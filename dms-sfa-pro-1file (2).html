@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMS/SFA Pro - Giám Sát Kỷ Luật & Quản Lý Sales</title>
+<meta name="theme-color" content="#12213D">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<!--
+  ============================================================================
+  DMS/SFA PRO — FILE DUY NHẤT. Không Cloud Functions, không CLI,
+  không Firebase Storage (nên không cần nâng cấp gói Blaze / gắn thẻ).
+  ============================================================================
+  Việc DUY NHẤT bạn phải làm ngoài file này là DÁN RULES vào Firebase
+  Console (chỉ là dán text vào 1 ô trên web):
+    Firestore Database → tab Rules → dán đoạn rules đã gửi kèm → Publish.
+
+  Ảnh check-in được nén và lưu dạng base64 THẲNG TRONG document Firestore
+  (không qua Storage) để tránh phải nâng cấp gói trả phí. Đánh đổi: ảnh
+  chất lượng thấp hơn (đủ để đối chiếu bằng mắt, không phải ảnh gốc nét
+  cao), và mỗi document tối đa 1MB nên ảnh được nén khá mạnh.
+
+  Vì không dùng Cloud Functions, quyền hạn được kiểm soát bằng Firestore
+  Rules đọc field "role" trong document users/{uid} của chính người đang
+  đăng nhập — không phải do client tự khai, nên vẫn không giả mạo được.
+  Việc trừ/hoàn tồn kho khi duyệt/hủy đơn chạy bằng transaction ngay
+  trên trình duyệt của người duyệt (Admin/Giám sát), rules chặn ai được
+  phép gọi hành động này.
+  ============================================================================
+-->
+
+<style>
+  :root { --navy:#12213D; --amber:#FCA311; --paper:#F6F1E6; --line:#D9D0BC; --muted:#6B6558; --green:#2D6A4F; --red:#C1121F; --purple:#5B3A8E; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',sans-serif;background:var(--navy);color:#1a1a1a;padding:12px;}
+  .app{max-width:1360px;margin:0 auto;}
+  .panel{background:var(--paper);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,0.3);margin-top:12px;}
+  h1,h2,h3,h4{font-family:'Oswald',sans-serif;color:var(--navy);}
+  code, .mono{font-family:'JetBrains Mono',monospace;}
+  .topbar{display:flex;justify-content:space-between;align-items:center;color:#fff;flex-wrap:wrap;gap:12px;}
+  .nav-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .btn{background:var(--navy);color:#fff;border:none;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn-amber{background:var(--amber);color:var(--navy);}
+  .btn-green{background:var(--green);color:#fff;}
+  .btn-red{background:var(--red);color:#fff;}
+  .btn-purple{background:var(--purple);color:#fff;}
+  .btn-sm{padding:4px 8px;font-size:11px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:12px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;}
+  .badge{display:inline-block;padding:3px 8px;background:#EFE7D6;border-radius:4px;font-size:11px;font-weight:700;}
+  .badge-success{background:#D8F3DC;color:var(--green);}
+  .badge-pending{background:#FFF3BF;color:#B57700;}
+  .badge-danger{background:#F8D7DA;color:var(--red);}
+  .badge-cat{background:#E0AFA0;color:#4A154B;font-size:10px;margin-left:4px;}
+  input, select, textarea { width:100%; padding:8px; margin:4px 0 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); font-size:12px; }
+  th { background:#EFE7D6; color:var(--navy); }
+  .login-box{max-width:400px;margin:50px auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,0.4);}
+  .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;justify-content:center;align-items:center;z-index:999;}
+  .modal-content{background:#fff;padding:24px;border-radius:16px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;}
+  .hidden{display:none !important;}
+  .stat-number{font-size:24px;font-weight:700;color:var(--navy);margin-top:4px;}
+  .cart-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);}
+  #map { height: 350px; width: 100%; border-radius: 12px; margin-top: 10px; z-index: 1; }
+  .cat-filter{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;}
+  .cat-chip{padding:4px 10px;background:#EFE7D6;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .cat-chip.active{background:var(--navy);color:#fff;}
+  .watermark-img{max-width:100%;border-radius:8px;margin-top:6px;border:2px solid var(--navy);}
+  .alert-box{background:#F8D7DA;color:var(--red);padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
+  .warn-box{background:#FFF3BF;color:#8a6300;padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
+  .suspicious{border:2px solid var(--red) !important;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:1200;box-shadow:0 6px 20px rgba(0,0,0,.4);}
+</style>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import {
+    getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+    updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import {
+    getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, where, runTransaction
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  // Không dùng Firebase Storage (yêu cầu gói Blaze) — ảnh check-in được nén
+  // và lưu dạng base64 thẳng trong document Firestore (giới hạn 1MB/doc,
+  // nên ảnh được nén nhỏ + giảm chất lượng để luôn nằm trong hạn mức).
+
+  // !!! THAY BẰNG CONFIG DỰ ÁN FIREBASE CỦA BẠN (Project Settings > General) !!!
+  const firebaseConfig = {
+  apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
+  authDomain: "project-4126159910229398131.firebaseapp.com",
+  projectId: "project-4126159910229398131",
+  storageBucket: "project-4126159910229398131.firebasestorage.app",
+  messagingSenderId: "87655220343",
+  appId: "1:87655220343:web:15576d27653acbee16f272",
+  measurementId: "G-JK9WGF52FY"
+};
+
+  const app = initializeApp(firebaseConfig);
+  const authSvc = getAuth(app);
+  const db = getFirestore(app);
+  enableIndexedDbPersistence(db).catch(() => {});
+
+  // App phụ dùng riêng để admin tạo tài khoản nhân viên mới mà KHÔNG bị
+  // đăng xuất khỏi phiên admin hiện tại (Firebase Auth mặc định sẽ tự
+  // đăng nhập vào user vừa tạo trên cùng 1 app instance).
+  const secondaryApp = initializeApp(firebaseConfig, "secondary");
+  const secondaryAuth = getAuth(secondaryApp);
+
+  let currentUser = null;   // { uid, name, code, role, email, active }
+  let currentTab = 'sales';
+  let stores = [], orders = [], users = [], checkins = [], products = [], promos = [], auditLogs = [];
+  let currentCart = [];
+  let activeVisitedStore = null;
+  let selectedCategoryFilter = 'Tất cả';
+  let html5QrScanner = null;
+
+  function toast(msg) {
+    const t = document.createElement('div');
+    t.className = 'toast'; t.innerText = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+
+  function getDistanceMeters(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const R = 6371e3, rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Nén + đóng dấu watermark, trả về base64 (dataURL) để lưu thẳng vào
+  // field của document Firestore. Firestore giới hạn 1MB/document, nên
+  // ảnh được nén khá mạnh (width 480px, quality 0.5) — vẫn đủ để nhìn rõ
+  // watermark đối chiếu bằng mắt, không nhằm mục đích lưu ảnh chất lượng cao.
+  const MAX_PHOTO_BASE64_BYTES = 700 * 1024; // chừa dư so với 1MB để cộng thêm các field khác
+
+  function createWatermarkedImage(file, infoText) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const draw = (maxWidth, quality) => {
+            const canvas = document.createElement("canvas");
+            const scale = Math.min(1, maxWidth / img.width);
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const stripH = Math.max(50, Math.round(canvas.height * 0.16));
+            ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+            ctx.fillRect(0, canvas.height - stripH, canvas.width, stripH);
+            ctx.fillStyle = "#FCA311";
+            ctx.font = "bold 13px Inter, sans-serif";
+            ctx.fillText(`📍 DMS: ${infoText.storeName}`, 10, canvas.height - stripH + 18);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "10px Inter, sans-serif";
+            ctx.fillText(`NV: [${infoText.salesCode}] ${infoText.salesName}`, 10, canvas.height - stripH + 34);
+            ctx.fillText(`GPS: ${infoText.lat.toFixed(5)}, ${infoText.lng.toFixed(5)} | ${new Date().toLocaleString('vi-VN')}`, 10, canvas.height - stripH + 48);
+            return canvas.toDataURL("image/jpeg", quality);
+          };
+
+          // Giảm dần chất lượng/kích thước cho tới khi vừa hạn mức Firestore
+          let dataUrl = draw(480, 0.55);
+          if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(360, 0.45);
+          if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(280, 0.35);
+          resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function writeAuditLog(action, targetType, targetId, detail) {
+    try {
+      await addDoc(collection(db, "auditLogs"), {
+        actorUid: currentUser.uid, actorName: currentUser.name, action, targetType, targetId, detail,
+        createdAt: serverTimestamp()
+      });
+    } catch (e) { /* không chặn luồng chính nếu ghi log lỗi */ }
+  }
+
+  // =====================================================================
+  // 1. ĐĂNG NHẬP (Firebase Auth) + đọc vai trò từ Firestore users/{uid}
+  // =====================================================================
+  window.handleLogin = async function(e) {
+    e.preventDefault();
+    const email = document.getElementById('logUser').value.trim();
+    const pass = document.getElementById('logPass').value.trim();
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = true; btn.innerHTML = 'Đang đăng nhập...';
+    try {
+      await signInWithEmailAndPassword(authSvc, email, pass);
+    } catch (err) {
+      alert("Sai tài khoản hoặc mật khẩu.");
+      btn.disabled = false; btn.innerHTML = '🔑 ĐĂNG NHẬP';
+    }
+  };
+
+  onAuthStateChanged(authSvc, async (user) => {
+    if (!user) {
+      currentUser = null;
+      document.getElementById('loginView').classList.remove('hidden');
+      document.getElementById('appView').classList.add('hidden');
+      return;
+    }
+    const profileSnap = await getDoc(doc(db, "users", user.uid));
+    if (!profileSnap.exists()) {
+      alert("Tài khoản chưa có hồ sơ phân quyền. Liên hệ Admin.");
+      await signOut(authSvc);
+      return;
+    }
+    const profile = profileSnap.data();
+    if (profile.active === false) {
+      alert("⛔ Tài khoản của bạn đã bị khóa. Liên hệ Admin.");
+      await signOut(authSvc);
+      return;
+    }
+    currentUser = { uid: user.uid, email: user.email, name: profile.name, code: profile.code, role: profile.role };
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appView').classList.remove('hidden');
+    currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
+    attachListeners();
+    renderUI();
+  });
+
+  window.handleLogout = async function() { await signOut(authSvc); };
+  window.openChangePasswordModal = function() { document.getElementById('changePassModal').classList.remove('hidden'); };
+  window.closeChangePasswordModal = function() { document.getElementById('changePassModal').classList.add('hidden'); };
+
+  window.submitChangePassword = async function(e) {
+    e.preventDefault();
+    const oldP = document.getElementById('oldPassInput').value;
+    const newP = document.getElementById('newPassInput').value;
+    const confirmP = document.getElementById('confirmPassInput').value;
+    if (newP !== confirmP) return alert("Mật khẩu mới không trùng khớp!");
+    if (newP.length < 6) return alert("Mật khẩu phải từ 6 ký tự trở lên!");
+    try {
+      const cred = EmailAuthProvider.credential(authSvc.currentUser.email, oldP);
+      await reauthenticateWithCredential(authSvc.currentUser, cred);
+      await updatePassword(authSvc.currentUser, newP);
+      alert("✅ Đổi mật khẩu thành công!");
+      closeChangePasswordModal();
+    } catch (err) {
+      alert("⛔ Mật khẩu cũ không đúng, hoặc cần đăng nhập lại rồi thử lại.");
+    }
+  };
+
+  // =====================================================================
+  // 2. CHECK-IN GPS <30M + CHỐNG GIẢ GPS (tính ngay trên client) + CHECK-OUT
+  // =====================================================================
+  window.doCheckinWithPhoto = function(storeId) {
+    const store = stores.find(s => s.id === storeId);
+    if (!store) return;
+    const fileInput = document.getElementById(`img_${store.id}`);
+    if (!fileInput || !fileInput.files[0]) return alert("⛔ BẮT BUỘC CHỤP ẢNH TẠI ĐIỂM BÁN!");
+    const file = fileInput.files[0];
+    const ageMinutes = (Date.now() - file.lastModified) / 60000;
+    if (ageMinutes > 10) {
+      if (!confirm(`⚠️ Ảnh này có vẻ chụp cách đây ${Math.round(ageMinutes)} phút, không phải vừa chụp.\nVẫn tiếp tục?`)) return;
+    }
+
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const userLat = pos.coords.latitude, userLng = pos.coords.longitude, accuracy = pos.coords.accuracy;
+      if (accuracy > 60) {
+        if (!confirm(`⚠️ Độ chính xác GPS kém (±${Math.round(accuracy)}m).\nVẫn tiếp tục?`)) return;
+      }
+      let distance = 0;
+      if (store.lat && store.lng) {
+        distance = getDistanceMeters(userLat, userLng, store.lat, store.lng);
+        if (distance > 30) return alert(`⛔ CHECK-IN THẤT BẠI!\nKhoảng cách hiện tại: ${Math.round(distance)}m (>30m).`);
+      }
+
+      // Chống "dịch chuyển tức thời" (giả GPS): so với check-in gần nhất của chính mình
+      let suspicious = false, suspiciousReasons = [];
+      const prevQ = query(collection(db, "checkins"), where("salesUid", "==", currentUser.uid), orderBy("createdAt", "desc"), limit(1));
+      const prevSnap = await getDocs(prevQ);
+      if (!prevSnap.empty) {
+        const prev = prevSnap.docs[0].data();
+        if (prev.createdAt) {
+          const distBetween = getDistanceMeters(prev.lat, prev.lng, userLat, userLng);
+          const seconds = (Date.now() - prev.createdAt.toMillis()) / 1000;
+          if (seconds > 0) {
+            const speedKmh = (distBetween/1000) / (seconds/3600);
+            if (speedKmh > 100) { suspicious = true; suspiciousReasons.push(`Di chuyển ${Math.round(distBetween)}m trong ${Math.round(seconds)}s (~${Math.round(speedKmh)}km/h)`); }
+          }
+        }
+      }
+      if (accuracy > 60) { suspicious = true; suspiciousReasons.push(`Độ chính xác GPS kém (±${Math.round(accuracy)}m)`); }
+
+      try {
+        const photo = await createWatermarkedImage(file, { storeName: store.name, salesCode: currentUser.code, salesName: currentUser.name, lat: userLat, lng: userLng });
+
+        await addDoc(collection(db, "checkins"), {
+          salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
+          storeName: store.name, storeId: store.id, lat: userLat, lng: userLng, accuracy, distance,
+          photo, status: 'Checked-in (Đạt <30m)', checkoutAt: null, durationMinutes: null,
+          suspicious, suspiciousReasons, createdAt: serverTimestamp()
+        });
+
+        if (suspicious) writeAuditLog("CANH_BAO_CHECKIN_NGHI_VAN", "checkins", store.id, suspiciousReasons.join(" | "));
+        activeVisitedStore = store;
+        toast(`✅ Check-in thành công tại ${store.name} (cách ${Math.round(distance)}m)`);
+        renderUI();
+      } catch (err) { alert("Lỗi khi lưu check-in: " + err.message); }
+    }, () => alert("⛔ LỖI GPS: Hãy bật GPS trên điện thoại."), { enableHighAccuracy: true, timeout: 10000 });
+  };
+
+  window.doCheckout = async function(checkinId) {
+    const c = checkins.find(x => x.id === checkinId);
+    if (!c || !c.createdAt) return;
+    const startMs = c.createdAt.toMillis ? c.createdAt.toMillis() : Date.now();
+    const durationMinutes = Math.round((Date.now() - startMs) / 60000);
+    await updateDoc(doc(db, "checkins", checkinId), { checkoutAt: serverTimestamp(), durationMinutes });
+    toast(`Đã check-out. Thời gian tại điểm bán: ${durationMinutes} phút.`);
+    renderUI();
+  };
+
+  // =====================================================================
+  // 3. QUÉT MÃ QR
+  // =====================================================================
+  window.startQRScanner = function(storeId) {
+    const store = stores.find(s => s.id === storeId);
+    document.getElementById('qrModal').classList.remove('hidden');
+    html5QrScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+    html5QrScanner.render(async (decodedText) => {
+      if (decodedText === store.id || decodedText === store.name) {
+        html5QrScanner.clear();
+        document.getElementById('qrModal').classList.add('hidden');
+        toast(`✅ Xác nhận đúng mã QR tại tiệm: ${store.name}`);
+        activeVisitedStore = store;
+        renderUI();
+      } else alert(`❌ Mã QR không khớp với cửa hàng ${store.name}.`);
+    });
+  };
+  window.closeQRScanner = function() { if (html5QrScanner) html5QrScanner.clear(); document.getElementById('qrModal').classList.add('hidden'); };
+
+  // =====================================================================
+  // 4. GIỎ HÀNG & KHUYẾN MÃI CÓ HIỆU LỰC THEO NGÀY
+  // =====================================================================
+  window.addToCartWithUnit = function(productId) {
+    const prd = products.find(p => p.id === productId);
+    if (!prd || prd.stock <= 0) return alert("Sản phẩm đã HẾT HÀNG!");
+    const selectedUnit = document.getElementById(`unit_select_${productId}`).value;
+    const unitRate = selectedUnit === 'Thùng' ? (prd.rateBox || 24) : (selectedUnit === 'Lốc' ? (prd.ratePack || 6) : 1);
+    const calculatedPrice = prd.price * unitRate;
+    const itemKey = `${productId}_${selectedUnit}`;
+    const item = currentCart.find(c => c.cartKey === itemKey);
+    if (item) {
+      if ((item.qty + 1) * unitRate > prd.stock) return alert("Không đủ tồn kho!");
+      item.qty += 1;
+    } else {
+      currentCart.push({ cartKey: itemKey, id: prd.id, code: prd.code, name: prd.name, unit: selectedUnit, unitRate, price: calculatedPrice, qty: 1 });
+    }
+    renderCartUI();
+  };
+  window.removeFromCart = function(cartKey) { currentCart = currentCart.filter(c => c.cartKey !== cartKey); renderCartUI(); };
+
+  function isPromoActive(p) {
+    const now = new Date();
+    if (p.startDate && new Date(p.startDate) > now) return false;
+    if (p.endDate && new Date(p.endDate) < now) return false;
+    return true;
+  }
+
+  function renderCartUI() {
+    const cartContainer = document.getElementById('cartList');
+    if (!cartContainer) return;
+    let subtotal = 0, promoGiftList = [];
+    currentCart.forEach(item => {
+      subtotal += item.price * item.qty;
+      promos.filter(isPromoActive).forEach(p => {
+        if (p.buyPrdId === item.id && (item.qty * item.unitRate) >= p.buyQty) {
+          const giftCount = Math.floor((item.qty * item.unitRate) / p.buyQty) * p.getQty;
+          promoGiftList.push(`🎁 Tặng ${giftCount} x ${p.getPrdName} (KM Mua ${p.buyQty} Tặng ${p.getQty})`);
+        }
+      });
+    });
+    cartContainer.innerHTML = currentCart.map(i => `
+      <div class="cart-item"><div><b>[${i.code}] ${i.name}</b><br><small>ĐVT: <b style="color:var(--amber);">${i.unit}</b> (${i.price.toLocaleString()}đ) x ${i.qty}</small></div>
+      <div><b>${(i.price*i.qty).toLocaleString()}đ</b> <button class="btn btn-red btn-sm" onclick="removeFromCart('${i.cartKey}')">X</button></div></div>`).join('')
+      + (promoGiftList.length > 0 ? `<div style="color:var(--green);font-size:11px;margin-top:6px;">${promoGiftList.join('<br>')}</div>` : '');
+    document.getElementById('cartTotal').innerText = `${subtotal.toLocaleString('vi-VN')} đ`;
+  }
+
+  // =====================================================================
+  // 5. ĐẶT HÀNG — chỉ tạo đơn "Chờ duyệt", chưa đụng tồn kho.
+  // =====================================================================
+  window.submitOrder = async function(e) {
+    e.preventDefault();
+    if (currentCart.length === 0) return alert("Vui lòng chọn sản phẩm!");
+    const storeName = document.getElementById('ordStore').value;
+    const storeObj = stores.find(s => s.name === storeName);
+    const creditLimit = storeObj?.creditLimit || 20000000;
+    const currentDebt = orders.filter(o => o.storeName === storeName && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
+    const subtotal = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    if ((currentDebt + subtotal) > creditLimit) {
+      return alert(`⛔ VƯỢT HẠN MỨC CÔNG NỢ!\n- Dư nợ: ${currentDebt.toLocaleString()}đ\n- Đơn mới: ${subtotal.toLocaleString()}đ\n- Hạn mức: ${creditLimit.toLocaleString()}đ`);
+    }
+    for (const item of currentCart) {
+      const prd = products.find(p => p.id === item.id);
+      if (!prd || prd.stock < item.qty * item.unitRate) return alert(`Sản phẩm ${item.name} có thể không đủ tồn kho.`);
+    }
+    await addDoc(collection(db, "orders"), {
+      salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
+      storeId: storeObj?.id || null, storeName, items: currentCart, amount: subtotal,
+      paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
+    });
+    toast("🚀 Đơn hàng đã gửi, đang chờ Giám sát duyệt.");
+    currentCart = []; activeVisitedStore = null; renderCartUI(); renderUI();
+  };
+
+  // Duyệt đơn: transaction chạy trên trình duyệt của người duyệt (Admin/Giám
+  // sát) — Firestore Rules chỉ cho phép 2 vai trò này sửa field "status".
+  window.approveOrder = async function(orderId) {
+    try {
+      await runTransaction(db, async (tx) => {
+        const orderRef = doc(db, "orders", orderId);
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists()) throw new Error("Không tìm thấy đơn hàng.");
+        const order = orderSnap.data();
+        if (order.status !== 'Chờ duyệt') throw new Error(`Đơn đang ở trạng thái "${order.status}".`);
+        const productRefs = order.items.map(it => doc(db, "products", it.id));
+        const productSnaps = await Promise.all(productRefs.map(r => tx.get(r)));
+        productSnaps.forEach((snap, idx) => {
+          const item = order.items[idx], need = item.qty * item.unitRate;
+          if (!snap.exists()) throw new Error(`Sản phẩm ${item.name} không tồn tại.`);
+          if (snap.data().stock < need) throw new Error(`Sản phẩm ${item.name} không đủ tồn kho (còn ${snap.data().stock}).`);
+        });
+        productSnaps.forEach((snap, idx) => {
+          const item = order.items[idx], need = item.qty * item.unitRate;
+          tx.update(productRefs[idx], { stock: snap.data().stock - need });
+        });
+        tx.update(orderRef, { status: 'Đã duyệt', approvedBy: currentUser.uid, approvedAt: serverTimestamp() });
+      });
+      writeAuditLog("DUYET_DON", "orders", orderId, "Duyệt đơn & trừ tồn kho");
+      toast("Đã duyệt đơn & trừ tồn kho.");
+    } catch (err) { alert("Lỗi duyệt đơn: " + err.message); }
+  };
+
+  window.cancelOrder = async function(orderId) {
+    const reason = prompt("Lý do hủy đơn:", "");
+    if (reason === null) return;
+    try {
+      await runTransaction(db, async (tx) => {
+        const orderRef = doc(db, "orders", orderId);
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists()) throw new Error("Không tìm thấy đơn hàng.");
+        const order = orderSnap.data();
+        if (order.status === 'Đã hủy') return;
+        if (['Đã duyệt', 'Đã giao hàng'].includes(order.status)) {
+          const productRefs = order.items.map(it => doc(db, "products", it.id));
+          const productSnaps = await Promise.all(productRefs.map(r => tx.get(r)));
+          productSnaps.forEach((snap, idx) => {
+            if (!snap.exists()) return;
+            const item = order.items[idx], need = item.qty * item.unitRate;
+            tx.update(productRefs[idx], { stock: snap.data().stock + need });
+          });
+        }
+        tx.update(orderRef, { status: 'Đã hủy', cancelReason: reason || '', cancelledBy: currentUser.uid, cancelledAt: serverTimestamp() });
+      });
+      writeAuditLog("HUY_DON", "orders", orderId, reason || "");
+      toast("Đã hủy đơn (hoàn kho nếu đã duyệt).");
+    } catch (err) { alert("Lỗi hủy đơn: " + err.message); }
+  };
+
+  window.markDelivered = async function(orderId) {
+    try {
+      const orderRef = doc(db, "orders", orderId);
+      const orderSnap = await getDoc(orderRef);
+      if (!orderSnap.exists() || orderSnap.data().status !== 'Đã duyệt') return alert("Chỉ đơn đã duyệt mới đánh dấu đã giao được.");
+      await updateDoc(orderRef, { status: 'Đã giao hàng', deliveredBy: currentUser.uid, deliveredAt: serverTimestamp() });
+      writeAuditLog("GIAO_HANG", "orders", orderId, "");
+      toast("Đã đánh dấu giao hàng.");
+    } catch (err) { alert("Lỗi: " + err.message); }
+  };
+
+  window.confirmPayment = async function(orderId) {
+    try {
+      await updateDoc(doc(db, "orders", orderId), { paymentStatus: 'Đã thanh toán', paymentConfirmedBy: currentUser.uid, paymentConfirmedAt: serverTimestamp() });
+      writeAuditLog("XAC_NHAN_THANH_TOAN", "orders", orderId, "");
+      toast("Đã xác nhận thanh toán.");
+    } catch (err) { alert("Lỗi: " + err.message); }
+  };
+
+  // =====================================================================
+  // 6. QUẢN LÝ SẢN PHẨM / KHUYẾN MÃI / ĐIỂM BÁN
+  // =====================================================================
+  window.addProduct = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('prdCode').value.trim();
+    const name = document.getElementById('prdName').value.trim();
+    const category = document.getElementById('prdCategory').value;
+    const baseUnit = document.getElementById('prdBaseUnit').value;
+    const ratePack = Number(document.getElementById('prdRatePack').value || 6);
+    const rateBox = Number(document.getElementById('prdRateBox').value || 24);
+    const price = Number(document.getElementById('prdPrice').value);
+    const stock = Number(document.getElementById('prdStock').value);
+    const reorderLevel = Number(document.getElementById('prdReorder').value || 20);
+    await addDoc(collection(db, "products"), { code, name, category, baseUnit, ratePack, rateBox, price, stock, reorderLevel, createdAt: serverTimestamp() });
+    toast("Đã thêm sản phẩm mới!");
+    document.getElementById('prdForm').reset();
+  };
+  window.deleteProduct = async function(id) { if(confirm("Xóa SP?")) await deleteDoc(doc(db, "products", id)); };
+  window.filterCategory = function(cat) { selectedCategoryFilter = cat; renderUI(); };
+
+  window.addPromo = async function(e) {
+    e.preventDefault();
+    const buyPrdId = document.getElementById('pmBuyPrd').value;
+    const buyQty = Number(document.getElementById('pmBuyQty').value);
+    const getPrdName = document.getElementById('pmGetName').value.trim();
+    const getQty = Number(document.getElementById('pmGetQty').value);
+    const startDate = document.getElementById('pmStart').value || null;
+    const endDate = document.getElementById('pmEnd').value || null;
+    await addDoc(collection(db, "promos"), { buyPrdId, buyQty, getPrdName, getQty, startDate, endDate, createdAt: serverTimestamp() });
+    toast("Đã thêm khuyến mãi!");
+    document.getElementById('promoForm').reset();
+  };
+  window.deletePromo = async function(id) { if(confirm("Xóa KM?")) await deleteDoc(doc(db, "promos", id)); };
+
+  // Tạo nhân viên: dùng app phụ (secondaryAuth) để không bị văng khỏi phiên admin
+  window.addUser = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('usCode').value.trim();
+    const name = document.getElementById('usName').value.trim();
+    const email = document.getElementById('usEmail').value.trim();
+    const password = document.getElementById('usPass').value.trim();
+    const role = document.getElementById('usRole').value;
+    if (password.length < 6) return alert("Mật khẩu tối thiểu 6 ký tự.");
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      // Ghi document với ID = uid (bắt buộc, để Firestore Rules đọc đúng
+      // hồ sơ vai trò của người đang đăng nhập qua get(users/$(uid))).
+      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await secondaryAuth.signOut();
+      toast("✅ Tạo tài khoản nhân viên thành công!");
+      writeAuditLog("TAO_NHAN_VIEN", "users", cred.user.uid, `${code} - ${name} (${role})`);
+      document.getElementById('userForm').reset();
+    } catch (err) { alert("Lỗi tạo nhân viên: " + err.message); }
+  };
+  window.toggleUserActive = async function(uid, active) {
+    await updateDoc(doc(db, "users", uid), { active });
+    writeAuditLog("CAP_NHAT_NHAN_VIEN", "users", uid, `active=${active}`);
+    toast(active ? "Đã mở khóa tài khoản." : "Đã khóa tài khoản (chặn ở tầng ứng dụng).");
+  };
+  window.changeUserRole = async function(uid, role) {
+    await updateDoc(doc(db, "users", uid), { role });
+    writeAuditLog("CAP_NHAT_NHAN_VIEN", "users", uid, `role=${role}`);
+    toast("Đã cập nhật vai trò. NV cần đăng nhập lại để áp dụng.");
+  };
+
+  window.addStore = async function(e) {
+    e.preventDefault();
+    const name = document.getElementById('stName').value;
+    const address = document.getElementById('stAddr').value;
+    const routeDay = document.getElementById('stRoute').value;
+    const creditLimit = Number(document.getElementById('stCredit').value || 20000000);
+    const lat = Number(document.getElementById('stLat').value || 0);
+    const lng = Number(document.getElementById('stLng').value || 0);
+    await addDoc(collection(db, "stores"), { name, address, routeDay, creditLimit, lat, lng, createdAt: serverTimestamp() });
+    toast("Đã thêm điểm bán mới!");
+    document.getElementById('stForm').reset();
+  };
+  window.deleteStore = async function(id) { if(confirm("Xóa điểm bán?")) await deleteDoc(doc(db, "stores", id)); };
+  window.switchTab = function(tab) { currentTab = tab; renderUI(); };
+
+  // =====================================================================
+  // 7. XUẤT CSV
+  // =====================================================================
+  function downloadCSV(filename, rows) {
+    const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = filename; link.click();
+  }
+  window.exportOrdersCSV = function() {
+    const rows = [["Mã NV","Tên NV","Điểm bán","Tổng tiền","Thanh toán","Trạng thái","Ngày tạo"]];
+    orders.forEach(o => rows.push([o.salesCode, o.salesName, o.storeName, o.amount, o.paymentStatus, o.status, o.createdAt?.toDate ? o.createdAt.toDate().toLocaleString('vi-VN') : '']));
+    downloadCSV(`don-hang-${Date.now()}.csv`, rows);
+  };
+  window.exportCheckinsCSV = function() {
+    const rows = [["Mã NV","Tên NV","Điểm bán","Khoảng cách (m)","Độ chính xác GPS (m)","Nghi vấn","Thời gian ở lại (phút)","Ngày"]];
+    checkins.forEach(c => rows.push([c.salesCode, c.salesName, c.storeName, Math.round(c.distance||0), Math.round(c.accuracy||0), c.suspicious ? (c.suspiciousReasons||[]).join(' | ') : '', c.durationMinutes ?? '', c.createdAt?.toDate ? c.createdAt.toDate().toLocaleString('vi-VN') : '']));
+    downloadCSV(`checkin-${Date.now()}.csv`, rows);
+  };
+
+  function initLiveMap() {
+    setTimeout(() => {
+      const mapContainer = document.getElementById('map');
+      if (!mapContainer) return;
+      const map = L.map('map').setView([10.7769, 106.7009], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+      let bounds = [];
+      checkins.forEach(c => {
+        if (c.lat && c.lng) {
+          L.marker([c.lat, c.lng]).addTo(map).bindPopup(`<b>[${c.salesCode||'NV'}] ${c.salesName}</b><br>Tiệm: ${c.storeName}${c.suspicious ? '<br><span style="color:#C1121F">⚠️ Nghi vấn</span>' : ''}`);
+          bounds.push([c.lat, c.lng]);
+        }
+      });
+      if (bounds.length > 0) map.fitBounds(bounds);
+    }, 300);
+  }
+
+  function attachListeners() {
+    onSnapshot(collection(db, "stores"), snap => { stores = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "products"), snap => { products = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "promos"), snap => { promos = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(300)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    if (currentUser.role === 'admin') {
+      onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    }
+    if (['admin','manager'].includes(currentUser.role)) {
+      onSnapshot(query(collection(db, "auditLogs"), orderBy("createdAt","desc"), limit(200)), snap => { auditLogs = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    }
+  }
+
+  function computeAlerts() {
+    const lowStock = products.filter(p => p.stock <= (p.reorderLevel || 20));
+    const debtByStore = {};
+    orders.filter(o => o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').forEach(o => { debtByStore[o.storeName] = (debtByStore[o.storeName]||0) + (o.amount||0); });
+    const debtWarnings = stores.map(s => ({...s, currentDebt: debtByStore[s.name]||0})).filter(s => s.creditLimit && s.currentDebt >= 0.8*s.creditLimit);
+    return { lowStock, debtWarnings };
+  }
+
+  // =====================================================================
+  // RENDER
+  // =====================================================================
+  function renderUI() {
+    if (!currentUser) return;
+    document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name} — ${roleLabel(currentUser.role)}`;
+    const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
+    const backOffice = isAdmin || isManager || isAccountant;
+
+    setNav('navDash', backOffice); setNav('navSales', true); setNav('navStores', true); setNav('navOrders', true);
+    setNav('navPrd', isAdmin); setNav('navPromo', isAdmin); setNav('navAudit', isAdmin || isManager); setNav('navUsers', isAdmin);
+
+    const main = document.getElementById('mainContent');
+
+    if (currentTab === 'dashboard') {
+      const alerts = computeAlerts();
+      const totalRev = orders.filter(o=>o.status!=='Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
+      const todayStr = new Date().toDateString();
+      const checkinsToday = checkins.filter(c => c.createdAt?.toDate && c.createdAt.toDate().toDateString() === todayStr);
+      const suspiciousCount = checkins.filter(c => c.suspicious).length;
+      main.innerHTML = `
+        <h2>Giám Sát & Báo Cáo Kỷ Luật Realtime</h2>
+        <div class="grid">
+          <div class="card"><span class="badge">Doanh Số (không tính đơn hủy)</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
+          <div class="card"><span class="badge">Tổng Đơn Hàng</span><div class="stat-number">${orders.length} đơn</div></div>
+          <div class="card"><span class="badge badge-success">Check-in Hôm Nay</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
+          <div class="card"><span class="badge badge-danger">Check-in Nghi Vấn</span><div class="stat-number">${suspiciousCount} lượt</div></div>
+        </div>
+        <div class="grid" style="margin-top:16px;">
+          <div class="card"><h3>📦 Cảnh Báo Tồn Kho Thấp</h3>
+            ${alerts.lowStock.length===0?'<p style="color:var(--muted);margin-top:8px;">Không có sản phẩm nào dưới ngưỡng.</p>':alerts.lowStock.map(p=>`<div class="warn-box">⚠️ ${p.name}: còn ${p.stock} (ngưỡng ${p.reorderLevel||20})</div>`).join('')}</div>
+          <div class="card"><h3>💳 Cảnh Báo Công Nợ ≥80% Hạn Mức</h3>
+            ${alerts.debtWarnings.length===0?'<p style="color:var(--muted);margin-top:8px;">Không có tiệm nào vượt ngưỡng.</p>':alerts.debtWarnings.map(s=>`<div class="alert-box">⛔ ${s.name}: nợ ${s.currentDebt.toLocaleString()}đ / hạn mức ${s.creditLimit.toLocaleString()}đ</div>`).join('')}</div>
+        </div>
+        <div class="grid" style="margin-top:16px;">
+          <div class="card" style="grid-column: span 3;"><h3>🗺️ Bản Đồ Live Tracking</h3>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <button class="btn btn-amber btn-sm" onclick="exportOrdersCSV()">⬇️ Xuất Đơn Hàng CSV</button>
+              <button class="btn btn-amber btn-sm" onclick="exportCheckinsCSV()">⬇️ Xuất Check-in CSV</button>
+            </div>
+            <div id="map"></div></div>
+        </div>`;
+      initLiveMap();
+    }
+
+    else if (currentTab === 'sales') {
+      const categories = ['Tất cả', 'Hộp', 'Chai', 'Lốc', 'Thùng', 'Khác'];
+      const filteredProducts = selectedCategoryFilter === 'Tất cả' ? products : products.filter(p => p.category === selectedCategoryFilter);
+      const myOpenCheckin = checkins.find(c => c.salesUid === currentUser.uid && !c.checkoutAt && activeVisitedStore && c.storeId === activeVisitedStore.id);
+      main.innerHTML = `
+        <h2>Bán Hàng & Giám Sát Đi Thị Trường</h2>
+        <div class="grid">
+          <div class="card"><h3>📍 Tuyến Điểm Bán Tới Lịch</h3>
+            <div class="alert-box">⚠️ Kỷ luật: Bán kính < 30m, chụp ảnh trực tiếp, GPS chính xác cao.</div>
+            ${stores.map(s => `<div style="margin-top:10px;padding-bottom:12px;border-bottom:1px solid #eee;">
+              <b>${s.name}</b> <span class="badge badge-pending">${s.routeDay||'Cả tuần'}</span><br>
+              <small style="color:var(--muted);">${s.address}</small><br>
+              <input type="file" id="img_${s.id}" accept="image/*" capture="environment" style="margin-top:4px;">
+              <div style="display:flex;gap:4px;margin-top:6px;">
+                <button class="btn btn-amber btn-sm" style="flex:1;" onclick="doCheckinWithPhoto('${s.id}')">📍 Check-in GPS (<30m)</button>
+                <button class="btn btn-green btn-sm" onclick="startQRScanner('${s.id}')">📷 Quét QR</button>
+              </div></div>`).join('')}
+          </div>
+          <div class="card" style="grid-column: span 2;">
+            ${activeVisitedStore ? `
+              <h3>🛒 Đang Bán Hàng Tại: <span style="color:var(--amber);">${activeVisitedStore.name}</span></h3>
+              ${myOpenCheckin ? `<button class="btn btn-purple btn-sm" onclick="doCheckout('${myOpenCheckin.id}')">🚪 Check-out điểm bán này</button>` : ''}
+              <div class="cat-filter" style="margin-top:10px;">${categories.map(c => `<div class="cat-chip ${selectedCategoryFilter===c?'active':''}" onclick="filterCategory('${c}')">${c}</div>`).join('')}</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div><h4>Catalog Sản Phẩm</h4><div style="max-height:350px;overflow-y:auto;margin-top:8px;">
+                  ${filteredProducts.map(p => `<div style="padding:8px;border-bottom:1px solid #eee;background:#fafafa;border-radius:6px;margin-bottom:6px;">
+                    <b>[${p.code||'SKU'}] ${p.name}</b> <span class="badge badge-cat">${p.category||'Khác'}</span><br>
+                    <small>Giá: <b>${p.price.toLocaleString()}đ</b> | Tồn: ${p.stock}${p.stock<=(p.reorderLevel||20)?' <span class="badge badge-danger">Sắp hết</span>':''}</small>
+                    <div style="display:flex;gap:4px;margin-top:6px;">
+                      <select id="unit_select_${p.id}" style="margin:0;padding:4px;font-size:11px;">
+                        <option value="${p.baseUnit||'Hộp'}">${p.baseUnit||'Hộp/Chai'} (x1)</option>
+                        <option value="Lốc">Lốc (x${p.ratePack||6})</option>
+                        <option value="Thùng">Thùng (x${p.rateBox||24})</option></select>
+                      <button class="btn btn-green btn-sm" onclick="addToCartWithUnit('${p.id}')">+ Chọn</button>
+                    </div></div>`).join('')}</div></div>
+                <div><form id="ordForm" onsubmit="submitOrder(event)">
+                  <input type="hidden" id="ordStore" value="${activeVisitedStore.name}">
+                  <div style="background:#f0f0f0;padding:10px;border-radius:8px;margin-bottom:8px;">
+                    <h4>Giỏ Hàng:</h4><div id="cartList">Chưa chọn sản phẩm...</div><hr style="margin:8px 0;">
+                    <div style="display:flex;justify-content:space-between;"><b>Tổng Tiền:</b><b id="cartTotal" style="color:var(--red);font-size:16px;">0 đ</b></div></div>
+                  <button class="btn btn-green" style="width:100%;">🚀 Gửi Đơn (chờ Giám sát duyệt)</button>
+                </form></div>
+              </div>` : `<div style="text-align:center;padding:40px;color:var(--muted);"><h3>🔒 Chưa Xác Thực Vị Trí!</h3><p>Chọn <b>"Check-in GPS"</b> hoặc <b>"Quét QR"</b> để bắt đầu.</p></div>`}
+          </div>
+        </div>`;
+      renderCartUI();
+    }
+
+    else if (currentTab === 'products' && isAdmin) {
+      main.innerHTML = `
+        <h2>Quản Lý Sản Phẩm & Ngưỡng Tồn Kho</h2>
+        <div class="grid">
+          <div class="card"><h3>+ Thêm Sản Phẩm</h3><form id="prdForm" onsubmit="addProduct(event)">
+            <label>Mã SKU:</label><input type="text" id="prdCode" required>
+            <label>Tên:</label><input type="text" id="prdName" required>
+            <label>Phân Loại:</label><select id="prdCategory"><option>Hộp</option><option>Chai</option><option>Lốc</option><option>Thùng</option><option>Khác</option></select>
+            <label>Đơn Vị Cơ Bản:</label><select id="prdBaseUnit"><option>Hộp</option><option>Chai</option><option>Gói</option></select>
+            <label>1 Lốc = ?:</label><input type="number" id="prdRatePack" value="6" required>
+            <label>1 Thùng = ?:</label><input type="number" id="prdRateBox" value="24" required>
+            <label>Đơn Giá:</label><input type="number" id="prdPrice" required>
+            <label>Tồn Kho:</label><input type="number" id="prdStock" required>
+            <label>Ngưỡng cảnh báo thấp:</label><input type="number" id="prdReorder" value="20" required>
+            <button class="btn btn-green" style="width:100%;">+ Lưu</button></form></div>
+          <div class="card" style="grid-column: span 2;"><h3>Danh Sách Sản Phẩm</h3><table>
+            <thead><tr><th>SKU</th><th>Tên</th><th>Loại</th><th>Quy đổi</th><th>Giá</th><th>Tồn</th><th></th></tr></thead>
+            <tbody>${products.map(p => `<tr class="${p.stock<=(p.reorderLevel||20)?'suspicious':''}">
+              <td><b>${p.code||'SKU'}</b></td><td>${p.name}</td><td><span class="badge badge-cat">${p.category||'Khác'}</span></td>
+              <td><small>Lốc=${p.ratePack||6} | Thùng=${p.rateBox||24}</small></td><td><b>${p.price.toLocaleString()}đ</b></td>
+              <td><span class="badge ${p.stock<=(p.reorderLevel||20)?'badge-danger':''}">${p.stock}</span></td>
+              <td><button class="btn btn-red btn-sm" onclick="deleteProduct('${p.id}')">Xóa</button></td></tr>`).join('')}</tbody>
+          </table></div>
+        </div>`;
+    }
+
+    else if (currentTab === 'promos' && isAdmin) {
+      main.innerHTML = `
+        <h2>Khuyến Mãi (Mua-Tặng, có thời hạn)</h2>
+        <div class="grid">
+          <div class="card"><h3>+ Thêm KM</h3><form id="promoForm" onsubmit="addPromo(event)">
+            <label>Sản phẩm mua:</label><select id="pmBuyPrd">${products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+            <label>SL mua:</label><input type="number" id="pmBuyQty" value="24" required>
+            <label>Quà tặng:</label><input type="text" id="pmGetName" required>
+            <label>SL tặng:</label><input type="number" id="pmGetQty" value="1" required>
+            <label>Bắt đầu:</label><input type="date" id="pmStart">
+            <label>Kết thúc:</label><input type="date" id="pmEnd">
+            <button class="btn btn-green" style="width:100%;">+ Lưu</button></form></div>
+          <div class="card" style="grid-column: span 2;"><h3>Danh Sách KM</h3><table>
+            <thead><tr><th>Mua</th><th>Tặng</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>${promos.map(p => { const prd=products.find(x=>x.id===p.buyPrdId); const active=isPromoActive(p);
+              return `<tr><td>${prd?prd.name:'?'} (mua ${p.buyQty})</td><td>${p.getPrdName} x${p.getQty}</td>
+              <td><small>${p.startDate||'—'} → ${p.endDate||'—'}</small></td>
+              <td><span class="badge ${active?'badge-success':'badge-pending'}">${active?'Đang chạy':'Ngoài hiệu lực'}</span></td>
+              <td><button class="btn btn-red btn-sm" onclick="deletePromo('${p.id}')">Xóa</button></td></tr>`; }).join('')}</tbody>
+          </table></div>
+        </div>`;
+    }
+
+    else if (currentTab === 'stores') {
+      main.innerHTML = `
+        <h2>Quản Lý Tuyến & Điểm Bán</h2>
+        <div class="grid">
+          ${isAdmin||isManager ? `<div class="card"><h3>+ Thêm Điểm Bán</h3><form id="stForm" onsubmit="addStore(event)">
+            <label>Tên:</label><input type="text" id="stName" required>
+            <label>Địa Chỉ:</label><input type="text" id="stAddr" required>
+            <label>Tuyến:</label><select id="stRoute"><option>Thứ 2 - Thứ 4 - Thứ 6</option><option>Thứ 3 - Thứ 5 - Thứ 7</option><option>Cả tuần</option></select>
+            <label>Hạn Mức Nợ:</label><input type="number" id="stCredit" value="20000000" required>
+            <label>Lat:</label><input type="number" step="any" id="stLat" placeholder="10.7769">
+            <label>Lng:</label><input type="number" step="any" id="stLng" placeholder="106.7009">
+            <button class="btn btn-green" style="width:100%;">+ Lưu</button></form></div>` : ''}
+          <div class="card" style="grid-column: span ${(isAdmin||isManager)?2:3};"><h3>Danh Sách Điểm Bán</h3><table>
+            <thead><tr><th>Tên</th><th>Địa Chỉ</th><th>Tuyến</th><th>Hạn Mức</th>${(isAdmin||isManager)?'<th></th>':''}</tr></thead>
+            <tbody>${stores.map(s => `<tr><td><b>${s.name}</b></td><td>${s.address}</td><td><span class="badge badge-pending">${s.routeDay||'Cả tuần'}</span></td>
+              <td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td>${(isAdmin||isManager)?`<td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')">Xóa</button></td>`:''}</tr>`).join('')}</tbody>
+          </table></div>
+        </div>`;
+    }
+
+    else if (currentTab === 'orders') {
+      const myOrders = currentUser.role === 'sales' ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
+      main.innerHTML = `
+        <h2>Đơn Hàng ${currentUser.role==='sales'?'(của tôi)':'Toàn Hệ Thống'}</h2>
+        ${backOffice ? `<button class="btn btn-amber btn-sm" onclick="exportOrdersCSV()">⬇️ Xuất CSV</button>` : ''}
+        <div class="card"><table>
+          <thead><tr><th>NV</th><th>Điểm Bán</th><th>Chi Tiết</th><th>Tổng Tiền</th><th>Thanh Toán</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
+          <tbody>${myOrders.map(o => `<tr>
+            <td><b>[${o.salesCode||'NV'}]</b><br>${o.salesName||''}</td><td><b>${o.storeName}</b></td>
+            <td><small>${(o.items||[]).map(i => `${i.name} (${i.unit} x${i.qty})`).join(', ')}</small></td>
+            <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b></td>
+            <td><span class="badge ${o.paymentStatus==='Đã thanh toán'?'badge-success':'badge-pending'}">${o.paymentStatus}</span></td>
+            <td><span class="badge ${o.status==='Đã hủy'?'badge-danger':(o.status==='Đã giao hàng'?'badge-success':'badge-pending')}">${o.status}</span></td>
+            <td style="display:flex;gap:4px;flex-wrap:wrap;">
+              ${(isAdmin||isManager)&&o.status==='Chờ duyệt'?`<button class="btn btn-green btn-sm" onclick="approveOrder('${o.id}')">Duyệt</button>`:''}
+              ${(isAdmin||isManager)&&['Chờ duyệt','Đã duyệt'].includes(o.status)?`<button class="btn btn-red btn-sm" onclick="cancelOrder('${o.id}')">Hủy</button>`:''}
+              ${(isAdmin||isManager)&&o.status==='Đã duyệt'?`<button class="btn btn-purple btn-sm" onclick="markDelivered('${o.id}')">Đã giao</button>`:''}
+              ${(isAdmin||isAccountant)&&o.paymentStatus!=='Đã thanh toán'?`<button class="btn btn-amber btn-sm" onclick="confirmPayment('${o.id}')">Xác nhận TT</button>`:''}
+            </td></tr>`).join('')}</tbody>
+        </table></div>`;
+    }
+
+    else if (currentTab === 'audit' && (isAdmin||isManager)) {
+      main.innerHTML = `
+        <h2>Nhật Ký Check-in & Ảnh Bằng Chứng</h2>
+        <button class="btn btn-amber btn-sm" onclick="exportCheckinsCSV()">⬇️ Xuất CSV</button>
+        <div class="grid">${checkins.map(c => `<div class="card ${c.suspicious?'suspicious':''}">
+          <b>Tiệm: ${c.storeName}</b> <span class="badge ${c.suspicious?'badge-danger':'badge-success'}">${c.suspicious?'⚠️ Nghi vấn':c.status}</span><br>
+          <small>Sales: [${c.salesCode||'NV'}] ${c.salesName}</small><br>
+          <small>Tọa độ: ${c.lat?c.lat.toFixed(4):'N/A'}, ${c.lng?c.lng.toFixed(4):'N/A'} | Khoảng cách: ${Math.round(c.distance||0)}m | GPS: ±${Math.round(c.accuracy||0)}m</small><br>
+          ${c.suspicious?`<small style="color:var(--red);">${(c.suspiciousReasons||[]).join(' | ')}</small><br>`:''}
+          ${c.durationMinutes!=null?`<small>Ở lại: ${c.durationMinutes} phút</small><br>`:`<small style="color:var(--muted);">Chưa check-out</small><br>`}
+          ${c.photo?`<img src="${c.photo}" class="watermark-img">`:''}
+        </div>`).join('')}</div>
+        <h3 style="margin-top:20px;">📜 Lịch Sử Thao Tác</h3>
+        <div class="card"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead>
+          <tbody>${auditLogs.map(l => `<tr><td><small>${l.createdAt?.toDate?l.createdAt.toDate().toLocaleString('vi-VN'):''}</small></td>
+            <td>${l.actorName||''}</td><td><span class="badge">${l.action}</span></td><td><small>${l.detail||''}</small></td></tr>`).join('')}</tbody>
+        </table></div>`;
+    }
+
+    else if (currentTab === 'users' && isAdmin) {
+      main.innerHTML = `
+        <h2>Quản Lý Tài Khoản Nhân Viên</h2>
+        <div class="grid">
+          <div class="card"><h3>+ Tạo Tài Khoản Mới</h3><form id="userForm" onsubmit="addUser(event)">
+            <input type="text" id="usCode" placeholder="Mã NV" required>
+            <input type="text" id="usName" placeholder="Tên NV" required>
+            <input type="email" id="usEmail" placeholder="Email đăng nhập" required>
+            <input type="text" id="usPass" placeholder="Mật khẩu (≥6 ký tự)" required>
+            <select id="usRole"><option value="sales">Sales</option><option value="manager">Giám Sát</option><option value="accountant">Kế Toán</option><option value="admin">Admin</option></select>
+            <button class="btn btn-green" style="width:100%;">+ Tạo</button></form></div>
+          <div class="card" style="grid-column: span 2;"><h3>Danh Sách Nhân Viên</h3><table>
+            <thead><tr><th>Mã</th><th>Tên</th><th>Email</th><th>Vai Trò</th><th>Trạng Thái</th><th></th></tr></thead>
+            <tbody>${users.map(u => `<tr><td><b>${u.code||'NV'}</b></td><td>${u.name}</td><td><small>${u.email}</small></td>
+              <td><select onchange="changeUserRole('${u.uid}', this.value)" style="margin:0;padding:2px;font-size:11px;">
+                ${['sales','manager','accountant','admin'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${roleLabel(r)}</option>`).join('')}</select></td>
+              <td><span class="badge ${u.active!==false?'badge-success':'badge-danger'}">${u.active!==false?'Hoạt động':'Đã khóa'}</span></td>
+              <td><button class="btn ${u.active!==false?'btn-red':'btn-green'} btn-sm" onclick="toggleUserActive('${u.uid}', ${u.active===false})">${u.active!==false?'Khóa':'Mở khóa'}</button></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>`;
+    }
+  }
+
+  function roleLabel(r) { return { admin: 'Admin', manager: 'Giám Sát', accountant: 'Kế Toán', sales: 'Sales' }[r] || r; }
+  function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
+</script>
+</head>
+
+<body>
+<div class="app">
+  <div id="loginView" class="login-box">
+    <h2 style="text-align:center;margin-bottom:12px;">DMS/SFA PRO</h2>
+    <p style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:20px;">Giám Sát Đi Thị Trường & Quản Lý Đơn Hàng</p>
+    <form onsubmit="handleLogin(event)">
+      <label>Email:</label><input type="email" id="logUser" placeholder="ten@congty.com" required autocomplete="username">
+      <label>Mật Khẩu:</label><input type="password" id="logPass" placeholder="Mật khẩu" required autocomplete="current-password">
+      <button id="loginBtn" class="btn btn-amber" style="width:100%;padding:12px;margin-top:10px;font-size:14px;">🔑 ĐĂNG NHẬP</button>
+    </form>
+    <div style="margin-top:16px;padding:10px;background:#f8f8f8;border-radius:8px;font-size:11px;color:var(--muted);">Tài khoản do Admin cấp trong mục "Nhân Viên".</div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="topbar">
+      <div><h1 style="color:var(--amber);">DMS CLOUD SFA — PRO</h1><small id="userInfo">XIN CHÀO...</small></div>
+      <div class="nav-btns">
+        <button id="navDash" class="btn btn-amber hidden" onclick="switchTab('dashboard')">📊 Dashboard</button>
+        <button id="navSales" class="btn" onclick="switchTab('sales')">🛒 Đi Thị Trường</button>
+        <button id="navStores" class="btn" onclick="switchTab('stores')">🏬 Tuyến / Tiệm</button>
+        <button id="navOrders" class="btn" onclick="switchTab('orders')">📦 Đơn Hàng</button>
+        <button id="navPrd" class="btn hidden" onclick="switchTab('products')">🥛 Sản Phẩm</button>
+        <button id="navPromo" class="btn hidden" onclick="switchTab('promos')">🎁 Khuyến Mãi</button>
+        <button id="navAudit" class="btn hidden" onclick="switchTab('audit')">📷 Audit Log</button>
+        <button id="navUsers" class="btn hidden" onclick="switchTab('users')">👥 Nhân Viên</button>
+        <button class="btn btn-amber" onclick="openChangePasswordModal()">🔒 Đổi Pass</button>
+        <button class="btn btn-red" onclick="handleLogout()">Đăng Xuất</button>
+      </div>
+    </div>
+    <div class="panel" id="mainContent"></div>
+  </div>
+</div>
+
+<div id="changePassModal" class="modal hidden"><div class="modal-content">
+  <h3>🔑 Đổi Mật Khẩu</h3>
+  <form onsubmit="submitChangePassword(event)" style="margin-top:12px;">
+    <label>Mật Khẩu Hiện Tại:</label><input type="password" id="oldPassInput" required>
+    <label>Mật Khẩu Mới:</label><input type="password" id="newPassInput" required>
+    <label>Xác Nhận:</label><input type="password" id="confirmPassInput" required>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button type="submit" class="btn btn-green" style="flex:1;">Lưu</button>
+      <button type="button" class="btn btn-red" onclick="closeChangePasswordModal()">Hủy</button>
+    </div>
+  </form>
+</div></div>
+
+<div id="qrModal" class="modal hidden"><div class="modal-content">
+  <h3>📷 Quét Mã QR</h3><div id="reader" style="width:100%;margin-top:10px;"></div>
+  <button class="btn btn-red" style="width:100%;margin-top:12px;" onclick="closeQRScanner()">Đóng Camera</button>
+</div></div>
+
+</body>
+</html>
