@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DMS/SFA Pro - Giám Sát Kỷ Luật & Quản Lý Sales</title>
+<title>DMS/SFA Pro Ultimate - Giám Sát Kỷ Luật & Quản Lý Sales</title>
 <meta name="theme-color" content="#12213D">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -52,10 +52,11 @@
   .watermark-img{max-width:100%;border-radius:8px;margin-top:6px;border:2px solid var(--navy);}
   .alert-box{background:#F8D7DA;color:var(--red);padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
   .warn-box{background:#FFF3BF;color:#8a6300;padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
+  .progress-bar{background:#e0e0e0;border-radius:8px;height:12px;width:100%;margin-top:4px;overflow:hidden;}
+  .progress-fill{background:var(--green);height:100%;width:0%;transition:width 0.3s;}
   .suspicious{border:2px solid var(--red) !important;}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:1200;box-shadow:0 6px 20px rgba(0,0,0,.4);}
 
-  /* Responsive Di Động */
   @media (max-width: 768px) {
     body { padding: 6px; }
     .topbar { flex-direction: column; align-items: flex-start; }
@@ -64,6 +65,12 @@
     .card { overflow-x: auto; }
     table { display: block; overflow-x: auto; white-space: nowrap; }
     #map { height: 260px; }
+  }
+
+  @media print {
+    body * { visibility: hidden; }
+    #printArea, #printArea * { visibility: visible; }
+    #printArea { position: absolute; left: 0; top: 0; width: 100%; }
   }
 </style>
 
@@ -91,6 +98,7 @@
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
   const db = getFirestore(app);
+  
   enableIndexedDbPersistence(db).catch(() => {});
 
   const secondaryApp = initializeApp(firebaseConfig, "secondary");
@@ -142,7 +150,7 @@
             ctx.fillText(`📍 DMS: ${infoText.storeName}`, 10, canvas.height - stripH + 18);
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "10px Inter, sans-serif";
-            ctx.fillText(`NV: [${infoText.salesCode}] ${infoText.salesName}`, 10, canvas.height - stripH + 34);
+            ctx.fillText(`NV: [${infoText.salesCode}] ${infoText.salesName} (${infoText.tag || 'Check-in'})`, 10, canvas.height - stripH + 34);
             ctx.fillText(`GPS: ${infoText.lat.toFixed(5)}, ${infoText.lng.toFixed(5)} | ${new Date().toLocaleString('vi-VN')}`, 10, canvas.height - stripH + 48);
             return canvas.toDataURL("image/jpeg", quality);
           };
@@ -228,7 +236,7 @@
       alert("✅ Đổi mật khẩu thành công!");
       closeChangePasswordModal();
     } catch (err) {
-      alert("⛔ Mật khẩu cũ không đúng, hoặc cần đăng nhập lại rồi thử lại.");
+      alert("⛔ Mật khẩu cũ không đúng.");
     }
   };
 
@@ -238,16 +246,9 @@
     const fileInput = document.getElementById(`img_${store.id}`);
     if (!fileInput || !fileInput.files[0]) return alert("⛔ BẮT BUỘC CHỤP ẢNH TẠI ĐIỂM BÁN!");
     const file = fileInput.files[0];
-    const ageMinutes = (Date.now() - file.lastModified) / 60000;
-    if (ageMinutes > 10) {
-      if (!confirm(`⚠️ Ảnh này có vẻ chụp cách đây ${Math.round(ageMinutes)} phút.\nVẫn tiếp tục?`)) return;
-    }
 
     navigator.geolocation.getCurrentPosition(async pos => {
       const userLat = pos.coords.latitude, userLng = pos.coords.longitude, accuracy = pos.coords.accuracy;
-      if (accuracy > 60) {
-        if (!confirm(`⚠️ Độ chính xác GPS kém (±${Math.round(accuracy)}m).\nVẫn tiếp tục?`)) return;
-      }
       let distance = 0;
       if (store.lat && store.lng) {
         distance = getDistanceMeters(userLat, userLng, store.lat, store.lng);
@@ -264,19 +265,17 @@
           const seconds = (Date.now() - prev.createdAt.toMillis()) / 1000;
           if (seconds > 0) {
             const speedKmh = (distBetween/1000) / (seconds/3600);
-            if (speedKmh > 100) { suspicious = true; suspiciousReasons.push(`Di chuyển ${Math.round(distBetween)}m trong ${Math.round(seconds)}s (~${Math.round(speedKmh)}km/h)`); }
+            if (speedKmh > 100) { suspicious = true; suspiciousReasons.push(`Di chuyển tốc độ bất thường (~${Math.round(speedKmh)}km/h)`); }
           }
         }
       }
-      if (accuracy > 60) { suspicious = true; suspiciousReasons.push(`Độ chính xác GPS kém (±${Math.round(accuracy)}m)`); }
 
       try {
-        const photo = await createWatermarkedImage(file, { storeName: store.name, salesCode: currentUser.code, salesName: currentUser.name, lat: userLat, lng: userLng });
-
+        const photo = await createWatermarkedImage(file, { storeName: store.name, salesCode: currentUser.code, salesName: currentUser.name, lat: userLat, lng: userLng, tag: 'Check-in' });
         await addDoc(collection(db, "checkins"), {
           salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
           storeName: store.name, storeId: store.id, lat: userLat, lng: userLng, accuracy, distance,
-          photo, status: 'Checked-in (Đạt <30m)', checkoutAt: null, durationMinutes: null,
+          photo, status: 'Checked-in (<30m)', checkoutAt: null, durationMinutes: null,
           suspicious, suspiciousReasons, createdAt: serverTimestamp()
         });
 
@@ -285,7 +284,20 @@
         toast(`✅ Check-in thành công tại ${store.name}`);
         renderUI();
       } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
-    }, () => alert("⛔ LỖI GPS: Hãy bật GPS trên thiết bị."), { enableHighAccuracy: true, timeout: 10000 });
+    }, () => alert("⛔ LỖI GPS: Hãy bật GPS."), { enableHighAccuracy: true, timeout: 10000 });
+  };
+
+  window.uploadPOSMPhoto = function(storeId) {
+    const fileInput = document.getElementById(`posm_${storeId}`);
+    if (!fileInput || !fileInput.files[0]) return alert("Vui lòng chọn ảnh trưng bày POSM!");
+    const file = fileInput.files[0];
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const photo = await createWatermarkedImage(file, { storeName: activeVisitedStore.name, salesCode: currentUser.code, salesName: currentUser.name, lat: pos.coords.latitude, lng: pos.coords.longitude, tag: 'POSM Display' });
+      await addDoc(collection(db, "auditLogs"), {
+        actorUid: currentUser.uid, actorName: currentUser.name, action: "POSM_DISPLAY_PHOTO", targetType: "stores", targetId: storeId, detail: photo, createdAt: serverTimestamp()
+      });
+      toast("📸 Đã gửi ảnh trưng bày POSM thành công!");
+    });
   };
 
   window.doCheckout = async function(checkinId) {
@@ -293,6 +305,11 @@
     if (!c || !c.createdAt) return;
     const startMs = c.createdAt.toMillis ? c.createdAt.toMillis() : Date.now();
     const durationMinutes = Math.round((Date.now() - startMs) / 60000);
+    
+    if (durationMinutes < 5) {
+      if (!confirm(`⚠️ Kỷ luật: Thời gian chăm sóc cửa hàng mới được ${durationMinutes} phút (< 5 phút).\nBạn có chắc chắn muốn Check-out?`)) return;
+    }
+
     await updateDoc(doc(db, "checkins", checkinId), { checkoutAt: serverTimestamp(), durationMinutes });
     toast(`Đã check-out. Thời gian ở lại: ${durationMinutes} phút.`);
     renderUI();
@@ -313,6 +330,15 @@
     });
   };
   window.closeQRScanner = function() { if (html5QrScanner) html5QrScanner.clear(); document.getElementById('qrModal').classList.add('hidden'); };
+
+  window.loadLastOrder = function() {
+    if (!activeVisitedStore) return;
+    const lastOrd = orders.filter(o => o.storeName === activeVisitedStore.name && o.status !== 'Đã hủy').sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0))[0];
+    if (!lastOrd || !lastOrd.items) return alert("Cửa hàng này chưa có đơn hàng cũ!");
+    currentCart = JSON.parse(JSON.stringify(lastOrd.items));
+    toast("🔄 Đã tải giỏ hàng từ đơn hàng gần nhất!");
+    renderCartUI();
+  };
 
   window.addToCartWithUnit = function(productId) {
     const prd = products.find(p => p.id === productId);
@@ -342,9 +368,9 @@
   function renderCartUI() {
     const cartContainer = document.getElementById('cartList');
     if (!cartContainer) return;
-    let subtotal = 0, promoGiftList = [];
+    let rawSubtotal = 0, promoGiftList = [];
     currentCart.forEach(item => {
-      subtotal += item.price * item.qty;
+      rawSubtotal += item.price * item.qty;
       promos.filter(isPromoActive).forEach(p => {
         if (p.buyPrdId === item.id && (item.qty * item.unitRate) >= p.buyQty) {
           const giftCount = Math.floor((item.qty * item.unitRate) / p.buyQty) * p.getQty;
@@ -352,11 +378,21 @@
         }
       });
     });
+
+    let discountPercent = 0;
+    if (rawSubtotal >= 10000000) discountPercent = 5;
+    else if (rawSubtotal >= 5000000) discountPercent = 2;
+
+    const discountAmount = (rawSubtotal * discountPercent) / 100;
+    const finalTotal = rawSubtotal - discountAmount;
+
     cartContainer.innerHTML = currentCart.map(i => `
       <div class="cart-item"><div><b>[${i.code}] ${i.name}</b><br><small>ĐVT: <b style="color:var(--amber);">${i.unit}</b> (${i.price.toLocaleString()}đ) x ${i.qty}</small></div>
       <div><b>${(i.price*i.qty).toLocaleString()}đ</b> <button class="btn btn-red btn-sm" onclick="removeFromCart('${i.cartKey}')">X</button></div></div>`).join('')
-      + (promoGiftList.length > 0 ? `<div style="color:var(--green);font-size:11px;margin-top:6px;">${promoGiftList.join('<br>')}</div>` : '');
-    document.getElementById('cartTotal').innerText = `${subtotal.toLocaleString('vi-VN')} đ`;
+      + (discountPercent > 0 ? `<div style="color:var(--green);font-size:11px;margin-top:6px;">💥 Chiết khấu đơn hàng (${discountPercent}%): -${discountAmount.toLocaleString()} đ</div>` : '')
+      + (promoGiftList.length > 0 ? `<div style="color:var(--green);font-size:11px;margin-top:4px;">${promoGiftList.join('<br>')}</div>` : '');
+    
+    document.getElementById('cartTotal').innerText = `${finalTotal.toLocaleString('vi-VN')} đ`;
   }
 
   window.submitOrder = async function(e) {
@@ -366,21 +402,42 @@
     const storeObj = stores.find(s => s.name === storeName);
     const creditLimit = storeObj?.creditLimit || 20000000;
     const currentDebt = orders.filter(o => o.storeName === storeName && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
-    const subtotal = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-    if ((currentDebt + subtotal) > creditLimit) {
-      return alert(`⛔ VƯỢT HẠN MỨC CÔNG NỢ!\n- Dư nợ: ${currentDebt.toLocaleString()}đ\n- Đơn mới: ${subtotal.toLocaleString()}đ\n- Hạn mức: ${creditLimit.toLocaleString()}đ`);
+    
+    let rawSubtotal = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    let discountPercent = rawSubtotal >= 10000000 ? 5 : (rawSubtotal >= 5000000 ? 2 : 0);
+    const finalAmount = rawSubtotal - (rawSubtotal * discountPercent / 100);
+
+    if ((currentDebt + finalAmount) > creditLimit) {
+      return alert(`⛔ VƯỢT HẠN MỨC CÔNG NỢ!\n- Dư nợ: ${currentDebt.toLocaleString()}đ\n- Đơn mới: ${finalAmount.toLocaleString()}đ\n- Hạn mức: ${creditLimit.toLocaleString()}đ`);
     }
-    for (const item of currentCart) {
-      const prd = products.find(p => p.id === item.id);
-      if (!prd || prd.stock < item.qty * item.unitRate) return alert(`Sản phẩm ${item.name} không đủ tồn kho.`);
-    }
+
     await addDoc(collection(db, "orders"), {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
-      storeId: storeObj?.id || null, storeName, items: currentCart, amount: subtotal,
+      storeId: storeObj?.id || null, storeName, items: currentCart, amount: finalAmount, discountPercent,
       paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
     });
     toast("🚀 Đã gửi đơn hàng.");
     currentCart = []; activeVisitedStore = null; renderCartUI(); renderUI();
+  };
+
+  window.printReceipt = function(orderId) {
+    const o = orders.find(x => x.id === orderId);
+    if (!o) return;
+    const printWindow = window.open('', '', 'width=600,height=600');
+    printWindow.document.write(`
+      <html><head><title>Hóa Đơn ${o.id}</title><style>body{font-family:sans-serif;padding:20px;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #ccc;padding:6px;font-size:12px;}</style></head>
+      <body>
+        <h2 style="text-align:center;">HÓA ĐƠN BÁN HÀNG</h2>
+        <p><b>Khách hàng:</b> ${o.storeName}</p>
+        <p><b>Nhân viên:</b> ${o.salesName} (${o.salesCode})</p>
+        <p><b>Ngày:</b> ${o.createdAt?.toDate ? o.createdAt.toDate().toLocaleString('vi-VN') : ''}</p>
+        <table><thead><tr><th>Sản phẩm</th><th>ĐVT</th><th>SL</th><th>Giá</th></tr></thead>
+        <tbody>${(o.items||[]).map(i => `<tr><td>${i.name}</td><td>${i.unit}</td><td>${i.qty}</td><td>${i.price.toLocaleString()}đ</td></tr>`).join('')}</tbody></table>
+        <h3 style="text-align:right;">TỔNG TIỀN: ${(o.amount||0).toLocaleString()} đ</h3>
+      </body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   window.approveOrder = async function(orderId) {
@@ -438,8 +495,6 @@
   window.markDelivered = async function(orderId) {
     try {
       const orderRef = doc(db, "orders", orderId);
-      const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists() || orderSnap.data().status !== 'Đã duyệt') return alert("Chỉ đơn đã duyệt mới đánh dấu giao.");
       await updateDoc(orderRef, { status: 'Đã giao hàng', deliveredBy: currentUser.uid, deliveredAt: serverTimestamp() });
       writeAuditLog("GIAO_HANG", "orders", orderId, "");
       toast("Đã đánh dấu giao hàng.");
@@ -601,12 +656,17 @@
       const totalRev = orders.filter(o=>o.status!=='Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
       const todayStr = new Date().toDateString();
       const checkinsToday = checkins.filter(c => c.createdAt?.toDate && c.createdAt.toDate().toDateString() === todayStr);
+      const visitedStoreIds = new Set(checkinsToday.map(c => c.storeId));
+      const routeCoverage = stores.length > 0 ? Math.round((visitedStoreIds.size / stores.length) * 100) : 0;
       const suspiciousCount = checkins.filter(c => c.suspicious).length;
+      
       main.innerHTML = `
-        <h2>Giám Sát & Báo Cáo Realtime</h2>
+        <h2>Giám Sát KPI & Phủ Tuyến Realtime</h2>
         <div class="grid">
           <div class="card"><span class="badge">Doanh Số (đã trừ hủy)</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
-          <div class="card"><span class="badge">Tổng Đơn Hàng</span><div class="stat-number">${orders.length} đơn</div></div>
+          <div class="card"><span class="badge">Tỷ Lệ Phủ Tuyến Hôm Nay</span><div class="stat-number">${routeCoverage}%</div>
+            <div class="progress-bar"><div class="progress-fill" style="width:${routeCoverage}%;"></div></div>
+          </div>
           <div class="card"><span class="badge badge-success">Check-in Hôm Nay</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
           <div class="card"><span class="badge badge-danger">Check-in Nghi Vấn</span><div class="stat-number">${suspiciousCount} lượt</div></div>
         </div>
@@ -631,24 +691,44 @@
       const categories = ['Tất cả', 'Hộp', 'Chai', 'Lốc', 'Thùng', 'Khác'];
       const filteredProducts = selectedCategoryFilter === 'Tất cả' ? products : products.filter(p => p.category === selectedCategoryFilter);
       const myOpenCheckin = checkins.find(c => c.salesUid === currentUser.uid && !c.checkoutAt && activeVisitedStore && c.storeId === activeVisitedStore.id);
+      
+      let sortedStores = stores;
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+          sortedStores = [...stores].sort((a,b) => {
+            const dA = getDistanceMeters(pos.coords.latitude, pos.coords.longitude, a.lat, a.lng);
+            const dB = getDistanceMeters(pos.coords.latitude, pos.coords.longitude, b.lat, b.lng);
+            return dA - dB;
+          });
+        });
+      }
+
       main.innerHTML = `
         <h2>Bán Hàng & Đi Thị Trường</h2>
         <div class="grid">
-          <div class="card"><h3>📍 Tuyến Điểm Bán Tới Lịch</h3>
+          <div class="card"><h3>📍 Tuyến Điểm Bán (Ưu tiên vị trí gần nhất)</h3>
             <div class="alert-box">⚠️ Yêu cầu: Bán kính < 30m, chụp ảnh trực tiếp, bật GPS.</div>
-            ${stores.map(s => `<div style="margin-top:10px;padding-bottom:12px;border-bottom:1px solid #eee;">
+            ${sortedStores.map(s => `<div style="margin-top:10px;padding-bottom:12px;border-bottom:1px solid #eee;">
               <b>${s.name}</b> <span class="badge badge-pending">${s.routeDay||'Cả tuần'}</span><br>
               <small style="color:var(--muted);">${s.address}</small><br>
               <input type="file" id="img_${s.id}" accept="image/*" capture="environment" style="margin-top:4px;">
               <div style="display:flex;gap:4px;margin-top:6px;">
                 <button class="btn btn-amber btn-sm" style="flex:1;" onclick="doCheckinWithPhoto('${s.id}')">📍 Check-in GPS (<30m)</button>
-                <button class="btn btn-green btn-sm" onclick="startQRScanner('${s.id}')">📷 Quét QR</button>
+                <button class="btn btn-green btn-sm" onclick="startQRScanner('${s.id}')">📷 QR</button>
               </div></div>`).join('')}
           </div>
           <div class="card" style="grid-column: span 2;">
             ${activeVisitedStore ? `
               <h3>🛒 Đang Bán Hàng Tại: <span style="color:var(--amber);">${activeVisitedStore.name}</span></h3>
-              ${myOpenCheckin ? `<button class="btn btn-purple btn-sm" onclick="doCheckout('${myOpenCheckin.id}')">🚪 Check-out điểm bán này</button>` : ''}
+              <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                ${myOpenCheckin ? `<button class="btn btn-purple btn-sm" onclick="doCheckout('${myOpenCheckin.id}')">🚪 Check-out điểm bán này</button>` : ''}
+                <button class="btn btn-amber btn-sm" onclick="loadLastOrder()">🔄 Đặt lại đơn gần nhất</button>
+              </div>
+              <div style="margin-top:10px;padding:8px;background:#f9f9f9;border-radius:8px;border:1px dashed var(--line);">
+                <small>📷 Chụp ảnh Trưng bày POSM:</small>
+                <input type="file" id="posm_${activeVisitedStore.id}" accept="image/*" capture="environment" style="margin:4px 0;">
+                <button class="btn btn-sm btn-green" onclick="uploadPOSMPhoto('${activeVisitedStore.id}')">Gửi ảnh POSM</button>
+              </div>
               <div class="cat-filter" style="margin-top:10px;">${categories.map(c => `<div class="cat-chip ${selectedCategoryFilter===c?'active':''}" onclick="filterCategory('${c}')">${c}</div>`).join('')}</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div><h4>Catalog Sản Phẩm</h4><div style="max-height:350px;overflow-y:auto;margin-top:8px;">
@@ -754,10 +834,11 @@
           <tbody>${myOrders.map(o => `<tr>
             <td><b>[${o.salesCode||'NV'}]</b><br>${o.salesName||''}</td><td><b>${o.storeName}</b></td>
             <td><small>${(o.items||[]).map(i => `${i.name} (${i.unit} x${i.qty})`).join(', ')}</small></td>
-            <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b></td>
+            <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b>${o.discountPercent?`<br><small style="color:var(--green); font-weight:bold;">(Đã ck ${o.discountPercent}%)</small>`:''}</td>
             <td><span class="badge ${o.paymentStatus==='Đã thanh toán'?'badge-success':'badge-pending'}">${o.paymentStatus}</span></td>
             <td><span class="badge ${o.status==='Đã hủy'?'badge-danger':(o.status==='Đã giao hàng'?'badge-success':'badge-pending')}">${o.status}</span></td>
             <td style="display:flex;gap:4px;flex-wrap:wrap;">
+              <button class="btn btn-amber btn-sm" onclick="printReceipt('${o.id}')">🖨️ In Hóa Đơn</button>
               ${(isAdmin||isManager)&&o.status==='Chờ duyệt'?`<button class="btn btn-green btn-sm" onclick="approveOrder('${o.id}')">Duyệt</button>`:''}
               ${(isAdmin||isManager)&&['Chờ duyệt','Đã duyệt'].includes(o.status)?`<button class="btn btn-red btn-sm" onclick="cancelOrder('${o.id}')">Hủy</button>`:''}
               ${(isAdmin||isManager)&&o.status==='Đã duyệt'?`<button class="btn btn-purple btn-sm" onclick="markDelivered('${o.id}')">Đã giao</button>`:''}
@@ -778,10 +859,11 @@
           ${c.durationMinutes!=null?`<small>Ở lại: ${c.durationMinutes} phút</small><br>`:`<small style="color:var(--muted);">Chưa check-out</small><br>`}
           ${c.photo?`<img src="${c.photo}" class="watermark-img">`:''}
         </div>`).join('')}</div>
-        <h3 style="margin-top:20px;">📜 Lịch Sử Thao Tác</h3>
+        <h3 style="margin-top:20px;">📜 Lịch Sử Thao Tác & POSM Display</h3>
         <div class="card"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead>
           <tbody>${auditLogs.map(l => `<tr><td><small>${l.createdAt?.toDate?l.createdAt.toDate().toLocaleString('vi-VN'):''}</small></td>
-            <td>${l.actorName||''}</td><td><span class="badge">${l.action}</span></td><td><small>${l.detail||''}</small></td></tr>`).join('')}</tbody>
+            <td>${l.actorName||''}</td><td><span class="badge">${l.action}</span></td>
+            <td>${l.action==='POSM_DISPLAY_PHOTO'?`<img src="${l.detail}" style="max-width:120px;border-radius:4px;">`:`<small>${l.detail||''}</small>`}</td></tr>`).join('')}</tbody>
         </table></div>`;
     }
 
@@ -818,7 +900,7 @@
 <div class="app">
   <div id="loginView" class="login-box">
     <h2 style="text-align:center;margin-bottom:12px;">DMS/SFA PRO</h2>
-    <p style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:20px;">Giám Sát Đi Thị Trường & Quản Lý Đơn Hàng</p>
+    <p style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:20px;">Giám Sát Đi Thị Trường & Quản Lý Sales</p>
     <form onsubmit="handleLogin(event)">
       <label>Email:</label><input type="email" id="logUser" placeholder="ten@congty.com" required autocomplete="username">
       <label>Mật Khẩu:</label><input type="password" id="logPass" placeholder="Mật khẩu" required autocomplete="current-password">
@@ -829,7 +911,7 @@
 
   <div id="appView" class="hidden">
     <div class="topbar">
-      <div><h1 style="color:var(--amber);">DMS CLOUD SFA — PRO</h1><small id="userInfo">XIN CHÀO...</small></div>
+      <div><h1 style="color:var(--amber);">DMS CLOUD SFA — ULTIMATE</h1><small id="userInfo">XIN CHÀO...</small></div>
       <div class="nav-btns">
         <button id="navDash" class="btn btn-amber hidden" onclick="switchTab('dashboard')">📊 Dashboard</button>
         <button id="navSales" class="btn" onclick="switchTab('sales')">🛒 Đi Thị Trường</button>
