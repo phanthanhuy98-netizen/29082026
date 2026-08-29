@@ -11,29 +11,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
 
-<!--
-  ============================================================================
-  DMS/SFA PRO — FILE DUY NHẤT. Không Cloud Functions, không CLI,
-  không Firebase Storage (nên không cần nâng cấp gói Blaze / gắn thẻ).
-  ============================================================================
-  Việc DUY NHẤT bạn phải làm ngoài file này là DÁN RULES vào Firebase
-  Console (chỉ là dán text vào 1 ô trên web):
-    Firestore Database → tab Rules → dán đoạn rules đã gửi kèm → Publish.
-
-  Ảnh check-in được nén và lưu dạng base64 THẲNG TRONG document Firestore
-  (không qua Storage) để tránh phải nâng cấp gói trả phí. Đánh đổi: ảnh
-  chất lượng thấp hơn (đủ để đối chiếu bằng mắt, không phải ảnh gốc nét
-  cao), và mỗi document tối đa 1MB nên ảnh được nén khá mạnh.
-
-  Vì không dùng Cloud Functions, quyền hạn được kiểm soát bằng Firestore
-  Rules đọc field "role" trong document users/{uid} của chính người đang
-  đăng nhập — không phải do client tự khai, nên vẫn không giả mạo được.
-  Việc trừ/hoàn tồn kho khi duyệt/hủy đơn chạy bằng transaction ngay
-  trên trình duyệt của người duyệt (Admin/Giám sát), rules chặn ai được
-  phép gọi hành động này.
-  ============================================================================
--->
-
 <style>
   :root { --navy:#12213D; --amber:#FCA311; --paper:#F6F1E6; --line:#D9D0BC; --muted:#6B6558; --green:#2D6A4F; --red:#C1121F; --purple:#5B3A8E; }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -77,6 +54,17 @@
   .warn-box{background:#FFF3BF;color:#8a6300;padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
   .suspicious{border:2px solid var(--red) !important;}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:1200;box-shadow:0 6px 20px rgba(0,0,0,.4);}
+
+  /* Responsive Di Động */
+  @media (max-width: 768px) {
+    body { padding: 6px; }
+    .topbar { flex-direction: column; align-items: flex-start; }
+    .nav-btns { width: 100%; overflow-x: auto; padding-bottom: 6px; flex-wrap: nowrap; }
+    .grid { grid-template-columns: 1fr !important; }
+    .card { overflow-x: auto; }
+    table { display: block; overflow-x: auto; white-space: nowrap; }
+    #map { height: 260px; }
+  }
 </style>
 
 <script type="module">
@@ -89,33 +77,26 @@
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
     serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, where, runTransaction
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  // Không dùng Firebase Storage (yêu cầu gói Blaze) — ảnh check-in được nén
-  // và lưu dạng base64 thẳng trong document Firestore (giới hạn 1MB/doc,
-  // nên ảnh được nén nhỏ + giảm chất lượng để luôn nằm trong hạn mức).
 
-  // !!! THAY BẰNG CONFIG DỰ ÁN FIREBASE CỦA BẠN (Project Settings > General) !!!
   const firebaseConfig = {
-  apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
-  authDomain: "project-4126159910229398131.firebaseapp.com",
-  projectId: "project-4126159910229398131",
-  storageBucket: "project-4126159910229398131.firebasestorage.app",
-  messagingSenderId: "87655220343",
-  appId: "1:87655220343:web:15576d27653acbee16f272",
-  measurementId: "G-JK9WGF52FY"
-};
+    apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
+    authDomain: "project-4126159910229398131.firebaseapp.com",
+    projectId: "project-4126159910229398131",
+    storageBucket: "project-4126159910229398131.firebasestorage.app",
+    messagingSenderId: "87655220343",
+    appId: "1:87655220343:web:15576d27653acbee16f272",
+    measurementId: "G-JK9WGF52FY"
+  };
 
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
   const db = getFirestore(app);
   enableIndexedDbPersistence(db).catch(() => {});
 
-  // App phụ dùng riêng để admin tạo tài khoản nhân viên mới mà KHÔNG bị
-  // đăng xuất khỏi phiên admin hiện tại (Firebase Auth mặc định sẽ tự
-  // đăng nhập vào user vừa tạo trên cùng 1 app instance).
   const secondaryApp = initializeApp(firebaseConfig, "secondary");
   const secondaryAuth = getAuth(secondaryApp);
 
-  let currentUser = null;   // { uid, name, code, role, email, active }
+  let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [], products = [], promos = [], auditLogs = [];
   let currentCart = [];
@@ -138,11 +119,7 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   }
 
-  // Nén + đóng dấu watermark, trả về base64 (dataURL) để lưu thẳng vào
-  // field của document Firestore. Firestore giới hạn 1MB/document, nên
-  // ảnh được nén khá mạnh (width 480px, quality 0.5) — vẫn đủ để nhìn rõ
-  // watermark đối chiếu bằng mắt, không nhằm mục đích lưu ảnh chất lượng cao.
-  const MAX_PHOTO_BASE64_BYTES = 700 * 1024; // chừa dư so với 1MB để cộng thêm các field khác
+  const MAX_PHOTO_BASE64_BYTES = 700 * 1024;
 
   function createWatermarkedImage(file, infoText) {
     return new Promise((resolve, reject) => {
@@ -170,7 +147,6 @@
             return canvas.toDataURL("image/jpeg", quality);
           };
 
-          // Giảm dần chất lượng/kích thước cho tới khi vừa hạn mức Firestore
           let dataUrl = draw(480, 0.55);
           if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(360, 0.45);
           if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(280, 0.35);
@@ -190,12 +166,9 @@
         actorUid: currentUser.uid, actorName: currentUser.name, action, targetType, targetId, detail,
         createdAt: serverTimestamp()
       });
-    } catch (e) { /* không chặn luồng chính nếu ghi log lỗi */ }
+    } catch (e) {}
   }
 
-  // =====================================================================
-  // 1. ĐĂNG NHẬP (Firebase Auth) + đọc vai trò từ Firestore users/{uid}
-  // =====================================================================
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
@@ -259,9 +232,6 @@
     }
   };
 
-  // =====================================================================
-  // 2. CHECK-IN GPS <30M + CHỐNG GIẢ GPS (tính ngay trên client) + CHECK-OUT
-  // =====================================================================
   window.doCheckinWithPhoto = function(storeId) {
     const store = stores.find(s => s.id === storeId);
     if (!store) return;
@@ -270,7 +240,7 @@
     const file = fileInput.files[0];
     const ageMinutes = (Date.now() - file.lastModified) / 60000;
     if (ageMinutes > 10) {
-      if (!confirm(`⚠️ Ảnh này có vẻ chụp cách đây ${Math.round(ageMinutes)} phút, không phải vừa chụp.\nVẫn tiếp tục?`)) return;
+      if (!confirm(`⚠️ Ảnh này có vẻ chụp cách đây ${Math.round(ageMinutes)} phút.\nVẫn tiếp tục?`)) return;
     }
 
     navigator.geolocation.getCurrentPosition(async pos => {
@@ -281,10 +251,9 @@
       let distance = 0;
       if (store.lat && store.lng) {
         distance = getDistanceMeters(userLat, userLng, store.lat, store.lng);
-        if (distance > 30) return alert(`⛔ CHECK-IN THẤT BẠI!\nKhoảng cách hiện tại: ${Math.round(distance)}m (>30m).`);
+        if (distance > 30) return alert(`⛔ CHECK-IN THẤT BẠI!\nKhoảng cách: ${Math.round(distance)}m (>30m).`);
       }
 
-      // Chống "dịch chuyển tức thời" (giả GPS): so với check-in gần nhất của chính mình
       let suspicious = false, suspiciousReasons = [];
       const prevQ = query(collection(db, "checkins"), where("salesUid", "==", currentUser.uid), orderBy("createdAt", "desc"), limit(1));
       const prevSnap = await getDocs(prevQ);
@@ -313,10 +282,10 @@
 
         if (suspicious) writeAuditLog("CANH_BAO_CHECKIN_NGHI_VAN", "checkins", store.id, suspiciousReasons.join(" | "));
         activeVisitedStore = store;
-        toast(`✅ Check-in thành công tại ${store.name} (cách ${Math.round(distance)}m)`);
+        toast(`✅ Check-in thành công tại ${store.name}`);
         renderUI();
-      } catch (err) { alert("Lỗi khi lưu check-in: " + err.message); }
-    }, () => alert("⛔ LỖI GPS: Hãy bật GPS trên điện thoại."), { enableHighAccuracy: true, timeout: 10000 });
+      } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
+    }, () => alert("⛔ LỖI GPS: Hãy bật GPS trên thiết bị."), { enableHighAccuracy: true, timeout: 10000 });
   };
 
   window.doCheckout = async function(checkinId) {
@@ -325,13 +294,10 @@
     const startMs = c.createdAt.toMillis ? c.createdAt.toMillis() : Date.now();
     const durationMinutes = Math.round((Date.now() - startMs) / 60000);
     await updateDoc(doc(db, "checkins", checkinId), { checkoutAt: serverTimestamp(), durationMinutes });
-    toast(`Đã check-out. Thời gian tại điểm bán: ${durationMinutes} phút.`);
+    toast(`Đã check-out. Thời gian ở lại: ${durationMinutes} phút.`);
     renderUI();
   };
 
-  // =====================================================================
-  // 3. QUÉT MÃ QR
-  // =====================================================================
   window.startQRScanner = function(storeId) {
     const store = stores.find(s => s.id === storeId);
     document.getElementById('qrModal').classList.remove('hidden');
@@ -340,17 +306,14 @@
       if (decodedText === store.id || decodedText === store.name) {
         html5QrScanner.clear();
         document.getElementById('qrModal').classList.add('hidden');
-        toast(`✅ Xác nhận đúng mã QR tại tiệm: ${store.name}`);
+        toast(`✅ Đúng mã QR tiệm: ${store.name}`);
         activeVisitedStore = store;
         renderUI();
-      } else alert(`❌ Mã QR không khớp với cửa hàng ${store.name}.`);
+      } else alert(`❌ Mã QR không khớp tiệm ${store.name}.`);
     });
   };
   window.closeQRScanner = function() { if (html5QrScanner) html5QrScanner.clear(); document.getElementById('qrModal').classList.add('hidden'); };
 
-  // =====================================================================
-  // 4. GIỎ HÀNG & KHUYẾN MÃI CÓ HIỆU LỰC THEO NGÀY
-  // =====================================================================
   window.addToCartWithUnit = function(productId) {
     const prd = products.find(p => p.id === productId);
     if (!prd || prd.stock <= 0) return alert("Sản phẩm đã HẾT HÀNG!");
@@ -396,9 +359,6 @@
     document.getElementById('cartTotal').innerText = `${subtotal.toLocaleString('vi-VN')} đ`;
   }
 
-  // =====================================================================
-  // 5. ĐẶT HÀNG — chỉ tạo đơn "Chờ duyệt", chưa đụng tồn kho.
-  // =====================================================================
   window.submitOrder = async function(e) {
     e.preventDefault();
     if (currentCart.length === 0) return alert("Vui lòng chọn sản phẩm!");
@@ -412,19 +372,17 @@
     }
     for (const item of currentCart) {
       const prd = products.find(p => p.id === item.id);
-      if (!prd || prd.stock < item.qty * item.unitRate) return alert(`Sản phẩm ${item.name} có thể không đủ tồn kho.`);
+      if (!prd || prd.stock < item.qty * item.unitRate) return alert(`Sản phẩm ${item.name} không đủ tồn kho.`);
     }
     await addDoc(collection(db, "orders"), {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
       storeId: storeObj?.id || null, storeName, items: currentCart, amount: subtotal,
       paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
     });
-    toast("🚀 Đơn hàng đã gửi, đang chờ Giám sát duyệt.");
+    toast("🚀 Đã gửi đơn hàng.");
     currentCart = []; activeVisitedStore = null; renderCartUI(); renderUI();
   };
 
-  // Duyệt đơn: transaction chạy trên trình duyệt của người duyệt (Admin/Giám
-  // sát) — Firestore Rules chỉ cho phép 2 vai trò này sửa field "status".
   window.approveOrder = async function(orderId) {
     try {
       await runTransaction(db, async (tx) => {
@@ -473,7 +431,7 @@
         tx.update(orderRef, { status: 'Đã hủy', cancelReason: reason || '', cancelledBy: currentUser.uid, cancelledAt: serverTimestamp() });
       });
       writeAuditLog("HUY_DON", "orders", orderId, reason || "");
-      toast("Đã hủy đơn (hoàn kho nếu đã duyệt).");
+      toast("Đã hủy đơn thành công.");
     } catch (err) { alert("Lỗi hủy đơn: " + err.message); }
   };
 
@@ -481,7 +439,7 @@
     try {
       const orderRef = doc(db, "orders", orderId);
       const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists() || orderSnap.data().status !== 'Đã duyệt') return alert("Chỉ đơn đã duyệt mới đánh dấu đã giao được.");
+      if (!orderSnap.exists() || orderSnap.data().status !== 'Đã duyệt') return alert("Chỉ đơn đã duyệt mới đánh dấu giao.");
       await updateDoc(orderRef, { status: 'Đã giao hàng', deliveredBy: currentUser.uid, deliveredAt: serverTimestamp() });
       writeAuditLog("GIAO_HANG", "orders", orderId, "");
       toast("Đã đánh dấu giao hàng.");
@@ -496,9 +454,6 @@
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
-  // =====================================================================
-  // 6. QUẢN LÝ SẢN PHẨM / KHUYẾN MÃI / ĐIỂM BÁN
-  // =====================================================================
   window.addProduct = async function(e) {
     e.preventDefault();
     const code = document.getElementById('prdCode').value.trim();
@@ -514,7 +469,7 @@
     toast("Đã thêm sản phẩm mới!");
     document.getElementById('prdForm').reset();
   };
-  window.deleteProduct = async function(id) { if(confirm("Xóa SP?")) await deleteDoc(doc(db, "products", id)); };
+  window.deleteProduct = async function(id) { if(confirm("Xóa sản phẩm này?")) await deleteDoc(doc(db, "products", id)); };
   window.filterCategory = function(cat) { selectedCategoryFilter = cat; renderUI(); };
 
   window.addPromo = async function(e) {
@@ -529,9 +484,8 @@
     toast("Đã thêm khuyến mãi!");
     document.getElementById('promoForm').reset();
   };
-  window.deletePromo = async function(id) { if(confirm("Xóa KM?")) await deleteDoc(doc(db, "promos", id)); };
+  window.deletePromo = async function(id) { if(confirm("Xóa chương trình KM này?")) await deleteDoc(doc(db, "promos", id)); };
 
-  // Tạo nhân viên: dùng app phụ (secondaryAuth) để không bị văng khỏi phiên admin
   window.addUser = async function(e) {
     e.preventDefault();
     const code = document.getElementById('usCode').value.trim();
@@ -542,8 +496,6 @@
     if (password.length < 6) return alert("Mật khẩu tối thiểu 6 ký tự.");
     try {
       const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      // Ghi document với ID = uid (bắt buộc, để Firestore Rules đọc đúng
-      // hồ sơ vai trò của người đang đăng nhập qua get(users/$(uid))).
       await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
       await secondaryAuth.signOut();
       toast("✅ Tạo tài khoản nhân viên thành công!");
@@ -554,12 +506,12 @@
   window.toggleUserActive = async function(uid, active) {
     await updateDoc(doc(db, "users", uid), { active });
     writeAuditLog("CAP_NHAT_NHAN_VIEN", "users", uid, `active=${active}`);
-    toast(active ? "Đã mở khóa tài khoản." : "Đã khóa tài khoản (chặn ở tầng ứng dụng).");
+    toast(active ? "Đã mở khóa tài khoản." : "Đã khóa tài khoản.");
   };
   window.changeUserRole = async function(uid, role) {
     await updateDoc(doc(db, "users", uid), { role });
     writeAuditLog("CAP_NHAT_NHAN_VIEN", "users", uid, `role=${role}`);
-    toast("Đã cập nhật vai trò. NV cần đăng nhập lại để áp dụng.");
+    toast("Đã cập nhật vai trò.");
   };
 
   window.addStore = async function(e) {
@@ -571,15 +523,12 @@
     const lat = Number(document.getElementById('stLat').value || 0);
     const lng = Number(document.getElementById('stLng').value || 0);
     await addDoc(collection(db, "stores"), { name, address, routeDay, creditLimit, lat, lng, createdAt: serverTimestamp() });
-    toast("Đã thêm điểm bán mới!");
+    toast("Đã thêm điểm bán!");
     document.getElementById('stForm').reset();
   };
-  window.deleteStore = async function(id) { if(confirm("Xóa điểm bán?")) await deleteDoc(doc(db, "stores", id)); };
+  window.deleteStore = async function(id) { if(confirm("Xóa điểm bán này?")) await deleteDoc(doc(db, "stores", id)); };
   window.switchTab = function(tab) { currentTab = tab; renderUI(); };
 
-  // =====================================================================
-  // 7. XUẤT CSV
-  // =====================================================================
   function downloadCSV(filename, rows) {
     const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\r\n');
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
@@ -636,9 +585,6 @@
     return { lowStock, debtWarnings };
   }
 
-  // =====================================================================
-  // RENDER
-  // =====================================================================
   function renderUI() {
     if (!currentUser) return;
     document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name} — ${roleLabel(currentUser.role)}`;
@@ -657,9 +603,9 @@
       const checkinsToday = checkins.filter(c => c.createdAt?.toDate && c.createdAt.toDate().toDateString() === todayStr);
       const suspiciousCount = checkins.filter(c => c.suspicious).length;
       main.innerHTML = `
-        <h2>Giám Sát & Báo Cáo Kỷ Luật Realtime</h2>
+        <h2>Giám Sát & Báo Cáo Realtime</h2>
         <div class="grid">
-          <div class="card"><span class="badge">Doanh Số (không tính đơn hủy)</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
+          <div class="card"><span class="badge">Doanh Số (đã trừ hủy)</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
           <div class="card"><span class="badge">Tổng Đơn Hàng</span><div class="stat-number">${orders.length} đơn</div></div>
           <div class="card"><span class="badge badge-success">Check-in Hôm Nay</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
           <div class="card"><span class="badge badge-danger">Check-in Nghi Vấn</span><div class="stat-number">${suspiciousCount} lượt</div></div>
@@ -667,7 +613,7 @@
         <div class="grid" style="margin-top:16px;">
           <div class="card"><h3>📦 Cảnh Báo Tồn Kho Thấp</h3>
             ${alerts.lowStock.length===0?'<p style="color:var(--muted);margin-top:8px;">Không có sản phẩm nào dưới ngưỡng.</p>':alerts.lowStock.map(p=>`<div class="warn-box">⚠️ ${p.name}: còn ${p.stock} (ngưỡng ${p.reorderLevel||20})</div>`).join('')}</div>
-          <div class="card"><h3>💳 Cảnh Báo Công Nợ ≥80% Hạn Mức</h3>
+          <div class="card"><h3>💳 Cảnh Báo Công Nợ ≥80%</h3>
             ${alerts.debtWarnings.length===0?'<p style="color:var(--muted);margin-top:8px;">Không có tiệm nào vượt ngưỡng.</p>':alerts.debtWarnings.map(s=>`<div class="alert-box">⛔ ${s.name}: nợ ${s.currentDebt.toLocaleString()}đ / hạn mức ${s.creditLimit.toLocaleString()}đ</div>`).join('')}</div>
         </div>
         <div class="grid" style="margin-top:16px;">
@@ -686,10 +632,10 @@
       const filteredProducts = selectedCategoryFilter === 'Tất cả' ? products : products.filter(p => p.category === selectedCategoryFilter);
       const myOpenCheckin = checkins.find(c => c.salesUid === currentUser.uid && !c.checkoutAt && activeVisitedStore && c.storeId === activeVisitedStore.id);
       main.innerHTML = `
-        <h2>Bán Hàng & Giám Sát Đi Thị Trường</h2>
+        <h2>Bán Hàng & Đi Thị Trường</h2>
         <div class="grid">
           <div class="card"><h3>📍 Tuyến Điểm Bán Tới Lịch</h3>
-            <div class="alert-box">⚠️ Kỷ luật: Bán kính < 30m, chụp ảnh trực tiếp, GPS chính xác cao.</div>
+            <div class="alert-box">⚠️ Yêu cầu: Bán kính < 30m, chụp ảnh trực tiếp, bật GPS.</div>
             ${stores.map(s => `<div style="margin-top:10px;padding-bottom:12px;border-bottom:1px solid #eee;">
               <b>${s.name}</b> <span class="badge badge-pending">${s.routeDay||'Cả tuần'}</span><br>
               <small style="color:var(--muted);">${s.address}</small><br>
@@ -721,7 +667,7 @@
                   <div style="background:#f0f0f0;padding:10px;border-radius:8px;margin-bottom:8px;">
                     <h4>Giỏ Hàng:</h4><div id="cartList">Chưa chọn sản phẩm...</div><hr style="margin:8px 0;">
                     <div style="display:flex;justify-content:space-between;"><b>Tổng Tiền:</b><b id="cartTotal" style="color:var(--red);font-size:16px;">0 đ</b></div></div>
-                  <button class="btn btn-green" style="width:100%;">🚀 Gửi Đơn (chờ Giám sát duyệt)</button>
+                  <button class="btn btn-green" style="width:100%;">🚀 Gửi Đơn (Chờ duyệt)</button>
                 </form></div>
               </div>` : `<div style="text-align:center;padding:40px;color:var(--muted);"><h3>🔒 Chưa Xác Thực Vị Trí!</h3><p>Chọn <b>"Check-in GPS"</b> hoặc <b>"Quét QR"</b> để bắt đầu.</p></div>`}
           </div>
@@ -801,7 +747,7 @@
     else if (currentTab === 'orders') {
       const myOrders = currentUser.role === 'sales' ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
       main.innerHTML = `
-        <h2>Đơn Hàng ${currentUser.role==='sales'?'(của tôi)':'Toàn Hệ Thống'}</h2>
+        <h2>Đơn Hàng ${currentUser.role==='sales'?'(Của tôi)':'Toàn Hệ Thống'}</h2>
         ${backOffice ? `<button class="btn btn-amber btn-sm" onclick="exportOrdersCSV()">⬇️ Xuất CSV</button>` : ''}
         <div class="card"><table>
           <thead><tr><th>NV</th><th>Điểm Bán</th><th>Chi Tiết</th><th>Tổng Tiền</th><th>Thanh Toán</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
