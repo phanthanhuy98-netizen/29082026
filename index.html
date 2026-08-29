@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>DMS Cloud SFA - Royal Elegant Edition</title>
+<title>DMS Cloud SFA - Royal Elegant Pro Edition</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Quicksand:wght@600;700&display=swap" rel="stylesheet">
@@ -52,7 +52,7 @@
     width: 100%;
     max-width: 440px;
     padding: 44px 36px;
-    background: rgba(15, 23, 42, 0.85);
+    background: rgba(15, 23, 42, 0.92);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 32px;
@@ -63,15 +63,17 @@
   .input-icon-group { position: relative; margin: 6px 0 14px; }
   .input-icon-group i { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: var(--amber); }
   .login-card input {
-    background: rgba(30, 41, 59, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: #FFFFFF !important;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #0F172A !important;
     padding: 14px 16px 14px 48px;
     border-radius: 16px;
     font-size: 14px;
+    font-weight: 700;
     width: 100%;
   }
-  .login-card input:focus { border-color: var(--amber); box-shadow: 0 0 15px rgba(245, 158, 11, 0.3); outline: none; }
+  .login-card input::placeholder { color: #94A3B8 !important; font-weight: 500; }
+  .login-card input:focus { border-color: var(--amber); box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); outline: none; }
   
   .topbar{display:flex;justify-content:space-between;align-items:center;color:#fff;background:rgba(15, 23, 42, 0.85);backdrop-filter:blur(16px);padding:18px 24px;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,0.3);flex-wrap:wrap;gap:14px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.1);}
   .brand-title{font-family:'Quicksand',sans-serif;font-size:26px;font-weight:700;letter-spacing:0.5px;color:#F8FAFC;display:flex;align-items:center;gap:10px;}
@@ -88,8 +90,6 @@
   
   .panel{background:#F8FAFC;border-radius:28px;padding:26px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-top:14px;}
-  
-  /* BỐ CỤC ĐẶC BIỆT CHO TRANG QUẢN LÝ KHO (CHỐNG TRÀN TUYỆT ĐỐI) */
   .grid-products { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 20px; margin-top: 14px; align-items: start; }
   
   .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:22px;padding:22px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;overflow:hidden;}
@@ -183,7 +183,7 @@
 
   let currentUser = null;
   let currentTab = 'sales';
-  let stores = [], orders = [], users = [], checkins = [], products = [], promos = [], auditLogs = [];
+  let stores = [], orders = [], users = [], checkins = [], products = [], promos = [], auditLogs = [], kpiTargets = [];
   let currentCart = {};
   let activeVisitedStore = null;
   let html5QrScanner = null;
@@ -192,6 +192,74 @@
   let searchStoreTerm = "", searchProductTerm = "", filterRoute = "ALL", activeCategory = "ALL";
   let isReturnOrderMode = false;
   let orderFilterKeyword = "", orderFilterStatus = "ALL";
+
+  // INDEXEDDB OFFLINE STORAGE SETUP
+  let idbDb = null;
+  function initIndexedDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("DMS_OfflineDB", 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
+      request.onupgradeneeded = (e) => {
+        const dbInstance = e.target.result;
+        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
+      };
+    });
+  }
+
+  async function saveToOfflineStore(storeName, data) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction([storeName], "readwrite");
+      const store = transaction.objectStore(storeName);
+      const request = store.add(data);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function getFromOfflineStore(storeName) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction([storeName], "readonly");
+      const store = transaction.objectStore(storeName);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function clearOfflineStore(storeName) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction([storeName], "readwrite");
+      const store = transaction.objectStore(storeName);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  window.addEventListener('online', async () => {
+    toast("🌐 Đã kết nối mạng trở lại! Đang đồng bộ dữ liệu Offline...");
+    try {
+      const pendingOrders = await getFromOfflineStore("offlineOrders");
+      for (const ord of pendingOrders) {
+        delete ord.id;
+        await addDoc(collection(db, "orders"), ord);
+      }
+      await clearOfflineStore("offlineOrders");
+
+      const pendingCheckins = await getFromOfflineStore("offlineCheckins");
+      for (const chk of pendingCheckins) {
+        delete chk.id;
+        await addDoc(collection(db, "checkins"), chk);
+      }
+      await clearOfflineStore("offlineCheckins");
+      toast("✅ Đồng bộ dữ liệu Offline lên Firebase thành công!");
+    } catch (e) { console.error("Lỗi đồng bộ offline:", e); }
+  });
 
   function toast(msg) {
     const t = document.createElement('div');
@@ -256,6 +324,7 @@
   }
 
   async function writeAuditLog(action, targetType, targetId, detail) {
+    if (!navigator.onLine) return;
     try {
       await addDoc(collection(db, "auditLogs"), {
         actorUid: currentUser.uid, actorName: currentUser.name, action, targetType, targetId, detail,
@@ -265,6 +334,7 @@
   }
 
   async function autoCleanOldOrders(storeId) {
+    if (!navigator.onLine) return;
     try {
       const tenDaysAgoMs = Date.now() - (10 * 24 * 60 * 60 * 1000);
       const qOld = query(collection(db, "orders"), where("storeId", "==", storeId));
@@ -309,6 +379,7 @@
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
+    await initIndexedDB();
     attachListeners();
     renderUI();
   });
@@ -335,7 +406,9 @@
   window.pinStoreGPS = function(storeId) {
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      await updateDoc(doc(db, "stores", storeId), { lat, lng });
+      if (navigator.onLine) {
+        await updateDoc(doc(db, "stores", storeId), { lat, lng });
+      }
       toast(`📌 Đã ghim tọa độ GPS chuẩn cho quầy!`);
       renderUI();
     }, () => alert("Lỗi lấy vị trí GPS điện thoại."));
@@ -357,11 +430,18 @@
 
       try {
         const photo = await createWatermarkedImage(file, { storeName: store.name, salesCode: currentUser.code, salesName: currentUser.name, lat: userLat, lng: userLng });
-        await addDoc(collection(db, "checkins"), {
+        const checkinData = {
           salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
           storeName: store.name, storeId: store.id, lat: userLat, lng: userLng, accuracy, distance,
-          photo, status: 'Checked-in (<30m)', createdAt: serverTimestamp()
-        });
+          photo, status: 'Checked-in (<30m)', createdAt: new Date()
+        };
+
+        if (navigator.onLine) {
+          await addDoc(collection(db, "checkins"), { ...checkinData, createdAt: serverTimestamp() });
+        } else {
+          await saveToOfflineStore("offlineCheckins", checkinData);
+          toast("📴 Mất mạng: Đã lưu Check-in vào bộ nhớ Offline!");
+        }
 
         activeVisitedStore = store;
         autoCleanOldOrders(store.id);
@@ -376,7 +456,9 @@
     if (!fileInput || !fileInput.files[0]) return alert("Chọn ảnh POSM!");
     navigator.geolocation.getCurrentPosition(async pos => {
       const photo = await createWatermarkedImage(fileInput.files[0], { storeName: activeVisitedStore.name, salesCode: currentUser.code, salesName: currentUser.name, lat: pos.coords.latitude, lng: pos.coords.longitude });
-      await addDoc(collection(db, "auditLogs"), { actorUid: currentUser.uid, actorName: currentUser.name, action: "POSM_DISPLAY_PHOTO", targetType: "stores", targetId: storeId, detail: photo, createdAt: serverTimestamp() });
+      if (navigator.onLine) {
+        await addDoc(collection(db, "auditLogs"), { actorUid: currentUser.uid, actorName: currentUser.name, action: "POSM_DISPLAY_PHOTO", targetType: "stores", targetId: storeId, detail: photo, createdAt: serverTimestamp() });
+      }
       toast("📸 Đã gửi ảnh POSM thành công!");
     });
   };
@@ -422,7 +504,7 @@
 
   window.loadLastOrder = function() {
     if (!activeVisitedStore) return;
-    const lastOrd = orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy').sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0))[0];
+    const lastOrd = orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy').sort((a,b) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0))[0];
     if (!lastOrd || !lastOrd.items) return alert("Quầy này chưa có toa đơn cũ!");
     currentCart = {};
     lastOrd.items.forEach(it => { currentCart[it.id] = { qty: it.qty||0, kien: it.kien||0, le: it.le||0 }; });
@@ -474,13 +556,20 @@
     let discountPercent = isReturnOrderMode ? 0 : (rawSubtotal >= 10000000 ? 5 : (rawSubtotal >= 5000000 ? 2 : 0));
     const finalAmount = rawSubtotal - (rawSubtotal * discountPercent / 100);
 
-    await addDoc(collection(db, "orders"), {
+    const orderData = {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
       storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}`,
       items, amount: isReturnOrderMode ? -finalAmount : finalAmount, rawSubtotal, discountPercent, promoGifts: promoGiftList,
       isReturnOrder: isReturnOrderMode,
-      paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
-    });
+      paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: new Date()
+    };
+
+    if (navigator.onLine) {
+      await addDoc(collection(db, "orders"), { ...orderData, createdAt: serverTimestamp() });
+    } else {
+      await saveToOfflineStore("offlineOrders", orderData);
+      toast("📴 Mất mạng: Toa đơn đã được lưu trữ Offline an toàn!");
+    }
     
     toast(isReturnOrderMode ? "✅ Đã gửi toa NHẬP TRẢ HÀNG!" : "🚀 Đã gửi toa BÁN HÀNG thành công!");
     currentCart = {}; activeVisitedStore = null; isReturnOrderMode = false; renderUI();
@@ -709,6 +798,25 @@
   };
   window.deletePromo = async function(id) { if(confirm("Xóa KM?")) await deleteDoc(doc(db, "promos", id)); };
 
+  // KPI MANAGEMENT FUNCTIONS
+  window.assignKpiTarget = async function(e) {
+    e.preventDefault();
+    const salesUid = document.getElementById('kpiSalesUid').value;
+    const month = document.getElementById('kpiMonth').value;
+    const targetRevenue = Number(document.getElementById('kpiRev').value || 0);
+    const categoryTarget = document.getElementById('kpiCategory').value;
+    const categoryTargetAmount = Number(document.getElementById('kpiCatAmt').value || 0);
+
+    const sObj = users.find(u => u.uid === salesUid);
+    await addDoc(collection(db, "kpiTargets"), {
+      salesUid, salesName: sObj ? sObj.name : '', salesCode: sObj ? sObj.code : '',
+      month, targetRevenue, categoryTarget, categoryTargetAmount, createdAt: serverTimestamp()
+    });
+    toast("🎯 Đã giao chỉ tiêu KPI thành công!");
+    document.getElementById('kpiForm').reset();
+  };
+  window.deleteKpiTarget = async function(id) { if(confirm("Xóa chỉ tiêu này?")) await deleteDoc(doc(db, "kpiTargets", id)); };
+
   window.addStore = async function(e) {
     e.preventDefault();
     const code = document.getElementById('stCode').value.trim();
@@ -790,6 +898,7 @@
     onSnapshot(collection(db, "products"), snap => { products = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "promos"), snap => { promos = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "kpiTargets"), snap => { kpiTargets = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(300)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     if (currentUser.role === 'admin') {
       onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
@@ -801,12 +910,12 @@
 
   function renderUI() {
     if (!currentUser) return;
-    document.getElementById('userInfo').innerHTML = `<i class="fa-solid fa-user-shield" style="color:var(--amber);"></i> [${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);font-weight:700;">${roleLabel(currentUser.role)}</span>)`;
+    document.getElementById('userInfo').innerHTML = `<i class="fa-solid fa-user-shield" style="color:var(--amber);"></i> [${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);font-weight:700;">${roleLabel(currentUser.role)}</span>) ${navigator.onLine?'<span class="badge badge-success">Online</span>':'<span class="badge badge-danger">Offline Mode</span>'}`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
     const backOffice = isAdmin || isManager || isAccountant;
 
     setNav('navDash', backOffice); setNav('navSales', true); setNav('navStores', backOffice);
-    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navPromo', isAdmin); setNav('navAudit', backOffice); setNav('navUsers', isAdmin);
+    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navPromo', isAdmin); setNav('navKpi', true); setNav('navAudit', backOffice); setNav('navUsers', isAdmin);
 
     const main = document.getElementById('mainContent');
 
@@ -860,7 +969,7 @@
       });
 
       const tenDaysAgoMs = Date.now() - (10 * 24 * 60 * 60 * 1000);
-      const historyOrders = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy' && (o.createdAt?.toMillis ? o.createdAt.toMillis() : Date.now()) >= tenDaysAgoMs).sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0)) : [];
+      const historyOrders = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy' && (o.createdAt?.toMillis ? o.createdAt.toMillis() : Date.now()) >= tenDaysAgoMs).sort((a,b) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0)) : [];
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
 
       main.innerHTML = `
@@ -898,7 +1007,7 @@
                       <b>📅 ${ho.createdAt?.toDate ? ho.createdAt.toDate().toLocaleDateString('vi-VN') : ''}</b> ${ho.isReturnOrder?'<span class="badge badge-danger"><i class="fa-solid fa-rotate-left"></i> Trả hàng</span>':''} - <b style="color:var(--rose);">${(ho.amount||0).toLocaleString()}đ</b><br>
                       <small style="color:var(--text-muted);">${(ho.items||[]).map(i => `${i.name} (x${i.qty})`).join(', ')}</small>
                     </div>
-                  `).join('')
+                  `).join('')}
                 }
               </div>
             ` : ''}
@@ -929,7 +1038,7 @@
               </div>
               <div class="table-responsive">
                 <table class="sales-table" style="margin-bottom:18px;">
-                  <thead><tr><th style="text-align:left;">Mã VTHH</th><th style="text-align:left;">Tên Hàng Hóa</th><th style="text-align:left;">Ngành / ĐVT</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr></thead>
+                  <thead><tr><th style="text-align:left;">MaVTHH</th><th style="text-align:left;">TenHangHoa</th><th style="text-align:left;">NganhHang / DVT</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr></thead>
                   <tbody>
                     ${filteredProducts.map(p => {
                       const selectedQty = currentCart[p.id]?.qty || 0;
@@ -948,7 +1057,7 @@
               <h4 style="font-size:14px; font-weight:800; margin-top:16px;"><i class="fa-solid fa-boxes-stacked"></i> Chi Tiết Trình Ký Vật Tư (Quy đổi ĐVT: Thùng, Lốc, Dây, Gói, Hộp, Chai...)</h4>
               <div class="table-responsive">
                 <table>
-                  <thead><tr><th>MaVT</th><th>TenVT</th><th>Ngành</th><th>ĐVT Chuẩn</th><th>Kiện/Thùng</th><th>Lẻ</th><th>Tổng SL</th><th>Quy cách</th><th>Đơn giá</th><th>SL tồn</th></tr></thead>
+                  <thead><tr><th>MaVT</th><th>TenVT</th><th>NganhHang</th><th>DvtChuan</th><th>KienThung</th><th>Le</th><th>TongSL</th><th>QuyCach</th><th>DonGia</th><th>SLTonKho</th></tr></thead>
                   <tbody>
                     ${filteredProducts.map(p => {
                       const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
@@ -1011,7 +1120,7 @@
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Tuyến Điểm Bán</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>Mã DTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>Tuyến Lịch Trình</th><th>Hạn Mức Nợ</th><th></th></tr></thead>
+                <thead><tr><th>MaDTPN</th><th>TenQuay</th><th>DiaChi</th><th>TuyenLichTrinh</th><th>HanMucNo</th><th>ThaoTac</th></tr></thead>
                 <tbody>
                   ${stores.map(s => `<tr><td><b>${s.code||'KH'}</b></td><td><b style="color:#1E293B;">${s.name}</b></td><td>${s.address||''}</td><td><span class="badge badge-pending"><i class="fa-solid fa-route"></i> ${s.routeDay||'Linh động'}</span></td><td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
                 </tbody>
@@ -1046,7 +1155,7 @@
         <div class="card">
           <div class="table-responsive">
             <table>
-              <thead><tr><th>Sales</th><th>MaDTPN (Quầy)</th><th>Chi Tiết Hàng & Ngành</th><th>Tổng Tiền</th><th>Thanh Toán</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
+              <thead><tr><th>Sales</th><th>MaDTPN (Quầy)</th><th>ChiTiếtHang & NganhHang</th><th>TongTien</th><th>ThanhToan</th><th>TrangThai</th><th>ThaoTac</th></tr></thead>
               <tbody>
                 ${filteredOrders.map(o => `
                   <tr>
@@ -1123,7 +1232,7 @@
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Tồn Kho Thời Gian Thực</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>MaVT</th><th>TenVT</th><th>Ngành Hàng</th><th>ĐVT</th><th>Đối Tác</th><th>Quy cách</th><th>Đơn Giá</th><th>Tồn Kho Trực Tiếp</th><th></th></tr></thead>
+                <thead><tr><th>MaVT</th><th>TenVT</th><th>NganhHang</th><th>Dvt</th><th>DoiTac</th><th>QuyCach</th><th>DonGia</th><th>TonKhoTrucTiep</th><th>ThaoTac</th></tr></thead>
                 <tbody>
                   ${products.map(p => `<tr>
                     <td><b>${p.code}</b></td><td style="font-weight:600;">${p.name}</td><td><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.category||'Khác'}</span></td><td><b>${p.dvt||'Hộp'}</b></td><td><b><i class="fa-solid fa-handshake"></i> ${p.supplier||'NPP'}</b></td>
@@ -1163,7 +1272,7 @@
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Chương Trình KM</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>Mua</th><th>Quà Tặng</th><th>Hiệu Lực</th><th>Thao Tác</th></tr></thead>
+                <thead><tr><th>Mua</th><th>QuaTang</th><th>HieuLuc</th><th>ThaoTac</th></tr></thead>
                 <tbody>
                   ${promos.map(p => { const prd=products.find(x=>x.id===p.buyPrdId);
                     return `<tr><td>${prd?prd.name:'?'} (mua ${p.buyQty})</td><td>${p.getPrdName} (x${p.getQty})</td><td><small>${p.startDate||'—'} → ${p.endDate||'—'}</small></td><td><button class="btn btn-red btn-sm" onclick="deletePromo('${p.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`;
@@ -1171,6 +1280,91 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      `;
+    }
+
+    else if (currentTab === 'kpi') {
+      const myTargets = currentUser.role === 'sales' ? kpiTargets.filter(k => k.salesUid === currentUser.uid) : kpiTargets;
+      const salesUsers = users.filter(u => u.role === 'sales');
+
+      main.innerHTML = `
+        <h2 style="font-size:20px; font-weight:800; color:#1E293B;"><i class="fa-solid fa-bullseye" style="color:var(--amber);"></i> Quản Lý & Theo Dõi KPI Doanh Số, Ngành Hàng & Hoa Hồng</h2>
+        ${backOffice ? `
+          <div class="card" style="margin-bottom:20px;">
+            <h3 style="font-size:16px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-user-gear"></i> Giao Chỉ Tiêu KPI Cho Nhân Viên Sales</h3>
+            <form id="kpiForm" onsubmit="assignKpiTarget(event)">
+              <div class="grid" style="margin:0;">
+                <div>
+                  <label>Chọn Nhân Viên Sales:</label>
+                  <select id="kpiSalesUid" required>${salesUsers.map(su => `<option value="${su.uid}">[${su.code}] ${su.name}</option>`).join('')}</select>
+                </div>
+                <div>
+                  <label>Tháng Mục Tiêu (vd: 2026-08):</label>
+                  <input type="text" id="kpiMonth" placeholder="2026-08" required>
+                </div>
+                <div>
+                  <label>Chỉ Tiêu Tổng Doanh Số (VNĐ):</label>
+                  <input type="number" id="kpiRev" value="50000000" required>
+                </div>
+                <div>
+                  <label>Ngành Hàng Bắt Buộc Trọng Điểm:</label>
+                  <select id="kpiCategory">
+                    <option value="Thuốc lá">Thuốc lá</option>
+                    <option value="Mì tôm">Mì tôm</option>
+                    <option value="Sữa">Sữa</option>
+                    <option value="Nước giải khát">Nước giải khát</option>
+                    <option value="Bánh kẹo">Bánh kẹo</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Chỉ Tiêu Doanh Số Ngành Hàng Này (VNĐ):</label>
+                  <input type="number" id="kpiCatAmt" value="15000000" required>
+                </div>
+              </div>
+              <button class="btn btn-green" style="margin-top:14px;width:100%;justify-content:center;font-weight:800;"><i class="fa-solid fa-floppy-disk"></i> Lưu & Giao Chỉ Tiêu KPI</button>
+            </form>
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <h3 style="font-size:16px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-chart-line"></i> Tiến Độ Thực Hiện KPI & Thưởng Phạt Tự Động</h3>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>Nhân Viên Sales</th><th>Tháng</th><th>Tổng Doanh Số Đạt / Chỉ Tiêu</th><th>Tiến Độ Tổng</th><th>Ngành Trọng Điểm</th><th>Doanh Số Ngành Đạt / Chỉ Tiêu</th><th>Hoa Hồng Tạm Tính</th><th>Thao Tác</th></tr></thead>
+              <tbody>
+                ${myTargets.map(kt => {
+                  const salesOrders = orders.filter(o => o.salesUid === kt.salesUid && o.status !== 'Đã hủy');
+                  const actualRev = salesOrders.reduce((sum, o) => sum + (o.amount || 0), 0);
+                  const totalPercent = Math.min(100, Math.round((actualRev / (kt.targetRevenue || 1)) * 100));
+
+                  let actualCatRev = 0;
+                  salesOrders.forEach(o => {
+                    (o.items || []).forEach(it => {
+                      if ((it.category || '').toLowerCase() === (kt.categoryTarget || '').toLowerCase()) {
+                        actualCatRev += (it.price * it.qty);
+                      }
+                    });
+                  });
+                  const catPercent = Math.min(100, Math.round((actualCatRev / (kt.categoryTargetAmount || 1)) * 100));
+                  const commission = totalPercent >= 100 ? Math.round(actualRev * 0.03) : (totalPercent >= 80 ? Math.round(actualRev * 0.015) : 0);
+
+                  return `
+                    <tr>
+                      <td><b>[${kt.salesCode}]</b> ${kt.salesName}</td>
+                      <td><b>${kt.month}</b></td>
+                      <td><b>${actualRev.toLocaleString()}đ</b> / <span style="color:var(--text-muted);">${(kt.targetRevenue||0).toLocaleString()}đ</span></td>
+                      <td><span class="badge ${totalPercent>=100?'badge-success':'badge-pending'}">${totalPercent}%</span></td>
+                      <td><b>${kt.categoryTarget}</b></td>
+                      <td><b>${actualCatRev.toLocaleString()}đ</b> / <span style="color:var(--text-muted);">${(kt.categoryTargetAmount||0).toLocaleString()}đ</span> <span class="badge ${catPercent>=100?'badge-success':'badge-danger'}">${catPercent}%</span></td>
+                      <td><b style="color:var(--emerald);">${commission.toLocaleString()}đ</b></td>
+                      <td>${backOffice ? `<button class="btn btn-red btn-sm" onclick="deleteKpiTarget('${kt.id}')"><i class="fa-solid fa-trash"></i></button>` : '—'}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
           </div>
         </div>
       `;
@@ -1193,7 +1387,7 @@
         <div class="card">
           <div class="table-responsive">
             <table>
-              <thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead>
+              <thead><tr><th>ThoiGian</th><th>NguoiThucHien</th><th>HanhDong</th><th>ChiTiet</th></tr></thead>
               <tbody>${auditLogs.map(l => `<tr><td><small>${l.createdAt?.toDate?l.createdAt.toDate().toLocaleString('vi-VN'):''}</small></td><td>${l.actorName||''}</td><td><span class="badge">${l.action}</span></td><td>${l.action==='POSM_DISPLAY_PHOTO'?`<img src="${l.detail}" style="max-width:120px;border-radius:6px;">`:`<small>${l.detail||''}</small>`}</td></tr>`).join('')}</tbody>
             </table>
           </div>
@@ -1224,7 +1418,7 @@
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Nhân Viên</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>Mã</th><th>Tên</th><th>Email</th><th>Vai Trò</th><th>Trạng Thái</th></tr></thead>
+                <thead><tr><th>Ma</th><th>Ten</th><th>Email</th><th>VaiTro</th><th>TrangThai</th></tr></thead>
                 <tbody>
                   ${users.map(u => `<tr><td><b>${u.code}</b></td><td><b style="color:#1E293B;">${u.name}</b></td><td>${u.email}</td><td><span class="badge">${roleLabel(u.role)}</span></td><td><button class="btn ${u.active!==false?'btn-red':'btn-green'} btn-sm" onclick="toggleUserActive('${u.uid}', ${u.active===false})">${u.active!==false?'Khóa':'Mở khóa'}</button></td></tr>`).join('')}
                 </tbody>
@@ -1279,6 +1473,7 @@
         <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
         <button id="navPrd" class="btn hidden" onclick="switchTab('products')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa / Tồn Kho</button>
         <button id="navPromo" class="btn hidden" onclick="switchTab('promos')"><i class="fa-solid fa-gift"></i> Khuyến Mãi</button>
+        <button id="navKpi" class="btn" onclick="switchTab('kpi')"><i class="fa-solid fa-bullseye"></i> KPI & Hoa Hồng</button>
         <button id="navAudit" class="btn hidden" onclick="switchTab('audit')"><i class="fa-solid fa-shield-halved"></i> Audit Log</button>
         <button id="navUsers" class="btn hidden" onclick="switchTab('users')"><i class="fa-solid fa-users"></i> Nhân Viên</button>
         <button class="btn btn-purple" onclick="openChangePasswordModal()"><i class="fa-solid fa-key"></i> Đổi Pass</button>
