@@ -41,11 +41,12 @@
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;justify-content:center;align-items:center;z-index:999;}
   .modal-content{background:#fff;padding:20px;border-radius:16px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;}
   .hidden{display:none !important;}
+  .stat-number{font-size:24px;font-weight:700;color:var(--navy);margin-top:4px;}
+  #map { height: 350px; width: 100%; border-radius: 12px; margin-top: 10px; z-index: 1; }
+  .watermark-img{max-width:100%;border-radius:8px;margin-top:6px;border:2px solid var(--navy);}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:1200;}
   
-  /* Style riêng cho bảng chọn hàng Sales */
-  .sales-table th { text-align: center; }
-  .sales-table td { text-align: center; }
+  .sales-table th, .sales-table td { text-align: center; }
   .btn-qty-num { background: #e9ecef; border: 1px solid #ced4da; color: #333; width: 28px; height: 28px; border-radius: 4px; font-weight: bold; cursor: pointer; }
   .btn-qty-num:hover { background: var(--amber); color: #000; }
 
@@ -55,6 +56,7 @@
     .nav-btns { width: 100%; overflow-x: auto; padding-bottom: 4px; flex-wrap: nowrap; }
     .grid { grid-template-columns: 1fr !important; }
     table { display: block; overflow-x: auto; white-space: nowrap; }
+    #map { height: 260px; }
   }
 </style>
 
@@ -92,6 +94,9 @@
   let stores = [], orders = [], users = [], checkins = [], products = [], auditLogs = [];
   let currentCart = {};
   let activeVisitedStore = null;
+  let html5QrScanner = null;
+  let isMapVisible = false;
+  let leafletMapInstance = null;
 
   function toast(msg) {
     const t = document.createElement('div');
@@ -106,6 +111,56 @@
     const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
     const a = Math.sin(dLat/2)**2 + Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dLon/2)**2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  const MAX_PHOTO_BASE64_BYTES = 700 * 1024;
+
+  function createWatermarkedImage(file, infoText) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const draw = (maxWidth, quality) => {
+            const canvas = document.createElement("canvas");
+            const scale = Math.min(1, maxWidth / img.width);
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const stripH = Math.max(50, Math.round(canvas.height * 0.16));
+            ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+            ctx.fillRect(0, canvas.height - stripH, canvas.width, stripH);
+            ctx.fillStyle = "#FCA311";
+            ctx.font = "bold 13px Inter, sans-serif";
+            ctx.fillText(`📍 DMS: ${infoText.storeName}`, 10, canvas.height - stripH + 18);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "10px Inter, sans-serif";
+            ctx.fillText(`NV: [${infoText.salesCode}] ${infoText.salesName}`, 10, canvas.height - stripH + 34);
+            ctx.fillText(`GPS: ${infoText.lat.toFixed(5)}, ${infoText.lng.toFixed(5)} | ${new Date().toLocaleString('vi-VN')}`, 10, canvas.height - stripH + 48);
+            return canvas.toDataURL("image/jpeg", quality);
+          };
+
+          let dataUrl = draw(480, 0.55);
+          if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(360, 0.45);
+          if (dataUrl.length > MAX_PHOTO_BASE64_BYTES) dataUrl = draw(280, 0.35);
+          resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function writeAuditLog(action, targetType, targetId, detail) {
+    try {
+      await addDoc(collection(db, "auditLogs"), {
+        actorUid: currentUser.uid, actorName: currentUser.name, action, targetType, targetId, detail,
+        createdAt: serverTimestamp()
+      });
+    } catch (e) {}
   }
 
   window.handleLogin = async function(e) {
@@ -140,15 +195,32 @@
   window.doCheckinWithPhoto = function(storeId) {
     const store = stores.find(s => s.id === storeId);
     const fileInput = document.getElementById(`img_${store.id}`);
-    if (!fileInput || !fileInput.files[0]) return alert("⛔ CHỤP ẢNH TẠI ĐIỂM BÁN!");
+    if (!fileInput || !fileInput.files[0]) return alert("⛔ BẮT BUỘC CHỤP ẢNH TẠI ĐIỂM BÁN!");
+    const file = fileInput.files[0];
+
     navigator.geolocation.getCurrentPosition(async pos => {
-      activeVisitedStore = store;
-      toast(`✅ Checked-in: ${store.code}_${store.name}`);
-      renderUI();
-    }, () => alert("⛔ LỖI GPS!"), { enableHighAccuracy: true });
+      const userLat = pos.coords.latitude, userLng = pos.coords.longitude, accuracy = pos.coords.accuracy;
+      let distance = 0;
+      if (store.lat && store.lng) {
+        distance = getDistanceMeters(userLat, userLng, store.lat, store.lng);
+        if (distance > 30) return alert(`⛔ CHECK-IN THẤT BẠI!\nKhoảng cách: ${Math.round(distance)}m (>30m).`);
+      }
+
+      try {
+        const photo = await createWatermarkedImage(file, { storeName: store.name, salesCode: currentUser.code, salesName: currentUser.name, lat: userLat, lng: userLng });
+        await addDoc(collection(db, "checkins"), {
+          salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
+          storeName: store.name, storeId: store.id, lat: userLat, lng: userLng, accuracy, distance,
+          photo, status: 'Checked-in (<30m)', createdAt: serverTimestamp()
+        });
+
+        activeVisitedStore = store;
+        toast(`✅ Checked-in: ${store.code||'KH'}_${store.name}`);
+        renderUI();
+      } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
+    }, () => alert("⛔ LỖI GPS: Hãy bật GPS."), { enableHighAccuracy: true });
   };
 
-  // Chọn nhanh số lượng bằng dãy phím 1-9
   window.selectQuickQty = function(prdId, qty) {
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     currentCart[prdId].qty = qty;
@@ -178,12 +250,47 @@
 
     await addDoc(collection(db, "orders"), {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
-      storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code}_${activeVisitedStore.name}`,
+      storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}`,
       items, amount: total, status: 'Chờ duyệt', createdAt: serverTimestamp()
     });
     toast("🚀 Đã lập toa đơn thành công!");
     currentCart = {}; activeVisitedStore = null; renderUI();
   };
+
+  window.approveOrder = async function(orderId) {
+    try {
+      await runTransaction(db, async (tx) => {
+        const orderRef = doc(db, "orders", orderId);
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists()) throw new Error("Không tìm thấy đơn hàng.");
+        tx.update(orderRef, { status: 'Đã duyệt', approvedBy: currentUser.uid, approvedAt: serverTimestamp() });
+      });
+      writeAuditLog("DUYET_DON", "orders", orderId, "Duyệt toa đơn");
+      toast("Đã duyệt đơn hàng.");
+    } catch (err) { alert("Lỗi duyệt đơn: " + err.message); }
+  };
+
+  window.cancelOrder = async function(orderId) {
+    const reason = prompt("Lý do hủy đơn:", "");
+    if (reason === null) return;
+    await updateDoc(doc(db, "orders", orderId), { status: 'Đã hủy', cancelReason: reason || '' });
+    writeAuditLog("HUY_DON", "orders", orderId, reason || "");
+    toast("Đã hủy đơn hàng.");
+  };
+
+  window.addProduct = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('prdCode').value.trim();
+    const name = document.getElementById('prdName').value.trim();
+    const dvt = document.getElementById('prdDvt').value;
+    const quycach = document.getElementById('prdQuyCach').value;
+    const price = Number(document.getElementById('prdPrice').value);
+    const stock = Number(document.getElementById('prdStock').value);
+    await addDoc(collection(db, "products"), { code, name, dvt, quycach, price, stock, createdAt: serverTimestamp() });
+    toast("Đã thêm hàng hóa!");
+    document.getElementById('prdForm').reset();
+  };
+  window.deleteProduct = async function(id) { if(confirm("Xóa sản phẩm?")) await deleteDoc(doc(db, "products", id)); };
 
   window.addStore = async function(e) {
     e.preventDefault();
@@ -191,31 +298,112 @@
     const name = document.getElementById('stName').value.trim();
     const address = document.getElementById('stAddr').value.trim();
     const routeDay = document.getElementById('stRoute').value;
-    await addDoc(collection(db, "stores"), { code, name, address, routeDay, createdAt: serverTimestamp() });
+    const lat = Number(document.getElementById('stLat').value || 0);
+    const lng = Number(document.getElementById('stLng').value || 0);
+    await addDoc(collection(db, "stores"), { code, name, address, routeDay, lat, lng, createdAt: serverTimestamp() });
     toast("Đã thêm điểm bán/tuyến!");
     document.getElementById('stForm').reset();
   };
+  window.deleteStore = async function(id) { if(confirm("Xóa tuyến/điểm bán này?")) await deleteDoc(doc(db, "stores", id)); };
 
-  window.deleteStore = async function(id) {
-    if(confirm("Xóa tuyến/điểm bán này?")) await deleteDoc(doc(db, "stores", id));
+  window.addUser = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('usCode').value.trim();
+    const name = document.getElementById('usName').value.trim();
+    const email = document.getElementById('usEmail').value.trim();
+    const password = document.getElementById('usPass').value.trim();
+    const role = document.getElementById('usRole').value;
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await secondaryAuth.signOut();
+      toast("✅ Tạo tài khoản nhân viên thành công!");
+      document.getElementById('userForm').reset();
+    } catch (err) { alert("Lỗi tạo nhân viên: " + err.message); }
   };
+
+  window.toggleLiveMap = function() {
+    isMapVisible = !isMapVisible;
+    const container = document.getElementById('mapContainer');
+    const btn = document.getElementById('toggleMapBtn');
+    if (isMapVisible) {
+      container.classList.remove('hidden');
+      btn.innerText = '🙈 Ẩn Bản Đồ';
+      initLiveMap();
+    } else {
+      container.classList.add('hidden');
+      btn.innerText = '🗺️ Mở Bản Đồ Live Tracking';
+    }
+  };
+
+  function initLiveMap() {
+    setTimeout(() => {
+      const mapContainer = document.getElementById('map');
+      if (!mapContainer) return;
+      if (leafletMapInstance) { leafletMapInstance.remove(); }
+      leafletMapInstance = L.map('map').setView([10.7769, 106.7009], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(leafletMapInstance);
+      let bounds = [];
+      checkins.forEach(c => {
+        if (c.lat && c.lng) {
+          L.marker([c.lat, c.lng]).addTo(leafletMapInstance).bindPopup(`<b>[${c.salesCode||'NV'}] ${c.salesName}</b><br>Tiệm: ${c.storeName}`);
+          bounds.push([c.lat, c.lng]);
+        }
+      });
+      if (bounds.length > 0) leafletMapInstance.fitBounds(bounds);
+    }, 200);
+  }
 
   function attachListeners() {
     onSnapshot(collection(db, "stores"), snap => { stores = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "products"), snap => { products = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(300)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     if (currentUser.role === 'admin') {
       onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    }
+    if (['admin','manager'].includes(currentUser.role)) {
+      onSnapshot(query(collection(db, "auditLogs"), orderBy("createdAt","desc"), limit(200)), snap => { auditLogs = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     }
   }
 
   function renderUI() {
     if (!currentUser) return;
-    document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name}`;
+    document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name} (${roleLabel(currentUser.role)})`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager';
+    const backOffice = isAdmin || isManager;
+
+    setNav('navDash', backOffice); setNav('navSales', true); setNav('navStores', backOffice);
+    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navAudit', backOffice); setNav('navUsers', isAdmin);
+
     const main = document.getElementById('mainContent');
 
-    if (currentTab === 'sales') {
+    if (currentTab === 'dashboard') {
+      const totalRev = orders.filter(o=>o.status!=='Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
+      const todayStr = new Date().toDateString();
+      const checkinsToday = checkins.filter(c => c.createdAt?.toDate && c.createdAt.toDate().toDateString() === todayStr);
+
+      main.innerHTML = `
+        <h2>Giám Sát Báo Cáo & Live Tracking</h2>
+        <div class="grid">
+          <div class="card"><span class="badge">Doanh Số Toa Hàng</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
+          <div class="card"><span class="badge">Tổng Số Toa Đơn</span><div class="stat-number">${orders.length} đơn</div></div>
+          <div class="card"><span class="badge badge-success">Check-in Hôm Nay</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
+        </div>
+        <div class="grid" style="margin-top:16px;">
+          <div class="card" style="grid-column: span 3;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <h3>🗺️ Bản Đồ Live Tracking</h3>
+              <button id="toggleMapBtn" class="btn btn-purple btn-sm" onclick="toggleLiveMap()">${isMapVisible ? '🙈 Ẩn Bản Đồ' : '🗺️ Mở Bản Đồ Live Tracking'}</button>
+            </div>
+            <div id="mapContainer" class="${isMapVisible ? '' : 'hidden'}"><div id="map"></div></div>
+          </div>
+        </div>
+      `;
+      if (isMapVisible) initLiveMap();
+    }
+
+    else if (currentTab === 'sales') {
       const todayDateStr = new Date().toLocaleDateString('vi-VN');
       main.innerHTML = `
         <h2>Bảng Bán Hàng & Chăm Sóc Quầy</h2>
@@ -235,11 +423,10 @@
           <div class="card" style="grid-column: span 2;">
             ${activeVisitedStore ? `
               <div style="background:#fff3bf; padding:12px; border-radius:8px; margin-bottom:12px;">
-                <h2 style="color:var(--navy);">MaDTPN: <span style="color:var(--red);">${activeVisitedStore.code||'20Anh'}_${activeVisitedStore.name}</span></h2>
+                <h2 style="color:var(--navy);">MaDTPN: <span style="color:var(--red);">${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}</span></h2>
                 <h4 style="margin-top:4px;">Toa đơn ngày ${todayDateStr}</h4>
               </div>
 
-              <!-- BẢNG CHỌN SỐ LƯỢNG MÃ VTHH (1 đến 9) -->
               <h4>📦 Bảng Chọn Nhanh Số Lượng (1 - 9)</h4>
               <table class="sales-table" style="margin-bottom:16px;">
                 <thead>
@@ -267,7 +454,6 @@
                 </tbody>
               </table>
 
-              <!-- BẢNG CHI TIẾT VẬT TƯ -->
               <h4 style="margin-top:16px;">📋 Chi Tiết Vật Tư Trình Ký & Tồn Kho</h4>
               <table>
                 <thead>
@@ -306,7 +492,7 @@
       `;
     }
 
-    else if (currentTab === 'stores' && (isAdmin || isManager)) {
+    else if (currentTab === 'stores' && backOffice) {
       main.innerHTML = `
         <h2>Quản Lý Tuyến & Phân Tuyến Điểm Bán</h2>
         <div class="grid">
@@ -322,6 +508,8 @@
                 <option>Tuyến Thứ 3 - Thứ 5 - Thứ 7</option>
                 <option>Tuyến Cả Tuần</option>
               </select>
+              <label>Lat:</label><input type="number" step="any" id="stLat" placeholder="10.7769">
+              <label>Lng:</label><input type="number" step="any" id="stLng" placeholder="106.7009">
               <button class="btn btn-green" style="width:100%;">+ Lưu Điểm Bán</button>
             </form>
           </div>
@@ -347,8 +535,120 @@
         </div>
       `;
     }
+
+    else if (currentTab === 'orders') {
+      const myOrders = currentUser.role === 'sales' ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
+      main.innerHTML = `
+        <h2>Danh Sách Toa Đơn Hàng</h2>
+        <div class="card">
+          <table>
+            <thead><tr><th>Sales</th><th>MaDTPN (Quầy)</th><th>Chi Tiết Hàng</th><th>Tổng Tiền</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
+            <tbody>
+              ${myOrders.map(o => `
+                <tr>
+                  <td><b>[${o.salesCode||'NV'}]</b><br>${o.salesName||''}</td>
+                  <td><b>${o.maDTPN||''}</b></td>
+                  <td><small>${(o.items||[]).map(i => `${i.name} (SL:${i.qty}, K:${i.kien}, L:${i.le})`).join(', ')}</small></td>
+                  <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b></td>
+                  <td><span class="badge ${o.status==='Đã hủy'?'badge-danger':(o.status==='Đã duyệt'?'badge-success':'badge-pending')}">${o.status}</span></td>
+                  <td>
+                    ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-green btn-sm" onclick="approveOrder('${o.id}')">Duyệt</button>` : ''}
+                    ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-red btn-sm" onclick="cancelOrder('${o.id}')">Hủy</button>` : ''}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    else if (currentTab === 'products' && isAdmin) {
+      main.innerHTML = `
+        <h2>Quản Lý Danh Mục Vật Tư / Hàng Hóa</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>+ Thêm Hàng Hóa</h3>
+            <form id="prdForm" onsubmit="addProduct(event)">
+              <label>Mã VTHH:</label><input type="text" id="prdCode" required>
+              <label>Tên Hàng Hóa:</label><input type="text" id="prdName" required>
+              <label>Đơn Vị Tính (Dvt):</label><input type="text" id="prdDvt" value="Hộp" required>
+              <label>Quy Cách:</label><input type="text" id="prdQuyCach" value="1x24" required>
+              <label>Đơn Giá:</label><input type="number" id="prdPrice" required>
+              <label>Số Lượng Tồn:</label><input type="number" id="prdStock" required>
+              <button class="btn btn-green" style="width:100%;">+ Lưu Hàng Hóa</button>
+            </form>
+          </div>
+          <div class="card" style="grid-column: span 2;">
+            <h3>Danh Sách Hàng Hóa</h3>
+            <table>
+              <thead><tr><th>MaVT</th><th>TenVT</th><th>Dvt</th><th>Quy cách</th><th>Đơn Giá</th><th>SL Tồn</th><th></th></tr></thead>
+              <tbody>
+                ${products.map(p => `
+                  <tr>
+                    <td><b>${p.code}</b></td>
+                    <td>${p.name}</td>
+                    <td>${p.dvt||'Hộp'}</td>
+                    <td>${p.quycach||'1x24'}</td>
+                    <td><b>${(p.price||0).toLocaleString()}đ</b></td>
+                    <td><span class="badge badge-success">${p.stock||0}</span></td>
+                    <td><button class="btn btn-red btn-sm" onclick="deleteProduct('${p.id}')">Xóa</button></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    else if (currentTab === 'audit' && backOffice) {
+      main.innerHTML = `
+        <h2>Audit Log & Bằng Chứng Check-in</h2>
+        <div class="grid">
+          ${checkins.map(c => `
+            <div class="card">
+              <b>Tiệm: ${c.storeName}</b> <span class="badge badge-success">${c.status}</span><br>
+              <small>Sales: [${c.salesCode}] ${c.salesName}</small><br>
+              <small>GPS: ${c.lat?c.lat.toFixed(4):''}, ${c.lng?c.lng.toFixed(4):''} | Cách: ${Math.round(c.distance||0)}m</small><br>
+              ${c.photo?`<img src="${c.photo}" class="watermark-img">`:''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    else if (currentTab === 'users' && isAdmin) {
+      main.innerHTML = `
+        <h2>Quản Lý Nhân Viên</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>+ Tạo Nhân Viên</h3>
+            <form id="userForm" onsubmit="addUser(event)">
+              <input type="text" id="usCode" placeholder="Mã NV" required>
+              <input type="text" id="usName" placeholder="Tên NV" required>
+              <input type="email" id="usEmail" placeholder="Email" required>
+              <input type="text" id="usPass" placeholder="Mật khẩu" required>
+              <select id="usRole"><option value="sales">Sales</option><option value="manager">Giám Sát</option><option value="admin">Admin</option></select>
+              <button class="btn btn-green" style="width:100%;">+ Tạo</button>
+            </form>
+          </div>
+          <div class="card" style="grid-column: span 2;">
+            <h3>Danh Sách Nhân Viên</h3>
+            <table>
+              <thead><tr><th>Mã</th><th>Tên</th><th>Email</th><th>Vai Trò</th></tr></thead>
+              <tbody>
+                ${users.map(u => `<tr><td><b>${u.code}</b></td><td>${u.name}</td><td>${u.email}</td><td><span class="badge">${roleLabel(u.role)}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
   }
 
+  function roleLabel(r) { return { admin: 'Admin', manager: 'Giám Sát', sales: 'Sales' }[r] || r; }
+  function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
   window.switchTab = function(tab) { currentTab = tab; renderUI(); };
 </script>
 </head>
@@ -366,10 +666,15 @@
 
   <div id="appView" class="hidden">
     <div class="topbar">
-      <div><h1 style="color:var(--amber);">DMS SFA — TOA HÀNG QUẦY</h1><small id="userInfo"></small></div>
+      <div><h1 style="color:var(--amber);">DMS CLOUD SFA — PRO</h1><small id="userInfo"></small></div>
       <div class="nav-btns">
-        <button class="btn btn-amber" onclick="switchTab('sales')">🛒 Toa Bán Hàng</button>
-        <button class="btn" onclick="switchTab('stores')">🏬 Quản Lý Tuyến</button>
+        <button id="navDash" class="btn btn-amber hidden" onclick="switchTab('dashboard')">📊 Dashboard</button>
+        <button id="navSales" class="btn" onclick="switchTab('sales')">🛒 Toa Bán Hàng</button>
+        <button id="navStores" class="btn hidden" onclick="switchTab('stores')">🏬 Tuyến / Tiệm</button>
+        <button id="navOrders" class="btn" onclick="switchTab('orders')">📦 Đơn Hàng</button>
+        <button id="navPrd" class="btn hidden" onclick="switchTab('products')">🥛 Vật Tư/SKU</button>
+        <button id="navAudit" class="btn hidden" onclick="switchTab('audit')">📷 Audit Log</button>
+        <button id="navUsers" class="btn hidden" onclick="switchTab('users')">👥 Nhân Viên</button>
         <button class="btn btn-red" onclick="handleLogout()">Đăng Xuất</button>
       </div>
     </div>
