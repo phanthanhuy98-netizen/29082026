@@ -193,7 +193,6 @@
   let isReturnOrderMode = false;
   let orderFilterKeyword = "", orderFilterStatus = "ALL";
 
-  // INDEXEDDB OFFLINE STORAGE SETUP
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
@@ -258,7 +257,7 @@
       }
       await clearOfflineStore("offlineCheckins");
       toast("✅ Đồng bộ dữ liệu Offline lên Firebase thành công!");
-    } catch (e) { console.error("Lỗi đồng bộ offline:", e); }
+    } catch (e) {}
   });
 
   function toast(msg) {
@@ -798,7 +797,6 @@
   };
   window.deletePromo = async function(id) { if(confirm("Xóa KM?")) await deleteDoc(doc(db, "promos", id)); };
 
-  // KPI MANAGEMENT FUNCTIONS
   window.assignKpiTarget = async function(e) {
     e.preventDefault();
     const salesUid = document.getElementById('kpiSalesUid').value;
@@ -913,9 +911,17 @@
     document.getElementById('userInfo').innerHTML = `<i class="fa-solid fa-user-shield" style="color:var(--amber);"></i> [${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);font-weight:700;">${roleLabel(currentUser.role)}</span>) ${navigator.onLine?'<span class="badge badge-success">Online</span>':'<span class="badge badge-danger">Offline Mode</span>'}`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
     const backOffice = isAdmin || isManager || isAccountant;
+    const isSales = currentUser.role === 'sales';
 
-    setNav('navDash', backOffice); setNav('navSales', true); setNav('navStores', backOffice);
-    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navPromo', isAdmin); setNav('navKpi', true); setNav('navAudit', backOffice); setNav('navUsers', isAdmin);
+    setNav('navDash', backOffice); 
+    setNav('navSales', isSales); // QUẢN LÝ KHÔNG CẦN BÁN HÀNG -> ẨN TAB TOA BÁN HÀNG
+    setNav('navStores', backOffice);
+    setNav('navOrders', true); 
+    setNav('navPrd', isAdmin); 
+    setNav('navPromo', isAdmin); 
+    setNav('navKpi', true); 
+    setNav('navAudit', backOffice); 
+    setNav('navUsers', isAdmin);
 
     const main = document.getElementById('mainContent');
 
@@ -928,7 +934,7 @@
       const lowStock = products.filter(p => p.stock <= (p.reorderLevel || 10));
 
       main.innerHTML = `
-        <h2 style="font-size:22px; color:#1E293B; font-weight:800;"><i class="fa-solid fa-chart-pie" style="color:var(--amber);"></i> Báo Cáo Tổng Quan Doanh Nghiệp</h2>
+        <h2 style="font-size:22px; color:#1E293B; font-weight:800;"><i class="fa-solid fa-chart-pie" style="color:var(--amber);"></i> Điều Hành Quản Lý & Báo Cáo Doanh Nghiệp</h2>
         <div class="grid">
           <div class="stat-card"><span class="badge badge-pending"><i class="fa-solid fa-money-bill-trend-up"></i> Doanh Số Toa Hàng</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
           <div class="stat-card"><span class="badge badge-success"><i class="fa-solid fa-route"></i> Phủ Tuyến Hôm Nay</span><div class="stat-number">${routeCoverage}%</div>
@@ -953,7 +959,7 @@
       if (isMapVisible) initLiveMap();
     }
 
-    else if (currentTab === 'sales') {
+    else if (currentTab === 'sales' && isSales) {
       const todayDateStr = new Date().toLocaleDateString('vi-VN');
       const filteredStores = stores.filter(s => {
         const matchSearch = (s.code||'').toLowerCase().includes(searchStoreTerm) || (s.name||'').toLowerCase().includes(searchStoreTerm);
@@ -1007,7 +1013,7 @@
                       <b>📅 ${ho.createdAt?.toDate ? ho.createdAt.toDate().toLocaleDateString('vi-VN') : ''}</b> ${ho.isReturnOrder?'<span class="badge badge-danger"><i class="fa-solid fa-rotate-left"></i> Trả hàng</span>':''} - <b style="color:var(--rose);">${(ho.amount||0).toLocaleString()}đ</b><br>
                       <small style="color:var(--text-muted);">${(ho.items||[]).map(i => `${i.name} (x${i.qty})`).join(', ')}</small>
                     </div>
-                  `).join('')}
+                  `).join('')
                 }
               </div>
             ` : ''}
@@ -1132,7 +1138,7 @@
     }
 
     else if (currentTab === 'orders') {
-      const myOrders = currentUser.role === 'sales' ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
+      const myOrders = isSales ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
       const filteredOrders = myOrders.filter(o => {
         const matchKey = (o.maDTPN||'').toLowerCase().includes(orderFilterKeyword) || (o.salesName||'').toLowerCase().includes(orderFilterKeyword) || (o.salesCode||'').toLowerCase().includes(orderFilterKeyword);
         const matchStatus = orderFilterStatus === 'ALL' || o.status === orderFilterStatus;
@@ -1286,7 +1292,7 @@
     }
 
     else if (currentTab === 'kpi') {
-      const myTargets = currentUser.role === 'sales' ? kpiTargets.filter(k => k.salesUid === currentUser.uid) : kpiTargets;
+      const myTargets = isSales ? kpiTargets.filter(k => k.salesUid === currentUser.uid) : kpiTargets;
       const salesUsers = users.filter(u => u.role === 'sales');
 
       main.innerHTML = `
@@ -1468,7 +1474,7 @@
       </div>
       <div class="nav-btns">
         <button id="navDash" class="btn btn-amber hidden" onclick="switchTab('dashboard')"><i class="fa-solid fa-chart-pie"></i> Dashboard</button>
-        <button id="navSales" class="btn" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Toa Bán Hàng</button>
+        <button id="navSales" class="btn hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Toa Bán Hàng</button>
         <button id="navStores" class="btn hidden" onclick="switchTab('stores')"><i class="fa-solid fa-store"></i> Tuyến / Tiệm</button>
         <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
         <button id="navPrd" class="btn hidden" onclick="switchTab('products')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa / Tồn Kho</button>
