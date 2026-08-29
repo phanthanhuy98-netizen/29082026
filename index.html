@@ -53,6 +53,8 @@
   .sales-table th, .sales-table td { text-align: center; }
   .btn-qty-num { background: #e9ecef; border: 1px solid #ced4da; color: #333; width: 28px; height: 28px; border-radius: 4px; font-weight: bold; cursor: pointer; }
   .btn-qty-num:hover { background: var(--amber); color: #000; }
+  .history-box { background: #f8f9fa; border: 1px dashed var(--line); border-radius: 8px; padding: 10px; margin-top: 12px; }
+  .history-item { border-bottom: 1px solid #e9ecef; padding: 6px 0; font-size: 11px; }
 
   @media (max-width: 768px) {
     body { padding: 4px; }
@@ -72,7 +74,7 @@
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, where, runTransaction
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, where, runTransaction, Timestamp
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -167,6 +169,21 @@
     } catch (e) {}
   }
 
+  // Tự động dọn dẹp các đơn hàng đã cũ hơn 10 ngày trong Firestore
+  async function autoCleanOldOrders(storeId) {
+    try {
+      const tenDaysAgoMs = Date.now() - (10 * 24 * 60 * 60 * 1000);
+      const qOld = query(collection(db, "orders"), where("storeId", "==", storeId));
+      const snap = await getDocs(qOld);
+      snap.forEach(async (dSnap) => {
+        const data = dSnap.data();
+        if (data.createdAt && data.createdAt.toMillis() < tenDaysAgoMs) {
+          await deleteDoc(doc(db, "orders", dSnap.id));
+        }
+      });
+    } catch (e) {}
+  }
+
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
@@ -236,6 +253,7 @@
         });
 
         activeVisitedStore = store;
+        autoCleanOldOrders(store.id); // Tự động xóa đơn > 10 ngày
         toast(`✅ Checked-in: ${store.code||'KH'}_${store.name}`);
         renderUI();
       } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
@@ -261,6 +279,7 @@
         html5QrScanner.clear();
         document.getElementById('qrModal').classList.add('hidden');
         activeVisitedStore = store;
+        autoCleanOldOrders(store.id);
         toast(`✅ Xác thực QR thành công: ${store.name}`);
         renderUI();
       } else alert(`❌ Không đúng mã QR quầy.`);
@@ -552,9 +571,19 @@
 
     else if (currentTab === 'sales') {
       const todayDateStr = new Date().toLocaleDateString('vi-VN');
+      const tenDaysAgoMs = Date.now() - (10 * 24 * 60 * 60 * 1000);
+
+      // Lọc lịch sử mua hàng 10 ngày gần nhất của quầy đang active
+      const historyOrders = activeVisitedStore ? orders.filter(o => {
+        if (o.storeId !== activeVisitedStore.id || o.status === 'Đã hủy') return false;
+        const createdMs = o.createdAt?.toMillis ? o.createdAt.toMillis() : Date.now();
+        return createdMs >= tenDaysAgoMs;
+      }).sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0)) : [];
+
       main.innerHTML = `
         <h2>Bảng Bán Hàng & Chăm Sóc Quầy</h2>
         <div class="grid">
+          <!-- CỘT BÊN TRÁI: DANH SÁCH QUẦY + LỊCH SỬ MUA HÀNG 10 NGÀY -->
           <div class="card">
             <h3>📍 Danh Sách Điểm Bán / Quầy</h3>
             ${stores.map(s => `
@@ -568,8 +597,25 @@
                 </div>
               </div>
             `).join('')}
+
+            <!-- MỤC LỊCH SỬ MUA HÀNG 10 NGÀY GÓC TRÁI -->
+            ${activeVisitedStore ? `
+              <div class="history-box">
+                <h4 style="color:var(--navy);">📜 Lịch Sử Mua Hàng (10 Ngày)</h4>
+                <small style="color:var(--muted);">Quầy: ${activeVisitedStore.name}</small>
+                ${historyOrders.length === 0 ? '<p style="font-size:11px;color:var(--muted);margin-top:6px;">Chưa có đơn trong 10 ngày qua.</p>' : 
+                  historyOrders.map(ho => `
+                    <div class="history-item">
+                      <b>📅 ${ho.createdAt?.toDate ? ho.createdAt.toDate().toLocaleDateString('vi-VN') : ''}</b> - <b style="color:var(--red);">${(ho.amount||0).toLocaleString()}đ</b><br>
+                      <small>${(ho.items||[]).map(i => `${i.name} (x${i.qty})`).join(', ')}</small>
+                    </div>
+                  `).join('')
+                }
+              </div>
+            ` : ''}
           </div>
 
+          <!-- CỘT BÊN PHẢI: BẢNG TOA BÁN HÀNG -->
           <div class="card" style="grid-column: span 2;">
             ${activeVisitedStore ? `
               <div style="background:#fff3bf; padding:12px; border-radius:8px; margin-bottom:12px;">
