@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DMS Cloud SFA - Enterprise Production System</title>
+<title>DMS Cloud SFA - Enterprise Ultimate Production System</title>
 <meta name="theme-color" content="#12213D">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -45,6 +45,9 @@
   #map { height: 350px; width: 100%; border-radius: 12px; margin-top: 10px; z-index: 1; }
   .watermark-img{max-width:100%;border-radius:8px;margin-top:6px;border:2px solid var(--navy);}
   .alert-box{background:#F8D7DA;color:var(--red);padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
+  .warn-box{background:#FFF3BF;color:#8a6300;padding:10px;border-radius:8px;font-size:12px;margin-bottom:10px;font-weight:600;}
+  .progress-bar{background:#e0e0e0;border-radius:8px;height:12px;width:100%;margin-top:4px;overflow:hidden;}
+  .progress-fill{background:var(--green);height:100%;width:0%;transition:width 0.3s;}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:1200;}
   
   .sales-table th, .sales-table td { text-align: center; }
@@ -188,6 +191,13 @@
     } catch (e) {}
   }
 
+  function isPromoActive(p) {
+    const now = new Date();
+    if (p.startDate && new Date(p.startDate) > now) return false;
+    if (p.endDate && new Date(p.endDate) < now) return false;
+    return true;
+  }
+
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
@@ -239,7 +249,7 @@
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
       await updateDoc(doc(db, "stores", storeId), { lat, lng });
-      toast(`📌 Đã cập nhật tọa độ chuẩn cho quầy!`);
+      toast(`📌 Đã ghim tọa độ GPS chuẩn cho quầy!`);
       renderUI();
     }, () => alert("Lỗi lấy vị trí GPS điện thoại."));
   };
@@ -274,6 +284,33 @@
     }, () => alert("⛔ LỖI GPS: Hãy bật GPS."), { enableHighAccuracy: true });
   };
 
+  window.uploadPOSMPhoto = function(storeId) {
+    const fileInput = document.getElementById(`posm_${storeId}`);
+    if (!fileInput || !fileInput.files[0]) return alert("Chọn ảnh POSM!");
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const photo = await createWatermarkedImage(fileInput.files[0], { storeName: activeVisitedStore.name, salesCode: currentUser.code, salesName: currentUser.name, lat: pos.coords.latitude, lng: pos.coords.longitude });
+      await addDoc(collection(db, "auditLogs"), { actorUid: currentUser.uid, actorName: currentUser.name, action: "POSM_DISPLAY_PHOTO", targetType: "stores", targetId: storeId, detail: photo, createdAt: serverTimestamp() });
+      toast("📸 Đã gửi ảnh POSM thành công!");
+    });
+  };
+
+  window.startQRScanner = function(storeId) {
+    const store = stores.find(s => s.id === storeId);
+    document.getElementById('qrModal').classList.remove('hidden');
+    html5QrScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+    html5QrScanner.render(async (decodedText) => {
+      if (decodedText === store.id || decodedText === store.name || decodedText === store.code) {
+        html5QrScanner.clear();
+        document.getElementById('qrModal').classList.add('hidden');
+        activeVisitedStore = store;
+        autoCleanOldOrders(store.id);
+        toast(`✅ Xác thực QR thành công: ${store.name}`);
+        renderUI();
+      } else alert(`❌ Không đúng mã QR quầy.`);
+    });
+  };
+  window.closeQRScanner = function() { if (html5QrScanner) html5QrScanner.clear(); document.getElementById('qrModal').classList.add('hidden'); };
+
   window.selectQuickQty = function(prdId, qty) {
     const p = products.find(x => x.id === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
@@ -296,6 +333,16 @@
     renderUI();
   };
 
+  window.loadLastOrder = function() {
+    if (!activeVisitedStore) return;
+    const lastOrd = orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy').sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0))[0];
+    if (!lastOrd || !lastOrd.items) return alert("Quầy này chưa có toa đơn cũ!");
+    currentCart = {};
+    lastOrd.items.forEach(it => { currentCart[it.id] = { qty: it.qty||0, kien: it.kien||0, le: it.le||0 }; });
+    toast("🔄 Đã tải lại toa đơn gần nhất!");
+    renderUI();
+  };
+
   window.toggleReturnMode = function() {
     isReturnOrderMode = !isReturnOrderMode;
     toast(isReturnOrderMode ? "🔄 Chuyển chế độ: LẬP ĐƠN TRẢ HÀNG" : "🛒 Chuyển chế độ: ĐƠN BÁN HÀNG THƯỜNG");
@@ -314,12 +361,18 @@
         const itemTotal = (p.price || 0) * (c.qty || 1);
         rawSubtotal += itemTotal;
         items.push({ id: p.id, code: p.code, name: p.name, supplier: p.supplier || 'NPP', qty: c.qty, kien: c.kien, le: c.le, dvt: p.dvt || 'Hộp', price: p.price });
+
+        promos.filter(isPromoActive).forEach(pr => {
+          if (pr.buyPrdId === p.id && c.qty >= pr.buyQty) {
+            const giftCount = Math.floor(c.qty / pr.buyQty) * pr.getQty;
+            promoGiftList.push(`🎁 Tặng ${giftCount} x ${pr.getPrdName}`);
+          }
+        });
       }
     });
 
     if (items.length === 0) return alert("Vui lòng chọn số lượng hàng!");
 
-    // RÀNG BUỘC KIỂM TRA HẠN MỨC CÔNG NỢ (CREDIT LIMIT ENFORCEMENT)
     const unpaidOrdersTotal = orders
       .filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy')
       .reduce((s, o) => s + (o.amount || 0), 0);
@@ -328,7 +381,7 @@
     const totalPotentialDebt = unpaidOrdersTotal + rawSubtotal;
 
     if (!isReturnOrderMode && totalPotentialDebt > storeCreditLimit) {
-      return alert(`⛔ KHÓA LẬP ĐƠN: Quầy đang vượt Hạn Mức Nợ!\n- Nợ cũ chưa trả: ${unpaidOrdersTotal.toLocaleString()}đ\n- Đơn mới: ${rawSubtotal.toLocaleString()}đ\n- Hạn mức nợ cho phép: ${storeCreditLimit.toLocaleString()}đ\nLiên hệ Kế toán/Admin để giải tỏa nợ.`);
+      return alert(`⛔ KHÓA LẬP ĐƠN: Quầy đang vượt Hạn Mức Nợ!\n- Nợ cũ chưa trả: ${unpaidOrdersTotal.toLocaleString()}đ\n- Đơn mới: ${rawSubtotal.toLocaleString()}đ\n- Hạn mức cho phép: ${storeCreditLimit.toLocaleString()}đ\nLiên hệ Kế toán/Admin để giải tỏa.`);
     }
 
     let discountPercent = isReturnOrderMode ? 0 : (rawSubtotal >= 10000000 ? 5 : (rawSubtotal >= 5000000 ? 2 : 0));
@@ -337,7 +390,7 @@
     await addDoc(collection(db, "orders"), {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
       storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}`,
-      items, amount: isReturnOrderMode ? -finalAmount : finalAmount, rawSubtotal, discountPercent,
+      items, amount: isReturnOrderMode ? -finalAmount : finalAmount, rawSubtotal, discountPercent, promoGifts: promoGiftList,
       isReturnOrder: isReturnOrderMode,
       paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
     });
@@ -490,6 +543,20 @@
   };
   window.deleteProduct = async function(id) { if(confirm("Xóa sản phẩm?")) await deleteDoc(doc(db, "products", id)); };
 
+  window.addPromo = async function(e) {
+    e.preventDefault();
+    const buyPrdId = document.getElementById('pmBuyPrd').value;
+    const buyQty = Number(document.getElementById('pmBuyQty').value);
+    const getPrdName = document.getElementById('pmGetName').value.trim();
+    const getQty = Number(document.getElementById('pmGetQty').value);
+    const startDate = document.getElementById('pmStart').value || null;
+    const endDate = document.getElementById('pmEnd').value || null;
+    await addDoc(collection(db, "promos"), { buyPrdId, buyQty, getPrdName, getQty, startDate, endDate, createdAt: serverTimestamp() });
+    toast("Đã thêm khuyến mãi!");
+    document.getElementById('promoForm').reset();
+  };
+  window.deletePromo = async function(id) { if(confirm("Xóa KM?")) await deleteDoc(doc(db, "promos", id)); };
+
   window.addStore = async function(e) {
     e.preventDefault();
     const code = document.getElementById('stCode').value.trim();
@@ -522,6 +589,38 @@
   };
   window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); toast("Đã cập nhật trạng thái."); };
 
+  window.toggleLiveMap = function() {
+    isMapVisible = !isMapVisible;
+    const container = document.getElementById('mapContainer');
+    const btn = document.getElementById('toggleMapBtn');
+    if (isMapVisible) {
+      container.classList.remove('hidden');
+      btn.innerText = '🙈 Ẩn Bản Đồ';
+      initLiveMap();
+    } else {
+      container.classList.add('hidden');
+      btn.innerText = '🗺️ Mở Bản Đồ Live Tracking';
+    }
+  };
+
+  function initLiveMap() {
+    setTimeout(() => {
+      const mapContainer = document.getElementById('map');
+      if (!mapContainer) return;
+      if (leafletMapInstance) { leafletMapInstance.remove(); }
+      leafletMapInstance = L.map('map').setView([10.7769, 106.7009], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(leafletMapInstance);
+      let bounds = [];
+      checkins.forEach(c => {
+        if (c.lat && c.lng) {
+          L.marker([c.lat, c.lng]).addTo(leafletMapInstance).bindPopup(`<b>[${c.salesCode||'NV'}] ${c.salesName}</b><br>Tiệm: ${c.storeName}`);
+          bounds.push([c.lat, c.lng]);
+        }
+      });
+      if (bounds.length > 0) leafletMapInstance.fitBounds(bounds);
+    }, 200);
+  }
+
   window.setSearchStore = function(val) { searchStoreTerm = val.toLowerCase(); renderUI(); };
   window.setSearchProduct = function(val) { searchProductTerm = val.toLowerCase(); renderUI(); };
   window.setFilterRoute = function(val) { filterRoute = val; renderUI(); };
@@ -530,24 +629,62 @@
     onSnapshot(collection(db, "stores"), snap => { stores = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "products"), snap => { products = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "promos"), snap => { promos = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(300)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     if (currentUser.role === 'admin') {
       onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    }
+    if (['admin','manager'].includes(currentUser.role)) {
+      onSnapshot(query(collection(db, "auditLogs"), orderBy("createdAt","desc"), limit(200)), snap => { auditLogs = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     }
   }
 
   function renderUI() {
     if (!currentUser) return;
-    document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name} (${currentUser.role.toUpperCase()})`;
+    document.getElementById('userInfo').innerText = `[${currentUser.code}] ${currentUser.name} (${roleLabel(currentUser.role)})`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
     const backOffice = isAdmin || isManager || isAccountant;
 
     setNav('navDash', backOffice); setNav('navSales', true); setNav('navStores', backOffice);
-    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navUsers', isAdmin);
+    setNav('navOrders', true); setNav('navPrd', isAdmin); setNav('navPromo', isAdmin); setNav('navAudit', backOffice); setNav('navUsers', isAdmin);
 
     const main = document.getElementById('mainContent');
 
-    if (currentTab === 'sales') {
+    if (currentTab === 'dashboard') {
+      const totalRev = orders.filter(o=>o.status!=='Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
+      const todayStr = new Date().toDateString();
+      const checkinsToday = checkins.filter(c => c.createdAt?.toDate && c.createdAt.toDate().toDateString() === todayStr);
+      const visitedStoreIds = new Set(checkinsToday.map(c => c.storeId));
+      const routeCoverage = stores.length > 0 ? Math.round((visitedStoreIds.size / stores.length) * 100) : 0;
+      const lowStock = products.filter(p => p.stock <= (p.reorderLevel || 10));
+
+      main.innerHTML = `
+        <h2>Giám Sát Báo Cáo & Live Tracking Enterprise</h2>
+        <div class="grid">
+          <div class="card"><span class="badge">Doanh Số Toa Hàng</span><div class="stat-number">${totalRev.toLocaleString('vi-VN')} đ</div></div>
+          <div class="card"><span class="badge">Tỷ Lệ Phủ Tuyến Hôm Nay</span><div class="stat-number">${routeCoverage}%</div>
+            <div class="progress-bar"><div class="progress-fill" style="width:${routeCoverage}%;"></div></div>
+          </div>
+          <div class="card"><span class="badge badge-success">Check-in Hôm Nay</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
+        </div>
+        <div class="grid" style="margin-top:16px;">
+          <div class="card"><h3>📦 Cảnh Báo Tồn Kho Thấp</h3>
+            ${lowStock.length===0?'<p style="color:var(--muted);margin-top:8px;">Tồn kho ổn định.</p>':lowStock.map(p=>`<div class="warn-box">⚠️ ${p.name}: còn ${p.stock} (ngưỡng 10)</div>`).join('')}</div>
+        </div>
+        <div class="grid" style="margin-top:16px;">
+          <div class="card" style="grid-column: span 3;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <h3>🗺️ Bản Đồ Live Tracking Sales</h3>
+              <button id="toggleMapBtn" class="btn btn-purple btn-sm" onclick="toggleLiveMap()">${isMapVisible ? '🙈 Ẩn Bản Đồ' : '🗺️ Mở Bản Đồ Live Tracking'}</button>
+            </div>
+            <div id="mapContainer" class="${isMapVisible ? '' : 'hidden'}"><div id="map"></div></div>
+          </div>
+        </div>
+      `;
+      if (isMapVisible) initLiveMap();
+    }
+
+    else if (currentTab === 'sales') {
       const todayDateStr = new Date().toLocaleDateString('vi-VN');
       
       const filteredStores = stores.filter(s => {
@@ -592,7 +729,8 @@
                   <input type="file" id="img_${s.id}" accept="image/*" capture="environment">
                   <div style="display:flex;gap:4px;margin-top:4px;">
                     <button class="btn btn-amber btn-sm" style="flex:1;" onclick="doCheckinWithPhoto('${s.id}')">📍 Check-in GPS (<30m)</button>
-                    <button class="btn btn-purple btn-sm" onclick="pinStoreGPS('${s.id}')">📌 Ghim GPS</button>
+                    <button class="btn btn-green btn-sm" onclick="startQRScanner('${s.id}')">📷 QR</button>
+                    <button class="btn btn-purple btn-sm" onclick="pinStoreGPS('${s.id}')">📌 Ghim</button>
                   </div>
                 </div>
               `).join('')}
@@ -624,14 +762,22 @@
                     ${isReturnOrderMode ? '🛒 Chuyển sang Đơn Bán Hàng' : '🔄 Chuyển sang Đơn Trả Hàng'}
                   </button>
                 </div>
-                <h4 style="margin-top:4px;">${isReturnOrderMode?'TOA NHẬP TRẢ HÀNG CẦN THU HỒI':'Toa đơn bán hàng ngày'} ${todayDateStr}</h4>
-                <div style="margin-top:4px;font-size:12px;">
+                <h4 style="margin-top:4px;">${isReturnOrderMode?'TOA NHẬP TRẢ HÀNG CẦN THU HỒI':'Toa đơn ngày'} ${todayDateStr}</h4>
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                  <button class="btn btn-amber btn-sm" onclick="loadLastOrder()">🔄 Đặt lại toa đơn gần nhất</button>
+                </div>
+                <div style="margin-top:8px;">
+                  <small>📷 Chụp ảnh Trưng bày POSM:</small>
+                  <input type="file" id="posm_${activeVisitedStore.id}" accept="image/*" capture="environment" style="margin:4px 0;">
+                  <button class="btn btn-sm btn-green" onclick="uploadPOSMPhoto('${activeVisitedStore.id}')">Gửi ảnh POSM</button>
+                </div>
+                <div style="margin-top:6px;font-size:12px;">
                   <span>Nợ cũ tồn: <b>${unpaidOrdersTotal.toLocaleString()}đ</b> / Hạn mức: <b>${(activeVisitedStore.creditLimit||20000000).toLocaleString()}đ</b></span>
                 </div>
               </div>
 
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <h4>📦 Danh Mục Vật Tư (60 Đối Tác)</h4>
+                <h4>📦 Bảng Chọn Nhanh Số Lượng (1 - 9)</h4>
                 <input type="text" placeholder="🔍 Tìm Mã VTHH, Tên hàng, Đối tác..." style="width:250px;margin:0;" onkeyup="setSearchProduct(this.value)">
               </div>
 
@@ -709,7 +855,7 @@
 
     else if (currentTab === 'stores' && backOffice) {
       main.innerHTML = `
-        <h2>Quản Lý Tuyến & Nhập Dữ Liệu Cửa Hàng (3.000 Tiệm)</h2>
+        <h2>Quản Lý Tuyến & Phân Tuyến Điểm Bán (3.000 Tiệm)</h2>
         <div class="grid">
           <div class="card">
             <h3>📥 Nạp 3.000 Cửa Hàng Từ CSV/Excel</h3>
@@ -732,11 +878,12 @@
           <div class="card" style="grid-column: span 2;">
             <h3>Danh Sách Tuyến Điểm Bán</h3>
             <table>
-              <thead><tr><th>Mã DTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>Tuyến</th><th>Thao Tác</th></tr></thead>
+              <thead><tr><th>Mã DTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>Tuyến</th><th>Hạn Mức Nợ</th><th>Thao Tác</th></tr></thead>
               <tbody>
                 ${stores.map(s => `<tr>
                   <td><b>${s.code||'KH'}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td>
                   <td><span class="badge badge-pending">${s.routeDay||'Cả tuần'}</span></td>
+                  <td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td>
                   <td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')">Xóa</button></td>
                 </tr>`).join('')}
               </tbody>
@@ -758,8 +905,10 @@
                 <tr>
                   <td><b>[${o.salesCode||'NV'}]</b><br>${o.salesName||''}</td>
                   <td><b>${o.maDTPN||''}</b> ${o.isReturnOrder?'<br><span class="badge badge-danger">Trả hàng</span>':''}</td>
-                  <td><small>${(o.items||[]).map(i => `${i.name} (SL:${i.qty}, K:${i.kien}, L:${i.le})`).join(', ')}</small></td>
-                  <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b></td>
+                  <td><small>${(o.items||[]).map(i => `${i.name} (SL:${i.qty}, K:${i.kien}, L:${i.le})`).join(', ')}</small>
+                    ${o.promoGifts?.length?`<br><small style="color:var(--green);">${o.promoGifts.join('<br>')}</small>`:''}
+                  </td>
+                  <td><b style="color:var(--red);">${(o.amount||0).toLocaleString()}đ</b>${o.discountPercent?`<br><small style="color:var(--green);">(Chiết khấu ${o.discountPercent}%)</small>`:''}</td>
                   <td><span class="badge ${o.paymentStatus==='Đã thanh toán'?'badge-success':'badge-pending'}">${o.paymentStatus||'Công nợ'}</span></td>
                   <td><span class="badge ${o.status==='Đã hủy'?'badge-danger':(o.status==='Đã duyệt'?'badge-success':'badge-pending')}">${o.status}</span></td>
                   <td style="display:flex;gap:4px;flex-wrap:wrap;">
@@ -778,7 +927,7 @@
 
     else if (currentTab === 'products' && isAdmin) {
       main.innerHTML = `
-        <h2>Quản Lý Hàng Hóa & Mã VTHH (60 Đối Tác)</h2>
+        <h2>Quản Lý Danh Mục Vật Tư / Hàng Hóa (60 Đối Tác)</h2>
         <div class="grid">
           <div class="card">
             <h3>📥 Nạp Danh Mục Mã Hàng Từ CSV/Excel</h3>
@@ -812,6 +961,64 @@
             </table>
           </div>
         </div>
+      `;
+    }
+
+    else if (currentTab === 'promos' && isAdmin) {
+      main.innerHTML = `
+        <h2>Chương Trình Khuyến Mãi (Mua - Tặng)</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>+ Thêm Khuyến Mãi</h3>
+            <form id="promoForm" onsubmit="addPromo(event)">
+              <label>Sản phẩm mua:</label><select id="pmBuyPrd">${products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+              <label>SL mua:</label><input type="number" id="pmBuyQty" value="10" required>
+              <label>Quà tặng:</label><input type="text" id="pmGetName" required>
+              <label>SL tặng:</label><input type="number" id="pmGetQty" value="1" required>
+              <label>Bắt đầu:</label><input type="date" id="pmStart">
+              <label>Kết thúc:</label><input type="date" id="pmEnd">
+              <button class="btn btn-green" style="width:100%;">+ Lưu KM</button>
+            </form>
+          </div>
+          <div class="card" style="grid-column: span 2;">
+            <h3>Danh Sách Chương Trình KM</h3>
+            <table>
+              <thead><tr><th>Mua</th><th>Quà Tặng</th><th>Hiệu Lực</th><th>Thao Tác</th></tr></thead>
+              <tbody>
+                ${promos.map(p => { const prd=products.find(x=>x.id===p.buyPrdId);
+                  return `<tr>
+                    <td>${prd?prd.name:'?'} (mua ${p.buyQty})</td>
+                    <td>${p.getPrdName} (x${p.getQty})</td>
+                    <td><small>${p.startDate||'—'} → ${p.endDate||'—'}</small></td>
+                    <td><button class="btn btn-red btn-sm" onclick="deletePromo('${p.id}')">Xóa</button></td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    else if (currentTab === 'audit' && backOffice) {
+      main.innerHTML = `
+        <h2>Audit Log & Bằng Chứng Check-in</h2>
+        <div class="grid">
+          ${checkins.map(c => `
+            <div class="card">
+              <b>Tiệm: ${c.storeName}</b> <span class="badge badge-success">${c.status}</span><br>
+              <small>Sales: [${c.salesCode}] ${c.salesName}</small><br>
+              <small>GPS: ${c.lat?c.lat.toFixed(4):''}, ${c.lng?c.lng.toFixed(4):''} | Cách: ${Math.round(c.distance||0)}m</small><br>
+              ${c.photo?`<img src="${c.photo}" class="watermark-img">`:''}
+            </div>
+          `).join('')}
+        </div>
+        <h3 style="margin-top:20px;">📜 Lịch Sử POSM & Thao Tác</h3>
+        <div class="card"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead>
+          <tbody>${auditLogs.map(l => `<tr><td><small>${l.createdAt?.toDate?l.createdAt.toDate().toLocaleString('vi-VN'):''}</small></td>
+            <td>${l.actorName||''}</td><td><span class="badge">${l.action}</span></td>
+            <td>${l.action==='POSM_DISPLAY_PHOTO'?`<img src="${l.detail}" style="max-width:120px;border-radius:4px;">`:`<small>${l.detail||''}</small>`}</td></tr>`).join('')}</tbody>
+        </table></div>
       `;
     }
 
@@ -873,6 +1080,8 @@
         <button id="navStores" class="btn hidden" onclick="switchTab('stores')">🏬 Tuyến / Tiệm</button>
         <button id="navOrders" class="btn" onclick="switchTab('orders')">📦 Đơn Hàng</button>
         <button id="navPrd" class="btn hidden" onclick="switchTab('products')">🥛 Hàng Hóa / Đối Tác</button>
+        <button id="navPromo" class="btn hidden" onclick="switchTab('promos')">🎁 Khuyến Mãi</button>
+        <button id="navAudit" class="btn hidden" onclick="switchTab('audit')">📷 Audit Log</button>
         <button id="navUsers" class="btn hidden" onclick="switchTab('users')">👥 Nhân Viên</button>
         <button class="btn btn-amber" onclick="openChangePasswordModal()">🔒 Đổi Pass</button>
         <button class="btn btn-red" onclick="handleLogout()">Đăng Xuất</button>
@@ -893,6 +1102,11 @@
       <button type="button" class="btn btn-red" onclick="closeChangePasswordModal()">Hủy</button>
     </div>
   </form>
+</div></div>
+
+<div id="qrModal" class="modal hidden"><div class="modal-content">
+  <h3>📷 Quét Mã QR</h3><div id="reader" style="width:100%;margin-top:10px;"></div>
+  <button class="btn btn-red" style="width:100%;margin-top:12px;" onclick="closeQRScanner()">Đóng Camera</button>
 </div></div>
 
 </body>
