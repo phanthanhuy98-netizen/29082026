@@ -111,6 +111,8 @@
   let activeVisitedStore = null;
   let selectedCategoryFilter = 'Tất cả';
   let html5QrScanner = null;
+  let isMapVisible = false;
+  let leafletMapInstance = null;
 
   function toast(msg) {
     const t = document.createElement('div');
@@ -601,21 +603,36 @@
     downloadCSV(`checkin-${Date.now()}.csv`, rows);
   };
 
+  window.toggleLiveMap = function() {
+    isMapVisible = !isMapVisible;
+    const container = document.getElementById('mapContainer');
+    const btn = document.getElementById('toggleMapBtn');
+    if (isMapVisible) {
+      container.classList.remove('hidden');
+      btn.innerText = '🙈 Ẩn Bản Đồ';
+      initLiveMap();
+    } else {
+      container.classList.add('hidden');
+      btn.innerText = '🗺️ Mở Bản Đồ Live Tracking';
+    }
+  };
+
   function initLiveMap() {
     setTimeout(() => {
       const mapContainer = document.getElementById('map');
       if (!mapContainer) return;
-      const map = L.map('map').setView([10.7769, 106.7009], 11);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+      if (leafletMapInstance) { leafletMapInstance.remove(); }
+      leafletMapInstance = L.map('map').setView([10.7769, 106.7009], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(leafletMapInstance);
       let bounds = [];
       checkins.forEach(c => {
         if (c.lat && c.lng) {
-          L.marker([c.lat, c.lng]).addTo(map).bindPopup(`<b>[${c.salesCode||'NV'}] ${c.salesName}</b><br>Tiệm: ${c.storeName}${c.suspicious ? '<br><span style="color:#C1121F">⚠️ Nghi vấn</span>' : ''}`);
+          L.marker([c.lat, c.lng]).addTo(leafletMapInstance).bindPopup(`<b>[${c.salesCode||'NV'}] ${c.salesName}</b><br>Tiệm: ${c.storeName}${c.suspicious ? '<br><span style="color:#C1121F">⚠️ Nghi vấn</span>' : ''}`);
           bounds.push([c.lat, c.lng]);
         }
       });
-      if (bounds.length > 0) map.fitBounds(bounds);
-    }, 300);
+      if (bounds.length > 0) leafletMapInstance.fitBounds(bounds);
+    }, 200);
   }
 
   function attachListeners() {
@@ -677,14 +694,19 @@
             ${alerts.debtWarnings.length===0?'<p style="color:var(--muted);margin-top:8px;">Không có tiệm nào vượt ngưỡng.</p>':alerts.debtWarnings.map(s=>`<div class="alert-box">⛔ ${s.name}: nợ ${s.currentDebt.toLocaleString()}đ / hạn mức ${s.creditLimit.toLocaleString()}đ</div>`).join('')}</div>
         </div>
         <div class="grid" style="margin-top:16px;">
-          <div class="card" style="grid-column: span 3;"><h3>🗺️ Bản Đồ Live Tracking</h3>
-            <div style="display:flex;gap:8px;margin-bottom:8px;">
-              <button class="btn btn-amber btn-sm" onclick="exportOrdersCSV()">⬇️ Xuất Đơn Hàng CSV</button>
-              <button class="btn btn-amber btn-sm" onclick="exportCheckinsCSV()">⬇️ Xuất Check-in CSV</button>
+          <div class="card" style="grid-column: span 3;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <h3>🗺️ Bản Đồ Live Tracking</h3>
+              <div style="display:flex;gap:6px;">
+                <button id="toggleMapBtn" class="btn btn-purple btn-sm" onclick="toggleLiveMap()">${isMapVisible ? '🙈 Ẩn Bản Đồ' : '🗺️ Mở Bản Đồ Live Tracking'}</button>
+                <button class="btn btn-amber btn-sm" onclick="exportOrdersCSV()">⬇️ Xuất Đơn Hàng CSV</button>
+                <button class="btn btn-amber btn-sm" onclick="exportCheckinsCSV()">⬇️ Xuất Check-in CSV</button>
+              </div>
             </div>
-            <div id="map"></div></div>
+            <div id="mapContainer" class="${isMapVisible ? '' : 'hidden'}"><div id="map"></div></div>
+          </div>
         </div>`;
-      initLiveMap();
+      if (isMapVisible) initLiveMap();
     }
 
     else if (currentTab === 'sales') {
