@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>DMS Cloud SFA - Ultimate Absolute Radiant Edition</title>
+<title>DMS Cloud SFA - Ultimate Category & Unit Edition</title>
 <meta name="theme-color" content="#070B19">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Oswald:wght@600;700&display=swap" rel="stylesheet">
@@ -149,6 +149,10 @@
   .btn-qty-num { background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; width: 32px; height: 32px; border-radius: 10px; font-weight: 700; cursor: pointer; transition:all 0.15s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
   .btn-qty-num:hover, .btn-qty-num:active { background: var(--amber); color: #0B132B; border-color: var(--amber); transform: scale(1.15); box-shadow: 0 4px 10px rgba(255, 159, 28, 0.4); }
   
+  .category-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cat-tab-btn { background: #E2E8F0; color: #334155; border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .cat-tab-btn.active, .cat-tab-btn:hover { background: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(58,134,239,0.3); }
+
   .history-box { background: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 14px; padding: 14px; margin-top: 16px; max-height: 250px; overflow-y: auto; }
   .history-item { border-bottom: 1px solid #E2E8F0; padding: 8px 0; font-size: 12px; }
   
@@ -203,7 +207,7 @@
   let html5QrScanner = null;
   let isMapVisible = false;
   let leafletMapInstance = null;
-  let searchStoreTerm = "", searchProductTerm = "", filterRoute = "ALL";
+  let searchStoreTerm = "", searchProductTerm = "", filterRoute = "ALL", activeCategory = "ALL";
   let isReturnOrderMode = false;
   let orderFilterKeyword = "", orderFilterStatus = "ALL";
 
@@ -461,7 +465,7 @@
       if (c && (c.qty > 0 || c.kien > 0 || c.le > 0)) {
         const itemTotal = (p.price || 0) * (c.qty || 1);
         rawSubtotal += itemTotal;
-        items.push({ id: p.id, code: p.code, name: p.name, supplier: p.supplier || 'NPP', qty: c.qty, kien: c.kien, le: c.le, dvt: p.dvt || 'Hộp', price: p.price });
+        items.push({ id: p.id, code: p.code, name: p.name, category: p.category||'Tạp hóa chung', supplier: p.supplier || 'NPP', qty: c.qty, kien: c.kien, le: c.le, dvt: p.dvt || 'Hộp', price: p.price });
 
         promos.filter(isPromoActive).forEach(pr => {
           if (pr.buyPrdId === p.id && c.qty >= pr.buyQty) {
@@ -509,14 +513,14 @@
 
   window.exportDailyOrdersCSV = function() {
     const todayStr = new Date().toDateString();
-    const rows = [["MaDTPN", "TenQuay", "MaNV", "TenNV", "NgayTao", "LoaiDon", "MaVT", "TenVT", "NhaCungCap", "Dvt", "SoLuong", "Kien", "Le", "DonGia", "ThanhTien", "TrangThai"]];
+    const rows = [["MaDTPN", "TenQuay", "MaNV", "TenNV", "NgayTao", "LoaiDon", "NganhHang", "MaVT", "TenVT", "NhaCungCap", "Dvt", "SoLuong", "Kien", "Le", "DonGia", "ThanhTien", "TrangThai"]];
     orders.forEach(o => {
       const createdDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date();
       if (createdDate.toDateString() === todayStr && o.status !== 'Đã hủy') {
         (o.items || []).forEach(it => {
           rows.push([
             o.maDTPN, o.maDTPN.split('_')[1]||'', o.salesCode, o.salesName,
-            createdDate.toLocaleString('vi-VN'), o.isReturnOrder?'TRẢ HÀNG':'BÁN HÀNG', it.code, it.name, it.supplier||'',
+            createdDate.toLocaleString('vi-VN'), o.isReturnOrder?'TRẢ HÀNG':'BÁN HÀNG', it.category||'', it.code, it.name, it.supplier||'',
             it.dvt, it.qty, it.kien, it.le, it.price, (it.price*it.qty), o.status
           ]);
         });
@@ -553,8 +557,11 @@
       let count = 0;
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
-        if (cols.length >= 4 && cols[0]) {
-          await addDoc(collection(db, "products"), { code: cols[0], name: cols[1], supplier: cols[2]||'Đối tác', dvt: cols[3]||'Hộp', quycach: cols[4]||'1x24', price: Number(cols[5]||0), stock: Number(cols[6]||100), reorderLevel: 10, createdAt: serverTimestamp() });
+        if (cols.length >= 5 && cols[0]) {
+          await addDoc(collection(db, "products"), { 
+            code: cols[0], name: cols[1], category: cols[2]||'Khác', supplier: cols[3]||'Đối tác', 
+            dvt: cols[4]||'Hộp', quycach: cols[5]||'1x24', price: Number(cols[6]||0), stock: Number(cols[7]||100), reorderLevel: 10, createdAt: serverTimestamp() 
+          });
           count++;
         }
       }
@@ -635,8 +642,8 @@
         <p><b>MaDTPN:</b> ${o.maDTPN}</p>
         <p><b>Nhân viên sales:</b> ${o.salesName} (${o.salesCode})</p>
         <p><b>Ngày:</b> ${o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString('vi-VN') : ''}</p>
-        <table><thead><tr><th>MaVT</th><th>TenVT</th><th>Dvt</th><th>SL quy đổi</th><th>Kiện</th><th>Lẻ</th><th>Đơn giá</th></tr></thead>
-        <tbody>${(o.items||[]).map(i => `<tr><td>${i.code}</td><td>${i.name}</td><td>${i.dvt}</td><td>${i.qty}</td><td>${i.kien}</td><td>${i.le}</td><td>${(i.price||0).toLocaleString()}đ</td></tr>`).join('')}</tbody></table>
+        <table><thead><tr><th>MaVT</th><th>TenVT</th><th>Ngành</th><th>Dvt</th><th>SL quy đổi</th><th>Kiện</th><th>Lẻ</th><th>Đơn giá</th></tr></thead>
+        <tbody>${(o.items||[]).map(i => `<tr><td>${i.code}</td><td>${i.name}</td><td>${i.category||''}</td><td>${i.dvt}</td><td>${i.qty}</td><td>${i.kien}</td><td>${i.le}</td><td>${(i.price||0).toLocaleString()}đ</td></tr>`).join('')}</tbody></table>
         <h3 style="text-align:right;">TỔNG THANH TOÁN: ${(o.amount||0).toLocaleString()} đ</h3>
       </body></html>`);
     printWindow.document.close(); printWindow.focus(); printWindow.print();
@@ -694,12 +701,13 @@
     e.preventDefault();
     const code = document.getElementById('prdCode').value.trim();
     const name = document.getElementById('prdName').value.trim();
+    const category = document.getElementById('prdCat').value;
     const supplier = document.getElementById('prdSupplier').value.trim() || 'NPP';
     const dvt = document.getElementById('prdDvt').value;
     const quycach = document.getElementById('prdQuyCach').value;
     const price = Number(document.getElementById('prdPrice').value);
     const stock = Number(document.getElementById('prdStock').value);
-    await addDoc(collection(db, "products"), { code, name, supplier, dvt, quycach, price, stock, reorderLevel: 10, createdAt: serverTimestamp() });
+    await addDoc(collection(db, "products"), { code, name, category, supplier, dvt, quycach, price, stock, reorderLevel: 10, createdAt: serverTimestamp() });
     toast("Đã thêm hàng hóa!");
     document.getElementById('prdForm').reset();
   };
@@ -786,6 +794,7 @@
   window.setSearchStore = function(val) { searchStoreTerm = val.toLowerCase(); renderUI(); };
   window.setSearchProduct = function(val) { searchProductTerm = val.toLowerCase(); renderUI(); };
   window.setFilterRoute = function(val) { filterRoute = val.toLowerCase(); renderUI(); };
+  window.setActiveCategory = function(cat) { activeCategory = cat; renderUI(); };
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setOrderFilterStatus = function(val) { orderFilterStatus = val; renderUI(); };
 
@@ -855,7 +864,14 @@
         const matchRoute = filterRoute === 'all' || (s.routeDay||'').toLowerCase().includes(filterRoute);
         return matchSearch && matchRoute;
       });
-      const filteredProducts = products.filter(p => (p.code||'').toLowerCase().includes(searchProductTerm) || (p.name||'').toLowerCase().includes(searchProductTerm) || (p.supplier||'').toLowerCase().includes(searchProductTerm));
+
+      const categories = ['ALL', 'Thuốc lá', 'Mì tôm', 'Sữa', 'Nước giải khát', 'Bánh kẹo', 'Gia vị', 'Hóa mỹ phẩm', 'Khác'];
+      const filteredProducts = products.filter(p => {
+        const matchSearch = (p.code||'').toLowerCase().includes(searchProductTerm) || (p.name||'').toLowerCase().includes(searchProductTerm) || (p.supplier||'').toLowerCase().includes(searchProductTerm);
+        const matchCat = activeCategory === 'ALL' || (p.category||'Khác').toLowerCase() === activeCategory.toLowerCase();
+        return matchSearch && matchCat;
+      });
+
       const tenDaysAgoMs = Date.now() - (10 * 24 * 60 * 60 * 1000);
       const historyOrders = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy' && (o.createdAt?.toMillis ? o.createdAt.toMillis() : Date.now()) >= tenDaysAgoMs).sort((a,b) => (b.createdAt?.toMillis()||0) - (a.createdAt?.toMillis()||0)) : [];
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
@@ -914,12 +930,18 @@
                 <div style="margin-top:10px;"><small style="font-weight:600;"><i class="fa-solid fa-camera"></i> Ảnh Trưng bày POSM:</small><input type="file" id="posm_${activeVisitedStore.id}" accept="image/*" capture="environment" style="margin:4px 0;"><button class="btn btn-sm btn-green" onclick="uploadPOSMPhoto('${activeVisitedStore.id}')"><i class="fa-solid fa-cloud-arrow-up"></i> Gửi ảnh POSM</button></div>
                 <div style="margin-top:8px;font-size:12px;font-weight:600;"><span>Nợ cũ tồn: <b style="color:var(--rose);">${unpaidOrdersTotal.toLocaleString()}đ</b> / Hạn mức: <b>${(activeVisitedStore.creditLimit||20000000).toLocaleString()}đ</b></span></div>
               </div>
+
+              <!-- NHÓM NGÀNH HÀNG TAB FILTER -->
+              <div class="category-tabs">
+                ${categories.map(cat => `<button class="cat-tab-btn ${activeCategory===cat?'active':''}" onclick="setActiveCategory('${cat}')">${cat === 'ALL' ? '📦 Tất cả ngành hàng' : cat}</button>`).join('')}
+              </div>
+
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <h4 style="font-size:14px;"><i class="fa-solid fa-hand-pointer"></i> Bảng Chọn Nhanh Số Lượng (1 - 9)</h4>
                 <input type="text" placeholder="🔍 Tìm Mã VTHH, Tên hàng, Đối tác..." style="width:240px;margin:0;" onkeyup="setSearchProduct(this.value)">
               </div>
               <table class="sales-table" style="margin-bottom:16px;">
-                <thead><tr><th style="text-align:left;">Mã VTHH</th><th style="text-align:left;">Tên Hàng Hóa</th><th style="text-align:left;">Đối Tác</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr></thead>
+                <thead><tr><th style="text-align:left;">Mã VTHH</th><th style="text-align:left;">Tên Hàng Hóa</th><th style="text-align:left;">Ngành / ĐVT</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr></thead>
                 <tbody>
                   ${filteredProducts.map(p => {
                     const selectedQty = currentCart[p.id]?.qty || 0;
@@ -927,22 +949,22 @@
                       <tr>
                         <td style="text-align:left;"><b>${p.code}</b></td>
                         <td style="text-align:left;">${p.name}</td>
-                        <td style="text-align:left;"><span class="badge" style="background:#F1F5F9;color:var(--purple);"><i class="fa-solid fa-handshake"></i> ${p.supplier||'NPP'}</span></td>
+                        <td style="text-align:left;"><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.category||'Khác'}</span> <span style="font-size:11px;color:var(--text-muted)">(${p.dvt||'Hộp'})</span></td>
                         ${[1,2,3,4,5,6,7,8,9].map(n => `<td><button class="btn-qty-num" style="${selectedQty===n?'background:var(--amber);color:#0B132B;border-color:var(--amber);font-weight:bold;':''}" onclick="selectQuickQty('${p.id}', ${n})">${n}</button></td>`).join('')}
                       </tr>
                     `;
                   }).join('')}
                 </tbody>
               </table>
-              <h4 style="font-size:14px;"><i class="fa-solid fa-boxes-stacked"></i> Chi Tiết Trình Ký Vật Tư (Quy đổi Kiện/Lẻ)</h4>
+              <h4 style="font-size:14px;"><i class="fa-solid fa-boxes-stacked"></i> Chi Tiết Trình Ký Vật Tư (Quy đổi ĐVT: Thùng, Lốc, Dây, Gói, Hộp, Chai...)</h4>
               <table>
-                <thead><tr><th>MaVT</th><th>TenVT</th><th>Dvt</th><th>Kiện</th><th>Lẻ</th><th>Tổng SL lẻ</th><th>Quy cách</th><th>Đơn giá</th><th>SL tồn</th></tr></thead>
+                <thead><tr><th>MaVT</th><th>TenVT</th><th>Ngành</th><th>ĐVT Chuẩn</th><th>Kiện/Thùng</th><th>Lẻ</th><th>Tổng SL</th><th>Quy cách</th><th>Đơn giá</th><th>SL tồn</th></tr></thead>
                 <tbody>
                   ${filteredProducts.map(p => {
                     const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
                     return `
                       <tr>
-                        <td><b>${p.code}</b></td><td>${p.name}</td><td>${p.dvt || 'Hộp'}</td>
+                        <td><b>${p.code}</b></td><td>${p.name}</td><td><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.category||'Khác'}</span></td><td><b>${p.dvt || 'Hộp'}</b></td>
                         <td><input type="number" value="${c.kien}" style="width:55px;margin:0;text-align:center;" onchange="updateCartDetail('${p.id}', 'kien', this.value)"></td>
                         <td><input type="number" value="${c.le}" style="width:55px;margin:0;text-align:center;" onchange="updateCartDetail('${p.id}', 'le', this.value)"></td>
                         <td><b style="color:var(--primary);">${c.qty}</b></td><td><small>${p.quycach || '1x24'}</small></td>
@@ -1019,13 +1041,13 @@
         </div>
         <div class="card">
           <table>
-            <thead><tr><th>Sales</th><th>MaDTPN (Quầy)</th><th>Chi Tiết Hàng</th><th>Tổng Tiền</th><th>Thanh Toán</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
+            <thead><tr><th>Sales</th><th>MaDTPN (Quầy)</th><th>Chi Tiết Hàng & Ngành</th><th>Tổng Tiền</th><th>Thanh Toán</th><th>Trạng Thái</th><th>Thao Tác</th></tr></thead>
             <tbody>
               ${filteredOrders.map(o => `
                 <tr>
                   <td><b>[${o.salesCode||'NV'}]</b><br>${o.salesName||''}</td>
                   <td><b>${o.maDTPN||''}</b> ${o.isReturnOrder?'<br><span class="badge badge-danger"><i class="fa-solid fa-rotate-left"></i> Trả hàng</span>':''}</td>
-                  <td><small>${(o.items||[]).map(i => `${i.name} (SL:${i.qty}, K:${i.kien}, L:${i.le})`).join(', ')}</small>
+                  <td><small>${(o.items||[]).map(i => `<b>[${i.category||'Khác'}]</b> ${i.name} (SL:${i.qty}, K:${i.kien}, L:${i.le})`).join('<br>')}</small>
                     ${o.promoGifts?.length?`<br><small style="color:var(--emerald);">${o.promoGifts.join('<br>')}</small>`:''}
                   </td>
                   <td><b style="color:var(--rose);">${(o.amount||0).toLocaleString()}đ</b>${o.discountPercent?`<br><small style="color:var(--emerald);">(CK ${o.discountPercent}%)</small>`:''}</td>
@@ -1047,20 +1069,45 @@
 
     else if (currentTab === 'products' && isAdmin) {
       main.innerHTML = `
-        <h2 style="font-size:20px;"><i class="fa-solid fa-boxes-stacked" style="color:var(--emerald);"></i> Quản Lý Kho & Hàng Hóa (60 Đối Tác)</h2>
+        <h2 style="font-size:20px;"><i class="fa-solid fa-boxes-stacked" style="color:var(--emerald);"></i> Quản Lý Kho & Hàng Hóa Tạp Hóa Chi Tiết</h2>
         <div class="grid">
           <div class="card">
-            <h3 style="font-size:15px;"><i class="fa-solid fa-file-arrow-down"></i> Import CSV Tồn Kho & Mã Hàng</h3>
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Cột: MaVTHH, TenHang, NhaCungCap, Dvt, QuyCach, DonGia, TonKho</p>
+            <h3 style="font-size:15px;"><i class="fa-solid fa-file-arrow-down"></i> Import CSV Tồn Kho & Ngành Hàng</h3>
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Cột: MaVT, TenHang, NganhHang, NhaCungCap, Dvt(Thùng/Lốc/Gói/Hộp/Chai...), QuyCach, DonGia, TonKho</p>
             <input type="file" accept=".csv" onchange="importProductsCSV(event)">
             <hr style="margin:14px 0;border:0;border-top:1px solid #E2E8F0;">
             <h3 style="font-size:15px;"><i class="fa-solid fa-plus"></i> Thêm Mặt Hàng Mới</h3>
             <form id="prdForm" onsubmit="addProduct(event)">
-              <label>Mã VTHH:</label><input type="text" id="prdCode" required>
-              <label>Tên Hàng Hóa:</label><input type="text" id="prdName" required>
-              <label>Nhà Cung Cấp / Đối Tác:</label><input type="text" id="prdSupplier" placeholder="Tên đối tác (Uniben, Vinamilk...)" required>
-              <label>Đơn Vị Tính (Dvt):</label><input type="text" id="prdDvt" value="Hộp" required>
-              <label>Quy Cách:</label><input type="text" id="prdQuyCach" value="1x24" required>
+              <label>Mã VTHH:</label><input type="text" id="prdCode" placeholder="TL01 hoặc MI01" required>
+              <label>Tên Hàng Hóa:</label><input type="text" id="prdName" placeholder="Thuốc lá Jet / Mì Hảo Hảo..." required>
+              <label>Nhóm Ngành Hàng:</label>
+              <select id="prdCat">
+                <option value="Thuốc lá">Thuốc lá</option>
+                <option value="Mì tôm">Mì tôm</option>
+                <option value="Sữa">Sữa</option>
+                <option value="Nước giải khát">Nước giải khát</option>
+                <option value="Bánh kẹo">Bánh kẹo</option>
+                <option value="Gia vị">Gia vị</option>
+                <option value="Hóa mỹ phẩm">Hóa mỹ phẩm</option>
+                <option value="Khác">Khác</option>
+              </select>
+              <label>Nhà Cung Cấp / Đối Tác:</label><input type="text" id="prdSupplier" placeholder="Vinamilk, Uniben, BAT..." required>
+              <label>Đơn Vị Tính Chuẩn (ĐVT):</label>
+              <select id="prdDvt">
+                <option value="Thùng">Thùng</option>
+                <option value="Lốc">Lốc</option>
+                <option value="Dây">Dây</option>
+                <option value="Cây">Cây (Thuốc lá)</option>
+                <option value="Gói">Gói</option>
+                <option value="Hộp">Hộp</option>
+                <option value="Chai">Chai</option>
+                <option value="Lon">Lon</option>
+                <option value="Can">Can</option>
+                <option value="Hũ">Hũ</option>
+                <option value="Bao">Bao</option>
+                <option value="Kg">Kg</option>
+              </select>
+              <label>Quy Cách (Kiện x Lẻ):</label><input type="text" id="prdQuyCach" value="1x24" required>
               <label>Đơn Giá:</label><input type="number" id="prdPrice" required>
               <label>Số Lượng Tồn Ban Đầu:</label><input type="number" id="prdStock" required>
               <button class="btn btn-green" style="width:100%;margin-top:6px;justify-content:center;"><i class="fa-solid fa-floppy-disk"></i> Lưu Hàng Hóa</button>
@@ -1069,11 +1116,11 @@
           <div class="card" style="grid-column: span 2;">
             <h3 style="font-size:15px;">Danh Sách Tồn Kho Thời Gian Thực</h3>
             <table>
-              <thead><tr><th>MaVT</th><th>TenVT</th><th>Đối Tác</th><th>Dvt</th><th>Quy cách</th><th>Đơn Giá</th><th>Tồn Kho Trực Tiếp</th><th></th></tr></thead>
+              <thead><tr><th>MaVT</th><th>TenVT</th><th>Ngành Hàng</th><th>ĐVT</th><th>Đối Tác</th><th>Quy cách</th><th>Đơn Giá</th><th>Tồn Kho Trực Tiếp</th><th></th></tr></thead>
               <tbody>
                 ${products.map(p => `<tr>
-                  <td><b>${p.code}</b></td><td>${p.name}</td><td><b><i class="fa-solid fa-handshake"></i> ${p.supplier||'NPP'}</b></td>
-                  <td>${p.dvt||'Hộp'}</td><td>${p.quycach||'1x24'}</td><td><b>${(p.price||0).toLocaleString()}đ</b></td>
+                  <td><b>${p.code}</b></td><td>${p.name}</td><td><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.category||'Khác'}</span></td><td><b>${p.dvt||'Hộp'}</b></td><td><b><i class="fa-solid fa-handshake"></i> ${p.supplier||'NPP'}</b></td>
+                  <td>${p.quycach||'1x24'}</td><td><b>${(p.price||0).toLocaleString()}đ</b></td>
                   <td><input type="number" value="${p.stock||0}" style="width:70px;margin:0;text-align:center;font-weight:bold;color:var(--primary);" onchange="updateProductStockDirect('${p.id}', this.value)"></td>
                   <td><button class="btn btn-red btn-sm" onclick="deleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button></td>
                 </tr>`).join('')}
@@ -1095,7 +1142,7 @@
             <hr style="margin:14px 0;border:0;border-top:1px solid #E2E8F0;">
             <h3 style="font-size:15px;"><i class="fa-solid fa-plus"></i> Thêm Chương Trình KM</h3>
             <form id="promoForm" onsubmit="addPromo(event)">
-              <label>Sản phẩm mua:</label><select id="pmBuyPrd">${products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+              <label>Sản phẩm mua:</label><select id="pmBuyPrd">${products.map(p=>`<option value="${p.id}">${p.name} (${p.category||''})</option>`).join('')}</select>
               <label>SL mua:</label><input type="number" id="pmBuyQty" value="10" required>
               <label>Quà tặng:</label><input type="text" id="pmGetName" required>
               <label>SL tặng:</label><input type="number" id="pmGetQty" value="1" required>
