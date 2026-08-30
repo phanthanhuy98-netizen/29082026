@@ -140,7 +140,6 @@
   .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:440px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
 
-  /* Dropdown giới hạn chuẩn xác bên trong khung trắng */
   .autocomplete-wrapper { position: relative; width: 100%; }
   .autocomplete-dropdown {
     position: absolute;
@@ -233,10 +232,8 @@
   let salesSearchKhCode = "";
   let salesSearchKhName = "";
   
-  // ⚡ New Product Table Filters
   let tableFilterMavt = "";
   let tableFilterName = "";
-
   let searchDebounceTimer = null;
 
   let idbDb = null;
@@ -376,10 +373,8 @@
     isFilterCollapsed = true;
     salesSearchKhName = activeVisitedStore ? activeVisitedStore.name : '';
     salesSearchKhCode = activeVisitedStore ? (activeVisitedStore.code || '') : '';
-    const dropdownCode = document.getElementById('salesCodeDropdown');
-    const dropdownName = document.getElementById('salesNameDropdown');
-    if (dropdownCode) dropdownCode.classList.add('hidden');
-    if (dropdownName) dropdownName.classList.add('hidden');
+    tableFilterMavt = "";
+    tableFilterName = "";
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
     renderUI();
   };
@@ -389,6 +384,8 @@
     isFilterCollapsed = false;
     salesSearchKhName = '';
     salesSearchKhCode = '';
+    tableFilterMavt = "";
+    tableFilterName = "";
     currentCart = {};
     toast("🔄 Đã đổi khách hàng, vui lòng chọn khách hàng mới!");
     renderUI();
@@ -407,8 +404,31 @@
       currentCart[prdId].kien = packRatio > 0 ? Math.floor(totalQ / packRatio) : 0;
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
-    renderUI();
+    
+    // Cập nhật ngay số tiền tổng và hiển thị trên dòng mà không cần re-render toàn màn hình (chống lag tuyệt đối)
+    updateCartTotalsUI();
   };
+
+  function updateCartTotalsUI() {
+    let cartTotalAmount = 0;
+    products.forEach(p => {
+      const c = currentCart[p.id];
+      if (c && c.qty > 0) {
+        cartTotalAmount += (p.price || 0) * c.qty;
+        const rowTotalEl = document.getElementById(`row_total_${p.id}`);
+        const totalQtyEl = document.getElementById(`total_qty_${p.id}`);
+        if (rowTotalEl) rowTotalEl.innerText = ((p.price || 0) * c.qty).toLocaleString() + 'đ';
+        if (totalQtyEl) totalQtyEl.innerText = c.qty;
+      } else {
+        const rowTotalEl = document.getElementById(`row_total_${p.id}`);
+        const totalQtyEl = document.getElementById(`total_qty_${p.id}`);
+        if (rowTotalEl) rowTotalEl.innerText = '0đ';
+        if (totalQtyEl) totalQtyEl.innerText = '0';
+      }
+    });
+    const mainTotalEl = document.getElementById('mainCartTotalAmount');
+    if (mainTotalEl) mainTotalEl.innerText = cartTotalAmount.toLocaleString() + ' đ';
+  }
 
   window.toggleReturnMode = function() {
     isReturnOrderMode = !isReturnOrderMode;
@@ -457,7 +477,7 @@
       toast("📴 Đã lưu đơn hàng vào Offline!");
     }
     
-    currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; renderUI();
+    currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; tableFilterMavt = ""; tableFilterName = ""; renderUI();
   };
 
   window.importProductsExcel = function(event) {
@@ -660,7 +680,7 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // ⚡ AUTOCOMPLETE & FILTER LOGIC ⚡
+  // ⚡ ULTRA-FAST DEBOUNCED SEARCH LOGIC (NO LAG) ⚡
   window.onSalesCodeInput = function(val) {
     salesSearchKhCode = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -668,10 +688,7 @@
       const queryKey = removeAccents(val.trim());
       const dropdown = document.getElementById('salesCodeDropdown');
       if (!dropdown) return;
-      if (queryKey === "") {
-        dropdown.classList.add('hidden');
-        return;
-      }
+      if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       const matched = stores.filter(s => removeAccents(s.code || '').includes(queryKey)).slice(0, 20);
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy mã KH phù hợp</div>`;
@@ -684,7 +701,7 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 80);
+    }, 120);
   };
 
   window.onSalesNameInput = function(val) {
@@ -694,10 +711,7 @@
       const queryKey = removeAccents(val.trim());
       const dropdown = document.getElementById('salesNameDropdown');
       if (!dropdown) return;
-      if (queryKey === "") {
-        dropdown.classList.add('hidden');
-        return;
-      }
+      if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       const matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey)).slice(0, 30);
       
       matched.sort((a, b) => {
@@ -717,55 +731,74 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 80);
+    }, 120);
   };
 
-  // ⚡ Company Code Filter (2 First Characters Professional Filter) & Product Table Filters
   window.onCompanyCodeSearchInput = function(val) {
-    const queryKey = removeAccents(val.trim());
-    const dropdown = document.getElementById('companyCodeDropdown');
-    if (!dropdown) return;
-    if (queryKey === "") {
-      dropdown.classList.add('hidden');
-      return;
-    }
-    // Professional 2-character prefix match or general keyword match
-    const matched = stores.filter(s => {
-      const codeNorm = removeAccents(s.code || '');
-      const nameNorm = removeAccents(s.name || '');
-      return codeNorm.startsWith(queryKey) || codeNorm.includes(queryKey) || nameNorm.includes(queryKey);
-    }).slice(0, 25);
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const queryKey = removeAccents(val.trim());
+      const dropdown = document.getElementById('companyCodeDropdown');
+      if (!dropdown) return;
+      if (queryKey === "") { dropdown.classList.add('hidden'); return; }
+      const matched = stores.filter(s => {
+        const codeNorm = removeAccents(s.code || '');
+        const nameNorm = removeAccents(s.name || '');
+        return codeNorm.startsWith(queryKey) || codeNorm.includes(queryKey) || nameNorm.includes(queryKey);
+      }).slice(0, 25);
 
-    if (matched.length === 0) {
-      dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy Mã Công Ty phù hợp</div>`;
+      if (matched.length === 0) {
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy Mã Công Ty phù hợp</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+      }
+      dropdown.innerHTML = matched.map(s => `
+        <div class="autocomplete-item" onclick="selectCompanyCode('${s.id}')">
+          <b style="color:var(--primary);">[${s.code||'KH'}]</b> ${s.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||''}</small>
+        </div>
+      `).join('');
       dropdown.classList.remove('hidden');
-      return;
-    }
-    dropdown.innerHTML = matched.map(s => `
-      <div class="autocomplete-item" onclick="selectCompanyCode('${s.id}')">
-        <b style="color:var(--primary);">[${s.code||'KH'}]</b> ${s.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||''}</small>
-      </div>
-    `).join('');
-    dropdown.classList.remove('hidden');
+    }, 120);
   };
 
   window.selectCompanyCode = function(storeId) {
     activeVisitedStore = stores.find(s => s.id === storeId);
     const dropdown = document.getElementById('companyCodeDropdown');
     if (dropdown) dropdown.classList.add('hidden');
+    tableFilterMavt = "";
+    tableFilterName = "";
     toast(`✅ Đã chọn công ty: ${activeVisitedStore.name}`);
     renderUI();
   };
 
+  // ⚡ FAST INSTANT TABLE ROW FILTERING WITHOUT FULL RE-RENDER (0 LAG) ⚡
   window.onTableMavtInput = function(val) {
-    tableFilterMavt = val.toLowerCase();
-    renderUI();
+    tableFilterMavt = val.toLowerCase().trim();
+    applyTableFilterFast();
   };
 
   window.onTableNameInput = function(val) {
-    tableFilterName = val.toLowerCase();
-    renderUI();
+    tableFilterName = val.toLowerCase().trim();
+    applyTableFilterFast();
   };
+
+  function applyTableFilterFast() {
+    const tbody = document.getElementById('salesProductTableBody');
+    if (!tbody) return;
+    const rows = tbody.getElementsByTagName('tr');
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const mavt = row.getAttribute('data-mavt') || '';
+      const name = row.getAttribute('data-name') || '';
+      const matchMavt = mavt.includes(tableFilterMavt);
+      const matchName = name.includes(tableFilterName);
+      if (matchMavt && matchName) {
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+      }
+    }
+  }
 
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setOrderFilterStatus = function(val) { orderFilterStatus = val; renderUI(); };
@@ -787,12 +820,7 @@
           const phoneNorm = removeAccents(s.phone || '');
           return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
         });
-        
-        filtered.sort((a, b) => {
-          let scoreA = removeAccents(a.name || '').startsWith(queryKey) ? 2 : 1;
-          let scoreB = removeAccents(b.name || '').startsWith(queryKey) ? 2 : 1;
-          return scoreB - scoreA;
-        });
+        filtered.sort((a, b) => (removeAccents(a.name || '').startsWith(queryKey) ? 2 : 1) - (removeAccents(b.name || '').startsWith(queryKey) ? 2 : 1));
       }
       const displayList = filtered.slice(0, 30);
       if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
@@ -811,7 +839,7 @@
           <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
         </div>
       `).join('');
-    }, 100);
+    }, 120);
   };
 
   window.onAdminSearchInput = function(val) {
@@ -833,7 +861,7 @@
           <div class="item-title">${p.name}</div>
         </div>
       `).join('');
-    }, 100);
+    }, 120);
   };
 
   function attachListeners() {
@@ -941,13 +969,6 @@
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
 
-      // Filter products based on table MAVT & Name inputs
-      const filteredProducts = products.filter(p => {
-        const matchMavt = (p.code || '').toLowerCase().includes(tableFilterMavt);
-        const matchName = (p.name || '').toLowerCase().includes(tableFilterName);
-        return matchMavt && matchName;
-      });
-
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-cart-shopping" style="color:var(--amber);"></i> Lập Đơn Bán Hàng</h2>
@@ -999,22 +1020,21 @@
                 <button class="btn ${isReturnOrderMode?'btn-green':'btn-red'} btn-sm" onclick="toggleReturnMode()">${isReturnOrderMode ? '🔄 Chế Độ: Trả Hàng' : '🛒 Chế Độ: Bán Hàng'}</button>
               </div>
 
-              <!-- Ô lọc Mã Công Ty chuyên nghiệp (hỗ trợ 2 ký tự đầu & mọi ký tự) -->
               <div class="autocomplete-wrapper" style="margin-top: 8px;">
                 <input type="text" placeholder="🔍 Lọc Mã Công Ty chuyên nghiệp (nhập 2 ký tự đầu hoặc tên tiệm để tìm ngay)..." oninput="onCompanyCodeSearchInput(this.value)" autocomplete="off" style="margin:0; background:#FFFFFF; color:#0F172A; font-weight:700; border: 1px solid var(--amber);">
                 <div id="companyCodeDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
             </div>
 
-            <!-- THANH TÌM KIẾM MAVT & TÊN VẬT TƯ CHUYÊN NGHIỆP -->
+            <!-- THANH TÌM KIẾM MAVT & TÊN VẬT TƯ CHUYÊN NGHIỆP (KHÔNG GÂY LAG, KHÔNG MẤT FOCUS) -->
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; background: #F1F5F9; padding: 12px; border-radius: 12px;">
               <div>
                 <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT:</label>
-                <input type="text" placeholder="Gõ mã vật tư (vd: 11YS, 01B1)..." oninput="onTableMavtInput(this.value)" value="${tableFilterMavt}" style="margin:0; background:#fff;">
+                <input type="text" id="tableFilterMavtInput" placeholder="Gõ mã vật tư (vd: 11YS, 01B1)..." oninput="onTableMavtInput(this.value)" value="${tableFilterMavt}" style="margin:0; background:#fff;">
               </div>
               <div>
                 <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-box"></i> Lọc theo Tên Vật Tư:</label>
-                <input type="text" placeholder="Gõ tên vật tư hoặc mô tả..." oninput="onTableNameInput(this.value)" value="${tableFilterName}" style="margin:0; background:#fff;">
+                <input type="text" id="tableFilterNameInput" placeholder="Gõ tên vật tư hoặc mô tả..." oninput="onTableNameInput(this.value)" value="${tableFilterName}" style="margin:0; background:#fff;">
               </div>
             </div>
 
@@ -1033,32 +1053,33 @@
                     <th>Tổng SL</th>
                   </tr>
                 </thead>
-                <tbody>
-                  ${filteredProducts.length === 0 ? `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không tìm thấy vật tư khớp với bộ lọc.</td></tr>` : 
-                    filteredProducts.map(p => {
-                      const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
-                      const itemTotal = (p.price || 0) * (c.qty || 0);
-                      return `
-                        <tr>
-                          <td><b>${p.code}</b></td>
-                          <td><b>${p.name}</b></td>
-                          <td>${p.dvt || 'cây'}</td>
-                          <td><input type="number" min="0" value="${c.le || 0}" onchange="updateCartDetail('${p.id}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
-                          <td><input type="number" min="0" value="${c.kien || 0}" onchange="updateCartDetail('${p.id}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
-                          <td><b>${p.tyLeQuyDoi || 50}</b></td>
-                          <td>${(p.price || 0).toLocaleString()}đ</td>
-                          <td><b style="color:var(--rose);">${itemTotal.toLocaleString()}đ</b></td>
-                          <td><b style="color:var(--primary);">${c.qty || 0}</b></td>
-                        </tr>
-                      `;
-                    }).join('')
-                  }
+                <tbody id="salesProductTableBody">
+                  ${products.map(p => {
+                    const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
+                    const itemTotal = (p.price || 0) * (c.qty || 0);
+                    const mavtLower = (p.code || '').toLowerCase();
+                    const nameLower = (p.name || '').toLowerCase();
+                    const isVisible = (!tableFilterMavt || mavtLower.includes(tableFilterMavt)) && (!tableFilterName || nameLower.includes(tableFilterName));
+                    return `
+                      <tr data-mavt="${mavtLower}" data-name="${nameLower}" style="${isVisible ? '' : 'display:none;'}">
+                        <td><b>${p.code}</b></td>
+                        <td><b>${p.name}</b></td>
+                        <td>${p.dvt || 'cây'}</td>
+                        <td><input type="number" min="0" value="${c.le || 0}" oninput="updateCartDetail('${p.id}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
+                        <td><input type="number" min="0" value="${c.kien || 0}" oninput="updateCartDetail('${p.id}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
+                        <td><b>${p.tyLeQuyDoi || 50}</b></td>
+                        <td>${(p.price || 0).toLocaleString()}đ</td>
+                        <td><b style="color:var(--rose);" id="row_total_${p.id}">${itemTotal.toLocaleString()}đ</b></td>
+                        <td><b style="color:var(--primary);" id="total_qty_${p.id}">${c.qty || 0}</b></td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid #E2E8F0; flex-wrap:wrap; gap:10px;">
-              <h3 style="font-size:16px; font-weight:800;">TỔNG TIỀN: <span style="color:var(--rose);">${cartTotalAmount.toLocaleString()} đ</span></h3>
+              <h3 style="font-size:16px; font-weight:800;">TỔNG TIỀN: <span style="color:var(--rose);" id="mainCartTotalAmount">${cartTotalAmount.toLocaleString()} đ</span></h3>
               <button class="btn ${isReturnOrderMode?'btn-red':'btn-green'}" style="padding:12px 24px; font-weight:800; font-size:15px; justify-content:center;" onclick="submitOrder()">GỬI ĐƠN HÀNG</button>
             </div>
           </div>
