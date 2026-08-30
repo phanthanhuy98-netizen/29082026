@@ -834,7 +834,11 @@
         applyTableFilterFast();
         return;
       }
-      const matched = products.filter(p => removeAccents(p.code || '').includes(queryKey)).slice(0, 20);
+      const matched = products.filter(p => {
+        const code = removeAccents(p.code || '');
+        return code.slice(0, 2).includes(queryKey) || code.includes(queryKey);
+      }).slice(0, 20);
+
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy MAVT phù hợp</div>`;
         dropdown.classList.remove('hidden');
@@ -844,7 +848,7 @@
       dropdown.innerHTML = matched.map(p => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
-            <b style="color:var(--primary);">${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${p.dvt||'hộp'} | Giá: ${(p.price||0).toLocaleString()}đ</small>
+            <b style="color:var(--primary);">[Cty: ${p.code.slice(0,2)}] ${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${p.dvt||'hộp'} | Giá: ${(p.price||0).toLocaleString()}đ</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectProductFromAutocomplete('mavt', '${p.code}')">CHỌN</button>
         </div>
@@ -876,7 +880,7 @@
       dropdown.innerHTML = matched.map(p => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
-            <b>${p.name}</b> <small style="color:var(--primary);display:block;margin-top:2px;">Mã: ${p.code} | Giá: ${(p.price||0).toLocaleString()}đ</small>
+            <b>${p.name}</b> <small style="color:var(--primary);display:block;margin-top:2px;">Cty: ${p.code.slice(0,2)} | Mã: ${p.code} | Giá: ${(p.price||0).toLocaleString()}đ</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectProductFromAutocomplete('name', '${p.name}')">CHỌN</button>
         </div>
@@ -914,7 +918,8 @@
       const row = rows[i];
       const mavt = row.getAttribute('data-mavt') || '';
       const name = row.getAttribute('data-name') || '';
-      const matchMavt = !mavtKey || mavt.includes(mavtKey);
+      const partnerCode = row.getAttribute('data-partner') || '';
+      const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
       const matchName = !nameKey || name.includes(nameKey);
       if (matchMavt && matchName) {
         row.style.display = '';
@@ -956,7 +961,6 @@
         const isAdmin = currentUser && currentUser.role === 'admin';
         const pinnedInfo = hasCoords ? `Đã ghim (${s.pinnedByCode || 'NV'})` : 'Ghim Định Vị';
         
-        // ⚡ CÚ PHÁP TÌM KIẾM TỌA ĐỘ CHUẨN XÁC TUYỆT ĐỐI KHÔNG BỊ LỖI VÀ CHỈ HIỂN THỊ ĐÚNG TỌA ĐỘ ĐÃ GHIM ⚡
         const mapUrl = hasCoords ? `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}` : '#';
 
         return `
@@ -986,7 +990,7 @@
   };
 
   window.onAdminSearchInput = function(val) {
-    adminSearchPrd = val.toLowerCase();
+    adminSearchPrd = val.toLowerCase().trim();
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
       const container = document.getElementById('productCardsContainer');
@@ -994,13 +998,21 @@
       if (!container) return;
       let filtered = products;
       if (adminSearchPrd !== "") {
-        filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+        filtered = products.filter(p => {
+          const code = (p.code || '').toLowerCase();
+          const name = (p.name || '').toLowerCase();
+          const partnerCode = code.slice(0, 2);
+          return partnerCode.includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+        });
       }
       const displayList = filtered.slice(0, 30);
       if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
       container.innerHTML = displayList.map(p => `
         <div class="mobile-item-card">
-          <div class="item-header"><span class="item-code">${p.code}</span></div>
+          <div class="item-header">
+            <span class="item-code">Cty: ${p.code.slice(0,2)} | Mã: ${p.code}</span>
+            <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
+          </div>
           <div class="item-title">${p.name}</div>
           <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
           <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
@@ -1132,7 +1144,7 @@
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:10px;'}">
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; width: 100%;">
               <div class="autocomplete-wrapper">
-                <label style="font-size:12px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:3px;">Lọc theo Mã KH:</label>
+                <label style="font-size:12px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:3px;">Lọc theo Mã KH (Tuyến):</label>
                 <input type="text" id="salesCodeInput" placeholder="Nhập mã KH..." oninput="onSalesCodeInput(this.value)" value="${salesSearchKhCode}" autocomplete="off" style="margin:0; background:#fff;">
                 <div id="salesCodeDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
@@ -1161,21 +1173,21 @@
             <div style="background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%); padding: 14px 18px; border-radius: 12px; margin-bottom: 14px; color: #fff;">
               <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 8px;">
                 <h3 style="font-size:14px; font-weight:800; display:flex; align-items:center; gap:8px;">
-                  <i class="fa-solid fa-building" style="color:var(--amber);"></i> MÃ CÔNG TY / KHÁCH HÀNG: <span style="color:var(--amber);">[${activeVisitedStore.code || 'KH'}] ${activeVisitedStore.name}</span>
+                  <i class="fa-solid fa-building" style="color:var(--amber);"></i> KHÁCH HÀNG: <span style="color:var(--amber);">[${activeVisitedStore.code || 'KH'}] ${activeVisitedStore.name}</span>
                 </h3>
                 <button class="btn ${isReturnOrderMode?'btn-green':'btn-red'} btn-sm" onclick="toggleReturnMode()">${isReturnOrderMode ? '🔄 Chế Độ: Trả Hàng' : '🛒 Chế Độ: Bán Hàng'}</button>
               </div>
 
               <div class="autocomplete-wrapper" style="margin-top: 8px;">
-                <input type="text" placeholder="🔍 Lọc Mã Công Ty chuyên nghiệp..." oninput="onCompanyCodeSearchInput(this.value)" autocomplete="off" style="margin:0; background:#FFFFFF; color:#0F172A; font-weight:700; border: 1px solid var(--amber);">
+                <input type="text" placeholder="🔍 Lọc khách hàng nhanh..." oninput="onCompanyCodeSearchInput(this.value)" autocomplete="off" style="margin:0; background:#FFFFFF; color:#0F172A; font-weight:700; border: 1px solid var(--amber);">
                 <div id="companyCodeDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
             </div>
 
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; background: #F1F5F9; padding: 12px; border-radius: 12px;">
               <div class="autocomplete-wrapper">
-                <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT:</label>
-                <input type="text" id="tableFilterMavtInput" placeholder="Gõ MAVT để chọn nhanh..." oninput="onProductMavtAutocomplete(this.value)" value="${productSearchMavtVal}" autocomplete="off" style="margin:0; background:#fff;">
+                <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT (gõ 2 ký tự đầu mã đối tác hoặc mã):</label>
+                <input type="text" id="tableFilterMavtInput" placeholder="Gõ 2 ký tự đầu hoặc MAVT..." oninput="onProductMavtAutocomplete(this.value)" value="${productSearchMavtVal}" autocomplete="off" style="margin:0; background:#fff;">
                 <div id="productMavtDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
               <div class="autocomplete-wrapper">
@@ -1207,16 +1219,17 @@
                     const itemTotal = (p.price || 0) * (c.qty || 0);
                     const mavtLower = removeAccents(p.code || '');
                     const nameLower = removeAccents(p.name || '');
+                    const partnerCode = mavtLower.slice(0, 2);
                     const mavtKey = removeAccents(productSearchMavtVal);
                     const nameKey = removeAccents(productSearchNameVal);
-                    const isVisible = (!mavtKey || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
+                    const isVisible = (!mavtKey || partnerCode.includes(mavtKey) || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
                     
                     const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
                     const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
 
                     return `
-                      <tr data-mavt="${mavtLower}" data-name="${nameLower}" style="${isVisible ? '' : 'display:none;'}">
-                        <td><b>${p.code}</b></td>
+                      <tr data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}" style="${isVisible ? '' : 'display:none;'}">
+                        <td><b>[Cty: ${p.code.slice(0,2)}]</b> ${p.code}</td>
                         <td><b>${p.name}</b></td>
                         <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
                         <td><input type="number" min="0" value="${leVal}" placeholder="" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
@@ -1266,7 +1279,12 @@
     else if (currentTab === 'productsAdmin' && backOffice) {
       let filteredAdminProducts = products;
       if (adminSearchPrd) {
-        filteredAdminProducts = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+        filteredAdminProducts = products.filter(p => {
+          const code = (p.code || '').toLowerCase();
+          const name = (p.name || '').toLowerCase();
+          const partnerCode = code.slice(0, 2);
+          return partnerCode.includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+        });
       }
 
       main.innerHTML = `
@@ -1275,7 +1293,7 @@
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm vật tư..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:0;">
+          <input type="text" placeholder="🔍 Tìm kiếm vật tư hoặc gõ 2 ký tự đầu mã đối tác..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:0;">
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <small id="productCount" style="color:var(--text-muted); font-weight:700;">Hiển thị nhanh: <b>${Math.min(filteredAdminProducts.length, 30)}</b> / ${filteredAdminProducts.length} vật tư</small>
@@ -1284,7 +1302,7 @@
           ${filteredAdminProducts.slice(0, 30).map(p => `
             <div class="mobile-item-card">
               <div class="item-header">
-                <span class="item-code">${p.code}</span>
+                <span class="item-code">Cty: ${p.code.slice(0,2)} | Mã: ${p.code}</span>
                 <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
               </div>
               <div class="item-title">${p.name}</div>
