@@ -232,8 +232,9 @@
   let salesSearchKhCode = "";
   let salesSearchKhName = "";
   
-  let tableFilterMavt = "";
-  let tableFilterName = "";
+  // Professional Autocomplete Product Filter States
+  let productSearchMavtVal = "";
+  let productSearchNameVal = "";
   let searchDebounceTimer = null;
 
   let idbDb = null;
@@ -373,8 +374,8 @@
     isFilterCollapsed = true;
     salesSearchKhName = activeVisitedStore ? activeVisitedStore.name : '';
     salesSearchKhCode = activeVisitedStore ? (activeVisitedStore.code || '') : '';
-    tableFilterMavt = "";
-    tableFilterName = "";
+    productSearchMavtVal = "";
+    productSearchNameVal = "";
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
     renderUI();
   };
@@ -384,8 +385,8 @@
     isFilterCollapsed = false;
     salesSearchKhName = '';
     salesSearchKhCode = '';
-    tableFilterMavt = "";
-    tableFilterName = "";
+    productSearchMavtVal = "";
+    productSearchNameVal = "";
     currentCart = {};
     toast("🔄 Đã đổi khách hàng, vui lòng chọn khách hàng mới!");
     renderUI();
@@ -404,8 +405,6 @@
       currentCart[prdId].kien = packRatio > 0 ? Math.floor(totalQ / packRatio) : 0;
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
-    
-    // Cập nhật ngay số tiền tổng và hiển thị trên dòng mà không cần re-render toàn màn hình (chống lag tuyệt đối)
     updateCartTotalsUI();
   };
 
@@ -477,7 +476,7 @@
       toast("📴 Đã lưu đơn hàng vào Offline!");
     }
     
-    currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; tableFilterMavt = ""; tableFilterName = ""; renderUI();
+    currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
   };
 
   window.importProductsExcel = function(event) {
@@ -680,7 +679,7 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // ⚡ ULTRA-FAST DEBOUNCED SEARCH LOGIC (NO LAG) ⚡
+  // ⚡ PROFESSIONAL AUTOCOMPLETE SEARCH FOR CUSTOMERS & PRODUCTS ⚡
   window.onSalesCodeInput = function(val) {
     salesSearchKhCode = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -730,7 +729,7 @@
           <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||'Chưa cập nhật địa chỉ'}</small>
         </div>
       `).join('');
-      dropdown.classList.remove('hidden');
+      dropdown.classList.add('hidden');
     }, 120);
   };
 
@@ -757,7 +756,7 @@
           <b style="color:var(--primary);">[${s.code||'KH'}]</b> ${s.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||''}</small>
         </div>
       `).join('');
-      dropdown.classList.remove('hidden');
+      dropdown.classList.add('hidden');
     }, 120);
   };
 
@@ -765,20 +764,85 @@
     activeVisitedStore = stores.find(s => s.id === storeId);
     const dropdown = document.getElementById('companyCodeDropdown');
     if (dropdown) dropdown.classList.add('hidden');
-    tableFilterMavt = "";
-    tableFilterName = "";
+    productSearchMavtVal = "";
+    productSearchNameVal = "";
     toast(`✅ Đã chọn công ty: ${activeVisitedStore.name}`);
     renderUI();
   };
 
-  // ⚡ FAST INSTANT TABLE ROW FILTERING WITHOUT FULL RE-RENDER (0 LAG) ⚡
-  window.onTableMavtInput = function(val) {
-    tableFilterMavt = val.toLowerCase().trim();
-    applyTableFilterFast();
+  // ⚡ PROFESSIONAL PRODUCT AUTOCOMPLETE SEARCH DROPDOWN (ZERO LAG) ⚡
+  window.onProductMavtAutocomplete = function(val) {
+    productSearchMavtVal = val;
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const queryKey = removeAccents(val.trim());
+      const dropdown = document.getElementById('productMavtDropdown');
+      if (!dropdown) return;
+      if (queryKey === "") {
+        dropdown.classList.add('hidden');
+        applyTableFilterFast();
+        return;
+      }
+      const matched = products.filter(p => removeAccents(p.code || '').includes(queryKey)).slice(0, 20);
+      if (matched.length === 0) {
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy MAVT phù hợp</div>`;
+        dropdown.classList.remove('hidden');
+        applyTableFilterFast();
+        return;
+      }
+      dropdown.innerHTML = matched.map(p => `
+        <div class="autocomplete-item" onclick="selectProductFromAutocomplete('mavt', '${p.code}')">
+          <b style="color:var(--primary);">${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${p.dvt||'cây'} | Giá: ${(p.price||0).toLocaleString()}đ</small>
+        </div>
+      `).join('');
+      dropdown.classList.remove('hidden');
+      applyTableFilterFast();
+    }, 100);
   };
 
-  window.onTableNameInput = function(val) {
-    tableFilterName = val.toLowerCase().trim();
+  window.onProductNameAutocomplete = function(val) {
+    productSearchNameVal = val;
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const queryKey = removeAccents(val.trim());
+      const dropdown = document.getElementById('productNameDropdown');
+      if (!dropdown) return;
+      if (queryKey === "") {
+        dropdown.classList.add('hidden');
+        applyTableFilterFast();
+        return;
+      }
+      const matched = products.filter(p => removeAccents(p.name || '').includes(queryKey)).slice(0, 25);
+      if (matched.length === 0) {
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy Tên vật tư phù hợp</div>`;
+        dropdown.classList.remove('hidden');
+        applyTableFilterFast();
+        return;
+      }
+      dropdown.innerHTML = matched.map(p => `
+        <div class="autocomplete-item" onclick="selectProductFromAutocomplete('name', '${p.name}')">
+          <b>${p.name}</b> <small style="color:var(--primary);display:block;margin-top:2px;">Mã: ${p.code} | Giá: ${(p.price||0).toLocaleString()}đ</small>
+        </div>
+      `).join('');
+      dropdown.classList.remove('hidden');
+      applyTableFilterFast();
+    }, 100);
+  };
+
+  window.selectProductFromAutocomplete = function(type, textVal) {
+    if (type === 'mavt') {
+      productSearchMavtVal = textVal;
+      const inputEl = document.getElementById('tableFilterMavtInput');
+      if (inputEl) inputEl.value = textVal;
+      const dropdown = document.getElementById('productMavtDropdown');
+      if (dropdown) dropdown.classList.add('hidden');
+    } else {
+      productSearchNameVal = textVal;
+      const inputEl = document.getElementById('tableFilterNameInput');
+      if (inputEl) inputEl.value = textVal;
+      const dropdown = document.getElementById('productNameDropdown');
+      if (dropdown) dropdown.classList.add('hidden');
+    }
     applyTableFilterFast();
   };
 
@@ -786,12 +850,15 @@
     const tbody = document.getElementById('salesProductTableBody');
     if (!tbody) return;
     const rows = tbody.getElementsByTagName('tr');
+    const mavtKey = removeAccents(productSearchMavtVal);
+    const nameKey = removeAccents(productSearchNameVal);
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const mavt = row.getAttribute('data-mavt') || '';
       const name = row.getAttribute('data-name') || '';
-      const matchMavt = mavt.includes(tableFilterMavt);
-      const matchName = name.includes(tableFilterName);
+      const matchMavt = !mavtKey || mavt.includes(mavtKey);
+      const matchName = !nameKey || name.includes(nameKey);
       if (matchMavt && matchName) {
         row.style.display = '';
       } else {
@@ -1026,15 +1093,17 @@
               </div>
             </div>
 
-            <!-- THANH TÌM KIẾM MAVT & TÊN VẬT TƯ CHUYÊN NGHIỆP (KHÔNG GÂY LAG, KHÔNG MẤT FOCUS) -->
+            <!-- ⚡ BỘ LỌC VẬT TƯ DẠNG AUTOCOMPLETION DROPOWN CHUYÊN NGHIỆP & KHÔNG LAG ⚡ -->
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; background: #F1F5F9; padding: 12px; border-radius: 12px;">
-              <div>
+              <div class="autocomplete-wrapper">
                 <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT:</label>
-                <input type="text" id="tableFilterMavtInput" placeholder="Gõ mã vật tư (vd: 11YS, 01B1)..." oninput="onTableMavtInput(this.value)" value="${tableFilterMavt}" style="margin:0; background:#fff;">
+                <input type="text" id="tableFilterMavtInput" placeholder="Gõ MAVT để chọn nhanh..." oninput="onProductMavtAutocomplete(this.value)" value="${productSearchMavtVal}" autocomplete="off" style="margin:0; background:#fff;">
+                <div id="productMavtDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
-              <div>
+              <div class="autocomplete-wrapper">
                 <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-box"></i> Lọc theo Tên Vật Tư:</label>
-                <input type="text" id="tableFilterNameInput" placeholder="Gõ tên vật tư hoặc mô tả..." oninput="onTableNameInput(this.value)" value="${tableFilterName}" style="margin:0; background:#fff;">
+                <input type="text" id="tableFilterNameInput" placeholder="Gõ tên vật tư gợi ý chuyên nghiệp..." oninput="onProductNameAutocomplete(this.value)" value="${productSearchNameVal}" autocomplete="off" style="margin:0; background:#fff;">
+                <div id="productNameDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
             </div>
 
@@ -1057,9 +1126,11 @@
                   ${products.map(p => {
                     const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
                     const itemTotal = (p.price || 0) * (c.qty || 0);
-                    const mavtLower = (p.code || '').toLowerCase();
-                    const nameLower = (p.name || '').toLowerCase();
-                    const isVisible = (!tableFilterMavt || mavtLower.includes(tableFilterMavt)) && (!tableFilterName || nameLower.includes(tableFilterName));
+                    const mavtLower = removeAccents(p.code || '');
+                    const nameLower = removeAccents(p.name || '');
+                    const mavtKey = removeAccents(productSearchMavtVal);
+                    const nameKey = removeAccents(productSearchNameVal);
+                    const isVisible = (!mavtKey || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
                     return `
                       <tr data-mavt="${mavtLower}" data-name="${nameLower}" style="${isVisible ? '' : 'display:none;'}">
                         <td><b>${p.code}</b></td>
