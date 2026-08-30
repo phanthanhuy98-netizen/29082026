@@ -656,7 +656,7 @@
     reader.readAsArrayBuffer(file);
   };
 
-  // NHẬP EXCEL ĐỒNG BỘ KHÁCH HÀNG (Ma DTPN, Ten DTPN, Dia Chi, Dien Thoai, Zalo)
+  // NHẬP EXCEL ĐỒNG BỘ KHÁCH HÀNG (CHUNK SIZE 400 ĐỂ LƯU FIREBASE AN TOÀN KHÔNG GIỚI HẠN)
   window.importCustomersExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -670,8 +670,7 @@
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        let count = 0;
-        const batch = writeBatch(db);
+        let rawCustomers = [];
         for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
           const maDtpn = r[0] ? String(r[0]).trim() : '';
@@ -682,8 +681,7 @@
 
           if (tenDtpn && tenDtpn !== 'Ten DTPN' && tenDtpn !== 'TenDTPN') {
             const code = maDtpn || `KH${i}`;
-            const docRef = doc(collection(db, "stores"));
-            batch.set(docRef, {
+            rawCustomers.push({
               code: code,
               name: tenDtpn,
               address: address,
@@ -695,12 +693,22 @@
               lng: 0,
               createdAt: serverTimestamp()
             });
-            count++;
           }
         }
-        if (count > 0) {
-          await batch.commit();
-          toast(`✅ Đã đồng bộ thành công ${count} khách hàng vào hệ thống!`);
+
+        if (rawCustomers.length > 0) {
+          toast(`⏳ Đang lưu ${rawCustomers.length} khách hàng lên Firebase... Vui lòng đợi.`);
+          const chunkSize = 400;
+          for (let i = 0; i < rawCustomers.length; i += chunkSize) {
+            const chunk = rawCustomers.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach(cust => {
+              const docRef = doc(collection(db, "stores"));
+              batch.set(docRef, cust);
+            });
+            await batch.commit();
+          }
+          toast(`✅ Đã đồng bộ & lưu vĩnh viễn ${rawCustomers.length} khách hàng lên Firebase thành công!`);
           renderUI();
         } else {
           alert("Không tìm thấy dữ liệu khách hàng hợp lệ trong file Excel!");
@@ -1309,7 +1317,6 @@
       `;
     }
 
-    // TAB KHÁCH HÀNG: CẬP NHẬT CỘT ĐỊNH VỊ (GPS) THAY CHO THAO TÁC XÓA/SỬA TRỰC TIẾP
     else if (currentTab === 'customers' && backOffice) {
       let filteredCustomers = stores.filter(s => 
         (s.code||'').toLowerCase().includes(customerSearchKey) ||
