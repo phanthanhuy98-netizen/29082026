@@ -14,6 +14,8 @@
 <script src="https://unpkg.com/html5-qrcode"></script>
 <!-- SheetJS for Excel Reading -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Chart.js for Visual Dashboards -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
   :root {
@@ -208,10 +210,11 @@
   let adminFilterDvt = "ALL";
   let adminSortBy = "code";
 
+  // CƠ CHẾ INDEXEDDB OFFLINE TOÀN DIỆN NÂNG CAO
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 1);
+      const request = indexedDB.open("DMS_OfflineDB", 2);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -256,7 +259,7 @@
   }
 
   window.addEventListener('online', async () => {
-    toast("🌐 Đã kết nối mạng trở lại! Đang đồng bộ dữ liệu Offline...");
+    toast("🌐 Đã kết nối mạng trở lại! Đang tự động đồng bộ dữ liệu Offline...");
     try {
       const pendingOrders = await getFromOfflineStore("offlineOrders");
       for (const ord of pendingOrders) {
@@ -271,7 +274,8 @@
         await addDoc(collection(db, "checkins"), chk);
       }
       await clearOfflineStore("offlineCheckins");
-      toast("✅ Đồng bộ dữ liệu Offline lên Firebase thành công!");
+      toast("✅ Đồng bộ ngầm dữ liệu Offline lên Firebase thành công!");
+      renderUI();
     } catch (e) {}
   });
 
@@ -432,11 +436,11 @@
           await addDoc(collection(db, "checkins"), { ...checkinData, createdAt: serverTimestamp() });
         } else {
           await saveToOfflineStore("offlineCheckins", checkinData);
-          toast("📴 Mất mạng: Đã lưu Check-in vào bộ nhớ Offline!");
+          toast("📴 Mất mạng hoàn toàn: Đã lưu Check-in vào bộ nhớ IndexedDB Offline!");
         }
 
         activeVisitedStore = store;
-        toast(`✅ Checked-in & Tự động ghim tọa độ GPS thành công!`);
+        toast(`✅ Checked-in thành công!`);
         renderUI();
       } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
     }, () => alert("⛔ LỖI GPS: Hãy bật GPS."), { enableHighAccuracy: true });
@@ -519,7 +523,6 @@
     if (!activeVisitedStore) return alert("Chưa chọn quầy hàng!");
     const items = [];
     let rawSubtotal = 0;
-    let promoGiftList = [];
 
     products.forEach(p => {
       const c = currentCart[p.id];
@@ -540,7 +543,7 @@
     const totalPotentialDebt = unpaidOrdersTotal + rawSubtotal;
 
     if (!isReturnOrderMode && totalPotentialDebt > storeCreditLimit) {
-      return alert(`⛔ KHÓA LẬP ĐƠN: Quầy đang vượt Hạn Mức Nợ!\n- Nợ cũ chưa trả: ${unpaidOrdersTotal.toLocaleString()}đ\n- Đơn mới: ${rawSubtotal.toLocaleString()}đ\n- Hạn mức cho phép: ${storeCreditLimit.toLocaleString()}đ`);
+      return alert(`⛔ KHÓA LẬP ĐƠN: Quầy đang vượt Hạn Mức Nợ!\n- Nợ cũ chưa trả: ${unpaidOrdersTotal.toLocaleString()}đ\n- Đơn mới: ${rawSubtotal.toLocaleString()}đ\n- Hạn mức: ${storeCreditLimit.toLocaleString()}đ`);
     }
 
     let discountPercent = isReturnOrderMode ? 0 : (rawSubtotal >= 10000000 ? 5 : (rawSubtotal >= 5000000 ? 2 : 0));
@@ -549,19 +552,19 @@
     const orderData = {
       salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
       storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}`,
-      items, amount: isReturnOrderMode ? -finalAmount : finalAmount, rawSubtotal, discountPercent, promoGifts: promoGiftList,
+      items, amount: isReturnOrderMode ? -finalAmount : finalAmount, rawSubtotal, discountPercent,
       isReturnOrder: isReturnOrderMode,
       paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: new Date()
     };
 
     if (navigator.onLine) {
       await addDoc(collection(db, "orders"), { ...orderData, createdAt: serverTimestamp() });
+      toast(isReturnOrderMode ? "✅ Đã gửi toa NHẬP TRẢ HÀNG!" : "🚀 Đã gửi toa BÁN HÀNG thành công!");
     } else {
       await saveToOfflineStore("offlineOrders", orderData);
-      toast("📴 Mất mạng: Toa đơn đã được lưu trữ Offline an toàn!");
+      toast("📴 Mất mạng hoàn toàn: Toa đơn đã được lưu an toàn vào IndexedDB Offline!");
     }
     
-    toast(isReturnOrderMode ? "✅ Đã gửi toa NHẬP TRẢ HÀNG!" : "🚀 Đã gửi toa BÁN HÀNG thành công!");
     currentCart = {}; activeVisitedStore = null; isReturnOrderMode = false; renderUI();
   };
 
@@ -887,10 +890,9 @@
     const countEl = document.getElementById('adminProductsCount');
     if (!tbody) return;
 
-    const uniqueDvts = adminFilterDvt;
     let filtered = products.filter(p => {
       const matchKey = (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd);
-      const matchDvt = uniqueDvts === 'ALL' || p.dvt === uniqueDvts;
+      const matchDvt = adminFilterDvt === 'ALL' || p.dvt === adminFilterDvt;
       return matchKey && matchDvt;
     });
 
@@ -941,7 +943,7 @@
 
   function renderUI() {
     if (!currentUser) return;
-    document.getElementById('userInfo').innerHTML = `<i class="fa-solid fa-user-shield" style="color:var(--amber);"></i> [${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);font-weight:700;">${roleLabel(currentUser.role)}</span>) ${navigator.onLine?'<span class="badge badge-success">Online</span>':'<span class="badge badge-danger">Offline Mode</span>'}`;
+    document.getElementById('userInfo').innerHTML = `<i class="fa-solid fa-user-shield" style="color:var(--amber);"></i> [${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);font-weight:700;">${roleLabel(currentUser.role)}</span>) ${navigator.onLine?'<span class="badge badge-success">Online</span>':'<span class="badge badge-danger">Offline Mode (IndexedDB Active)</span>'}`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
     const backOffice = isAdmin || isManager || isAccountant;
     const isSales = currentUser.role === 'sales';
@@ -973,6 +975,23 @@
           </div>
           <div class="stat-card"><span class="badge badge-success"><i class="fa-solid fa-location-crosshairs"></i> Check-in Thực Tế</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
         </div>
+
+        <!-- TÍCH HỢP BIỂU ĐỒ TRỰC QUAN CHART.JS -->
+        <div class="grid" style="margin-top:16px;">
+          <div class="card" style="grid-column: span 2;">
+            <h3 style="font-size:15px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-chart-column" style="color:var(--primary);"></i> Biểu Đồ Doanh Số Theo Trạng Thái Đơn Hàng</h3>
+            <div style="position: relative; height: 240px; width: 100%;">
+              <canvas id="revenueChart"></canvas>
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:15px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-chart-pie" style="color:var(--amber);"></i> Tỷ Lệ Đơn Hàng</h3>
+            <div style="position: relative; height: 240px; width: 100%;">
+              <canvas id="orderPieChart"></canvas>
+            </div>
+          </div>
+        </div>
+
         <div class="grid" style="margin-top:16px;">
           <div class="card" style="grid-column: span 3;">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -990,6 +1009,50 @@
           </div>
         </div>
       `;
+
+      // Khởi tạo render biểu đồ Chart.js
+      setTimeout(() => {
+        const approvedRev = orders.filter(o => o.status === 'Đã duyệt').reduce((s,o) => s + (o.amount||0), 0);
+        const pendingRev = orders.filter(o => o.status === 'Chờ duyệt').reduce((s,o) => s + (o.amount||0), 0);
+        const canceledRev = orders.filter(o => o.status === 'Đã hủy').reduce((s,o) => s + (o.amount||0), 0);
+
+        const ctxBar = document.getElementById('revenueChart');
+        if (ctxBar) {
+          new Chart(ctxBar, {
+            type: 'bar',
+            data: {
+              labels: ['Đã duyệt', 'Chờ duyệt', 'Đã hủy'],
+              datasets: [{
+                label: 'Doanh số (VNĐ)',
+                data: [approvedRev, pendingRev, canceledRev],
+                backgroundColor: ['#10B981', '#F59E0B', '#F43F5E'],
+                borderRadius: 8
+              }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+          });
+        }
+
+        const ctxPie = document.getElementById('orderPieChart');
+        if (ctxPie) {
+          new Chart(ctxPie, {
+            type: 'doughnut',
+            data: {
+              labels: ['Đã duyệt', 'Chờ duyệt', 'Đã hủy'],
+              datasets: [{
+                data: [
+                  orders.filter(o => o.status === 'Đã duyệt').length,
+                  orders.filter(o => o.status === 'Chờ duyệt').length,
+                  orders.filter(o => o.status === 'Đã hủy').length
+                ],
+                backgroundColor: ['#10B981', '#F59E0B', '#F43F5E']
+              }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+          });
+        }
+      }, 100);
+
       if (isMapVisible) initLiveMap();
     }
 
@@ -1185,7 +1248,7 @@
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; align-items:center;">
             <div>
               <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ khóa (Mã hoặc Tên):</label>
-              <!-- SỬ DỤNG oninput và KHÔNG GỌI renderUI() TRỰC TIẾP ĐỂ GIỮ NGUYÊN FOCUS KHI GÕ -->
+              <!-- SỬ DỤNG oninput ĐỂ TRÁNH MẤT FOCUS KHI GÕ -->
               <input type="text" id="adminSearchInput" placeholder="🔍 Nhập mã VTHH hoặc tên..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:4px 0 0;">
             </div>
             <div>
