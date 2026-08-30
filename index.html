@@ -210,6 +210,9 @@
   let adminFilterDvt = "ALL";
   let adminSortBy = "code";
 
+  // Tìm kiếm Khách Hàng chuyên nghiệp không mất focus
+  let customerSearchKey = "";
+
   // CƠ CHẾ INDEXEDDB OFFLINE TOÀN DIỆN NÂNG CAO
   let idbDb = null;
   function initIndexedDB() {
@@ -360,7 +363,7 @@
     document.getElementById('appView').classList.remove('hidden');
     
     const hashTab = window.location.hash.replace('#', '');
-    if (hashTab && ['dashboard', 'sales', 'stores', 'orders', 'productsAdmin', 'kpi', 'audit', 'users'].includes(hashTab)) {
+    if (hashTab && ['dashboard', 'sales', 'stores', 'customers', 'orders', 'productsAdmin', 'kpi', 'audit', 'users'].includes(hashTab)) {
       currentTab = hashTab;
     } else {
       currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
@@ -655,6 +658,59 @@
     reader.readAsArrayBuffer(file);
   };
 
+  // NHẬP EXCEL / CSV KHÁCH HÀNG (Cột A: Tên DTPN, Cột B: Địa Chỉ, Cột C: Điện Thoại)
+  window.importCustomersExcel = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        toast("⏳ Đang đọc file Excel Khách Hàng...");
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        let count = 0;
+        const batch = writeBatch(db);
+        for (let i = 0; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          const name = r[0] ? String(r[0]).trim() : '';
+          const address = r[1] ? String(r[1]).trim() : '';
+          const phone = r[2] ? String(r[2]).trim() : '';
+
+          if (name && name !== 'Ten DTPN' && name !== 'TenDTPN') {
+            const code = `KH${i}`;
+            const docRef = doc(collection(db, "stores"));
+            batch.set(docRef, {
+              code: code,
+              name: name,
+              address: address,
+              phone: phone,
+              routeDay: 'Thứ 2, Thứ 4, Thứ 6',
+              creditLimit: 20000000,
+              lat: 0,
+              lng: 0,
+              createdAt: serverTimestamp()
+            });
+            count++;
+          }
+        }
+        if (count > 0) {
+          await batch.commit();
+          toast(`✅ Đã đồng bộ thành công ${count} khách hàng vào hệ thống!`);
+          renderUI();
+        } else {
+          alert("Không tìm thấy dữ liệu khách hàng hợp lệ trong file Excel!");
+        }
+      } catch (err) {
+        alert("Lỗi đọc file Excel Khách Hàng: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   window.importStoresCSV = function(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -664,8 +720,8 @@
       let count = 0;
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
-        if (cols.length >= 3 && cols[0]) {
-          await addDoc(collection(db, "stores"), { code: cols[0], name: cols[1], address: cols[2], routeDay: cols[3]||'Thứ 2, Thứ 4, Thứ 6', creditLimit: Number(cols[4]||20000000), lat: Number(cols[5]||0), lng: Number(cols[6]||0), createdAt: serverTimestamp() });
+        if (cols.length >= 2 && cols[0]) {
+          await addDoc(collection(db, "stores"), { code: "KH"+i, name: cols[0], address: cols[1]||'', phone: cols[2]||'', routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit: 20000000, lat: 0, lng: 0, createdAt: serverTimestamp() });
           count++;
         }
       }
@@ -759,20 +815,19 @@
     const code = document.getElementById('stCode').value.trim();
     const name = document.getElementById('stName').value.trim();
     const address = document.getElementById('stAddr').value.trim();
+    const phone = document.getElementById('stPhone').value.trim();
     
     const checkboxes = document.querySelectorAll('input[name="routeDays"]:checked');
     let selectedDays = Array.from(checkboxes).map(cb => cb.value);
     let routeDay = selectedDays.length > 0 ? selectedDays.join(', ') : 'Linh động';
 
     const creditLimit = Number(document.getElementById('stCredit').value || 20000000);
-    const lat = Number(document.getElementById('stLat').value || 0);
-    const lng = Number(document.getElementById('stLng').value || 0);
-    await addDoc(collection(db, "stores"), { code, name, address, routeDay, creditLimit, lat, lng, createdAt: serverTimestamp() });
-    toast("Đã thêm điểm bán/tuyến!");
+    await addDoc(collection(db, "stores"), { code, name, address, phone, routeDay, creditLimit, lat: 0, lng: 0, createdAt: serverTimestamp() });
+    toast("Đã thêm khách hàng mới!");
     document.getElementById('stForm').reset();
   };
 
-  window.deleteStore = async function(id) { if(confirm("Xóa tuyến/điểm bán này?")) await deleteDoc(doc(db, "stores", id)); };
+  window.deleteStore = async function(id) { if(confirm("Xóa khách hàng này?")) await deleteDoc(doc(db, "stores", id)); };
 
   window.addUser = async function(e) {
     e.preventDefault();
@@ -883,7 +938,32 @@
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setOrderFilterStatus = function(val) { orderFilterStatus = val; renderUI(); };
 
-  // Khắc phục hoàn toàn lỗi mất nét/focus khi gõ tìm kiếm
+  // Tìm kiếm Khách Hàng mượt mà không mất focus
+  window.onCustomerSearchInput = function(val) {
+    customerSearchKey = val.toLowerCase();
+    const tbody = document.getElementById('customerTbody');
+    const countEl = document.getElementById('customerCount');
+    if (!tbody) return;
+
+    let filtered = stores.filter(s => 
+      (s.name||'').toLowerCase().includes(customerSearchKey) || 
+      (s.address||'').toLowerCase().includes(customerSearchKey) ||
+      (s.phone||'').toLowerCase().includes(customerSearchKey)
+    );
+
+    if (countEl) countEl.innerHTML = `Hiển thị: <b>${filtered.length}</b> / ${stores.length} khách hàng`;
+
+    tbody.innerHTML = filtered.slice(0, 300).map(s => `
+      <tr>
+        <td><b>${s.code||'KH'}</b></td>
+        <td class="col-name" style="font-weight:600;">${s.name}</td>
+        <td>${s.address || '—'}</td>
+        <td><b style="color:var(--emerald);"><i class="fa-solid fa-phone"></i> ${s.phone || '—'}</b></td>
+        <td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td>
+      </tr>
+    `).join('');
+  };
+
   window.onAdminSearchInput = function(val) {
     adminSearchPrd = val.toLowerCase();
     const tbody = document.getElementById('adminProductsTbody');
@@ -951,6 +1031,7 @@
     setNav('navDash', backOffice); 
     setNav('navSales', isSales);
     setNav('navStores', backOffice);
+    setNav('navCustomers', backOffice); // Tab Khách Hàng
     setNav('navOrders', true); 
     setNav('navProductsAdmin', backOffice);
     setNav('navKpi', true); 
@@ -976,7 +1057,7 @@
           <div class="stat-card"><span class="badge badge-success"><i class="fa-solid fa-location-crosshairs"></i> Check-in Thực Tế</span><div class="stat-number">${checkinsToday.length} lượt</div></div>
         </div>
 
-        <!-- TÍCH HỢP BIỂU ĐỒ TRỰC QUAN CHART.JS -->
+        <!-- Biểu đồ trực quan Chart.js -->
         <div class="grid" style="margin-top:16px;">
           <div class="card" style="grid-column: span 2;">
             <h3 style="font-size:15px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-chart-column" style="color:var(--primary);"></i> Biểu Đồ Doanh Số Theo Trạng Thái Đơn Hàng</h3>
@@ -1010,7 +1091,6 @@
         </div>
       `;
 
-      // Khởi tạo render biểu đồ Chart.js
       setTimeout(() => {
         const approvedRev = orders.filter(o => o.status === 'Đã duyệt').reduce((s,o) => s + (o.amount||0), 0);
         const pendingRev = orders.filter(o => o.status === 'Chờ duyệt').reduce((s,o) => s + (o.amount||0), 0);
@@ -1088,7 +1168,7 @@
                 <div style="padding:10px 0; border-bottom:1px solid #E2E8F0;">
                   <b style="color:#1E293B; font-size:14px;"><i class="fa-solid fa-shop" style="color:var(--primary);"></i> ${s.code||'KH'}_${s.name}</b> <span class="badge badge-pending"><i class="fa-regular fa-calendar-days"></i> ${s.routeDay||'Linh động'}</span><br>
                   <small style="color:var(--text-muted);"><i class="fa-solid fa-location-dot"></i> ${s.address||''}</small><br>
-                  <small style="color:var(--rose);font-weight:700;"><i class="fa-solid fa-wallet"></i> Hạn mức nợ: ${(s.creditLimit||20000000).toLocaleString()}đ</small><br>
+                  <small style="color:var(--emerald);font-weight:700;"><i class="fa-solid fa-phone"></i> SĐT: ${s.phone||'Chưa có'}</small><br>
                   <input type="file" id="img_${s.id}" accept="image/*" capture="environment" style="margin:6px 0;">
                   <div style="display:flex;gap:6px;margin-top:6px;">
                     <button class="btn btn-amber btn-sm" style="flex:1;" onclick="doCheckinWithPhoto('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Check-in GPS (<30m)</button>
@@ -1197,6 +1277,7 @@
               <label>Mã Khách Hàng (Mã DTPN):</label><input type="text" id="stCode" placeholder="20Anh" required>
               <label>Tên Quầy / Tiệm:</label><input type="text" id="stName" placeholder="Quầy Ánh" required>
               <label>Địa Chỉ:</label><input type="text" id="stAddr" placeholder="Đồng Xoài" required>
+              <label>Điện Thoại:</label><input type="text" id="stPhone" placeholder="0948521213">
               <label><b>Chọn Ngày Phân Phối Tuyến:</b></label>
               <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:6px 0 12px;background:#F1F5F9;padding:10px;border-radius:12px;">
                 <label style="font-size:12px;font-weight:700;"><input type="checkbox" name="routeDays" value="Thứ 2"> Thứ 2</label>
@@ -1211,12 +1292,68 @@
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Tuyến Điểm Bán</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>MaDTPN</th><th>TenQuay</th><th>DiaChi</th><th>Tuyen</th><th>HanMucNo</th><th>ThaoTac</th></tr></thead>
+                <thead><tr><th>MaDTPN</th><th>TenQuay</th><th>DiaChi</th><th>DienThoai</th><th>Tuyen</th><th>HanMucNo</th><th>ThaoTac</th></tr></thead>
                 <tbody>
-                  ${stores.map(s => `<tr><td><b>${s.code||'KH'}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td><td><span class="badge badge-pending">${s.routeDay||''}</span></td><td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
+                  ${stores.map(s => `<tr><td><b>${s.code||'KH'}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td><td>${s.phone||'—'}</td><td><span class="badge badge-pending">${s.routeDay||''}</span></td><td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // TAB KHÁCH HÀNG MỚI ĐẶT NGAY KẾ BÊN TAB HÀNG HÓA
+    else if (currentTab === 'customers' && backOffice) {
+      let filteredCustomers = stores.filter(s => 
+        (s.name||'').toLowerCase().includes(customerSearchKey) || 
+        (s.address||'').toLowerCase().includes(customerSearchKey) ||
+        (s.phone||'').toLowerCase().includes(customerSearchKey)
+      );
+
+      main.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+          <h2 style="font-size:20px; font-weight:800; color:#1E293B;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Quản Lý Khách Hàng (Tên DTPN, Địa Chỉ, Điện Thoại)</h2>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <label class="btn btn-green" style="margin:0;cursor:pointer;"><i class="fa-solid fa-file-arrow-up"></i> Tải File Khách Hàng (XLSX/CSV) <input type="file" accept=".xlsx, .xls, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:14px;">
+          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px;"><i class="fa-solid fa-filter" style="color:var(--primary);"></i> Tìm Kiếm Khách Hàng</h3>
+          <div>
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ khóa (Tên DTPN, Địa chỉ hoặc Điện thoại):</label>
+            <input type="text" id="customerSearchInput" placeholder="🔍 Nhập tên, địa chỉ hoặc số điện thoại..." oninput="onCustomerSearchInput(this.value)" value="${customerSearchKey}" style="margin:4px 0 0;">
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <small id="customerCount" style="color:var(--text-muted); font-weight:700;">Hiển thị: <b>${filteredCustomers.length}</b> / ${stores.length} khách hàng</small>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mã DTPN</th>
+                  <th class="col-name">Tên DTPN / Quầy</th>
+                  <th>Địa Chỉ</th>
+                  <th>Điện Thoại</th>
+                  <th>Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="customerTbody">
+                ${filteredCustomers.slice(0, 300).map(s => `
+                  <tr>
+                    <td><b>${s.code||'KH'}</b></td>
+                    <td class="col-name" style="font-weight:600;">${s.name}</td>
+                    <td>${s.address || '—'}</td>
+                    <td><b style="color:var(--emerald);"><i class="fa-solid fa-phone"></i> ${s.phone || '—'}</b></td>
+                    <td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
           </div>
         </div>
       `;
@@ -1248,7 +1385,6 @@
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; align-items:center;">
             <div>
               <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ khóa (Mã hoặc Tên):</label>
-              <!-- SỬ DỤNG oninput ĐỂ TRÁNH MẤT FOCUS KHI GÕ -->
               <input type="text" id="adminSearchInput" placeholder="🔍 Nhập mã VTHH hoặc tên..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:4px 0 0;">
             </div>
             <div>
@@ -1487,8 +1623,10 @@
         <button id="navDash" class="btn btn-amber hidden" onclick="switchTab('dashboard')"><i class="fa-solid fa-chart-pie"></i> Dashboard</button>
         <button id="navSales" class="btn hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Toa Bán Hàng</button>
         <button id="navStores" class="btn hidden" onclick="switchTab('stores')"><i class="fa-solid fa-store"></i> Tuyến / Tiệm</button>
-        <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
+        <!-- TAB KHÁCH HÀNG NẰM NGAY KẾ BÊN TAB HÀNG HÓA -->
+        <button id="navCustomers" class="btn hidden" onclick="switchTab('customers')"><i class="fa-solid fa-address-book"></i> Khách Hàng</button>
         <button id="navProductsAdmin" class="btn hidden" onclick="switchTab('productsAdmin')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa</button>
+        <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
         <button id="navKpi" class="btn" onclick="switchTab('kpi')"><i class="fa-solid fa-bullseye"></i> KPI</button>
         <button id="navAudit" class="btn hidden" onclick="switchTab('audit')"><i class="fa-solid fa-shield-halved"></i> Audit Log</button>
         <button id="navUsers" class="btn hidden" onclick="switchTab('users')"><i class="fa-solid fa-users"></i> Nhân Viên</button>
