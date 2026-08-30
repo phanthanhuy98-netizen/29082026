@@ -39,7 +39,7 @@
   }
   
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg-dark);background-image:var(--bg-gradient);color:var(--text-main);padding:8px;min-height:100vh;overflow-x:hidden;}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg-dark);background-image:var(--bg-gradient);color:var(--text-main);padding:8px;min-height:100vh;overflow-x:hidden;padding-bottom:90px;}
   .app{max-width:1440px;margin:0 auto;}
   
   .login-container {
@@ -93,7 +93,7 @@
   .btn-purple{background:var(--purple-gradient);color:#fff;}
   .btn-sm{padding:7px 12px;font-size:11px;border-radius:10px;}
   
-  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;}
+  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;margin-bottom:40px;}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:12px;}
   
   .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;margin-bottom:12px; position: relative;}
@@ -218,7 +218,6 @@
   let currentCart = {};
   let activeVisitedStore = null;
   let isFilterCollapsed = false;
-  let html5QrScanner = null;
   let isMapVisible = false;
   let leafletMapInstance = null;
   let managerMarker = null;
@@ -233,6 +232,44 @@
   let productSearchMavtVal = "";
   let productSearchNameVal = "";
   let searchDebounceTimer = null;
+
+  let idbDb = null;
+  function initIndexedDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("DMS_OfflineDB", 3);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
+      request.onupgradeneeded = (e) => {
+        const dbInstance = e.target.result;
+        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
+        if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
+      };
+    });
+  }
+
+  async function saveProductsToLocalCache(list) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localProducts"], "readwrite");
+      const store = transaction.objectStore("localProducts");
+      store.clear();
+      list.forEach(p => store.put(p));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function loadProductsFromLocalCache() {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localProducts"], "readonly");
+      const store = transaction.objectStore("localProducts");
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
 
   function toast(msg) {
     const t = document.createElement('div');
@@ -279,6 +316,10 @@
     } else {
       currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
     }
+
+    await initIndexedDB();
+    const cachedPrds = await loadProductsFromLocalCache();
+    if (cachedPrds && cachedPrds.length > 0) products = cachedPrds;
 
     attachListeners();
     renderUI();
@@ -327,7 +368,7 @@
   };
 
   window.updateCartDetail = function(prdId, field, val) {
-    const p = products.find(x => x.id === prdId);
+    const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     currentCart[prdId][field] = Number(val) || 0;
     const packRatio = p?.tyLeQuyDoi || 50;
@@ -345,16 +386,17 @@
   function updateCartTotalsUI() {
     let cartTotalAmount = 0;
     products.forEach(p => {
-      const c = currentCart[p.id];
+      const keyId = p.id || p.code;
+      const c = currentCart[keyId];
       if (c && c.qty > 0) {
         cartTotalAmount += (p.price || 0) * c.qty;
-        const rowTotalEl = document.getElementById(`row_total_${p.id}`);
-        const totalQtyEl = document.getElementById(`total_qty_${p.id}`);
+        const rowTotalEl = document.getElementById(`row_total_${keyId}`);
+        const totalQtyEl = document.getElementById(`total_qty_${keyId}`);
         if (rowTotalEl) rowTotalEl.innerText = ((p.price || 0) * c.qty).toLocaleString() + 'đ';
         if (totalQtyEl) totalQtyEl.innerText = c.qty;
       } else {
-        const rowTotalEl = document.getElementById(`row_total_${p.id}`);
-        const totalQtyEl = document.getElementById(`total_qty_${p.id}`);
+        const rowTotalEl = document.getElementById(`row_total_${keyId}`);
+        const totalQtyEl = document.getElementById(`total_qty_${keyId}`);
         if (rowTotalEl) rowTotalEl.innerText = '0đ';
         if (totalQtyEl) totalQtyEl.innerText = '0';
       }
@@ -375,11 +417,12 @@
     let rawSubtotal = 0;
 
     products.forEach(p => {
-      const c = currentCart[p.id];
+      const keyId = p.id || p.code;
+      const c = currentCart[keyId];
       if (c && (c.qty > 0 || c.kien > 0 || c.le > 0)) {
         const itemTotal = (p.price || 0) * (c.qty || 1);
         rawSubtotal += itemTotal;
-        items.push({ id: p.id, code: p.code, name: p.name, dvt: p.dvt || 'hộp', qty: c.qty, kien: c.kien, le: c.le, price: p.price });
+        items.push({ id: p.id||p.code, code: p.code, name: p.name, dvt: p.dvt || 'hộp', qty: c.qty, kien: c.kien, le: c.le, price: p.price });
       }
     });
 
@@ -428,6 +471,7 @@
           
           if (code && code !== 'Ma VTHH' && code !== 'undefined') {
             rawProducts.push({
+              id: code,
               code: code, name: name, dvt: dvt,
               stockDau: Number(r[3]) || 0, stockCuoi: Number(r[4]) || 0,
               tyLeQuyDoi: Number(r[5]) || 50, price: 15000
@@ -460,6 +504,8 @@
             await new Promise(r => setTimeout(r, 40));
           }
 
+          await saveProductsToLocalCache(uniqueList);
+          products = uniqueList;
           toast(`✅ Đã đẩy thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
@@ -624,7 +670,7 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // ⚡ MOBILE OPTIMIZED AUTOCOMPLETE SEARCH LOGIC ⚡
+  // ⚡ ULTRA PERFORMANCE MOBILE AUTOCOMPLETE SEARCH ⚡
   window.onSalesCodeInput = function(val) {
     salesSearchKhCode = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -645,7 +691,7 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 100);
+    }, 80);
   };
 
   window.onSalesNameInput = function(val) {
@@ -656,10 +702,8 @@
       const dropdown = document.getElementById('salesNameDropdown');
       if (!dropdown) return;
       if (queryKey === "") { dropdown.classList.add('hidden'); return; }
-      const matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey)).slice(0, 30);
+      const matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey)).slice(0, 20);
       
-      matched.sort((a, b) => (removeAccents(a.name||'').startsWith(queryKey) ? 2 : 1) - (removeAccents(b.name||'').startsWith(queryKey) ? 2 : 1));
-
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy khách hàng phù hợp</div>`;
         dropdown.classList.remove('hidden');
@@ -671,7 +715,7 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 100);
+    }, 80);
   };
 
   window.onCompanyCodeSearchInput = function(val) {
@@ -685,7 +729,7 @@
         const codeNorm = removeAccents(s.code || '');
         const nameNorm = removeAccents(s.name || '');
         return codeNorm.startsWith(queryKey) || codeNorm.includes(queryKey) || nameNorm.includes(queryKey);
-      }).slice(0, 25);
+      }).slice(0, 20);
 
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy Mã Công Ty phù hợp</div>`;
@@ -698,7 +742,7 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 100);
+    }, 80);
   };
 
   window.selectCompanyCode = function(storeId) {
@@ -737,7 +781,7 @@
       `).join('');
       dropdown.classList.remove('hidden');
       applyTableFilterFast();
-    }, 80);
+    }, 60);
   };
 
   window.onProductNameAutocomplete = function(val) {
@@ -752,7 +796,7 @@
         applyTableFilterFast();
         return;
       }
-      const matched = products.filter(p => removeAccents(p.name || '').includes(queryKey)).slice(0, 25);
+      const matched = products.filter(p => removeAccents(p.name || '').includes(queryKey)).slice(0, 20);
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy Tên vật tư phù hợp</div>`;
         dropdown.classList.remove('hidden');
@@ -766,7 +810,7 @@
       `).join('');
       dropdown.classList.remove('hidden');
       applyTableFilterFast();
-    }, 80);
+    }, 60);
   };
 
   window.selectProductFromAutocomplete = function(type, textVal) {
@@ -827,7 +871,6 @@
           const phoneNorm = removeAccents(s.phone || '');
           return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
         });
-        filtered.sort((a, b) => (removeAccents(a.name || '').startsWith(queryKey) ? 2 : 1) - (removeAccents(b.name || '').startsWith(queryKey) ? 2 : 1));
       }
       const displayList = filtered.slice(0, 30);
       if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
@@ -846,7 +889,7 @@
           <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
         </div>
       `).join('');
-    }, 100);
+    }, 80);
   };
 
   window.onAdminSearchInput = function(val) {
@@ -870,7 +913,7 @@
           <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
         </div>
       `).join('');
-    }, 100);
+    }, 80);
   };
 
   function attachListeners() {
@@ -878,9 +921,12 @@
     onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "kpiTargets"), snap => { kpiTargets = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(100)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
-    onSnapshot(collection(db, "products"), snap => {
+    onSnapshot(collection(db, "products"), async snap => {
       const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (cloudProducts.length > 0) products = cloudProducts;
+      if (cloudProducts.length > 0) {
+        products = cloudProducts;
+        await saveProductsToLocalCache(cloudProducts);
+      }
       renderUI();
     });
     if (currentUser.role === 'admin') onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
@@ -972,7 +1018,8 @@
     else if (currentTab === 'sales') {
       let cartTotalAmount = 0;
       products.forEach(p => {
-        const c = currentCart[p.id];
+        const keyId = p.id || p.code;
+        const c = currentCart[keyId];
         if (c && c.qty > 0) cartTotalAmount += (p.price || 0) * c.qty;
       });
 
@@ -980,10 +1027,9 @@
 
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-cart-shopping" style="color:var(--amber);"></i> Lập Đơn Bán Hàng (${products.length} vật tư trên Cloud)</h2>
+          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-cart-shopping" style="color:var(--amber);"></i> Lập Đơn Bán Hàng (${products.length} vật tư sẵn sàng)</h2>
         </div>
 
-        <!-- SEARCH BOX KHÁCH HÀNG BAN ĐẦU -->
         <div class="card" style="margin-bottom:12px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: ${activeVisitedStore ? '12px' : '20px'};">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '10px'};">
             <h3 style="font-size:${activeVisitedStore ? '14px' : '16px'}; font-weight:800; margin:0;"><i class="fa-solid fa-magnifying-glass" style="color:var(--primary);"></i> ${activeVisitedStore ? 'Khách Hàng Đã Chọn' : '🔍 Tìm Kiếm Khách Hàng (Mã KH / Tên KH)'}</h3>
@@ -1016,7 +1062,6 @@
           ` : ''}
         </div>
 
-        <!-- ⚡ MÃ CÔNG TY & BỘ LỌC CHUYÊN NGHIỆP ⚡ -->
         ${activeVisitedStore ? `
           <div class="card" style="border:2px solid var(--primary); animation: fadeIn 0.3s ease;">
             
@@ -1029,12 +1074,11 @@
               </div>
 
               <div class="autocomplete-wrapper" style="margin-top: 8px;">
-                <input type="text" placeholder="🔍 Lọc Mã Công Ty chuyên nghiệp (nhập 2 ký tự đầu hoặc tên tiệm để tìm ngay)..." oninput="onCompanyCodeSearchInput(this.value)" autocomplete="off" style="margin:0; background:#FFFFFF; color:#0F172A; font-weight:700; border: 1px solid var(--amber);">
+                <input type="text" placeholder="🔍 Lọc Mã Công Ty chuyên nghiệp..." oninput="onCompanyCodeSearchInput(this.value)" autocomplete="off" style="margin:0; background:#FFFFFF; color:#0F172A; font-weight:700; border: 1px solid var(--amber);">
                 <div id="companyCodeDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
             </div>
 
-            <!-- ⚡ BỘ LỌC VẬT TƯ DẠNG AUTOCOMPLETION DROPDOWN CHUYÊN NGHIỆP ⚡ -->
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; background: #F1F5F9; padding: 12px; border-radius: 12px;">
               <div class="autocomplete-wrapper">
                 <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT:</label>
@@ -1065,7 +1109,8 @@
                 </thead>
                 <tbody id="salesProductTableBody">
                   ${products.map(p => {
-                    const c = currentCart[p.id] || { kien: 0, le: 0, qty: 0 };
+                    const keyId = p.id || p.code;
+                    const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                     const itemTotal = (p.price || 0) * (c.qty || 0);
                     const mavtLower = removeAccents(p.code || '');
                     const nameLower = removeAccents(p.name || '');
@@ -1078,12 +1123,12 @@
                         <td><b>${p.code}</b></td>
                         <td><b>${p.name}</b></td>
                         <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
-                        <td><input type="number" min="0" value="${c.le || 0}" oninput="updateCartDetail('${p.id}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
-                        <td><input type="number" min="0" value="${c.kien || 0}" oninput="updateCartDetail('${p.id}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
+                        <td><input type="number" min="0" value="${c.le || 0}" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
+                        <td><input type="number" min="0" value="${c.kien || 0}" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
                         <td><b>${p.tyLeQuyDoi || 50}</b></td>
                         <td>${(p.price || 0).toLocaleString()}đ</td>
-                        <td><b style="color:var(--rose);" id="row_total_${p.id}">${itemTotal.toLocaleString()}đ</b></td>
-                        <td><b style="color:var(--primary);" id="total_qty_${p.id}">${c.qty || 0}</b></td>
+                        <td><b style="color:var(--rose);" id="row_total_${keyId}">${itemTotal.toLocaleString()}đ</b></td>
+                        <td><b style="color:var(--primary);" id="total_qty_${keyId}">${c.qty || 0}</b></td>
                       </tr>
                     `;
                   }).join('')}
@@ -1350,12 +1395,6 @@
       <button type="button" class="btn btn-red" onclick="closeChangePasswordModal()" style="font-weight:800;">Hủy</button>
     </div>
   </form>
-</div></div>
-
-<div id="qrModal" class="modal hidden"><div class="modal-content">
-  <h3 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-qrcode"></i> Quét Mã QR</h3>
-  <div id="reader" style="width:100%;margin-top:10px;border-radius:12px;overflow:hidden;"></div>
-  <button class="btn btn-red" style="width:100%;margin-top:12px;justify-content:center;font-weight:800;" onclick="closeQRScanner()">Đóng Camera</button>
 </div></div>
 
 </body>
