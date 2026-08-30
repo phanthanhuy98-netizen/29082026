@@ -126,6 +126,22 @@
   tr:last-child td { border-bottom:none; }
   tr:hover td { background: #F8FAFC; }
 
+  /* Tự động chuyển đổi giao diện bảng ngang thành thẻ dọc tối ưu trên thiết bị di động */
+  @media (max-width: 768px) {
+    .desktop-table-view { display: none !important; }
+    .mobile-card-view { display: block !important; }
+    body { padding: 4px; }
+    .topbar { flex-direction: column; align-items: flex-start; }
+    .nav-btns { width: 100%; overflow-x: auto; padding-bottom: 4px; flex-wrap: nowrap; }
+    .grid { grid-template-columns: 1fr !important; }
+    .card { padding: 12px; }
+    input, select { font-size: 16px !important; padding: 12px 14px; }
+  }
+  @media (min-width: 769px) {
+    .desktop-table-view { display: block !important; }
+    .mobile-card-view { display: none !important; }
+  }
+
   .stat-card{background:linear-gradient(135deg, #1E1B4B 100%, #312E81 0%);color:#fff;border-radius:16px;padding:16px;box-shadow:0 10px 25px rgba(30,27,75,0.3);position:relative;overflow:hidden;}
   .stat-number{font-size:24px;font-weight:800;color:#F8FAFC;margin-top:4px;font-family:'Quicksand',sans-serif;}
   
@@ -178,15 +194,6 @@
     cursor: pointer;
     white-space: nowrap;
     touch-action: manipulation;
-  }
-
-  @media (max-width: 768px) {
-    body { padding: 4px; }
-    .topbar { flex-direction: column; align-items: flex-start; }
-    .nav-btns { width: 100%; overflow-x: auto; padding-bottom: 4px; flex-wrap: nowrap; }
-    .grid { grid-template-columns: 1fr !important; }
-    .card { padding: 12px; }
-    input, select { font-size: 16px !important; padding: 12px 14px; }
   }
 </style>
 
@@ -449,13 +456,17 @@
       if (c && c.qty > 0) {
         cartTotalAmount += (p.price || 0) * c.qty;
         const rowTotalEl = document.getElementById(`row_total_${keyId}`);
+        const mobileRowTotalEl = document.getElementById(`mobile_row_total_${keyId}`);
         const totalQtyEl = document.getElementById(`total_qty_${keyId}`);
         if (rowTotalEl) rowTotalEl.innerText = ((p.price || 0) * c.qty).toLocaleString() + 'đ';
+        if (mobileRowTotalEl) mobileRowTotalEl.innerText = ((p.price || 0) * c.qty).toLocaleString() + 'đ';
         if (totalQtyEl) totalQtyEl.innerText = c.qty;
       } else {
         const rowTotalEl = document.getElementById(`row_total_${keyId}`);
+        const mobileRowTotalEl = document.getElementById(`mobile_row_total_${keyId}`);
         const totalQtyEl = document.getElementById(`total_qty_${keyId}`);
         if (rowTotalEl) rowTotalEl.innerText = '0đ';
+        if (mobileRowTotalEl) mobileRowTotalEl.innerText = '0đ';
         if (totalQtyEl) totalQtyEl.innerText = '0';
       }
     });
@@ -780,7 +791,6 @@
         return nameNorm.includes(queryKey) || addrNorm.includes(queryKey);
       });
 
-      // ⚡ THUẬT TOÁN ƯU TIÊN THÔNG MINH TUYỆT ĐỐI (Bắt đầu bằng -> Chứa trọn vẹn từ -> Khớp phần còn lại) ⚡
       matched.sort((a, b) => {
         const nameA = removeAccents(a.name || '');
         const nameB = removeAccents(b.name || '');
@@ -941,25 +951,32 @@
   };
 
   function applyTableFilterFast() {
-    const tbody = document.getElementById('salesProductTableBody');
-    if (!tbody) return;
-    const rows = tbody.getElementsByTagName('tr');
     const mavtKey = removeAccents(productSearchMavtVal);
     const nameKey = removeAccents(productSearchNameVal);
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const mavt = row.getAttribute('data-mavt') || '';
-      const name = row.getAttribute('data-name') || '';
-      const partnerCode = row.getAttribute('data-partner') || '';
-      const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
-      const matchName = !nameKey || name.includes(nameKey);
-      if (matchMavt && matchName) {
-        row.style.display = '';
-      } else {
-        row.style.display = 'none';
+    const tbody = document.getElementById('salesProductTableBody');
+    if (tbody) {
+      const rows = tbody.getElementsByTagName('tr');
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const mavt = row.getAttribute('data-mavt') || '';
+        const name = row.getAttribute('data-name') || '';
+        const partnerCode = row.getAttribute('data-partner') || '';
+        const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
+        const matchName = !nameKey || name.includes(nameKey);
+        row.style.display = (matchMavt && matchName) ? '' : 'none';
       }
     }
+
+    const cards = document.querySelectorAll('.product-card-item');
+    cards.forEach(card => {
+      const mavt = card.getAttribute('data-mavt') || '';
+      const name = card.getAttribute('data-name') || '';
+      const partnerCode = card.getAttribute('data-partner') || '';
+      const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
+      const matchName = !nameKey || name.includes(nameKey);
+      card.style.display = (matchMavt && matchName) ? 'block' : 'none';
+    });
   }
 
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
@@ -995,8 +1012,6 @@
         const hasCoords = !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0;
         const isAdmin = currentUser && currentUser.role === 'admin';
         const pinnedInfo = hasCoords ? `Đã ghim (${s.pinnedByCode || 'NV'})` : 'Ghim Định Vị';
-        
-        // ⚡ FIX CHUẨN ĐƯỜNG DẪN ĐIỀU HƯỚNG GOOGLE MAPS GPS ⚡
         const mapUrl = hasCoords ? `https://www.google.com/maps/search/?api=1&query=${rawLat},${rawLng}` : '#';
 
         return `
@@ -1233,7 +1248,8 @@
               </div>
             </div>
 
-            <div class="table-responsive">
+            <!-- GIAO DIỆN BẢNG CHUẨN CHO MÁY TÍNH / TABLET NGANG -->
+            <div class="table-responsive desktop-table-view">
               <table>
                 <thead>
                   <tr>
@@ -1279,6 +1295,54 @@
                   }).join('')}
                 </tbody>
               </table>
+            </div>
+
+            <!-- GIAO DIỆN THẺ DỌC TỐI ƯU TUYỆT ĐỐI CHO ĐIỆN THOẠI DỌC -->
+            <div class="mobile-card-view" id="salesProductMobileContainer">
+              ${products.map(p => {
+                const keyId = p.id || p.code;
+                const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+                const itemTotal = (p.price || 0) * (c.qty || 0);
+                const mavtLower = removeAccents(p.code || '');
+                const nameLower = removeAccents(p.name || '');
+                const partnerCode = mavtLower.slice(0, 2);
+                const mavtKey = removeAccents(productSearchMavtVal);
+                const nameKey = removeAccents(productSearchNameVal);
+                const isVisible = (!mavtKey || partnerCode.includes(mavtKey) || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
+                
+                const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
+                const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
+
+                return `
+                  <div class="mobile-item-card product-card-item" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}" style="${isVisible ? 'display:block;' : 'display:none;'}">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                      <span class="item-code">[Cty: ${p.code.slice(0,2)}] ${p.code}</span>
+                      <span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span>
+                    </div>
+                    <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px;">${p.name}</div>
+                    
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:8px; border-radius:8px; margin-bottom:6px; font-size:12px;">
+                      <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
+                      <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; align-items:center; background:#F1F5F9; padding:8px; border-radius:8px;">
+                      <div>
+                        <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
+                        <input type="number" min="0" value="${leVal}" placeholder="0" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:6px; background:#fff;">
+                      </div>
+                      <div>
+                        <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
+                        <input type="number" min="0" value="${kienVal}" placeholder="0" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:6px; background:#fff;">
+                      </div>
+                      <div style="text-align:right;">
+                        <span style="font-size:10px; color:var(--text-muted); display:block;">Thành tiền:</span>
+                        <b style="color:var(--rose); font-size:13px;" id="mobile_row_total_${keyId}">${itemTotal.toLocaleString()}đ</b>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid #E2E8F0; flex-wrap:wrap; gap:10px;">
