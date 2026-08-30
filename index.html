@@ -210,11 +210,8 @@
   let stores = [], orders = [], users = [], checkins = [], kpiTargets = [], auditLogs = [];
   
   let products = [
-    { id: "p1", code: "11YS/", name: "Young Star Slim BC", dvt: "cây", stockDau: 51, stockCuoi: 34, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 },
-    { id: "p2", code: "11Z1", name: "TLSG_Quẹt Đ/tử", dvt: "cái", stockDau: 38, stockCuoi: 38, tyLeQuyDoi: 1000, dvt1: "", price: 5000 },
-    { id: "p3", code: "11SGSX/", name: "Sài Gòn Star xanh super slim BC", dvt: "cây", stockDau: 2567, stockCuoi: 3369, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 18000 },
-    { id: "p4", code: "11D/", name: "Du Lịch BM", dvt: "cây", stockDau: 119, stockCuoi: 82, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 12000 },
-    { id: "p5", code: "11E2/", name: "Era Đỏ", dvt: "cây", stockDau: 118, stockCuoi: 76, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 14000 }
+    { id: "p1", code: "57R243+", name: "URC_Nước TL Rồng đỏ H/vải 240ml*6bl*8ly", dvt: "ly", stockDau: 0, stockCuoi: 0, tyLeQuyDoi: 48, price: 15000 },
+    { id: "p2", code: "7001SC02", name: "SĐCĐ NSPN Cam 380g.", dvt: "hộp", stockDau: 303, stockCuoi: 255, tyLeQuyDoi: 48, price: 18000 }
   ];
 
   let currentCart = {};
@@ -444,7 +441,7 @@
       if (c && (c.qty > 0 || c.kien > 0 || c.le > 0)) {
         const itemTotal = (p.price || 0) * (c.qty || 1);
         rawSubtotal += itemTotal;
-        items.push({ id: p.id, code: p.code, name: p.name, dvt: p.dvt || 'cây', qty: c.qty, kien: c.kien, le: c.le, price: p.price });
+        items.push({ id: p.id, code: p.code, name: p.name, dvt: p.dvt || 'hộp', qty: c.qty, kien: c.kien, le: c.le, price: p.price });
       }
     });
 
@@ -478,13 +475,14 @@
     currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
   };
 
+  // ⚡ MAPPING CHUẨN ĐÚNG CẤU TRÚC FILE EXCEL zzXLS.xlsx ⚡
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc danh mục vật tư...");
+        toast("⏳ Đang đọc danh mục vật tư chuẩn Excel...");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
@@ -492,17 +490,19 @@
         let rawProducts = [];
         for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
-          const code = r[1] ? String(r[1]).trim() : '';
-          const name = r[2] ? String(r[2]).trim() : '';
+          const code = r[0] ? String(r[0]).trim() : ''; // Cột 0: Ma VTHH
+          const name = r[1] ? String(r[1]).trim() : ''; // Cột 1: TenVTHH
+          const dvt = r[2] ? String(r[2]).trim() : 'hộp'; // Cột 2: Don Vi Tinh
+          
           if (code && code !== 'Ma VTHH' && code !== 'undefined') {
-            // Chuẩn hóa ĐVT đúng chuẩn (tránh lấy nhầm cột số tồn kho)
-            let rawDvt = r[3] ? String(r[3]).trim() : 'cây';
-            if (!isNaN(Number(rawDvt))) rawDvt = 'cây';
-
             rawProducts.push({
-              code: code, name: name, dvt: rawDvt,
-              stockDau: Number(r[5]) || 0, stockCuoi: Number(r[6]) || 0,
-              tyLeQuyDoi: Number(r[7]) || 50, dvt1: r[8] ? String(r[8]).trim() : '', price: 15000
+              code: code, 
+              name: name, 
+              dvt: dvt,
+              stockDau: Number(r[3]) || 0,     // Cột 3: SL Ton Dau
+              stockCuoi: Number(r[4]) || 0,    // Cột 4: SL Ton Cuoi
+              tyLeQuyDoi: Number(r[5]) || 50,  // Cột 5: Ty Le Quy Doi2
+              price: 15000
             });
           }
         }
@@ -512,7 +512,7 @@
           rawProducts.forEach(p => uniqueMap.set(p.code, p));
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast(`⏳ Đang lưu ${uniqueList.length} vật tư lên Firebase...`);
+          toast(`⏳ Đang đồng bộ ${uniqueList.length} vật tư lên Firebase...`);
           for (let i = 0; i < uniqueList.length; i += 450) {
             const chunk = uniqueList.slice(i, i + 450);
             const batch = writeBatch(db);
@@ -521,7 +521,7 @@
           }
           toast(`✅ Đồng bộ thành công ${uniqueList.length} vật tư!`);
           renderUI();
-        } else { alert("Không tìm thấy dữ liệu vật tư!"); }
+        } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
@@ -795,7 +795,7 @@
       }
       dropdown.innerHTML = matched.map(p => `
         <div class="autocomplete-item" onclick="selectProductFromAutocomplete('mavt', '${p.code}')">
-          <b style="color:var(--primary);">${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${!isNaN(Number(p.dvt))?'cây':(p.dvt||'cây')} | Giá: ${(p.price||0).toLocaleString()}đ</small>
+          <b style="color:var(--primary);">${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${p.dvt||'hộp'} | Giá: ${(p.price||0).toLocaleString()}đ</small>
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
@@ -929,6 +929,8 @@
         <div class="mobile-item-card">
           <div class="item-header"><span class="item-code">${p.code}</span></div>
           <div class="item-title">${p.name}</div>
+          <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
+          <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
         </div>
       `).join('');
     }, 120);
@@ -1134,15 +1136,11 @@
                     const nameKey = removeAccents(productSearchNameVal);
                     const isVisible = (!mavtKey || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
                     
-                    // Ép chuẩn đơn vị tính dạng text (cây, cái, thùng...) không bị nhận nhầm số
-                    let cleanDvt = p.dvt || 'cây';
-                    if (!isNaN(Number(cleanDvt))) cleanDvt = 'cây';
-
                     return `
                       <tr data-mavt="${mavtLower}" data-name="${nameLower}" style="${isVisible ? '' : 'display:none;'}">
                         <td><b>${p.code}</b></td>
                         <td><b>${p.name}</b></td>
-                        <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${cleanDvt}</span></td>
+                        <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
                         <td><input type="number" min="0" value="${c.le || 0}" oninput="updateCartDetail('${p.id}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
                         <td><input type="number" min="0" value="${c.kien || 0}" oninput="updateCartDetail('${p.id}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
                         <td><b>${p.tyLeQuyDoi || 50}</b></td>
@@ -1209,7 +1207,7 @@
             <div class="mobile-item-card">
               <div class="item-header">
                 <span class="item-code">${p.code}</span>
-                <span class="badge" style="background:#F1F5F9;color:var(--purple);">${!isNaN(Number(p.dvt))?'cây':(p.dvt || 'cây')}</span>
+                <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
               </div>
               <div class="item-title">${p.name}</div>
               <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
