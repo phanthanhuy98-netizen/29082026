@@ -12,6 +12,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
+<!-- SheetJS for Excel Reading -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <style>
   :root {
@@ -177,7 +179,7 @@
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [], promos = [], auditLogs = [], kpiTargets = [];
 
-  // 47 MÃ VẬT TƯ HÀNG HÓA CHUẨN XÁC TỪ FILE EXCEL (zzXLS.xlsx)
+  // 47 MÃ VẬT TƯ HÀNG HÓA BAN ĐẦU (TẢI TỪ FILE EXCEL)
   let products = [
     { id: "p1", code: "11YS/", name: "Young Star Slim BC", dvt: "cây", stockDau: 51, stockCuoi: 34, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 },
     { id: "p2", code: "11Z1", name: "TLSG_Quẹt Đ/tử", dvt: "cái", stockDau: 38, stockCuoi: 38, tyLeQuyDoi: 1000, dvt1: "", price: 5000 },
@@ -613,6 +615,55 @@
     downloadCSV(`ToaDonDay_${Date.now()}.csv`, rows);
   };
 
+  // TÍNH NĂNG IMPORT FILE EXCEL/CSV DANH MỤC VẬT TƯ TRỰC TIẾP
+  window.importProductsExcel = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        let newProducts = [];
+        // Giả định file Excel có cấu trúc chuẩn như file bạn cung cấp:
+        // Cột: [0]: Nhom Hang, [1]: Ma VTHH, [2]: TenVTHH, [3]: Slban, [4]: Don Vi Tinh, [5]: SL Ton Dau, [6]: SL Ton Cuoi, [7]: Ty Le Quy Doi2, [8]: Don Vi Tinh1
+        for (let i = 0; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          const code = r[1] ? String(r[1]).trim() : '';
+          const name = r[2] ? String(r[2]).trim() : '';
+          if (code && code !== 'Ma VTHH' && code !== 'undefined') {
+            newProducts.push({
+              id: `p_${i}`,
+              code: code,
+              name: name,
+              dvt: r[4] ? String(r[4]).trim() : 'cây',
+              stockDau: Number(r[5]) || 0,
+              stockCuoi: Number(r[6]) || 0,
+              tyLeQuyDoi: Number(r[7]) || 50,
+              dvt1: r[8] ? String(r[8]).trim() : '',
+              price: 15000 // Đơn giá mặc định có thể điều chỉnh
+            });
+          }
+        }
+
+        if (newProducts.length > 0) {
+          products = newProducts;
+          toast(`✅ Đã đồng bộ thành công ${products.length} mã vật tư từ file!`);
+          renderUI();
+        } else {
+          alert("Không tìm thấy dữ liệu mã vật tư hợp lệ trong file!");
+        }
+      } catch (err) {
+        alert("Lỗi đọc file Excel: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   window.importStoresCSV = function(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -865,6 +916,7 @@
     setNav('navSales', isSales);
     setNav('navStores', backOffice);
     setNav('navOrders', true); 
+    setNav('navProductsAdmin', backOffice);
     setNav('navKpi', true); 
     setNav('navAudit', backOffice); 
     setNav('navUsers', isAdmin);
@@ -1073,6 +1125,39 @@
       `;
     }
 
+    else if (currentTab === 'productsAdmin' && backOffice) {
+      main.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+          <h2 style="font-size:20px; font-weight:800; color:#1E293B;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Danh Mục Vật Tư Hàng Hóa</h2>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <label class="btn btn-green" style="margin:0;cursor:pointer;"><i class="fa-solid fa-file-arrow-up"></i> Tải File Danh Mục (XLSX/CSV) <input type="file" accept=".xlsx, .xls, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
+          </div>
+        </div>
+        <div class="card">
+          <input type="text" placeholder="🔍 Tìm kiếm nhanh Mã VTHH hoặc Tên Vật Tư..." onkeyup="window.adminSearchPrd = this.value.toLowerCase(); renderUI();" style="margin-bottom:14px;">
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>Ma VTHH</th><th>TenVTHH</th><th>ĐVT</th><th>SL Ton Dau</th><th>SL Ton Cuoi</th><th>Tỷ Lệ Quy Đổi</th><th>ĐVT1</th><th>Đơn Giá</th></tr></thead>
+              <tbody>
+                ${products.filter(p => (p.code||'').toLowerCase().includes(window.adminSearchPrd||'') || (p.name||'').toLowerCase().includes(window.adminSearchPrd||'')).map(p => `
+                  <tr>
+                    <td><b style="color:var(--primary);">${p.code}</b></td>
+                    <td><b>${p.name}</b></td>
+                    <td><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt}</span></td>
+                    <td>${p.stockDau}</td>
+                    <td>${p.stockCuoi}</td>
+                    <td>${p.tyLeQuyDoi}</td>
+                    <td>${p.dvt1 || '—'}</td>
+                    <td><b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
     else if (currentTab === 'orders') {
       const myOrders = isSales ? orders.filter(o => o.salesUid === currentUser.uid) : orders;
       const filteredOrders = myOrders.filter(o => {
@@ -1253,6 +1338,7 @@
         <button id="navSales" class="btn hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Toa Bán Hàng</button>
         <button id="navStores" class="btn hidden" onclick="switchTab('stores')"><i class="fa-solid fa-store"></i> Tuyến / Tiệm</button>
         <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
+        <button id="navProductsAdmin" class="btn hidden" onclick="switchTab('productsAdmin')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa</button>
         <button id="navKpi" class="btn" onclick="switchTab('kpi')"><i class="fa-solid fa-bullseye"></i> KPI</button>
         <button id="navAudit" class="btn hidden" onclick="switchTab('audit')"><i class="fa-solid fa-shield-halved"></i> Audit Log</button>
         <button id="navUsers" class="btn hidden" onclick="switchTab('users')"><i class="fa-solid fa-users"></i> Nhân Viên</button>
