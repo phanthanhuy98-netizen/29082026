@@ -176,8 +176,8 @@
   let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [], promos = [], auditLogs = [], kpiTargets = [];
-  
-  // KHỞI TẠO DANH MỤC VẬT TƯ CỐ ĐỊNH CHUẨN TỪ FILE EXCEL (zzXLS.xlsx)
+
+  // 47 MÃ VẬT TƯ HÀNG HÓA CHUẨN XÁC TỪ FILE EXCEL (zzXLS.xlsx)
   let products = [
     { id: "p1", code: "11YS/", name: "Young Star Slim BC", dvt: "cây", stockDau: 51, stockCuoi: 34, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 },
     { id: "p2", code: "11Z1", name: "TLSG_Quẹt Đ/tử", dvt: "cái", stockDau: 38, stockCuoi: 38, tyLeQuyDoi: 1000, dvt1: "", price: 5000 },
@@ -429,7 +429,6 @@
     navigator.geolocation.getCurrentPosition(async pos => {
       const userLat = pos.coords.latitude, userLng = pos.coords.longitude, accuracy = pos.coords.accuracy;
       
-      // Tự động ghim tọa độ nếu quầy chưa có
       if (navigator.onLine && (!store.lat || store.lat === 0 || !store.lng || store.lng === 0)) {
         try {
           await updateDoc(doc(db, "stores", storeId), { lat: userLat, lng: userLng });
@@ -698,6 +697,21 @@
     toast("Đã xác nhận thanh toán.");
   };
 
+  window.assignKpiTarget = async function(e) {
+    e.preventDefault();
+    const salesUid = document.getElementById('kpiSalesUid').value;
+    const month = document.getElementById('kpiMonth').value;
+    const targetRevenue = Number(document.getElementById('kpiRev').value || 0);
+    const sObj = users.find(u => u.uid === salesUid);
+    await addDoc(collection(db, "kpiTargets"), {
+      salesUid, salesName: sObj ? sObj.name : '', salesCode: sObj ? sObj.code : '',
+      month, targetRevenue, createdAt: serverTimestamp()
+    });
+    toast("🎯 Đã giao chỉ tiêu KPI thành công!");
+    document.getElementById('kpiForm').reset();
+  };
+  window.deleteKpiTarget = async function(id) { if(confirm("Xóa chỉ tiêu này?")) await deleteDoc(doc(db, "kpiTargets", id)); };
+
   window.addStore = async function(e) {
     e.preventDefault();
     const code = document.getElementById('stCode').value.trim();
@@ -851,8 +865,6 @@
     setNav('navSales', isSales);
     setNav('navStores', backOffice);
     setNav('navOrders', true); 
-    setNav('navPrd', false); // Đã bỏ màn hình tự thêm vật tư thủ công
-    setNav('navPromo', false); 
     setNav('navKpi', true); 
     setNav('navAudit', backOffice); 
     setNav('navUsers', isAdmin);
@@ -1114,10 +1126,23 @@
       const myTargets = isSales ? kpiTargets.filter(k => k.salesUid === currentUser.uid) : kpiTargets;
       main.innerHTML = `
         <h2 style="font-size:20px; font-weight:800; color:#1E293B;"><i class="fa-solid fa-bullseye" style="color:var(--amber);"></i> Theo Dõi KPI & Doanh Số</h2>
+        ${backOffice ? `
+          <div class="card" style="margin-bottom:20px;">
+            <h3 style="font-size:16px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-user-gear"></i> Giao Chỉ Tiêu KPI Cho Nhân Viên Sales</h3>
+            <form id="kpiForm" onsubmit="assignKpiTarget(event)">
+              <div class="grid" style="margin:0;">
+                <div><label>Chọn Nhân Viên Sales:</label><select id="kpiSalesUid" required>${users.filter(u=>u.role==='sales').map(su => `<option value="${su.uid}">[${su.code}] ${su.name}</option>`).join('')}</select></div>
+                <div><label>Tháng Mục Tiêu:</label><input type="text" id="kpiMonth" placeholder="2026-08" required></div>
+                <div><label>Chỉ Tiêu Doanh Số (VNĐ):</label><input type="number" id="kpiRev" value="50000000" required></div>
+              </div>
+              <button class="btn btn-green" style="margin-top:14px;width:100%;justify-content:center;font-weight:800;"><i class="fa-solid fa-floppy-disk"></i> Giao KPI</button>
+            </form>
+          </div>
+        ` : ''}
         <div class="card">
           <div class="table-responsive">
             <table>
-              <thead><tr><th>Nhân Viên Sales</th><th>Tháng</th><th>Tổng Doanh Số Đạt</th><th>Tiến Độ</th></tr></thead>
+              <thead><tr><th>Nhân Viên Sales</th><th>Tháng</th><th>Tổng Doanh Số Đạt / Chỉ Tiêu</th><th>Tiến Độ</th><th>Thao Tác</th></tr></thead>
               <tbody>
                 ${myTargets.map(kt => {
                   const salesOrders = orders.filter(o => o.salesUid === kt.salesUid && o.status !== 'Đã hủy');
@@ -1129,6 +1154,7 @@
                       <td><b>${kt.month}</b></td>
                       <td><b>${actualRev.toLocaleString()}đ</b> / ${(kt.targetRevenue||0).toLocaleString()}đ</td>
                       <td><span class="badge ${totalPercent>=100?'badge-success':'badge-pending'}">${totalPercent}%</span></td>
+                      <td>${backOffice ? `<button class="btn btn-red btn-sm" onclick="deleteKpiTarget('${kt.id}')"><i class="fa-solid fa-trash"></i></button>` : '—'}</td>
                     </tr>
                   `;
                 }).join('')}
@@ -1227,8 +1253,6 @@
         <button id="navSales" class="btn hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Toa Bán Hàng</button>
         <button id="navStores" class="btn hidden" onclick="switchTab('stores')"><i class="fa-solid fa-store"></i> Tuyến / Tiệm</button>
         <button id="navOrders" class="btn" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn Hàng</button>
-        <button id="navPrd" class="btn hidden" onclick="switchTab('products')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa</button>
-        <button id="navPromo" class="btn hidden" onclick="switchTab('promos')"><i class="fa-solid fa-gift"></i> Khuyến Mãi</button>
         <button id="navKpi" class="btn" onclick="switchTab('kpi')"><i class="fa-solid fa-bullseye"></i> KPI</button>
         <button id="navAudit" class="btn hidden" onclick="switchTab('audit')"><i class="fa-solid fa-shield-halved"></i> Audit Log</button>
         <button id="navUsers" class="btn hidden" onclick="switchTab('users')"><i class="fa-solid fa-users"></i> Nhân Viên</button>
