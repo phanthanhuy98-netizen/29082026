@@ -179,7 +179,7 @@
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [], promos = [], auditLogs = [], kpiTargets = [];
 
-  // 47 MÃ VẬT TƯ HÀNG HÓA BAN ĐẦU (TẢI TỪ FILE EXCEL)
+  // 47 MÃ VẬT TƯ HÀNG HÓA CHUẨN XÁC TỪ FILE EXCEL
   let products = [
     { id: "p1", code: "11YS/", name: "Young Star Slim BC", dvt: "cây", stockDau: 51, stockCuoi: 34, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 },
     { id: "p2", code: "11Z1", name: "TLSG_Quẹt Đ/tử", dvt: "cái", stockDau: 38, stockCuoi: 38, tyLeQuyDoi: 1000, dvt1: "", price: 5000 },
@@ -386,7 +386,15 @@
     currentUser = { uid: user.uid, email: user.email, name: profile.name, code: profile.code, role: profile.role };
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
-    currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
+    
+    // Tự động nhận diện tab từ URL hash (hỗ trợ link #productsAdmin)
+    const hashTab = window.location.hash.replace('#', '');
+    if (hashTab && ['dashboard', 'sales', 'stores', 'orders', 'productsAdmin', 'kpi', 'audit', 'users'].includes(hashTab)) {
+      currentTab = hashTab;
+    } else {
+      currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
+    }
+
     await initIndexedDB();
     attachListeners();
     renderUI();
@@ -615,7 +623,7 @@
     downloadCSV(`ToaDonDay_${Date.now()}.csv`, rows);
   };
 
-  // TÍNH NĂNG IMPORT FILE EXCEL/CSV DANH MỤC VẬT TƯ TRỰC TIẾP
+  // TÍNH NĂNG IMPORT FILE EXCEL VÀ TỰ ĐỘNG KHỬ TRÙNG (DEDUPLICATION) GỘP GIỮ 1
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -628,15 +636,13 @@
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        let newProducts = [];
-        // Giả định file Excel có cấu trúc chuẩn như file bạn cung cấp:
-        // Cột: [0]: Nhom Hang, [1]: Ma VTHH, [2]: TenVTHH, [3]: Slban, [4]: Don Vi Tinh, [5]: SL Ton Dau, [6]: SL Ton Cuoi, [7]: Ty Le Quy Doi2, [8]: Don Vi Tinh1
+        let rawProducts = [];
         for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
           const code = r[1] ? String(r[1]).trim() : '';
           const name = r[2] ? String(r[2]).trim() : '';
           if (code && code !== 'Ma VTHH' && code !== 'undefined') {
-            newProducts.push({
+            rawProducts.push({
               id: `p_${i}`,
               code: code,
               name: name,
@@ -645,14 +651,20 @@
               stockCuoi: Number(r[6]) || 0,
               tyLeQuyDoi: Number(r[7]) || 50,
               dvt1: r[8] ? String(r[8]).trim() : '',
-              price: 15000 // Đơn giá mặc định có thể điều chỉnh
+              price: 15000
             });
           }
         }
 
-        if (newProducts.length > 0) {
-          products = newProducts;
-          toast(`✅ Đã đồng bộ thành công ${products.length} mã vật tư từ file!`);
+        if (rawProducts.length > 0) {
+          // Tự động gom nhóm & loại bỏ trùng lặp mã Ma VTHH (Giữ lại dòng mới nhất hoặc dòng đầu tiên)
+          const uniqueMap = new Map();
+          rawProducts.forEach(p => {
+            uniqueMap.set(p.code, p); // Map key là code nên nếu trùng sẽ tự ghi đè/giữ 1
+          });
+          
+          products = Array.from(uniqueMap.values());
+          toast(`✅ Đã đồng bộ ${products.length} mã vật tư duy nhất (Đã tự động khử trùng lặp)!`);
           renderUI();
         } else {
           alert("Không tìm thấy dữ liệu mã vật tư hợp lệ trong file!");
@@ -1011,7 +1023,7 @@
                       <b>📅 ${ho.createdAt?.toDate ? ho.createdAt.toDate().toLocaleDateString('vi-VN') : ''}</b> ${ho.isReturnOrder?'<span class="badge badge-danger"><i class="fa-solid fa-rotate-left"></i> Trả hàng</span>':''} - <b style="color:var(--rose);">${(ho.amount||0).toLocaleString()}đ</b><br>
                       <small style="color:var(--text-muted);">${(ho.items||[]).map(i => `${i.name} (x${i.qty})`).join(', ')}</small>
                     </div>
-                  `).join('')
+                  `).join('')}
                 }
               </div>
             ` : ''}
@@ -1299,7 +1311,7 @@
 
   function roleLabel(r) { return { admin: 'Admin', manager: 'Giám Sát', accountant: 'Kế Toán', sales: 'Sales' }[r] || r; }
   function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
-  window.switchTab = function(tab) { currentTab = tab; renderUI(); };
+  window.switchTab = function(tab) { currentTab = tab; window.location.hash = tab; renderUI(); };
 </script>
 </head>
 
