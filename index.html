@@ -344,35 +344,28 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  // ⚡ SỬA LẠI: NẾU ĐÃ CÓ TỌA ĐỘ GPS THÌ MỞ THẲNG GOOGLE MAPS CHỈ ĐƯỜNG, NẾU CHƯA THÌ MỚI GHIM MỚI ⚡
-  window.handleCustomerLocationAction = function(storeId, hasLat) {
+  // ⚡ DÙNG CHO TRƯỜNG HỢP CHƯA CÓ GPS (GHI MỚI) ⚡
+  window.handleCustomerLocationAction = function(storeId) {
     const store = stores.find(s => s.id === storeId);
     if (!store) return;
 
-    if (hasLat && store.lat && store.lng) {
-      // Đã có tọa độ -> Bấm vào mở ngay Google Maps chỉ đường
-      const mapUrl = `https://www.google.com/maps/search/?api=1&query=${store.lat},${store.lng}`;
-      window.open(mapUrl, '_blank');
-    } else {
-      // Chưa có tọa độ -> Tiến hành ghim vị trí thực tế tại chỗ
-      if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
-      toast("📍 Đang lấy tọa độ GPS thực tế...");
-      navigator.geolocation.getCurrentPosition(async pos => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        try {
-          await updateDoc(doc(db, "stores", storeId), {
-            lat,
-            lng,
-            pinnedByCode: currentUser.code || 'NV',
-            pinnedByName: currentUser.name || 'Nhân viên'
-          });
-          toast(`✅ Đã ghim định vị thành công cho tiệm: ${store.name}`);
-        } catch (err) {
-          alert("Lỗi cập nhật GPS: " + err.message);
-        }
-      }, () => alert("Không lấy được tọa độ GPS. Vui lòng bật định vị trên thiết bị."), { enableHighAccuracy: true });
-    }
+    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
+    toast("📍 Đang lấy tọa độ GPS thực tế...");
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      try {
+        await updateDoc(doc(db, "stores", storeId), {
+          lat,
+          lng,
+          pinnedByCode: currentUser.code || 'NV',
+          pinnedByName: currentUser.name || 'Nhân viên'
+        });
+        toast(`✅ Đã ghim định vị thành công cho tiệm: ${store.name}`);
+      } catch (err) {
+        alert("Lỗi cập nhật GPS: " + err.message);
+      }
+    }, () => alert("Không lấy được tọa độ GPS. Vui lòng bật định vị trên thiết bị."), { enableHighAccuracy: true });
   };
 
   // ⚡ CHỈ ADMIN MỚI ĐƯỢC XÓA ĐỊNH VỊ CŨ ⚡
@@ -930,14 +923,22 @@
         const hasCoords = s.lat && s.lng && s.lat !== 0 && s.lng !== 0;
         const isAdmin = currentUser && currentUser.role === 'admin';
         const pinnedInfo = hasCoords ? `Đã ghim (${s.pinnedByCode || 'NV'})` : 'Ghim Định Vị';
+        const mapUrl = hasCoords ? `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}` : '#';
+
         return `
           <div class="mobile-item-card">
             <div class="item-header">
               <span class="item-code">${s.code || 'KH'}</span>
               <div style="display:flex; gap:6px; align-items:center;">
-                <button class="badge ${hasCoords ? 'badge-success' : 'badge-pending'}" style="border:none; cursor:pointer;" onclick="handleCustomerLocationAction('${s.id}', ${hasCoords})">
-                  <i class="fa-solid fa-location-dot"></i> ${pinnedInfo}
-                </button>
+                ${hasCoords ? `
+                  <a href="${mapUrl}" target="_blank" class="badge badge-success" style="border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
+                    <i class="fa-solid fa-location-dot"></i> ${pinnedInfo}
+                  </a>
+                ` : `
+                  <button class="badge badge-pending" style="border:none; cursor:pointer;" onclick="handleCustomerLocationAction('${s.id}')">
+                    <i class="fa-solid fa-location-dot"></i> ${pinnedInfo}
+                  </button>
+                `}
                 ${hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')" title="Admin xóa định vị cũ"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
               </div>
             </div>
