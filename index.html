@@ -140,6 +140,32 @@
   .modal-content{background:#fff;padding:28px;border-radius:24px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
 
+  /* Autocomplete Dropdown Styling for Super Smooth UI */
+  .autocomplete-wrapper { position: relative; }
+  .autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 12px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 1050;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    margin-top: 2px;
+  }
+  .autocomplete-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid #F1F5F9;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.15s;
+  }
+  .autocomplete-item:hover { background: #EEF2FF; color: var(--primary); }
+  .autocomplete-item:last-child { border-bottom: none; }
+
   @media (max-width: 768px) {
     body { padding: 4px; }
     .topbar { flex-direction: column; align-items: flex-start; }
@@ -202,10 +228,9 @@
 
   let adminSearchPrd = "";
   let customerSearchKey = "";
-  let storeSearchKey = "";
   let salesSearchKhCode = "";
   let salesSearchKhName = "";
-  let searchDebounceTimer = null; // Biến hỗ trợ Debounce chống lag
+  let searchDebounceTimer = null;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -309,7 +334,7 @@
     document.getElementById('appView').classList.remove('hidden');
     
     const hashTab = window.location.hash.replace('#', '');
-    if (hashTab && ['dashboard', 'sales', 'stores', 'customers', 'orders', 'productsAdmin', 'kpi', 'audit', 'users'].includes(hashTab)) {
+    if (hashTab && ['dashboard', 'sales', 'customers', 'orders', 'productsAdmin', 'kpi', 'audit', 'users'].includes(hashTab)) {
       currentTab = hashTab;
     } else {
       currentTab = (profile.role === 'sales') ? 'sales' : 'dashboard';
@@ -339,43 +364,13 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  window.pinStoreGPS = function(storeId) {
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      const pinnedBy = `[${currentUser.code}] ${currentUser.name}`;
-      const pinnedAt = new Date().toLocaleString('vi-VN');
-      if (navigator.onLine) {
-        await updateDoc(doc(db, "stores", storeId), { lat, lng, pinnedBy, pinnedAt });
-      }
-      toast(`📌 Đã ghim GPS thành công bởi ${currentUser.name}!`);
-      renderUI();
-    }, () => alert("Lỗi lấy vị trí GPS điện thoại."));
-  };
-
-  window.clearStoreGPS = async function(storeId) {
-    const userRole = (currentUser?.role || '').toLowerCase();
-    if (userRole !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa ghim GPS!");
-    if (!confirm("Bạn có chắc chắn muốn xóa tọa độ GPS để ghim mới không?")) return;
-    if (navigator.onLine) {
-      await updateDoc(doc(db, "stores", storeId), { lat: 0, lng: 0, pinnedBy: '', pinnedAt: '' });
-      toast("🗑️ Đã xóa ghim GPS thành công!");
-      renderUI();
-    }
-  };
-
-  window.openMapDirections = function(lat, lng) {
-    if (!lat || !lng) return alert("Chưa có tọa độ GPS!");
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if (isIOS) {
-      window.location.href = `maps://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`;
-    } else {
-      window.location.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-    }
-  };
-
   window.selectStoreDirectly = function(storeId) {
     activeVisitedStore = stores.find(s => s.id === storeId);
     isFilterCollapsed = true;
+    salesSearchKhName = activeVisitedStore ? activeVisitedStore.name : '';
+    salesSearchKhCode = activeVisitedStore ? (activeVisitedStore.code || '') : '';
+    const dropdown = document.getElementById('salesNameDropdown');
+    if (dropdown) dropdown.classList.add('hidden');
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
     renderUI();
   };
@@ -449,13 +444,6 @@
     }
     
     currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; renderUI();
-  };
-
-  window.downloadCSV = function(filename, rows) {
-    const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\r\n');
-    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob); link.download = filename; link.click();
   };
 
   window.importProductsExcel = function(event) {
@@ -580,19 +568,6 @@
   };
   window.deleteKpiTarget = async function(id) { if(confirm("Xóa KPI này?")) await deleteDoc(doc(db, "kpiTargets", id)); };
 
-  window.addStore = async function(e) {
-    e.preventDefault();
-    const code = document.getElementById('stCode').value.trim();
-    const name = document.getElementById('stName').value.trim();
-    const address = document.getElementById('stAddr').value.trim();
-    const phone = document.getElementById('stPhone').value.trim();
-    const zalo = document.getElementById('stZalo').value.trim();
-    const creditLimit = Number(document.getElementById('stCredit').value || 20000000);
-    await addDoc(collection(db, "stores"), { code, name, address, phone, zalo, routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit, lat: 0, lng: 0, pinnedBy: '', pinnedAt: '', createdAt: serverTimestamp() });
-    toast("Đã thêm điểm bán mới!");
-    document.getElementById('stForm').reset();
-  };
-
   window.addUser = async function(e) {
     e.preventDefault();
     const code = document.getElementById('usCode').value.trim();
@@ -671,17 +646,65 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // Debounced input handlers để loại bỏ hoàn toàn hiện tượng lag khi gõ nhanh
-  window.setSalesSearchKhCode = function(val) {
+  // ⚡ ULTRA-SMOOTH AUTOCOMPLETE FILTER LOGIC FOR TENKH & MAKH ⚡
+  window.onSalesCodeInput = function(val) {
     salesSearchKhCode = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => renderUI(), 120);
+    searchDebounceTimer = setTimeout(() => {
+      const queryKey = removeAccents(val.trim());
+      const dropdown = document.getElementById('salesCodeDropdown');
+      if (!dropdown) return;
+      if (queryKey === "") {
+        dropdown.classList.add('hidden');
+        return;
+      }
+      const matched = stores.filter(s => removeAccents(s.code || '').includes(queryKey)).slice(0, 15);
+      if (matched.length === 0) {
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy mã KH phù hợp</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+      }
+      dropdown.innerHTML = matched.map(s => `
+        <div class="autocomplete-item" onclick="selectStoreDirectly('${s.id}')">
+          <b>${s.code}</b> — ${s.name} <small style="color:var(--text-muted);display:block;">${s.address||''}</small>
+        </div>
+      `).join('');
+      dropdown.classList.remove('hidden');
+    }, 80);
   };
-  
-  window.setSalesSearchKhName = function(val) {
+
+  window.onSalesNameInput = function(val) {
     salesSearchKhName = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => renderUI(), 120);
+    searchDebounceTimer = setTimeout(() => {
+      const queryKey = removeAccents(val.trim());
+      const dropdown = document.getElementById('salesNameDropdown');
+      if (!dropdown) return;
+      if (queryKey === "") {
+        dropdown.classList.add('hidden');
+        return;
+      }
+      const matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey)).slice(0, 20);
+      
+      // Sort priority: startsWith first
+      matched.sort((a, b) => {
+        let scoreA = removeAccents(a.name||'').startsWith(queryKey) ? 2 : 1;
+        let scoreB = removeAccents(b.name||'').startsWith(queryKey) ? 2 : 1;
+        return scoreB - scoreA;
+      });
+
+      if (matched.length === 0) {
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted);">Không tìm thấy khách hàng phù hợp</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+      }
+      dropdown.innerHTML = matched.map(s => `
+        <div class="autocomplete-item" onclick="selectStoreDirectly('${s.id}')">
+          <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;">${s.address||'Chưa cập nhật địa chỉ'}</small>
+        </div>
+      `).join('');
+      dropdown.classList.remove('hidden');
+    }, 80);
   };
 
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
@@ -706,13 +729,9 @@
         });
         
         filtered.sort((a, b) => {
-          let scoreA = 0, scoreB = 0;
-          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
-          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
-          if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
-          if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return nA.localeCompare(nB);
+          let scoreA = removeAccents(a.name || '').startsWith(queryKey) ? 2 : 1;
+          let scoreB = removeAccents(b.name || '').startsWith(queryKey) ? 2 : 1;
+          return scoreB - scoreA;
         });
       }
       const displayList = filtered.slice(0, 30);
@@ -732,42 +751,7 @@
           <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
         </div>
       `).join('');
-    }, 120);
-  };
-
-  window.onStoreSearchInput = function(val) {
-    storeSearchKey = val;
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      const container = document.getElementById('storeCardsContainer');
-      const countEl = document.getElementById('storeCount');
-      if (!container) return;
-      const queryKey = removeAccents(val.trim());
-      let filtered = stores;
-      if (queryKey !== "") {
-        filtered = stores.filter(s => {
-          return removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey);
-        });
-        filtered.sort((a, b) => {
-          let scoreA = 0, scoreB = 0;
-          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
-          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
-          if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
-          if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return nA.localeCompare(nB);
-        });
-      }
-      const displayList = filtered.slice(0, 30);
-      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
-      container.innerHTML = displayList.map(s => `
-        <div class="mobile-item-card">
-          <div class="item-header"><span class="item-code">${s.code || 'KH'}</span></div>
-          <div class="item-title">${s.name}</div>
-          <div class="item-info">${s.address || ''}</div>
-        </div>
-      `).join('');
-    }, 120);
+    }, 100);
   };
 
   window.onAdminSearchInput = function(val) {
@@ -780,25 +764,16 @@
       let filtered = products;
       if (adminSearchPrd !== "") {
         filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
-        filtered.sort((a, b) => {
-          let scoreA = 0, scoreB = 0;
-          const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
-          const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
-          if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
-          if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return nA.localeCompare(nB);
-        });
       }
       const displayList = filtered.slice(0, 30);
-      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
+      if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
       container.innerHTML = displayList.map(p => `
         <div class="mobile-item-card">
           <div class="item-header"><span class="item-code">${p.code}</span></div>
           <div class="item-title">${p.name}</div>
         </div>
       `).join('');
-    }, 120);
+    }, 100);
   };
 
   function attachListeners() {
@@ -824,7 +799,6 @@
 
     setNav('navDash', backOffice); 
     setNav('navSales', true); 
-    setNav('navStores', backOffice);
     setNav('navCustomers', backOffice);
     setNav('navOrders', true); 
     setNav('navProductsAdmin', backOffice);
@@ -899,37 +873,6 @@
     }
 
     else if (currentTab === 'sales') {
-      const filteredStores = stores.filter(s => {
-        const matchCode = removeAccents(s.code||'').includes(removeAccents(salesSearchKhCode));
-        const matchName = removeAccents(s.name||'').includes(removeAccents(salesSearchKhName));
-        return matchCode && matchName;
-      });
-
-      if (salesSearchKhName || salesSearchKhCode) {
-        const nameQuery = removeAccents(salesSearchKhName.trim());
-        const codeQuery = removeAccents(salesSearchKhCode.trim());
-        filteredStores.sort((a, b) => {
-          let scoreA = 0, scoreB = 0;
-          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
-          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
-          
-          if (nameQuery && nA.startsWith(nameQuery)) scoreA += 2;
-          else if (nameQuery && nA.includes(nameQuery)) scoreA += 1;
-          
-          if (codeQuery && cA.startsWith(codeQuery)) scoreA += 2;
-          else if (codeQuery && cA.includes(codeQuery)) scoreA += 1;
-          
-          if (nameQuery && nB.startsWith(nameQuery)) scoreB += 2;
-          else if (nameQuery && nB.includes(nameQuery)) scoreB += 1;
-          
-          if (codeQuery && cB.startsWith(codeQuery)) scoreB += 2;
-          else if (codeQuery && cB.includes(codeQuery)) scoreB += 1;
-
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return nA.localeCompare(nB);
-        });
-      }
-
       let cartTotalAmount = 0;
       products.forEach(p => {
         const c = currentCart[p.id];
@@ -945,35 +888,24 @@
 
         <div class="card" style="margin-bottom:14px; background:#F8FAFC; border:1px solid #CBD5E1;">
           <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleFilterCollapse()">
-            <h3 style="font-size:14px; font-weight:800; margin:0;"><i class="fa-solid fa-filter" style="color:var(--primary);"></i> Lọc Khách Hàng Chuyên Nghiệp (Mã KH / Tên KH)</h3>
+            <h3 style="font-size:14px; font-weight:800; margin:0;"><i class="fa-solid fa-filter" style="color:var(--primary);"></i> Tìm Kiếm Khách Hàng Siêu Mượt (Mã KH / Tên KH)</h3>
             <span style="font-size:13px; font-weight:800; color:var(--primary);"><i class="fa-solid ${isFilterCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}"></i> ${isFilterCollapsed ? 'Mở rộng' : 'Thu gọn'}</span>
           </div>
 
           <div style="${isFilterCollapsed ? 'display:none;' : 'display:block; margin-top:10px;'}">
             <div class="grid" style="margin:0; gap:10px;">
-              <div>
-                <label style="font-size:11px;font-weight:700;color:var(--text-muted);">Lọc theo Mã KH (MaKH):</label>
-                <input type="text" id="salesCodeInput" placeholder="Nhập mã KH cần tìm..." oninput="setSalesSearchKhCode(this.value)" value="${salesSearchKhCode}" style="margin:0; background:#fff;">
+              <div class="autocomplete-wrapper">
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);">Lọc theo Mã KH:</label>
+                <input type="text" id="salesCodeInput" placeholder="Nhập mã KH..." oninput="onSalesCodeInput(this.value)" value="${salesSearchKhCode}" autocomplete="off" style="margin:0; background:#fff;">
+                <div id="salesCodeDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
-              <div>
-                <label style="font-size:11px;font-weight:700;color:var(--text-muted);">Lọc theo Tên KH (TenKH):</label>
-                <input type="text" id="salesNameInput" placeholder="Nhập tên KH cần tìm..." oninput="setSalesSearchKhName(this.value)" value="${salesSearchKhName}" style="margin:0; background:#fff;">
+              <div class="autocomplete-wrapper">
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);">Lọc theo Tên KH:</label>
+                <input type="text" id="salesNameInput" placeholder="Nhập tên KH hoặc địa chỉ..." oninput="onSalesNameInput(this.value)" value="${salesSearchKhName}" autocomplete="off" style="margin:0; background:#fff;">
+                <div id="salesNameDropdown" class="autocomplete-dropdown hidden"></div>
               </div>
             </div>
-
-            <div style="margin-top:10px; max-height:180px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:12px; background:#fff; padding:6px; box-shadow:inset 0 2px 4px rgba(0,0,0,0.02);">
-              ${filteredStores.length > 0 ? filteredStores.slice(0, 30).map(s => `
-                <div style="padding:8px 12px; border-bottom:1px solid #F1F5F9; display:flex; justify-content:space-between; align-items:center; transition:background 0.2s; border-radius:8px;" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background='#fff'">
-                  <div>
-                    <span style="background:#EEF2FF; color:var(--primary); padding:2px 6px; border-radius:6px; font-size:11px; font-weight:800;">${s.code||'KH'}</span>
-                    <b style="font-size:14px; color:#0F172A; margin-left:6px;">${s.name}</b>
-                    <small style="color:var(--text-muted); display:block; margin-top:2px;">${s.address||'Chưa cập nhật địa chỉ'}</small>
-                  </div>
-                  <button class="btn btn-amber btn-sm" style="padding:6px 14px;" onclick="selectStoreDirectly('${s.id}')"><i class="fa-solid fa-check"></i> Chọn Lập Đơn</button>
-                </div>
-              `).join('') : '<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Không tìm thấy khách hàng phù hợp với bộ lọc!</div>'}
-            </div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:6px; text-align:right;">Hiển thị tối ưu 30 kết quả nhanh / Tổng kho: <b>${stores.length}</b></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:8px; text-align:right;">Tổng kho dữ liệu: <b>${stores.length}</b> khách hàng</div>
           </div>
         </div>
 
@@ -1033,45 +965,10 @@
         ` : `
           <div class="card" style="text-align:center; padding:40px; color:var(--text-muted); font-weight:700;">
             <i class="fa-solid fa-hand-pointer" style="font-size:28px; color:var(--amber); margin-bottom:10px;"></i><br>
-            Vui lòng nhập Mã KH hoặc Tên KH vào bộ lọc phía trên và bấm <b>Chọn Lập Đơn</b> để hiển thị bảng vật tư chi tiết.
+            Vui lòng nhập tên khách hàng vào ô tìm kiếm ở trên và bấm chọn khách hàng để hiển thị bảng vật tư chi tiết.
           </div>
         `}
       `;
-
-      setTimeout(() => {
-        const codeInput = document.getElementById('salesCodeInput');
-        const nameInput = document.getElementById('salesNameInput');
-        if (codeInput && salesSearchKhCode) { codeInput.value = salesSearchKhCode; codeInput.focus(); codeInput.setSelectionRange(codeInput.value.length, codeInput.value.length); }
-        if (nameInput && salesSearchKhName) { nameInput.value = salesSearchKhName; nameInput.focus(); nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length); }
-      }, 50);
-    }
-
-    else if (currentTab === 'stores' && backOffice) {
-      main.innerHTML = `
-        <h2 style="font-size:18px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-store" style="color:var(--primary);"></i> Quản Lý Tuyến & Điểm Bán (${stores.length})</h2>
-        <div class="card" style="margin-bottom:12px;">
-          <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;"><i class="fa-solid fa-plus"></i> Thêm Điểm Bán Mới</h3>
-          <form id="stForm" onsubmit="addStore(event)">
-            <div class="grid" style="margin:0;">
-              <div><label>Mã DTPN:</label><input type="text" id="stCode" placeholder="VM3IU" required></div>
-              <div><label>Tên Quầy:</label><input type="text" id="stName" placeholder="TH Thành Đô" required></div>
-              <div><label>Địa Chỉ:</label><input type="text" id="stAddr" placeholder="QL14" required></div>
-              <div><label>SĐT:</label><input type="text" id="stPhone" placeholder="0948521213"></div>
-              <div><label>Zalo:</label><input type="text" id="stZalo" placeholder="0948521213"></div>
-              <div><label>Hạn Mức Nợ:</label><input type="number" id="stCredit" value="20000000" required></div>
-            </div>
-            <button class="btn btn-green" style="width:100%;margin-top:10px;justify-content:center;font-weight:800;">Lưu Điểm Bán</button>
-          </form>
-        </div>
-        <div class="card" style="margin-bottom:10px;">
-          <input type="text" id="storeSearchInput" placeholder="🔍 Gõ tìm kiếm điểm bán (mã, tên, địa chỉ, SĐT)..." oninput="onStoreSearchInput(this.value)" value="${storeSearchKey}" style="margin:0;">
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <small id="storeCount" style="color:var(--text-muted); font-weight:700;">Hiển thị điểm bán</small>
-        </div>
-        <div id="storeCardsContainer"></div>
-      `;
-      setTimeout(() => onStoreSearchInput(storeSearchKey), 10);
     }
 
     else if (currentTab === 'customers' && backOffice) {
@@ -1095,15 +992,6 @@
       let filteredAdminProducts = products;
       if (adminSearchPrd) {
         filteredAdminProducts = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
-        filteredAdminProducts.sort((a, b) => {
-          let scoreA = 0, scoreB = 0;
-          const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
-          const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
-          if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
-          if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return nA.localeCompare(nB);
-        });
       }
 
       main.innerHTML = `
@@ -1303,7 +1191,6 @@
       <div class="nav-btns">
         <button id="navDash" class="btn btn-amber btn-sm hidden" onclick="switchTab('dashboard')"><i class="fa-solid fa-chart-pie"></i> Dash</button>
         <button id="navSales" class="btn btn-sm hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Bán Hàng</button>
-        <button id="navStores" class="btn btn-sm hidden" onclick="switchTab('stores')"><i class="fa-solid fa-store"></i> Tuyến</button>
         <button id="navCustomers" class="btn btn-sm hidden" onclick="switchTab('customers')"><i class="fa-solid fa-address-book"></i> Khách Hàng</button>
         <button id="navProductsAdmin" class="btn btn-sm hidden" onclick="switchTab('productsAdmin')"><i class="fa-solid fa-boxes-stacked"></i> Hàng Hóa</button>
         <button id="navOrders" class="btn btn-sm" onclick="switchTab('orders')"><i class="fa-solid fa-box-archive"></i> Đơn</button>
