@@ -816,6 +816,15 @@
   };
   window.deleteKpiTarget = async function(id) { if(confirm("Xóa chỉ tiêu này?")) await deleteDoc(doc(db, "kpiTargets", id)); };
 
+  // TÍNH NĂNG TỰ ĐỘNG LẤY KINH ĐỘ VĨ ĐỘ KHI THÊM QUẦY
+  window.autoGetStoreGPS = function() {
+    navigator.geolocation.getCurrentPosition(pos => {
+      document.getElementById('stLat').value = pos.coords.latitude.toFixed(6);
+      document.getElementById('stLng').value = pos.coords.longitude.toFixed(6);
+      toast("📍 Đã tự động lấy kinh độ, vĩ độ hiện tại thành công!");
+    }, () => alert("⛔ Không thể lấy vị trí GPS. Hãy kiểm tra cài đặt định vị."), { enableHighAccuracy: true });
+  };
+
   window.addStore = async function(e) {
     e.preventDefault();
     const code = document.getElementById('stCode').value.trim();
@@ -928,7 +937,6 @@
       leafletMapInstance.setView([foundCheckin.lat, foundCheckin.lng], 16);
       toast(`🔍 Đã tìm thấy vị trí check-in: ${foundCheckin.salesName} tại ${foundCheckin.storeName}`);
     } else {
-      // Thử tìm trong danh sách cửa hàng (Stores)
       let foundStore = stores.find(s => 
         (s.name||'').toLowerCase().includes(key) || 
         (s.code||'').toLowerCase().includes(key)
@@ -1011,7 +1019,6 @@
               <button id="toggleMapBtn" class="btn btn-purple btn-sm" onclick="toggleLiveMap()">${isMapVisible ? '<i class="fa-solid fa-eye-slash"></i> Ẩn Bản Đồ' : '<i class="fa-solid fa-map-location-dot"></i> Mở Bản Đồ Live Tracking'}</button>
             </div>
             
-            <!-- THANH TÌM KIẾM & ĐỊNH VỊ BẢN THÂN TRÊN LIVE MAP -->
             <div id="mapContainer" class="${isMapVisible ? '' : 'hidden'}">
               <div style="display:flex; gap:10px; margin:12px 0; flex-wrap:wrap; align-items:center;">
                 <input type="text" id="mapSearchInput" placeholder="🔍 Nhập tên/mã nhân viên hoặc tên tiệm quầy để định vị nhanh..." style="flex:1; margin:0;" onchange="searchOnLiveMap(this.value)">
@@ -1099,7 +1106,6 @@
                 <div style="margin-top:10px;font-size:12px;font-weight:700;"><span>Nợ cũ tồn: <b style="color:var(--rose);">${unpaidOrdersTotal.toLocaleString()}đ</b> / Hạn mức: <b>${(activeVisitedStore.creditLimit||20000000).toLocaleString()}đ</b></span></div>
               </div>
 
-              <!-- NHÓM NGÀNH HÀNG TAB FILTER -->
               <div class="category-tabs">
                 ${categories.map(cat => `<button class="cat-tab-btn ${activeCategory===cat?'active':''}" onclick="setActiveCategory('${cat}')">${cat === 'ALL' ? '📦 Tất cả ngành hàng' : cat}</button>`).join('')}
               </div>
@@ -1183,18 +1189,26 @@
               </div>
 
               <label>Hạn Mức Nợ:</label><input type="number" id="stCredit" value="20000000" required>
-              <label>Lat:</label><input type="number" step="any" id="stLat" placeholder="10.7769">
-              <label>Lng:</label><input type="number" step="any" id="stLng" placeholder="106.7009">
-              <button class="btn btn-green" style="width:100%;margin-top:8px;justify-content:center;font-weight:800;"><i class="fa-solid fa-floppy-disk"></i> Lưu Điểm Bán</button>
+              
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                <label style="margin:0;">Tọa Độ GPS (Lat / Lng):</label>
+                <button type="button" class="btn btn-amber btn-sm" onclick="autoGetStoreGPS()"><i class="fa-solid fa-location-crosshairs"></i> Lấy GPS Hiện Tại</button>
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:6px;">
+                <input type="number" step="any" id="stLat" placeholder="Lat (Vĩ độ)" required>
+                <input type="number" step="any" id="stLng" placeholder="Lng (Kinh độ)" required>
+              </div>
+
+              <button class="btn btn-green" style="width:100%;margin-top:12px;justify-content:center;font-weight:800;"><i class="fa-solid fa-floppy-disk"></i> Lưu Điểm Bán</button>
             </form>
           </div>
           <div class="card">
             <h3 style="font-size:15px; font-weight:800;">Danh Sách Tuyến Điểm Bán</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>MaDTPN</th><th>TenQuay</th><th>DiaChi</th><th>TuyenLichTrinh</th><th>HanMucNo</th><th>ThaoTac</th></tr></thead>
+                <thead><tr><th>MaDTPN</th><th>TenQuay</th><th>DiaChi</th><th>TuyenLichTrinh</th><th>HanMucNo</th><th>Toạ Độ (Lat, Lng)</th><th>ThaoTac</th></tr></thead>
                 <tbody>
-                  ${stores.map(s => `<tr><td><b>${s.code||'KH'}</b></td><td><b style="color:#1E293B;">${s.name}</b></td><td>${s.address||''}</td><td><span class="badge badge-pending"><i class="fa-solid fa-route"></i> ${s.routeDay||'Linh động'}</span></td><td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
+                  ${stores.map(s => `<tr><td><b>${s.code||'KH'}</b></td><td><b style="color:#1E293B;">${s.name}</b></td><td>${s.address||''}</td><td><span class="badge badge-pending"><i class="fa-solid fa-route"></i> ${s.routeDay||'Linh động'}</span></td><td><b>${(s.creditLimit||0).toLocaleString()}đ</b></td><td><small>${s.lat || 0}, ${s.lng || 0}</small></td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
                 </tbody>
               </table>
             </div>
@@ -1243,7 +1257,7 @@
                       <button class="btn btn-amber btn-sm" onclick="printReceipt('${o.id}')"><i class="fa-solid fa-print"></i> In</button>
                       ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-green btn-sm" onclick="approveOrder('${o.id}')"><i class="fa-solid fa-check"></i></button>` : ''}
                       ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-red btn-sm" onclick="cancelOrder('${o.id}')"><i class="fa-solid fa-xmark"></i></button>` : ''}
-                      ${(isAdmin||isAccountant) && o.paymentStatus!=='Đã thanh toán' ? `<button class="btn btn-amber btn-sm" onclick="confirmPayment('${o.id}')">TT</button>` : ''}
+                      {(isAdmin||isAccountant) && o.paymentStatus!=='Đã thanh toán' ? `<button class="btn btn-amber btn-sm" onclick="confirmPayment('${o.id}')">TT</button>` : ''}
                     </td>
                   </tr>
                 `).join('')}
