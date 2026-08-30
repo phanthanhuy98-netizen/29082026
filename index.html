@@ -186,18 +186,12 @@
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [], promos = [], auditLogs = [], kpiTargets = [];
   
-  // Dữ liệu mẫu dự phòng ban đầu (47 mã chuẩn) để tránh trống dữ liệu
   let products = [
     { id: "p1", code: "11YS/", name: "Young Star Slim BC", dvt: "cây", stockDau: 51, stockCuoi: 34, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 },
     { id: "p2", code: "11Z1", name: "TLSG_Quẹt Đ/tử", dvt: "cái", stockDau: 38, stockCuoi: 38, tyLeQuyDoi: 1000, dvt1: "", price: 5000 },
     { id: "p3", code: "11SGSX/", name: "Sài Gòn Star xanh super slim BC", dvt: "cây", stockDau: 2567, stockCuoi: 3369, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 18000 },
     { id: "p4", code: "11D/", name: "Du Lịch BM", dvt: "cây", stockDau: 119, stockCuoi: 82, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 12000 },
-    { id: "p5", code: "11E2/", name: "Era Đỏ", dvt: "cây", stockDau: 118, stockCuoi: 76, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 14000 },
-    { id: "p6", code: "11ET2/", name: "Era The (Menthol)", dvt: "cây", stockDau: 2415, stockCuoi: 2384, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 16000 },
-    { id: "p7", code: "11F2/", name: "Fasol", dvt: "cây", stockDau: 14325, stockCuoi: 13478, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 13000 },
-    { id: "p8", code: "11H/", name: "Hòa Bình BM", dvt: "cây", stockDau: 762, stockCuoi: 647, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 13500 },
-    { id: "p9", code: "11HBC2/", name: "Hòa Bình BC", dvt: "cây", stockDau: 32990, stockCuoi: 31534, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 14000 },
-    { id: "p10", code: "11M/", name: "Mélia mềm", dvt: "cây", stockDau: 693, stockCuoi: 771, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 15000 }
+    { id: "p5", code: "11E2/", name: "Era Đỏ", dvt: "cây", stockDau: 118, stockCuoi: 76, tyLeQuyDoi: 50, dvt1: "sl_LE", price: 14000 }
   ];
 
   let currentCart = {};
@@ -596,14 +590,13 @@
     downloadCSV(`ToaDonDay_${Date.now()}.csv`, rows);
   };
 
-  // CƠ CHẾ CHIA NHỎ BATCH (CHUNKED BATCH) ĐỂ ĐẨY 4000+ DÒNG MÀ KHÔNG BỊ TREO TRÌNH DUYỆT
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc file Excel (4000+ dòng)... Vui lòng đợi trong giây lát.");
+        toast("⏳ Đang đọc file Excel (4000+ dòng)... Vui lòng đợi.");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
@@ -635,9 +628,7 @@
           rawProducts.forEach(p => { uniqueMap.set(p.code, p); });
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast(`⏳ Đang lưu ${uniqueList.length} mã vật tư lên hệ thống đám mây (chia nhỏ batch)...`);
-
-          // Chia nhỏ thành các cụm 400 items mỗi batch để chống treo máy
+          toast(`⏳ Đang lưu ${uniqueList.length} mã vật tư lên hệ thống đám mây...`);
           const chunkSize = 400;
           for (let i = 0; i < uniqueList.length; i += chunkSize) {
             const chunk = uniqueList.slice(i, i + chunkSize);
@@ -889,7 +880,40 @@
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setOrderFilterStatus = function(val) { orderFilterStatus = val; renderUI(); };
 
-  window.setAdminSearchPrd = function(val) { adminSearchPrd = val.toLowerCase(); renderUI(); };
+  // Khắc phục hoàn toàn lỗi mất nét/focus khi gõ tìm kiếm
+  window.onAdminSearchInput = function(val) {
+    adminSearchPrd = val.toLowerCase();
+    const tbody = document.getElementById('adminProductsTbody');
+    const countEl = document.getElementById('adminProductsCount');
+    if (!tbody) return;
+
+    const uniqueDvts = adminFilterDvt;
+    let filtered = products.filter(p => {
+      const matchKey = (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd);
+      const matchDvt = uniqueDvts === 'ALL' || p.dvt === uniqueDvts;
+      return matchKey && matchDvt;
+    });
+
+    if (adminSortBy === 'codeAsc') filtered.sort((a,b) => (a.code||'').localeCompare(b.code||''));
+    else if (adminSortBy === 'nameAsc') filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    else if (adminSortBy === 'stockDesc') filtered.sort((a,b) => (b.stockCuoi||0) - (a.stockCuoi||0));
+
+    if (countEl) countEl.innerHTML = `Hiển thị: <b>${filtered.length}</b> / ${products.length} vật tư`;
+
+    tbody.innerHTML = filtered.slice(0, 300).map(p => `
+      <tr>
+        <td class="col-code"><b style="color:var(--primary);">${p.code}</b></td>
+        <td class="col-name" style="font-weight:600;">${p.name}</td>
+        <td class="col-dvt"><span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt}</span></td>
+        <td class="col-num">${p.stockDau}</td>
+        <td class="col-num">${p.stockCuoi}</td>
+        <td class="col-num">${p.tyLeQuyDoi}</td>
+        <td class="col-num">${p.dvt1 || '—'}</td>
+        <td class="col-num"><b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></td>
+      </tr>
+    `).join('');
+  };
+
   window.setAdminFilterDvt = function(val) { adminFilterDvt = val; renderUI(); };
   window.setAdminSortBy = function(val) { adminSortBy = val; renderUI(); };
 
@@ -1161,7 +1185,8 @@
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; align-items:center;">
             <div>
               <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ khóa (Mã hoặc Tên):</label>
-              <input type="text" placeholder="🔍 Nhập mã VTHH hoặc tên..." onkeyup="setAdminSearchPrd(this.value)" value="${adminSearchPrd}" style="margin:4px 0 0;">
+              <!-- SỬ DỤNG oninput và KHÔNG GỌI renderUI() TRỰC TIẾP ĐỂ GIỮ NGUYÊN FOCUS KHI GÕ -->
+              <input type="text" id="adminSearchInput" placeholder="🔍 Nhập mã VTHH hoặc tên..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:4px 0 0;">
             </div>
             <div>
               <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Lọc theo ĐVT:</label>
@@ -1184,7 +1209,7 @@
 
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <small style="color:var(--text-muted); font-weight:700;">Hiển thị: <b>${filteredAdminProducts.length}</b> / ${products.length} vật tư</small>
+            <small id="adminProductsCount" style="color:var(--text-muted); font-weight:700;">Hiển thị: <b>${filteredAdminProducts.length}</b> / ${products.length} vật tư</small>
           </div>
           <div class="table-responsive">
             <table>
@@ -1200,7 +1225,7 @@
                   <th class="col-num">Đơn Giá</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="adminProductsTbody">
                 ${filteredAdminProducts.slice(0, 300).map(p => `
                   <tr>
                     <td class="col-code"><b style="color:var(--primary);">${p.code}</b></td>
