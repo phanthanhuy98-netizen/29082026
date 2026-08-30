@@ -475,14 +475,14 @@
     currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
   };
 
-  // ⚡ MAPPING CHUẨN ĐÚNG CẤU TRÚC FILE EXCEL zzXLS.xlsx ⚡
+  // ⚡ GHI ĐÈ & XÓA TRÙNG (DEDUP & OVERWRITE) CHO EXCEL ⚡
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc danh mục vật tư chuẩn Excel...");
+        toast("⏳ Đang đọc và loại bỏ dòng trùng lặp...");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
@@ -508,18 +508,30 @@
         }
 
         if (rawProducts.length > 0) {
+          // Lọc trùng theo Mã Vật Tư (giữ cái đầu tiên)
           const uniqueMap = new Map();
-          rawProducts.forEach(p => uniqueMap.set(p.code, p));
+          rawProducts.forEach(p => {
+            if (!uniqueMap.has(p.code)) uniqueMap.set(p.code, p);
+          });
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast(`⏳ Đang đồng bộ ${uniqueList.length} vật tư lên Firebase...`);
+          toast(`⏳ Đang xóa dữ liệu cũ và ghi đè ${uniqueList.length} vật tư sạch lên Firebase...`);
+          
+          // Xóa toàn bộ dữ liệu cũ trên Firestore collection 'products' trước khi ghi đè mới
+          const existingSnap = await getDocs(collection(db, "products"));
+          const deleteBatch = writeBatch(db);
+          existingSnap.docs.forEach(d => deleteBatch.delete(d.ref));
+          await deleteBatch.commit();
+
+          // Ghi đè danh sách mới
           for (let i = 0; i < uniqueList.length; i += 450) {
             const chunk = uniqueList.slice(i, i + 450);
             const batch = writeBatch(db);
             chunk.forEach(p => batch.set(doc(db, "products", p.code), p));
             await batch.commit();
           }
-          toast(`✅ Đồng bộ thành công ${uniqueList.length} vật tư!`);
+
+          toast(`✅ Ghi đè và loại bỏ trùng thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
