@@ -475,7 +475,7 @@
     currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
   };
 
-  // ⚡ GHI ĐÈ & XÓA TRÙNG (DEDUP & OVERWRITE) CHO EXCEL ⚡
+  // ⚡ CHUNKED BATCH WRITE OVERWRITE & DEDUP (CHỐNG LỖI TRANSACTION TOO BIG) ⚡
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -508,24 +508,29 @@
         }
 
         if (rawProducts.length > 0) {
-          // Lọc trùng theo Mã Vật Tư (giữ cái đầu tiên)
+          // Lọc trùng theo Mã Vật Tư
           const uniqueMap = new Map();
           rawProducts.forEach(p => {
             if (!uniqueMap.has(p.code)) uniqueMap.set(p.code, p);
           });
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast(`⏳ Đang xóa dữ liệu cũ và ghi đè ${uniqueList.length} vật tư sạch lên Firebase...`);
-          
-          // Xóa toàn bộ dữ liệu cũ trên Firestore collection 'products' trước khi ghi đè mới
+          toast("⏳ Đang dọn dẹp dữ liệu cũ trên Firebase...");
           const existingSnap = await getDocs(collection(db, "products"));
-          const deleteBatch = writeBatch(db);
-          existingSnap.docs.forEach(d => deleteBatch.delete(d.ref));
-          await deleteBatch.commit();
+          
+          // Xóa theo lô nhỏ (< 400 docs mỗi batch) để không bị lỗi Transaction too big
+          const docsArr = existingSnap.docs;
+          for (let i = 0; i < docsArr.length; i += 400) {
+            const chunk = docsArr.slice(i, i + 400);
+            const deleteBatch = writeBatch(db);
+            chunk.forEach(d => deleteBatch.delete(d.ref));
+            await deleteBatch.commit();
+          }
 
-          // Ghi đè danh sách mới
-          for (let i = 0; i < uniqueList.length; i += 450) {
-            const chunk = uniqueList.slice(i, i + 450);
+          toast(`⏳ Đang ghi đè ${uniqueList.length} vật tư sạch lên Firebase...`);
+          // Ghi đè theo lô nhỏ (< 400 docs mỗi batch)
+          for (let i = 0; i < uniqueList.length; i += 400) {
+            const chunk = uniqueList.slice(i, i + 400);
             const batch = writeBatch(db);
             chunk.forEach(p => batch.set(doc(db, "products", p.code), p));
             await batch.commit();
@@ -569,8 +574,8 @@
 
         if (rawCustomers.length > 0) {
           toast(`⏳ Đang đồng bộ ${rawCustomers.length} khách hàng...`);
-          for (let i = 0; i < rawCustomers.length; i += 450) {
-            const chunk = rawCustomers.slice(i, i + 450);
+          for (let i = 0; i < rawCustomers.length; i += 400) {
+            const chunk = rawCustomers.slice(i, i + 400);
             const batch = writeBatch(db);
             chunk.forEach(cust => batch.set(doc(collection(db, "stores")), cust));
             await batch.commit();
