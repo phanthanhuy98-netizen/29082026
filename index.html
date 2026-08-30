@@ -95,7 +95,6 @@
   
   .panel{background:#F8FAFC;border-radius:24px;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:14px;}
-  .grid-products { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; margin-top: 14px; align-items: start; }
   
   .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:18px;padding:18px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;overflow:hidden;margin-bottom:12px;}
   
@@ -111,11 +110,9 @@
   .mobile-item-card .item-code { background: #EEF2FF; color: var(--primary); padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 800; }
   .mobile-item-card .item-title { font-size: 15px; font-weight: 800; color: #0F172A; margin-bottom: 4px; }
   .mobile-item-card .item-info { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-  .mobile-item-card .item-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #F1F5F9; align-items: center; }
 
-  .badge{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:700;white-space:nowrap;touch-action:manipulation;cursor:pointer;}
-  .badge-success{background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;}
-  .badge-success:hover{background:#D1FAE5;}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:700;white-space:nowrap;touch-action:manipulation;}
+  .badge-success{background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;text-decoration:none;}
   .badge-pending{background:#FFFBEB;color:#D97706;border:1px solid #FDE68A;}
   .badge-danger{background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;}
   
@@ -143,9 +140,6 @@
   .modal-content{background:#fff;padding:28px;border-radius:24px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
 
-  @media (max-width: 1024px) {
-    .grid-products { grid-template-columns: 1fr; }
-  }
   @media (max-width: 768px) {
     body { padding: 4px; }
     .topbar { flex-direction: column; align-items: flex-start; }
@@ -208,6 +202,7 @@
 
   let adminSearchPrd = "";
   let customerSearchKey = "";
+  let storeSearchKey = "";
 
   let idbDb = null;
   function initIndexedDB() {
@@ -841,7 +836,58 @@
         <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: <a href="tel:${s.phone}" style="color:var(--emerald);font-weight:700;text-decoration:none;">${s.phone || '—'}</a></div>
         <div class="item-info"><i class="fa-brands fa-whatsapp" style="color:var(--primary);"></i> Zalo: ${s.zalo || '—'}</div>
         ${s.lat && s.lng && s.pinnedBy ? `<div class="item-info" style="font-size:11px; color:var(--purple); font-weight:700;"><i class="fa-solid fa-user-shield"></i> Người ghim: ${s.pinnedBy} (${s.pinnedAt || ''})</div>` : ''}
-        <div class="item-actions">
+        <div style="display:flex; gap:8px; margin-top:10px; padding-top:8px; border-top:1px solid #F1F5F9; align-items:center;">
+          <button class="btn btn-amber btn-sm" style="flex:1;justify-content:center;" onclick="pinStoreGPS('${s.id}')"><i class="fa-solid fa-thumbtack"></i> Ghim GPS Nhanh</button>
+          ${s.lat && s.lng && userRole === 'admin' ? `<button class="btn btn-red btn-sm" onclick="clearStoreGPS('${s.id}')" title="Chỉ Admin được xóa ghim"><i class="fa-solid fa-trash"></i> Xóa ghim</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+  };
+
+  window.onStoreSearchInput = function(val) {
+    storeSearchKey = val;
+    const container = document.getElementById('storeCardsContainer');
+    const countEl = document.getElementById('storeCount');
+    if (!container) return;
+
+    const queryKey = removeAccents(val.trim());
+    let filtered = stores;
+    
+    if (queryKey !== "") {
+      filtered = stores.filter(s => {
+        const codeNorm = removeAccents(s.code || '');
+        const nameNorm = removeAccents(s.name || '');
+        const addrNorm = removeAccents(s.address || '');
+        const phoneNorm = removeAccents(s.phone || '');
+        return codeNorm.includes(queryKey) ||
+               nameNorm.includes(queryKey) || 
+               addrNorm.includes(queryKey) ||
+               phoneNorm.includes(queryKey);
+      });
+    }
+
+    const displayList = filtered.slice(0, 50);
+
+    if (countEl) countEl.innerHTML = `Hiển thị: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
+
+    if (displayList.length === 0) {
+      container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy điểm bán nào khớp với từ khóa "${val}".</div>`;
+      return;
+    }
+
+    const userRole = (currentUser?.role || '').toLowerCase();
+
+    container.innerHTML = displayList.map(s => `
+      <div class="mobile-item-card">
+        <div class="item-header">
+          <span class="item-code">${s.code || 'KH'}</span>
+          ${s.lat && s.lng ? `<span class="badge badge-success" onclick="openMapDirections(${s.lat}, ${s.lng})" title="Nhấn để chỉ đường trực tiếp"><i class="fa-solid fa-location-dot"></i> Đã ghim GPS</span>` : '<span class="badge badge-pending">Chưa ghim</span>'}
+        </div>
+        <div class="item-title">${s.name}</div>
+        <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
+        <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: <a href="tel:${s.phone}" style="color:var(--emerald);font-weight:700;text-decoration:none;">${s.phone || '—'}</a></div>
+        ${s.lat && s.lng && s.pinnedBy ? `<div class="item-info" style="font-size:11px; color:var(--purple); font-weight:700;"><i class="fa-solid fa-user-shield"></i> Người ghim: ${s.pinnedBy} (${s.pinnedAt || ''})</div>` : ''}
+        <div style="display:flex; gap:8px; margin-top:10px; padding-top:8px; border-top:1px solid #F1F5F9; align-items:center;">
           <button class="btn btn-amber btn-sm" style="flex:1;justify-content:center;" onclick="pinStoreGPS('${s.id}')"><i class="fa-solid fa-thumbtack"></i> Ghim GPS Nhanh</button>
           ${s.lat && s.lng && userRole === 'admin' ? `<button class="btn btn-red btn-sm" onclick="clearStoreGPS('${s.id}')" title="Chỉ Admin được xóa ghim"><i class="fa-solid fa-trash"></i> Xóa ghim</button>` : ''}
         </div>
@@ -893,7 +939,7 @@
     const isSales = currentUser.role === 'sales';
 
     setNav('navDash', backOffice); 
-    setNav('navSales', isSales);
+    setNav('navSales', true); // Hiển thị nút Bán Hàng cho mọi cấp độ
     setNav('navStores', backOffice);
     setNav('navCustomers', backOffice);
     setNav('navOrders', true); 
@@ -968,7 +1014,7 @@
       if (isMapVisible) initLiveMap();
     }
 
-    else if (currentTab === 'sales' && isSales) {
+    else if (currentTab === 'sales') {
       const filteredStores = stores.filter(s => {
         const matchSearch = (s.code||'').toLowerCase().includes(searchStoreTerm) || (s.name||'').toLowerCase().includes(searchStoreTerm);
         const matchRoute = filterRoute === 'all' || (s.routeDay||'').toLowerCase().includes(filterRoute);
@@ -1038,33 +1084,30 @@
 
     else if (currentTab === 'stores' && backOffice) {
       main.innerHTML = `
-        <h2 style="font-size:18px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-store" style="color:var(--primary);"></i> Quản Lý Tuyến & Điểm Bán</h2>
-        <div class="grid-products">
-          <div class="card">
-            <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;"><i class="fa-solid fa-plus"></i> Thêm Điểm Bán Mới</h3>
-            <form id="stForm" onsubmit="addStore(event)">
-              <label>Mã DTPN:</label><input type="text" id="stCode" placeholder="VM3IU" required>
-              <label>Tên Quầy:</label><input type="text" id="stName" placeholder="TH Thành Đô" required>
-              <label>Địa Chỉ:</label><input type="text" id="stAddr" placeholder="QL14" required>
-              <label>SĐT:</label><input type="text" id="stPhone" placeholder="0948521213">
-              <label>Zalo:</label><input type="text" id="stZalo" placeholder="0948521213">
-              <label>Hạn Mức Nợ:</label><input type="number" id="stCredit" value="20000000" required>
-              <button class="btn btn-green" style="width:100%;margin-top:6px;justify-content:center;font-weight:800;">Lưu</button>
-            </form>
-          </div>
-          <div class="card">
-            <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;">Danh Sách Tuyến Điểm (${stores.length})</h3>
-            <div class="table-responsive">
-              <table>
-                <thead><tr><th>MaDTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>SĐT</th></tr></thead>
-                <tbody>
-                  ${stores.slice(0, 50).map(s => `<tr><td><b>${s.code||''}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td><td>${s.phone||''}</td></tr>`).join('')}
-                </tbody>
-              </table>
+        <h2 style="font-size:18px; font-weight:800; margin-bottom:12px;"><i class="fa-solid fa-store" style="color:var(--primary);"></i> Quản Lý Tuyến & Điểm Bán (${stores.length})</h2>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;"><i class="fa-solid fa-plus"></i> Thêm Điểm Bán Mới</h3>
+          <form id="stForm" onsubmit="addStore(event)">
+            <div class="grid" style="margin:0;">
+              <div><label>Mã DTPN:</label><input type="text" id="stCode" placeholder="VM3IU" required></div>
+              <div><label>Tên Quầy:</label><input type="text" id="stName" placeholder="TH Thành Đô" required></div>
+              <div><label>Địa Chỉ:</label><input type="text" id="stAddr" placeholder="QL14" required></div>
+              <div><label>SĐT:</label><input type="text" id="stPhone" placeholder="0948521213"></div>
+              <div><label>Zalo:</label><input type="text" id="stZalo" placeholder="0948521213"></div>
+              <div><label>Hạn Mức Nợ:</label><input type="number" id="stCredit" value="20000000" required></div>
             </div>
-          </div>
+            <button class="btn btn-green" style="width:100%;margin-top:10px;justify-content:center;font-weight:800;">Lưu Điểm Bán</button>
+          </form>
         </div>
+        <div class="card" style="margin-bottom:10px;">
+          <input type="text" id="storeSearchInput" placeholder="🔍 Gõ tìm kiếm điểm bán (mã, tên, địa chỉ, SĐT)..." oninput="onStoreSearchInput(this.value)" value="${storeSearchKey}" style="margin:0;">
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <small id="storeCount" style="color:var(--text-muted); font-weight:700;">Hiển thị điểm bán</small>
+        </div>
+        <div id="storeCardsContainer"></div>
       `;
+      setTimeout(() => onStoreSearchInput(storeSearchKey), 10);
     }
 
     else if (currentTab === 'customers' && backOffice) {
@@ -1217,7 +1260,7 @@
     else if (currentTab === 'users' && isAdmin) {
       main.innerHTML = `
         <h2 style="font-size:18px; font-weight:800; margin-bottom:10px;"><i class="fa-solid fa-users" style="color:var(--primary);"></i> Quản Lý Nhân Viên</h2>
-        <div class="grid-products">
+        <div class="grid" style="grid-template-columns: 360px minmax(0,1fr);">
           <div class="card">
             <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;">Tạo Tài Khoản</h3>
             <form id="userForm" onsubmit="addUser(event)">
