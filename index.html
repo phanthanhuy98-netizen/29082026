@@ -344,6 +344,44 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
+  // ⚡ GHI NHẬN HOẶC CHỈ ĐƯỜNG ĐỊNH VỊ CHO KHÁCH HÀNG ⚡
+  window.handleCustomerLocationAction = function(storeId, hasLat) {
+    const store = stores.find(s => s.id === storeId);
+    if (!store) return;
+
+    if (hasLat) {
+      // Đã ghim -> Mở Google Maps chỉ đường
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}`;
+      window.open(url, '_blank');
+    } else {
+      // Chưa ghim -> Lấy GPS thiết bị ghim ngay lập tức
+      if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
+      toast("📍 Đang lấy tọa độ GPS...");
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        try {
+          await updateDoc(doc(db, "stores", storeId), { lat, lng });
+          toast(`✅ Đã ghim định vị cho tiệm: ${store.name}`);
+        } catch (err) {
+          alert("Lỗi cập nhật GPS: " + err.message);
+        }
+      }, () => alert("Không lấy được tọa độ GPS. Vui lòng bật định vị trên thiết bị."), { enableHighAccuracy: true });
+    }
+  };
+
+  // ⚡ CHỈ ADMIN MỚI ĐƯỢC XÓA ĐỊNH VỊ CŨ ĐỂ GHIM LẠI ⚡
+  window.adminResetCustomerLocation = async function(storeId) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
+    if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này để ghim lại mới không?")) return;
+    try {
+      await updateDoc(doc(db, "stores", storeId), { lat: 0, lng: 0 });
+      toast("🔄 Đã xóa định vị cũ thành công!");
+    } catch (err) {
+      alert("Lỗi: " + err.message);
+    }
+  };
+
   window.selectStoreDirectly = function(storeId) {
     activeVisitedStore = stores.find(s => s.id === storeId);
     isFilterCollapsed = true;
@@ -514,7 +552,6 @@
     reader.readAsArrayBuffer(file);
   };
 
-  // ⚡ BẢO MẬT KHÁCH HÀNG: SALES KHÔNG ĐƯỢC XÓA KH, CHỈ ADMIN/MANAGER MỚI CẬP NHẬT GPS ⚡
   window.importCustomersExcel = function(event) {
     if (currentUser.role === 'sales') return alert("⛔ Bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
@@ -879,17 +916,26 @@
         container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy kết quả khớp với từ khóa "${val}".</div>`;
         return;
       }
-      container.innerHTML = displayList.map(s => `
-        <div class="mobile-item-card">
-          <div class="item-header">
-            <span class="item-code">${s.code || 'KH'}</span>
-            ${s.lat && s.lng ? '<span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> Đã ghim GPS</span>' : '<span class="badge badge-pending">Chưa ghim</span>'}
+      container.innerHTML = displayList.map(s => {
+        const hasCoords = s.lat && s.lng && s.lat !== 0 && s.lng !== 0;
+        const isAdmin = currentUser && currentUser.role === 'admin';
+        return `
+          <div class="mobile-item-card">
+            <div class="item-header">
+              <span class="item-code">${s.code || 'KH'}</span>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button class="badge ${hasCoords ? 'badge-success' : 'badge-pending'}" style="border:none; cursor:pointer;" onclick="handleCustomerLocationAction('${s.id}', ${hasCoords})">
+                  <i class="fa-solid fa-location-dot"></i> ${hasCoords ? 'Chỉ Đường' : 'Ghim Định Vị'}
+                </button>
+                ${hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')" title="Admin xóa định vị cũ"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
+              </div>
+            </div>
+            <div class="item-title">${s.name}</div>
+            <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
+            <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
           </div>
-          <div class="item-title">${s.name}</div>
-          <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
-          <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }, 80);
   };
 
@@ -1390,7 +1436,7 @@
   <form onsubmit="submitChangePassword(event)" style="margin-top:10px;">
     <label>Mật Khẩu Cũ:</label><input type="password" id="oldPassInput" required>
     <label>Mật Khẩu Mới:</label><input type="password" id="newPassInput" required>
-    <label>Xác Nhận Mật Khẩu:</label><input type="password" id="confirmPassInput" required>
+    <label>Xác Nhận Mật Khẩu:</label><input type="password" id="confirmPassInput`" required>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button type="submit" class="btn btn-green" style="flex:1;justify-content:center;font-weight:800;">Lưu</button>
       <button type="button" class="btn btn-red" onclick="closeChangePasswordModal()" style="font-weight:800;">Hủy</button>
