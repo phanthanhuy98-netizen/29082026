@@ -422,6 +422,16 @@
 
     navigator.geolocation.getCurrentPosition(async pos => {
       const userLat = pos.coords.latitude, userLng = pos.coords.longitude, accuracy = pos.coords.accuracy;
+      
+      // TỰ ĐỘNG GẮN VÀ CẬP NHẬT TỌA ĐỘ GPS NGAY KHI MỞ / CHECK-IN NẾU QUẦY CHƯA CÓ HOẶC CHƯA CHUẨN
+      if (navigator.onLine && (!store.lat || store.lat === 0 || !store.lng || store.lng === 0)) {
+        try {
+          await updateDoc(doc(db, "stores", storeId), { lat: userLat, lng: userLng });
+          store.lat = userLat;
+          store.lng = userLng;
+        } catch (e) {}
+      }
+
       let distance = 0;
       if (store.lat && store.lng) {
         distance = getDistanceMeters(userLat, userLng, store.lat, store.lng);
@@ -445,7 +455,7 @@
 
         activeVisitedStore = store;
         autoCleanOldOrders(store.id);
-        toast(`✅ Checked-in: ${store.code||'KH'}_${store.name}`);
+        toast(`✅ Checked-in & Tự động ghim tọa độ GPS thành công!`);
         renderUI();
       } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
     }, () => alert("⛔ LỖI GPS: Hãy bật GPS."), { enableHighAccuracy: true });
@@ -471,6 +481,14 @@
       if (decodedText === store.id || decodedText === store.name || decodedText === store.code) {
         html5QrScanner.clear();
         document.getElementById('qrModal').classList.add('hidden');
+        
+        // TỰ ĐỘNG GẮN VÀ CẬP NHẬT TỌA ĐỘ GPS KHI QUÉT QR THÀNH CÔNG NẾU QUẦY CHƯA CÓ
+        navigator.geolocation.getCurrentPosition(async pos => {
+          if (navigator.onLine && (!store.lat || store.lat === 0 || !store.lng || store.lng === 0)) {
+            await updateDoc(doc(db, "stores", store.id), { lat: pos.coords.latitude, lng: pos.coords.longitude });
+          }
+        }, () => {}, { enableHighAccuracy: true });
+
         activeVisitedStore = store;
         autoCleanOldOrders(store.id);
         toast(`✅ Xác thực QR thành công: ${store.name}`);
@@ -887,7 +905,6 @@
     }, 200);
   }
 
-  // TÍNH NĂNG MỚI: ĐỊNH VỊ VỊ TRÍ CỦA QUẢN LÝ TRÊN BẢN ĐỒ
   window.locateManagerOnMap = function() {
     if (!leafletMapInstance) return alert("Vui lòng mở Bản Đồ Live Tracking trước!");
     navigator.geolocation.getCurrentPosition(pos => {
@@ -912,7 +929,6 @@
     }, () => alert("⛔ Không thể lấy GPS của bạn. Hãy bật định vị thiết bị."), { enableHighAccuracy: true });
   };
 
-  // TÍNH NĂNG MỚI: TÌM KIẾM NHANH NHÂN VIÊN HOẶC TIỆM QUẦY TRÊN BẢN ĐỒ
   window.searchOnLiveMap = function(keyword) {
     if (!leafletMapInstance) return alert("Vui lòng mở Bản Đồ Live Tracking trước!");
     const key = keyword.toLowerCase().trim();
@@ -928,7 +944,6 @@
       leafletMapInstance.setView([foundCheckin.lat, foundCheckin.lng], 16);
       toast(`🔍 Đã tìm thấy vị trí check-in: ${foundCheckin.salesName} tại ${foundCheckin.storeName}`);
     } else {
-      // Thử tìm trong danh sách cửa hàng (Stores)
       let foundStore = stores.find(s => 
         (s.name||'').toLowerCase().includes(key) || 
         (s.code||'').toLowerCase().includes(key)
@@ -1011,7 +1026,6 @@
               <button id="toggleMapBtn" class="btn btn-purple btn-sm" onclick="toggleLiveMap()">${isMapVisible ? '<i class="fa-solid fa-eye-slash"></i> Ẩn Bản Đồ' : '<i class="fa-solid fa-map-location-dot"></i> Mở Bản Đồ Live Tracking'}</button>
             </div>
             
-            <!-- THANH TÌM KIẾM & ĐỊNH VỊ BẢN THÂN TRÊN LIVE MAP -->
             <div id="mapContainer" class="${isMapVisible ? '' : 'hidden'}">
               <div style="display:flex; gap:10px; margin:12px 0; flex-wrap:wrap; align-items:center;">
                 <input type="text" id="mapSearchInput" placeholder="🔍 Nhập tên/mã nhân viên hoặc tên tiệm quầy để định vị nhanh..." style="flex:1; margin:0;" onchange="searchOnLiveMap(this.value)">
@@ -1099,7 +1113,6 @@
                 <div style="margin-top:10px;font-size:12px;font-weight:700;"><span>Nợ cũ tồn: <b style="color:var(--rose);">${unpaidOrdersTotal.toLocaleString()}đ</b> / Hạn mức: <b>${(activeVisitedStore.creditLimit||20000000).toLocaleString()}đ</b></span></div>
               </div>
 
-              <!-- NHÓM NGÀNH HÀNG TAB FILTER -->
               <div class="category-tabs">
                 ${categories.map(cat => `<button class="cat-tab-btn ${activeCategory===cat?'active':''}" onclick="setActiveCategory('${cat}')">${cat === 'ALL' ? '📦 Tất cả ngành hàng' : cat}</button>`).join('')}
               </div>
