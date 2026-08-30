@@ -205,6 +205,7 @@
   let storeSearchKey = "";
   let salesSearchKhCode = "";
   let salesSearchKhName = "";
+  let searchDebounceTimer = null; // Biến hỗ trợ Debounce chống lag
 
   let idbDb = null;
   function initIndexedDB() {
@@ -670,119 +671,134 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // Cập nhật giá trị vào state để filter trong hàm renderUI()
-  window.setSalesSearchKhCode = function(val) { salesSearchKhCode = val; renderUI(); };
-  window.setSalesSearchKhName = function(val) { salesSearchKhName = val; renderUI(); };
+  // Debounced input handlers để loại bỏ hoàn toàn hiện tượng lag khi gõ nhanh
+  window.setSalesSearchKhCode = function(val) {
+    salesSearchKhCode = val;
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => renderUI(), 120);
+  };
+  
+  window.setSalesSearchKhName = function(val) {
+    salesSearchKhName = val;
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => renderUI(), 120);
+  };
 
   window.setOrderFilterKeyword = function(val) { orderFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setOrderFilterStatus = function(val) { orderFilterStatus = val; renderUI(); };
 
   window.onCustomerSearchInput = function(val) {
     customerSearchKey = val;
-    const container = document.getElementById('customerCardsContainer');
-    const countEl = document.getElementById('customerCount');
-    if (!container) return;
-    const queryKey = removeAccents(val.trim());
-    let filtered = stores;
-    if (queryKey !== "") {
-      filtered = stores.filter(s => {
-        const codeNorm = removeAccents(s.code || '');
-        const nameNorm = removeAccents(s.name || '');
-        const addrNorm = removeAccents(s.address || '');
-        const phoneNorm = removeAccents(s.phone || '');
-        return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
-      });
-      
-      // Thuật toán chấm điểm để xếp hạng ưu tiên (Starts With = Ưu tiên lên đầu)
-      filtered.sort((a, b) => {
-        let scoreA = 0, scoreB = 0;
-        const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
-        const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
-        if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
-        if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
-        if (scoreA !== scoreB) return scoreB - scoreA;
-        return nA.localeCompare(nB);
-      });
-    }
-    const displayList = filtered.slice(0, 30);
-    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
-    if (displayList.length === 0) {
-      container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy kết quả khớp với từ khóa "${val}".</div>`;
-      return;
-    }
-    container.innerHTML = displayList.map(s => `
-      <div class="mobile-item-card">
-        <div class="item-header">
-          <span class="item-code">${s.code || 'KH'}</span>
-          ${s.lat && s.lng ? '<span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> Đã ghim GPS</span>' : '<span class="badge badge-pending">Chưa ghim</span>'}
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const container = document.getElementById('customerCardsContainer');
+      const countEl = document.getElementById('customerCount');
+      if (!container) return;
+      const queryKey = removeAccents(val.trim());
+      let filtered = stores;
+      if (queryKey !== "") {
+        filtered = stores.filter(s => {
+          const codeNorm = removeAccents(s.code || '');
+          const nameNorm = removeAccents(s.name || '');
+          const addrNorm = removeAccents(s.address || '');
+          const phoneNorm = removeAccents(s.phone || '');
+          return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
+        });
+        
+        filtered.sort((a, b) => {
+          let scoreA = 0, scoreB = 0;
+          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
+          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
+          if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
+          if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return nA.localeCompare(nB);
+        });
+      }
+      const displayList = filtered.slice(0, 30);
+      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
+      if (displayList.length === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy kết quả khớp với từ khóa "${val}".</div>`;
+        return;
+      }
+      container.innerHTML = displayList.map(s => `
+        <div class="mobile-item-card">
+          <div class="item-header">
+            <span class="item-code">${s.code || 'KH'}</span>
+            ${s.lat && s.lng ? '<span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> Đã ghim GPS</span>' : '<span class="badge badge-pending">Chưa ghim</span>'}
+          </div>
+          <div class="item-title">${s.name}</div>
+          <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
+          <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
         </div>
-        <div class="item-title">${s.name}</div>
-        <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
-        <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
-      </div>
-    `).join('');
+      `).join('');
+    }, 120);
   };
 
   window.onStoreSearchInput = function(val) {
     storeSearchKey = val;
-    const container = document.getElementById('storeCardsContainer');
-    const countEl = document.getElementById('storeCount');
-    if (!container) return;
-    const queryKey = removeAccents(val.trim());
-    let filtered = stores;
-    if (queryKey !== "") {
-      filtered = stores.filter(s => {
-        return removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey);
-      });
-      // Ưu tiên hiển thị
-      filtered.sort((a, b) => {
-        let scoreA = 0, scoreB = 0;
-        const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
-        const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
-        if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
-        if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
-        if (scoreA !== scoreB) return scoreB - scoreA;
-        return nA.localeCompare(nB);
-      });
-    }
-    const displayList = filtered.slice(0, 30);
-    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
-    container.innerHTML = displayList.map(s => `
-      <div class="mobile-item-card">
-        <div class="item-header"><span class="item-code">${s.code || 'KH'}</span></div>
-        <div class="item-title">${s.name}</div>
-        <div class="item-info">${s.address || ''}</div>
-      </div>
-    `).join('');
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const container = document.getElementById('storeCardsContainer');
+      const countEl = document.getElementById('storeCount');
+      if (!container) return;
+      const queryKey = removeAccents(val.trim());
+      let filtered = stores;
+      if (queryKey !== "") {
+        filtered = stores.filter(s => {
+          return removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey);
+        });
+        filtered.sort((a, b) => {
+          let scoreA = 0, scoreB = 0;
+          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
+          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
+          if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
+          if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return nA.localeCompare(nB);
+        });
+      }
+      const displayList = filtered.slice(0, 30);
+      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
+      container.innerHTML = displayList.map(s => `
+        <div class="mobile-item-card">
+          <div class="item-header"><span class="item-code">${s.code || 'KH'}</span></div>
+          <div class="item-title">${s.name}</div>
+          <div class="item-info">${s.address || ''}</div>
+        </div>
+      `).join('');
+    }, 120);
   };
 
   window.onAdminSearchInput = function(val) {
     adminSearchPrd = val.toLowerCase();
-    const container = document.getElementById('productCardsContainer');
-    const countEl = document.getElementById('productCount');
-    if (!container) return;
-    let filtered = products;
-    if (adminSearchPrd !== "") {
-      filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
-      // Ưu tiên hiển thị vật tư
-      filtered.sort((a, b) => {
-        let scoreA = 0, scoreB = 0;
-        const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
-        const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
-        if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
-        if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
-        if (scoreA !== scoreB) return scoreB - scoreA;
-        return nA.localeCompare(nB);
-      });
-    }
-    const displayList = filtered.slice(0, 30);
-    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
-    container.innerHTML = displayList.map(p => `
-      <div class="mobile-item-card">
-        <div class="item-header"><span class="item-code">${p.code}</span></div>
-        <div class="item-title">${p.name}</div>
-      </div>
-    `).join('');
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const container = document.getElementById('productCardsContainer');
+      const countEl = document.getElementById('productCount');
+      if (!container) return;
+      let filtered = products;
+      if (adminSearchPrd !== "") {
+        filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+        filtered.sort((a, b) => {
+          let scoreA = 0, scoreB = 0;
+          const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
+          const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
+          if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
+          if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return nA.localeCompare(nB);
+        });
+      }
+      const displayList = filtered.slice(0, 30);
+      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
+      container.innerHTML = displayList.map(p => `
+        <div class="mobile-item-card">
+          <div class="item-header"><span class="item-code">${p.code}</span></div>
+          <div class="item-title">${p.name}</div>
+        </div>
+      `).join('');
+    }, 120);
   };
 
   function attachListeners() {
@@ -889,7 +905,6 @@
         return matchCode && matchName;
       });
 
-      // Bổ sung thuật toán Sort Ưu Tiên cho màn hình Bán Hàng
       if (salesSearchKhName || salesSearchKhCode) {
         const nameQuery = removeAccents(salesSearchKhName.trim());
         const codeQuery = removeAccents(salesSearchKhCode.trim());
