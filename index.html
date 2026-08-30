@@ -112,7 +112,7 @@
   .mobile-item-card .item-code { background: #EEF2FF; color: var(--primary); padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 800; }
   .mobile-item-card .item-title { font-size: 15px; font-weight: 800; color: #0F172A; margin-bottom: 4px; }
   .mobile-item-card .item-info { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-  .mobile-item-card .item-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #F1F5F9; }
+  .mobile-item-card .item-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #F1F5F9; align-items: center; }
 
   .badge{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:16px;font-size:11px;font-weight:700;white-space:nowrap;}
   .badge-success{background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;text-decoration:none;cursor:pointer;}
@@ -139,9 +139,6 @@
   #map { height: 400px; width: 100%; border-radius: 16px; margin-top: 12px; z-index: 1; border: 2px solid #E2E8F0; }
   .watermark-img{max-width:100%;border-radius:12px;margin-top:10px;border:3px solid #1E1B4B;box-shadow:0 6px 16px rgba(0,0,0,0.2);}
   .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:12px 28px;border-radius:32px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:420px;}
-  
-  .sales-table th, .sales-table td { text-align: center; }
-  .sales-table th.col-name, .sales-table td.col-name { text-align: left; }
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15, 23, 42, 0.8);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;z-index:999;padding:12px;}
   .modal-content{background:#fff;padding:28px;border-radius:24px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
@@ -396,10 +393,24 @@
   window.pinStoreGPS = function(storeId) {
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      if (navigator.onLine) await updateDoc(doc(db, "stores", storeId), { lat, lng });
-      toast(`📌 Đã ghim GPS thành công!`);
+      const pinnedBy = `[${currentUser.code}] ${currentUser.name}`;
+      const pinnedAt = new Date().toLocaleString('vi-VN');
+      if (navigator.onLine) {
+        await updateDoc(doc(db, "stores", storeId), { lat, lng, pinnedBy, pinnedAt });
+      }
+      toast(`📌 Đã ghim GPS thành công bởi ${currentUser.name}!`);
       renderUI();
     }, () => alert("Lỗi lấy vị trí GPS điện thoại."));
+  };
+
+  window.clearStoreGPS = async function(storeId) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa ghim GPS!");
+    if (!confirm("Bạn có chắc chắn muốn xóa tọa độ GPS để ghim mới không?")) return;
+    if (navigator.onLine) {
+      await updateDoc(doc(db, "stores", storeId), { lat: 0, lng: 0, pinnedBy: '', pinnedAt: '' });
+      toast("🗑️ Đã xóa ghim GPS thành công! Ô ghim đã trống để ghim mới.");
+      renderUI();
+    }
   };
 
   window.doCheckinWithPhoto = function(storeId) {
@@ -413,7 +424,9 @@
       
       if (navigator.onLine && (!store.lat || store.lat === 0 || !store.lng || store.lng === 0)) {
         try {
-          await updateDoc(doc(db, "stores", storeId), { lat: userLat, lng: userLng });
+          const pinnedBy = `[${currentUser.code}] ${currentUser.name}`;
+          const pinnedAt = new Date().toLocaleString('vi-VN');
+          await updateDoc(doc(db, "stores", storeId), { lat: userLat, lng: userLng, pinnedBy, pinnedAt });
           store.lat = userLat; store.lng = userLng;
         } catch (e) {}
       }
@@ -444,18 +457,6 @@
         renderUI();
       } catch (err) { alert("Lỗi lưu check-in: " + err.message); }
     }, () => alert("⛔ Hãy bật GPS trên điện thoại."), { enableHighAccuracy: true });
-  };
-
-  window.uploadPOSMPhoto = function(storeId) {
-    const fileInput = document.getElementById(`posm_${storeId}`);
-    if (!fileInput || !fileInput.files[0]) return alert("Chọn ảnh POSM!");
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const photo = await createWatermarkedImage(fileInput.files[0], { storeName: activeVisitedStore.name, salesCode: currentUser.code, salesName: currentUser.name, lat: pos.coords.latitude, lng: pos.coords.longitude });
-      if (navigator.onLine) {
-        await addDoc(collection(db, "auditLogs"), { actorUid: currentUser.uid, actorName: currentUser.name, action: "POSM_DISPLAY_PHOTO", targetType: "stores", targetId: storeId, detail: photo, createdAt: serverTimestamp() });
-      }
-      toast("📸 Đã gửi ảnh POSM thành công!");
-    });
   };
 
   window.startQRScanner = function(storeId) {
@@ -492,16 +493,6 @@
     if (field === 'kien' || field === 'le') {
       currentCart[prdId].qty = (currentCart[prdId].kien * packRatio) + currentCart[prdId].le;
     }
-    renderUI();
-  };
-
-  window.loadLastOrder = function() {
-    if (!activeVisitedStore) return;
-    const lastOrd = orders.filter(o => o.storeId === activeVisitedStore.id && o.status !== 'Đã hủy').sort((a,b) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0))[0];
-    if (!lastOrd || !lastOrd.items) return alert("Quầy này chưa có đơn cũ!");
-    currentCart = {};
-    lastOrd.items.forEach(it => { currentCart[it.id] = { qty: it.qty||0, kien: it.kien||0, le: it.le||0 }; });
-    toast("🔄 Đã tải lại toa đơn gần nhất!");
     renderUI();
   };
 
@@ -644,7 +635,7 @@
           if (tenDtpn && tenDtpn !== 'Ten DTPN' && tenDtpn !== 'TenDTPN') {
             rawCustomers.push({
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit: 20000000, lat: 0, lng: 0
+              routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit: 20000000, lat: 0, lng: 0, pinnedBy: '', pinnedAt: ''
             });
           }
         }
@@ -706,11 +697,10 @@
     const phone = document.getElementById('stPhone').value.trim();
     const zalo = document.getElementById('stZalo').value.trim();
     const creditLimit = Number(document.getElementById('stCredit').value || 20000000);
-    await addDoc(collection(db, "stores"), { code, name, address, phone, zalo, routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit, lat: 0, lng: 0, createdAt: serverTimestamp() });
+    await addDoc(collection(db, "stores"), { code, name, address, phone, zalo, routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit, lat: 0, lng: 0, pinnedBy: '', pinnedAt: '', createdAt: serverTimestamp() });
     toast("Đã thêm điểm bán mới!");
     document.getElementById('stForm').reset();
   };
-  window.deleteStore = async function(id) { if(confirm("Xóa tiệm này?")) await deleteDoc(doc(db, "stores", id)); };
 
   window.addUser = async function(e) {
     e.preventDefault();
@@ -838,9 +828,10 @@
         <div class="item-info"><i class="fa-solid fa-location-dot" style="color:var(--primary);"></i> ${s.address || 'Chưa cập nhật địa chỉ'}</div>
         <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: <a href="tel:${s.phone}" style="color:var(--emerald);font-weight:700;text-decoration:none;">${s.phone || '—'}</a></div>
         <div class="item-info"><i class="fa-brands fa-whatsapp" style="color:var(--primary);"></i> Zalo: ${s.zalo || '—'}</div>
+        ${s.lat && s.lng && s.pinnedBy ? `<div class="item-info" style="font-size:11px; color:var(--purple); font-weight:700;"><i class="fa-solid fa-user-shield"></i> Người ghim: ${s.pinnedBy} (${s.pinnedAt || ''})</div>` : ''}
         <div class="item-actions">
           <button class="btn btn-amber btn-sm" style="flex:1;justify-content:center;" onclick="pinStoreGPS('${s.id}')"><i class="fa-solid fa-thumbtack"></i> Ghim GPS Nhanh</button>
-          ${currentUser.role === 'admin' ? `<button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button>` : ''}
+          ${s.lat && s.lng && currentUser.role === 'admin' ? `<button class="btn btn-red btn-sm" onclick="clearStoreGPS('${s.id}')" title="Chỉ Admin được xóa ghim"><i class="fa-solid fa-trash"></i> Xóa ghim</button>` : ''}
         </div>
       </div>
     `).join('');
@@ -1053,9 +1044,9 @@
             <h3 style="font-size:15px; font-weight:800; margin-bottom:8px;">Danh Sách Tuyến Điểm (${stores.length})</h3>
             <div class="table-responsive">
               <table>
-                <thead><tr><th>MaDTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>SĐT</th><th>Thao Tác</th></tr></thead>
+                <thead><tr><th>MaDTPN</th><th>Tên Quầy</th><th>Địa Chỉ</th><th>SĐT</th></tr></thead>
                 <tbody>
-                  ${stores.slice(0, 50).map(s => `<tr><td><b>${s.code||''}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td><td>${s.phone||''}</td><td><button class="btn btn-red btn-sm" onclick="deleteStore('${s.id}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')}
+                  ${stores.slice(0, 50).map(s => `<tr><td><b>${s.code||''}</b></td><td><b>${s.name}</b></td><td>${s.address||''}</td><td>${s.phone||''}</td></tr>`).join('')}
                 </tbody>
               </table>
             </div>
