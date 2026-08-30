@@ -134,7 +134,7 @@
   
   #map { height: 350px; width: 100%; border-radius: 14px; margin-top: 10px; z-index: 1; border: 2px solid #E2E8F0; }
   .watermark-img{max-width:100%;border-radius:10px;margin-top:8px;border:3px solid #1E1B4B;box-shadow:0 6px 16px rgba(0,0,0,0.2);}
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:10px 24px;border-radius:28px;font-size:12px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:400px;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:12px 28px;border-radius:28px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:450px;}
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15, 23, 42, 0.8);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
   .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:440px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
@@ -299,7 +299,7 @@
     const t = document.createElement('div');
     t.className = 'toast'; t.innerText = msg;
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3200);
+    setTimeout(() => t.remove(), 4000);
   }
 
   function removeAccents(str) {
@@ -475,14 +475,14 @@
     currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; isReturnOrderMode = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
   };
 
-  // ⚡ CHUNKED BATCH WRITE OVERWRITE & DEDUP (CHỐNG LỖI TRANSACTION TOO BIG) ⚡
+  // ⚡ SIÊU TỐC & AN TOÀN TUYỆT ĐỐI CHO 4180+ VẬT TƯ (CHUNKED BATCH & PROGRESS) ⚡
   window.importProductsExcel = function(event) {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc và loại bỏ dòng trùng lặp...");
+        toast("⏳ Đang đọc file Excel...");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
@@ -515,28 +515,31 @@
           });
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast("⏳ Đang dọn dẹp dữ liệu cũ trên Firebase...");
+          toast("⏳ Đang làm sạch cơ sở dữ liệu cũ...");
           const existingSnap = await getDocs(collection(db, "products"));
-          
-          // Xóa theo lô nhỏ (< 400 docs mỗi batch) để không bị lỗi Transaction too big
           const docsArr = existingSnap.docs;
-          for (let i = 0; i < docsArr.length; i += 400) {
-            const chunk = docsArr.slice(i, i + 400);
+          
+          // Xóa từng lô 250 docs
+          for (let i = 0; i < docsArr.length; i += 250) {
+            const chunk = docsArr.slice(i, i + 250);
             const deleteBatch = writeBatch(db);
             chunk.forEach(d => deleteBatch.delete(d.ref));
             await deleteBatch.commit();
           }
 
-          toast(`⏳ Đang ghi đè ${uniqueList.length} vật tư sạch lên Firebase...`);
-          // Ghi đè theo lô nhỏ (< 400 docs mỗi batch)
-          for (let i = 0; i < uniqueList.length; i += 400) {
-            const chunk = uniqueList.slice(i, i + 400);
+          toast(`⏳ Bắt đầu nạp ${uniqueList.length} vật tư lên Firebase...`);
+          
+          // Ghi đè từng lô 200 docs kèm độ trễ nhỏ chống nghẽn
+          for (let i = 0; i < uniqueList.length; i += 200) {
+            const chunk = uniqueList.slice(i, i + 200);
             const batch = writeBatch(db);
             chunk.forEach(p => batch.set(doc(db, "products", p.code), p));
             await batch.commit();
+            toast(`⏳ Đang nạp: ${Math.min(i + 200, uniqueList.length)} / ${uniqueList.length} vật tư...`);
+            await new Promise(r => setTimeout(r, 60));
           }
 
-          toast(`✅ Ghi đè và loại bỏ trùng thành công ${uniqueList.length} vật tư!`);
+          toast(`✅ Đã đồng bộ thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
@@ -574,11 +577,12 @@
 
         if (rawCustomers.length > 0) {
           toast(`⏳ Đang đồng bộ ${rawCustomers.length} khách hàng...`);
-          for (let i = 0; i < rawCustomers.length; i += 400) {
-            const chunk = rawCustomers.slice(i, i + 400);
+          for (let i = 0; i < rawCustomers.length; i += 250) {
+            const chunk = rawCustomers.slice(i, i + 250);
             const batch = writeBatch(db);
             chunk.forEach(cust => batch.set(doc(collection(db, "stores")), cust));
             await batch.commit();
+            await new Promise(r => setTimeout(r, 50));
           }
           toast(`✅ Đã đồng bộ thành công ${rawCustomers.length} khách hàng!`);
           renderUI();
@@ -1210,7 +1214,7 @@
 
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư Hàng Hóa</h2>
+          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư Hàng Hóa (${products.length})</h2>
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
