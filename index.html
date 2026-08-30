@@ -364,8 +364,8 @@
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     toast("📍 Đang lấy tọa độ GPS thực tế...");
     navigator.geolocation.getCurrentPosition(async pos => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
+      const lat = Number(pos.coords.latitude);
+      const lng = Number(pos.coords.longitude);
       try {
         await updateDoc(doc(db, "stores", storeId), {
           lat,
@@ -780,13 +780,22 @@
         return nameNorm.includes(queryKey) || addrNorm.includes(queryKey);
       });
 
+      // ⚡ THUẬT TOÁN ƯU TIÊN THÔNG MINH TUYỆT ĐỐI (Bắt đầu bằng -> Chứa trọn vẹn từ -> Khớp phần còn lại) ⚡
       matched.sort((a, b) => {
         const nameA = removeAccents(a.name || '');
         const nameB = removeAccents(b.name || '');
-        const incA = nameA.includes(queryKey) ? 0 : 1;
-        const incB = nameB.includes(queryKey) ? 0 : 1;
-        return incA - incB;
+        
+        const startsA = nameA.startsWith(queryKey) ? 0 : 1;
+        const startsB = nameB.startsWith(queryKey) ? 0 : 1;
+        if (startsA !== startsB) return startsA - startsB;
+
+        const exactA = nameA.includes(queryKey) ? 0 : 1;
+        const exactB = nameB.includes(queryKey) ? 0 : 1;
+        if (exactA !== exactB) return exactA - exactB;
+
+        return nameA.localeCompare(nameB);
       });
+
       matched = matched.slice(0, 20);
       
       if (matched.length === 0) {
@@ -803,7 +812,7 @@
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
-    }, 80);
+    }, 60);
   };
 
   window.onCompanyCodeSearchInput = function(val) {
@@ -987,7 +996,8 @@
         const isAdmin = currentUser && currentUser.role === 'admin';
         const pinnedInfo = hasCoords ? `Đã ghim (${s.pinnedByCode || 'NV'})` : 'Ghim Định Vị';
         
-        const mapUrl = hasCoords ? `https://www.google.com/maps/dir/?api=1&destination=${rawLat},${rawLng}&travelmode=driving` : '#';
+        // ⚡ FIX CHUẨN ĐƯỜNG DẪN ĐIỀU HƯỚNG GOOGLE MAPS GPS ⚡
+        const mapUrl = hasCoords ? `https://www.google.com/maps/search/?api=1&query=${rawLat},${rawLng}` : '#';
 
         return `
           <div class="mobile-item-card">
@@ -995,7 +1005,7 @@
               <span class="item-code">${s.code || 'KH'}</span>
               <div style="display:flex; gap:6px; align-items:center;">
                 ${hasCoords ? `
-                  <a href="${mapUrl}" target="_blank" class="badge badge-success" style="border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
+                  <a href="${mapUrl}" target="_blank" rel="noopener noreferrer" class="badge badge-success" style="border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
                     <i class="fa-solid fa-location-arrow"></i> ${pinnedInfo}
                   </a>
                 ` : `
