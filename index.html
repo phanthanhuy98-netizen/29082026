@@ -670,7 +670,7 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
-  // Áp dụng tìm kiếm bất cứ vị trí nào trong chuỗi (.includes) và tối ưu render tối đa 30 kết quả chống lag
+  // Cập nhật giá trị vào state để filter trong hàm renderUI()
   window.setSalesSearchKhCode = function(val) { salesSearchKhCode = val; renderUI(); };
   window.setSalesSearchKhName = function(val) { salesSearchKhName = val; renderUI(); };
 
@@ -692,9 +692,20 @@
         const phoneNorm = removeAccents(s.phone || '');
         return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
       });
+      
+      // Thuật toán chấm điểm để xếp hạng ưu tiên (Starts With = Ưu tiên lên đầu)
+      filtered.sort((a, b) => {
+        let scoreA = 0, scoreB = 0;
+        const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
+        const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
+        if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
+        if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return nA.localeCompare(nB);
+      });
     }
-    const displayList = filtered.slice(0, 30); // Giới hạn 30 kết quả giúp tối ưu tốc độ tránh lag
-    if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
+    const displayList = filtered.slice(0, 30);
+    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
     if (displayList.length === 0) {
       container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy kết quả khớp với từ khóa "${val}".</div>`;
       return;
@@ -723,9 +734,19 @@
       filtered = stores.filter(s => {
         return removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey);
       });
+      // Ưu tiên hiển thị
+      filtered.sort((a, b) => {
+        let scoreA = 0, scoreB = 0;
+        const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
+        const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
+        if (nA.startsWith(queryKey) || cA.startsWith(queryKey)) scoreA = 2; else scoreA = 1;
+        if (nB.startsWith(queryKey) || cB.startsWith(queryKey)) scoreB = 2; else scoreB = 1;
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return nA.localeCompare(nB);
+      });
     }
     const displayList = filtered.slice(0, 30);
-    if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
+    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} điểm bán`;
     container.innerHTML = displayList.map(s => `
       <div class="mobile-item-card">
         <div class="item-header"><span class="item-code">${s.code || 'KH'}</span></div>
@@ -740,9 +761,22 @@
     const container = document.getElementById('productCardsContainer');
     const countEl = document.getElementById('productCount');
     if (!container) return;
-    let filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+    let filtered = products;
+    if (adminSearchPrd !== "") {
+      filtered = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+      // Ưu tiên hiển thị vật tư
+      filtered.sort((a, b) => {
+        let scoreA = 0, scoreB = 0;
+        const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
+        const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
+        if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
+        if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return nA.localeCompare(nB);
+      });
+    }
     const displayList = filtered.slice(0, 30);
-    if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
+    if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} vật tư`;
     container.innerHTML = displayList.map(p => `
       <div class="mobile-item-card">
         <div class="item-header"><span class="item-code">${p.code}</span></div>
@@ -849,12 +883,37 @@
     }
 
     else if (currentTab === 'sales') {
-      // Lọc tìm kiếm chứa bất cứ vị trí nào trong chuỗi (.includes)
       const filteredStores = stores.filter(s => {
         const matchCode = removeAccents(s.code||'').includes(removeAccents(salesSearchKhCode));
         const matchName = removeAccents(s.name||'').includes(removeAccents(salesSearchKhName));
         return matchCode && matchName;
       });
+
+      // Bổ sung thuật toán Sort Ưu Tiên cho màn hình Bán Hàng
+      if (salesSearchKhName || salesSearchKhCode) {
+        const nameQuery = removeAccents(salesSearchKhName.trim());
+        const codeQuery = removeAccents(salesSearchKhCode.trim());
+        filteredStores.sort((a, b) => {
+          let scoreA = 0, scoreB = 0;
+          const nA = removeAccents(a.name || ''), cA = removeAccents(a.code || '');
+          const nB = removeAccents(b.name || ''), cB = removeAccents(b.code || '');
+          
+          if (nameQuery && nA.startsWith(nameQuery)) scoreA += 2;
+          else if (nameQuery && nA.includes(nameQuery)) scoreA += 1;
+          
+          if (codeQuery && cA.startsWith(codeQuery)) scoreA += 2;
+          else if (codeQuery && cA.includes(codeQuery)) scoreA += 1;
+          
+          if (nameQuery && nB.startsWith(nameQuery)) scoreB += 2;
+          else if (nameQuery && nB.includes(nameQuery)) scoreB += 1;
+          
+          if (codeQuery && cB.startsWith(codeQuery)) scoreB += 2;
+          else if (codeQuery && cB.includes(codeQuery)) scoreB += 1;
+
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return nA.localeCompare(nB);
+        });
+      }
 
       let cartTotalAmount = 0;
       products.forEach(p => {
@@ -899,7 +958,7 @@
                 </div>
               `).join('') : '<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Không tìm thấy khách hàng phù hợp với bộ lọc!</div>'}
             </div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:6px; text-align:right;">Hiển thị tối đa 30 kết quả nhanh / Tổng kho: <b>${stores.length}</b></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:6px; text-align:right;">Hiển thị tối ưu 30 kết quả nhanh / Tổng kho: <b>${stores.length}</b></div>
           </div>
         </div>
 
@@ -1018,7 +1077,20 @@
     }
 
     else if (currentTab === 'productsAdmin' && backOffice) {
-      let filteredAdminProducts = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+      let filteredAdminProducts = products;
+      if (adminSearchPrd) {
+        filteredAdminProducts = products.filter(p => (p.code||'').toLowerCase().includes(adminSearchPrd) || (p.name||'').toLowerCase().includes(adminSearchPrd));
+        filteredAdminProducts.sort((a, b) => {
+          let scoreA = 0, scoreB = 0;
+          const nA = (a.name||'').toLowerCase(), cA = (a.code||'').toLowerCase();
+          const nB = (b.name||'').toLowerCase(), cB = (b.code||'').toLowerCase();
+          if (nA.startsWith(adminSearchPrd) || cA.startsWith(adminSearchPrd)) scoreA = 2; else scoreA = 1;
+          if (nB.startsWith(adminSearchPrd) || cB.startsWith(adminSearchPrd)) scoreB = 2; else scoreB = 1;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return nA.localeCompare(nB);
+        });
+      }
+
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <h2 style="font-size:18px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư Hàng Hóa</h2>
