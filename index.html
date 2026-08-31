@@ -259,7 +259,6 @@
   let showOnlySelectedItems = false;
   let searchDebounceTimer = null;
   let customerPageLimit = 20;
-  let salesProductPageLimit = 25;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -462,7 +461,7 @@
     salesSearchKeyword = '';
     productSearchKeyword = '';
     showOnlySelectedItems = false;
-    salesProductPageLimit = 25;
+    currentCart = {};
 
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
     renderUI();
@@ -511,7 +510,7 @@
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   };
 
-  // --- CƠ CHẾ CẬP NHẬT SỐ LƯỢNG CHUẨN XÁC, LUÔN HIỆN SỐ (KHÔNG CHO DƯỚI 0) ---
+  // --- HÀM XỬ LÝ SỐ LƯỢNG CHUẨN XÁC, LUÔN HIỆN SỐ, CHẶN DƯỚI 0 ---
   window.updateCartDetail = function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
@@ -531,9 +530,9 @@
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
     
-    // Hiển thị trực tiếp số lượng trong box (nếu bằng 0 thì hiện '0' hoặc để trống tùy ý, ở đây hiển thị số 0 rõ ràng hoặc giá trị số)
-    const leDisplay = currentCart[prdId].le > 0 ? currentCart[prdId].le : (currentCart[prdId].le === 0 ? '0' : '');
-    const kienDisplay = currentCart[prdId].kien > 0 ? currentCart[prdId].kien : (currentCart[prdId].kien === 0 ? '0' : '');
+    // Cập nhật giá trị hiển thị trực tiếp vào tất cả các input tương ứng (máy tính & mobile)
+    const leDisplay = currentCart[prdId].le;
+    const kienDisplay = currentCart[prdId].kien;
 
     document.querySelectorAll(`.input-le-${prdId}`).forEach(el => {
       if (document.activeElement !== el) el.value = leDisplay;
@@ -557,24 +556,68 @@
     let curVal = Number(currentCart[prdId][field]) || 0;
     let newVal = curVal + delta;
     if (newVal < 0) newVal = 0; // Chặn không cho giảm dưới 0
-    updateCartDetail(prdId, field, newVal);
+    
+    // Gán trực tiếp vào input tương ứng trên giao diện để phản hồi lập tức
+    const inputClass = field === 'le' ? `.input-le-${prdId}` : `.input-kien-${prdId}`;
+    document.querySelectorAll(inputClass).forEach(el => {
+      el.value = newVal;
+    });
+
+    window.updateCartDetail(prdId, field, newVal);
   };
 
-  window.filterSalesProducts = function(val) {
-    if (val !== undefined) productSearchKeyword = val;
-    salesProductPageLimit = 25; 
-    renderUI();
-  };
+  // --- TỐI ƯU TÌM KIẾM NHANH VẬT TƯ KHÔNG BỊ KHỰNG (REAL-TIME DOM FILTERING) ---
+  window.filterSalesProductsRealtime = function(val) {
+    productSearchKeyword = val;
+    const queryKey = removeAccents(val.trim());
+    
+    const rows = document.querySelectorAll('#salesProductTableBody tr');
+    const cards = document.querySelectorAll('#mobileProductListContainer .product-card-item');
 
-  window.loadMoreSalesProducts = function() {
-    salesProductPageLimit += 30;
-    renderUI();
+    let visibleCount = 0;
+
+    rows.forEach(r => {
+      const mavt = r.getAttribute('data-mavt') || '';
+      const name = r.getAttribute('data-name') || '';
+      const keyId = r.getAttribute('data-id');
+      const hasQty = currentCart[keyId] && currentCart[keyId].qty > 0;
+
+      const matchSearch = queryKey === "" || mavt.includes(queryKey) || name.includes(queryKey);
+      const matchSelected = !showOnlySelectedItems || hasQty;
+
+      if (matchSearch && matchSelected) {
+        r.style.display = '';
+        visibleCount++;
+      } else {
+        r.style.display = 'none';
+      }
+    });
+
+    cards.forEach(c => {
+      const mavt = c.getAttribute('data-mavt') || '';
+      const name = c.getAttribute('data-name') || '';
+      const keyId = c.getAttribute('data-id');
+      const hasQty = currentCart[keyId] && currentCart[keyId].qty > 0;
+
+      const matchSearch = queryKey === "" || mavt.includes(queryKey) || name.includes(queryKey);
+      const matchSelected = !showOnlySelectedItems || hasQty;
+
+      if (matchSearch && matchSelected) {
+        c.style.display = '';
+        visibleCount++;
+      } else {
+        c.style.display = 'none';
+      }
+    });
   };
 
   window.toggleShowOnlySelected = function() {
     showOnlySelectedItems = !showOnlySelectedItems;
-    salesProductPageLimit = 25;
-    renderUI();
+    const btn = document.getElementById('toggleSelectedBtn');
+    if (btn) {
+      btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
+    }
+    window.filterSalesProductsRealtime(productSearchKeyword);
   };
 
   window.filterSoGocRows = function(val) {
@@ -582,19 +625,6 @@
     const queryKey = removeAccents(soGocFilterKeyword.trim());
     const rows = document.querySelectorAll('#soGocTableBody tr[data-so-ctu]');
     let cleanSoCtuKey = queryKey.replace('#', '').trim();
-
-    const tableBody = document.getElementById('soGocTableBody');
-    if (tableBody && queryKey !== '') {
-      const rowsArray = Array.from(rows);
-      rowsArray.sort((a, b) => {
-        const ctuA = (a.getAttribute('data-so-ctu') || '').toLowerCase();
-        const ctuB = (b.getAttribute('data-so-ctu') || '').toLowerCase();
-        const matchA = ctuA.includes(cleanSoCtuKey) ? 0 : 1;
-        const matchB = ctuB.includes(cleanSoCtuKey) ? 0 : 1;
-        return matchA - matchB;
-      });
-      rowsArray.forEach(r => tableBody.appendChild(r));
-    }
 
     rows.forEach(r => {
       const soCtu = r.getAttribute('data-so-ctu') || '';
@@ -1076,22 +1106,7 @@
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
 
-      const queryKey = removeAccents(productSearchKeyword.trim());
-      let filteredProducts = products;
-      if (showOnlySelectedItems) {
-        filteredProducts = products.filter(p => {
-          const keyId = p.id || p.code;
-          return currentCart[keyId] && currentCart[keyId].qty > 0;
-        });
-      } else if (queryKey !== "") {
-        filteredProducts = products.filter(p => 
-          removeAccents(p.code || '').includes(queryKey) || 
-          removeAccents(p.name || '').includes(queryKey)
-        );
-      }
-
       const isMobileScreen = window.innerWidth <= 768;
-      const displayProducts = filteredProducts.slice(0, salesProductPageLimit);
 
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 16px;">
@@ -1133,7 +1148,7 @@
             
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Tìm kiếm nhanh vật tư theo mã hoặc tên..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Tìm kiếm nhanh vật tư theo mã hoặc tên..." oninput="filterSalesProductsRealtime(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:700; padding:10px 12px; font-size:12px; white-space:nowrap;">
                 <i class="fa-solid fa-filter"></i> Đã chọn
@@ -1157,7 +1172,7 @@
                     </tr>
                   </thead>
                   <tbody id="salesProductTableBody">
-                    ${displayProducts.map(p => {
+                    ${products.map(p => {
                       const keyId = p.id || p.code;
                       const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                       const itemTotal = (p.price || 0) * (c.qty || 0);
@@ -1165,8 +1180,8 @@
                       const nameLower = removeAccents(p.name || '');
                       const hasQty = c.qty > 0;
                       
-                      const leVal = c.le > 0 ? c.le : (c.le === 0 ? '0' : '');
-                      const kienVal = c.kien > 0 ? c.kien : (c.kien === 0 ? '0' : '');
+                      const leVal = c.le;
+                      const kienVal = c.kien;
 
                       return `
                         <tr id="row_item_${keyId}" class="${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}">
@@ -1175,16 +1190,16 @@
                           <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
                           <td>
                             <div style="display:flex; align-items:center; gap:2px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)" ontouchend="adjustQty('${keyId}', 'le', -1)">-</button>
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
                               <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)" ontouchend="adjustQty('${keyId}', 'le', 1)">+</button>
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
                             </div>
                           </td>
                           <td>
                             <div style="display:flex; align-items:center; gap:2px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)" ontouchend="adjustQty('${keyId}', 'kien', -1)">-</button>
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
                               <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)" ontouchend="adjustQty('${keyId}', 'kien', 1)">+</button>
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
                             </div>
                           </td>
                           <td><b>${p.tyLeQuyDoi || 50}</b></td>
@@ -1199,7 +1214,7 @@
               </div>
             ` : `
               <div id="mobileProductListContainer" class="mobile-card-view">
-                ${displayProducts.map(p => {
+                ${products.map(p => {
                   const keyId = p.id || p.code;
                   const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                   const itemTotal = (p.price || 0) * (c.qty || 0);
@@ -1207,8 +1222,8 @@
                   const nameLower = removeAccents(p.name || '');
                   const hasQty = c.qty > 0;
                   
-                  const leVal = c.le > 0 ? c.le : (c.le === 0 ? '0' : '');
-                  const kienVal = c.kien > 0 ? c.kien : (c.kien === 0 ? '0' : '');
+                  const leVal = c.le;
+                  const kienVal = c.kien;
 
                   return `
                     <div id="card_item_${keyId}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" style="padding:10px 12px; margin-bottom:8px;">
@@ -1227,17 +1242,17 @@
                         <div>
                           <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
                           <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)" ontouchend="adjustQty('${keyId}', 'le', -1)">-</button>
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
                             <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)" ontouchend="adjustQty('${keyId}', 'le', 1)">+</button>
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
                           </div>
                         </div>
                         <div>
                           <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
                           <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)" ontouchend="adjustQty('${keyId}', 'kien', -1)">-</button>
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
                             <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)" ontouchend="adjustQty('${keyId}', 'kien', 1)">+</button>
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
                           </div>
                         </div>
                       </div>
@@ -1249,12 +1264,6 @@
                 }).join('')}
               </div>
             `}
-
-            ${filteredProducts.length > displayProducts.length ? `
-              <button class="btn btn-sm" style="width:100%; margin-top:10px; justify-content:center; background:#CBD5E1; color:#0F172A; font-weight:800;" onclick="loadMoreSalesProducts()">
-                Xem thêm vật tư (${displayProducts.length}/${filteredProducts.length})...
-              </button>
-            ` : ''}
           </div>
 
           <div id="dynamicCartFooter" class="sticky-cart-footer">
@@ -1390,15 +1399,6 @@
     }
 
     else if (currentTab === 'productsAdmin' && backOffice) {
-      let filteredAdminProducts = products;
-      if (adminSearchPrd) {
-        filteredAdminProducts = products.filter(p => {
-          const code = (p.code || '').toLowerCase();
-          const name = (p.name || '').toLowerCase();
-          return code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
-        });
-      }
-
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư (${products.length})</h2>
@@ -1408,22 +1408,11 @@
           <input type="text" placeholder="🔍 Tìm kiếm vật tư theo mã hoặc tên..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:0;">
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <small id="productCount" style="color:var(--text-muted); font-weight:700;">Hiển thị nhanh: <b>${Math.min(filteredAdminProducts.length, 30)}</b> / ${filteredAdminProducts.length} vật tư</small>
+          <small id="productCount" style="color:var(--text-muted); font-weight:700;">Hiển thị nhanh vật tư</small>
         </div>
-        <div id="productCardsContainer">
-          ${filteredAdminProducts.slice(0, 30).map(p => `
-            <div class="mobile-item-card">
-              <div class="item-header">
-                <span class="item-code">Mã: ${p.code}</span>
-                <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
-              </div>
-              <div class="item-title">${p.name}</div>
-              <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
-              <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
-            </div>
-          `).join('')}
-        </div>
+        <div id="productCardsContainer"></div>
       `;
+      setTimeout(() => onAdminSearchInput(adminSearchPrd), 10);
     }
 
     else if (currentTab === 'users' && isAdmin) {
