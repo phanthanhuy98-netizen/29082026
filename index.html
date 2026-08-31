@@ -166,7 +166,7 @@
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:12px 28px;border-radius:28px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:450px;}
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15, 23, 42, 0.8);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
-  .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
+  .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.5);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
 
   .select-row-btn {
@@ -226,14 +226,12 @@
 
   let currentCart = {};
   let activeVisitedStore = null;
-  let soGocFilterKeyword = "", soGocFilterDate = "";
+  let soGocFilterKeyword = "", soGocFilterDate = "", soGocSalesFilter = "";
   let soGocLimitCount = 30;
 
-  let adminSearchPrd = "";
-  let customerSearchKey = "";
+  let customerSearchKeyword = ""; 
   let salesSearchKeyword = ""; 
   let productSearchKeyword = ""; 
-  let customerSearchKeyword = ""; 
   let tabCustomerSearchKey = ""; 
   let tabProductSearchKey = ""; 
   let showOnlySelectedItems = false;
@@ -418,7 +416,7 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  // --- XÓA CHỨNG TỪ YÊU CẦU XÁC NHẬN 3 LẦN (DÀNH CHO ADMIN) ---
+  // --- XÓA CHỨNG TỪ YÊU CẦU XÁC NHẬN 3 LẦN ---
   window.adminDeleteOrder = async function(orderId, soCtu) {
     if (!currentUser || currentUser.role !== 'admin') {
       return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa đơn hàng!");
@@ -879,41 +877,51 @@
     }, 120);
   };
 
-  window.toggleShowOnlySelected = function() {
-    showOnlySelectedItems = !showOnlySelectedItems;
-    renderUI();
-  };
-
   window.filterSoGocRows = function(val) {
     if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
     const queryKey = removeAccents(soGocFilterKeyword.trim());
     const rows = document.querySelectorAll('#soGocTableBody tr[data-so-ctu]');
     let cleanSoCtuKey = queryKey.replace('#', '').trim();
 
+    let totalFilteredAmount = 0;
+
     rows.forEach(r => {
       const soCtu = r.getAttribute('data-so-ctu') || '';
       const maDtpn = r.getAttribute('data-ma-dtpn') || '';
-      const maVt = r.getAttribute('data-ma-vt') || '';
-      const tenHang = r.getAttribute('data-ten-hang') || '';
+      const maNv = r.getAttribute('data-ma-nv') || '';
       const tenNv = r.getAttribute('data-ten-nv') || '';
       const ngayCtu = r.getAttribute('data-ngay-ctu') || '';
+      const orderAmount = Number(r.getAttribute('data-order-amount')) || 0;
 
       const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
       const matchOther = queryKey === "" || 
         matchSoCtu ||
         maDtpn.includes(queryKey) || 
-        maVt.includes(queryKey) || 
-        tenHang.includes(queryKey) || 
+        maNv.includes(queryKey) || 
         tenNv.includes(queryKey);
 
       const matchDate = soGocFilterDate === "" || ngayCtu === soGocFilterDate;
+      const matchSales = soGocSalesFilter === "" || maNv === soGocSalesFilter;
 
-      r.style.display = (matchOther && matchDate) ? '' : 'none';
+      const isVisible = matchOther && matchDate && matchSales;
+      r.style.display = isVisible ? '' : 'none';
+
+      if (isVisible) {
+        totalFilteredAmount += orderAmount;
+      }
     });
+
+    const sumEl = document.getElementById('soGocTotalRevenueVal');
+    if (sumEl) sumEl.innerText = totalFilteredAmount.toLocaleString() + ' đ';
   };
 
   window.setSoGocFilterDate = function(val) {
     soGocFilterDate = val;
+    filterSoGocRows();
+  };
+
+  window.setSoGocSalesFilter = function(val) {
+    soGocSalesFilter = val;
     filterSoGocRows();
   };
 
@@ -939,6 +947,72 @@
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
     }
+  };
+
+  // --- MODAL XEM CHI TIẾT ĐƠN HÀNG ---
+  window.openOrderDetailsModal = function(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    let inferredMaDTPN = order.maDTPNNo || '';
+    if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
+      inferredMaDTPN = order.maKH.split(' - ')[0].trim();
+    }
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;">
+        <div class="modal-content" style="max-width:650px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #E2E8F0; padding-bottom:8px;">
+            <h3 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
+            <button class="btn btn-red btn-sm" onclick="closeOrderDetailsModal()">Đóng</button>
+          </div>
+          <div style="font-size:13px; color:var(--text-muted); margin-bottom:12px; display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <div>Ngày chứng từ: <b>${formatDateDDMMYYYY(order.ngayCtu)}</b></div>
+            <div>Nhân viên: <b>[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
+            <div>Mã KH: <b>${inferredMaDTPN}</b></div>
+            <div>Khách hàng: <b>${order.maKH || '—'}</b></div>
+          </div>
+          <div class="table-responsive" style="max-height:300px; margin-bottom:12px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mã VT</th>
+                  <th>Tên Hàng Hóa</th>
+                  <th>ĐVT</th>
+                  <th>SL</th>
+                  <th>Đơn Giá</th>
+                  <th>Thành Tiền</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${order.items && order.items.length > 0 ? order.items.map(item => `
+                  <tr>
+                    <td><b>${item.code || ''}</b></td>
+                    <td>${item.name || ''}</td>
+                    <td>${item.dvt || 'hộp'}</td>
+                    <td><b style="color:var(--primary);">${item.qty || 0}</b></td>
+                    <td>${(item.price || 0).toLocaleString()}đ</td>
+                    <td><b style="color:var(--rose);">${((item.price || 0) * (item.qty || 0)).toLocaleString()}đ</b></td>
+                  </tr>
+                `).join('') : `<tr><td colspan="6" style="text-align:center;">Không có sản phẩm.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:10px 14px; border-radius:10px; font-size:14px;">
+            <span>Tổng giá trị đơn hàng:</span>
+            <b style="color:var(--rose); font-size:16px;">${(order.amount || 0).toLocaleString()}đ</b>
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+  };
+
+  window.closeOrderDetailsModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
   };
 
   function updateCartTotalsUI() {
@@ -1071,21 +1145,15 @@
     }
   };
 
-  // --- XUẤT EXCEL (LOẠI BỎ HOÀN TOÀN CỘT THAO TÁC ADMIN) ---
+  // --- XUẤT EXCEL ĐẦY ĐỦ TOÀN BỘ CHI TIẾT ---
   window.exportSoGocExcel = function() {
-    const tableEl = document.getElementById('soGocTable');
+    const tableEl = document.getElementById('soGocExportTable');
     if (!tableEl) return alert("Không có dữ liệu để xuất!");
     
-    // Clone bảng để ẩn cột thao tác admin trước khi xuất file
-    const cloneTable = tableEl.cloneNode(true);
-    const adminTh = cloneTable.querySelector('th.admin-action-col');
-    if (adminTh) adminTh.remove();
-    cloneTable.querySelectorAll('td.admin-action-col').forEach(td => td.remove());
-
-    const wb = XLSX.utils.table_to_book(cloneTable, { raw: true });
+    const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
-    toast("✅ Đã xuất file Excel Sổ Gốc Bán Hàng thành công!");
+    toast("✅ Đã xuất file Excel Sổ Gốc Bán Hàng thành công (đầy đủ mọi cột dòng)!");
   };
 
   window.importProductsExcel = function(event) {
@@ -1414,7 +1482,11 @@
     }
 
     else if (tab === 'soGocBH') {
-      let flatSoGocRows = [];
+      // 1. Dữ liệu gộp nhóm theo từng Đơn Hàng (SO CTU) cho giao diện
+      let groupedOrdersMap = new Map();
+      // 2. Dữ liệu chi tiết từng dòng phục vụ xuất Excel đầy đủ
+      let flatExcelRows = [];
+
       orders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
           let inferredMaDTPN = o.maDTPNNo || '';
@@ -1422,7 +1494,10 @@
             inferredMaDTPN = o.maKH.split(' - ')[0].trim();
           }
 
+          let orderTotalQty = 0;
           o.items.forEach(item => {
+            orderTotalQty += Number(item.qty || 0);
+
             let itemCode = item.code || '';
             let itemName = item.name || '';
             let finalMaVTHHCo = itemCode;
@@ -1434,12 +1509,8 @@
               if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
             }
 
-            // LOẠI BỎ DẤU # TRƯỚC SỐ CHỨNG TỪ (HIỂN THỊ DẠNG 1, 2, 5...)
-            let rawSoCtuNum = o.soCtu || 1;
-
-            flatSoGocRows.push({
-              orderId: o.id,
-              soCtu: rawSoCtuNum,
+            flatExcelRows.push({
+              soCtu: o.soCtu || 1,
               ngayCtu: o.ngayCtu || '2026-08-31',
               ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
               maDTPNNo: inferredMaDTPN,
@@ -1453,31 +1524,99 @@
               vndThanhTien: (item.price || 0) * (item.qty || 0)
             });
           });
+
+          groupedOrdersMap.set(o.id, {
+            orderId: o.id,
+            soCtu: o.soCtu || 1,
+            ngayCtu: o.ngayCtu || '2026-08-31',
+            ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
+            maDTPNNo: inferredMaDTPN,
+            maKH: o.maKH || '',
+            maNhanVien: o.salesCode || '',
+            tenNhanVien: o.salesName || '',
+            totalQty: orderTotalQty,
+            amount: o.amount || 0
+          });
         }
       });
 
       const isAdmin = currentUser && currentUser.role === 'admin';
-      const limitedRows = flatSoGocRows.slice(0, soGocLimitCount);
+      const allGroupedList = Array.from(groupedOrdersMap.values());
+      const limitedOrders = allGroupedList.slice(0, soGocLimitCount);
+
+      // Lấy danh sách nhân viên duy nhất để đưa vào bộ lọc theo nhân viên
+      const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (Chi Tiết Giao Dịch)</h2>
+          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (Gom Nhóm Chứng Từ)</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('today')">Hôm Nay</button>
             <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('all')">Tất Cả</button>
-            <input type="date" id="soGocDateFilter" value="${soGocFilterDate}" onchange="setSoGocFilterDate(this.value)" style="margin:0; width:150px; padding:7px 10px; font-size:12px; background:#fff;">
+            <input type="date" id="soGocDateFilter" value="${soGocFilterDate}" onchange="setSoGocFilterDate(this.value)" style="margin:0; width:140px; padding:7px 8px; font-size:12px; background:#fff;">
+            
+            <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; width:130px; padding:7px 8px; font-size:12px; background:#fff;">
+              <option value="">Tất cả NV</option>
+              ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>${code}</option>`).join('')}
+            </select>
+
             <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
             ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="adminDeleteAllOrders()"><i class="fa-solid fa-trash-can"></i> Xóa Tất Cả</button>` : ''}
           </div>
         </div>
 
-        <div class="card" style="margin-bottom:10px; padding:12px;">
-          <!-- HỖ TRỢ TÌM KIẾM CẢ KHI GÕ KHÔNG CÓ DẤU # HOẶC CÓ DẤU # -->
-          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, tên hàng, nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+        <!-- THANH TỔNG DOANH THU REAL-TIME -->
+        <div style="background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%); padding: 12px 18px; border-radius: 12px; color: #fff; margin-bottom: 12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="font-size:13px; font-weight:700; color:#CBD5E1;"><i class="fa-solid fa-chart-pie" style="color:var(--amber);"></i> Tổng doanh thu theo bộ lọc hiện tại:</div>
+          <div style="font-size:18px; font-weight:800; color:var(--amber);" id="soGocTotalRevenueVal">0 đ</div>
         </div>
 
+        <div class="card" style="margin-bottom:10px; padding:12px;">
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+        </div>
+
+        <!-- BẢNG GIAO DIỆN GOM NHÓM THEO CHỨNG TỪ -->
         <div class="table-responsive">
           <table id="soGocTable">
+            <thead>
+              <tr>
+                <th>So CTu</th>
+                <th>Ngay CTu</th>
+                <th>Ma DTPNNo</th>
+                <th>Tên Khách Hàng</th>
+                <th>Ma NV</th>
+                <th>Tên Nhân Viên</th>
+                <th>Tổng SL</th>
+                <th>Tổng Thành Tiền</th>
+                <th style="text-align:right;">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody id="soGocTableBody">
+              ${limitedOrders.length > 0 ? limitedOrders.map(o => `
+                <tr data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}">
+                  <td><b>${o.soCtu}</b></td>
+                  <td style="white-space: nowrap;">${o.ngayCtuFormatted}</td>
+                  <td><b>${o.maDTPNNo}</b></td>
+                  <td>${o.maKH}</td>
+                  <td><b>${o.maNhanVien}</b></td>
+                  <td style="white-space: nowrap;">${o.tenNhanVien}</td>
+                  <td><b style="color:var(--primary);">${o.totalQty}</b></td>
+                  <td style="white-space: nowrap;"><b style="color:var(--rose);">${o.amount.toLocaleString()}đ</b></td>
+                  <td style="text-align:right; white-space: nowrap;">
+                    <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
+                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminDeleteOrder('${o.orderId}', '${o.soCtu}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                  </td>
+                </tr>
+              `).join('') : `
+                <tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- BẢNG ẨN PHỤC VỤ XUẤT FILE EXCEL ĐẦY ĐỦ 100% CHI TIẾT DÒNG VÀ CỘT -->
+        <div style="display:none;">
+          <table id="soGocExportTable">
             <thead>
               <tr>
                 <th>So CTu</th>
@@ -1491,38 +1630,31 @@
                 <th>So Luong</th>
                 <th>VND Don Gia</th>
                 <th>VND Thanh Tien</th>
-                ${isAdmin ? `<th class="admin-action-col">Thao Tác Admin</th>` : ''}
               </tr>
             </thead>
-            <tbody id="soGocTableBody">
-              ${limitedRows.length > 0 ? limitedRows.map(r => `
-                <tr data-so-ctu="${r.soCtu}" data-ma-dtpn="${removeAccents(r.maDTPNNo)}" data-ma-vt="${removeAccents(r.maVTHHCo)}" data-ten-hang="${removeAccents(r.tenHangHoa)}" data-ten-nv="${removeAccents(r.tenNhanVien)}" data-ngay-ctu="${r.ngayCtu}">
+            <tbody>
+              ${flatExcelRows.map(r => `
+                <tr>
                   <td><b>${r.soCtu}</b></td>
-                  <td style="white-space: nowrap;">${r.ngayCtuFormatted}</td>
+                  <td>${r.ngayCtuFormatted}</td>
                   <td><b>${r.maDTPNNo}</b></td>
                   <td><b>${r.maNhanVien}</b></td>
-                  <td style="white-space: nowrap;">${r.tenNhanVien}</td>
+                  <td>${r.tenNhanVien}</td>
                   <td><b>${r.maVTHHCo}</b></td>
                   <td>${r.tenHangHoa}</td>
                   <td>${r.donViTinh}</td>
-                  <td><b style="color:var(--primary);">${r.soLuong}</b></td>
-                  <td style="white-space: nowrap;">${r.vndDonGia.toLocaleString()}đ</td>
-                  <td style="white-space: nowrap;"><b style="color:var(--rose);">${r.vndThanhTien.toLocaleString()}đ</b></td>
-                  ${isAdmin ? `
-                    <td class="admin-action-col" style="white-space: nowrap;">
-                      <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="adminDeleteOrder('${r.orderId}', '${r.soCtu}')"><i class="fa-solid fa-trash"></i> Xóa</button>
-                    </td>
-                  ` : ''}
+                  <td><b>${r.soLuong}</b></td>
+                  <td>${r.vndDonGia}</td>
+                  <td><b>${r.vndThanhTien}</b></td>
                 </tr>
-              `).join('') : `
-                <tr><td colspan="${isAdmin ? 12 : 11}" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
-              `}
+              `).join('')}
             </tbody>
           </table>
         </div>
-        ${flatSoGocRows.length > soGocLimitCount ? `
+
+        ${allGroupedList.length > soGocLimitCount ? `
           <div style="text-align:center; margin-top:12px;">
-            <button class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn (${soGocLimitCount}/${flatSoGocRows.length})</button>
+            <button class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn (${soGocLimitCount}/${allGroupedList.length})</button>
           </div>
         ` : ''}
       `;
