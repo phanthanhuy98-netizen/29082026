@@ -259,6 +259,7 @@
   let showOnlySelectedItems = false;
   let searchDebounceTimer = null;
   let customerPageLimit = 20;
+  let salesProductPageLimit = 25;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -384,7 +385,6 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  // --- XÓA CHỨNG TỪ (CHỈ ADMIN & HỎI 2 LẦN) ---
   window.adminDeleteOrder = async function(orderId, soCtu) {
     if (!currentUser || currentUser.role !== 'admin') {
       return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa đơn hàng!");
@@ -462,19 +462,10 @@
     salesSearchKeyword = '';
     productSearchKeyword = '';
     showOnlySelectedItems = false;
+    salesProductPageLimit = 25;
 
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
-
-    // Dùng requestAnimationFrame kết hợp setTimeout để ngắt luồng xử lý UI nặng, chống đơ/lag
-    requestAnimationFrame(() => {
-      renderUI();
-      setTimeout(() => {
-        const productInput = document.getElementById('productSearchInput');
-        if (productInput) {
-          productInput.focus();
-        }
-      }, 50);
-    });
+    renderUI();
   };
 
   window.resetSelectedStore = function() {
@@ -520,6 +511,7 @@
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   };
 
+  // --- CƠ CHẾ CẬP NHẬT SỐ LƯỢNG CHUẨN XÁC, LUÔN HIỆN SỐ (KHÔNG CHO DƯỚI 0) ---
   window.updateCartDetail = function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
@@ -529,7 +521,7 @@
     
     currentCart[prdId][field] = cleanVal;
     
-    const packRatio = p?.tyLeQuyDoi || 50;
+    const packRatio = p?.tyLeQuyDoi || 1;
     
     if (field === 'kien' || field === 'le') {
       currentCart[prdId].qty = (Number(currentCart[prdId].kien || 0) * packRatio) + Number(currentCart[prdId].le || 0);
@@ -539,8 +531,9 @@
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
     
-    const leDisplay = currentCart[prdId].le > 0 ? currentCart[prdId].le : '';
-    const kienDisplay = currentCart[prdId].kien > 0 ? currentCart[prdId].kien : '';
+    // Hiển thị trực tiếp số lượng trong box (nếu bằng 0 thì hiện '0' hoặc để trống tùy ý, ở đây hiển thị số 0 rõ ràng hoặc giá trị số)
+    const leDisplay = currentCart[prdId].le > 0 ? currentCart[prdId].le : (currentCart[prdId].le === 0 ? '0' : '');
+    const kienDisplay = currentCart[prdId].kien > 0 ? currentCart[prdId].kien : (currentCart[prdId].kien === 0 ? '0' : '');
 
     document.querySelectorAll(`.input-le-${prdId}`).forEach(el => {
       if (document.activeElement !== el) el.value = leDisplay;
@@ -562,45 +555,26 @@
   window.adjustQty = function(prdId, field, delta) {
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     let curVal = Number(currentCart[prdId][field]) || 0;
-    let newVal = Math.max(0, curVal + delta);
+    let newVal = curVal + delta;
+    if (newVal < 0) newVal = 0; // Chặn không cho giảm dưới 0
     updateCartDetail(prdId, field, newVal);
   };
 
   window.filterSalesProducts = function(val) {
     if (val !== undefined) productSearchKeyword = val;
-    const queryKey = removeAccents(productSearchKeyword.trim());
-    const desktopRows = document.querySelectorAll('#salesProductTableBody tr[data-id]');
-    const mobileCards = document.querySelectorAll('#mobileProductListContainer .product-card-item');
+    salesProductPageLimit = 25; 
+    renderUI();
+  };
 
-    const processItem = (el) => {
-      const keyId = el.getAttribute('data-id');
-      const mavt = el.getAttribute('data-mavt') || '';
-      const name = el.getAttribute('data-name') || '';
-      const c = currentCart[keyId];
-      const hasQty = c && c.qty > 0;
-
-      let show = true;
-      if (showOnlySelectedItems) {
-        show = hasQty;
-      } else if (queryKey !== '') {
-        show = mavt.includes(queryKey) || name.includes(queryKey);
-      }
-
-      el.style.display = show ? '' : 'none';
-    };
-
-    desktopRows.forEach(processItem);
-    mobileCards.forEach(processItem);
+  window.loadMoreSalesProducts = function() {
+    salesProductPageLimit += 30;
+    renderUI();
   };
 
   window.toggleShowOnlySelected = function() {
     showOnlySelectedItems = !showOnlySelectedItems;
-    const btn = document.getElementById('toggleSelectedBtn');
-    if (btn) {
-      btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
-      btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đã chọn' : '<i class="fa-solid fa-filter"></i> Đã chọn';
-    }
-    filterSalesProducts();
+    salesProductPageLimit = 25;
+    renderUI();
   };
 
   window.filterSoGocRows = function(val) {
@@ -964,7 +938,7 @@
           <div style="flex:1; padding-right:8px;">
             <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;">${s.address||'Chưa có địa chỉ'}</small>
           </div>
-          <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)" ontouchend="selectStoreDirectly('${s.id}', event)">CHỌN</button>
+          <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN</button>
         </div>
       `).join('');
       dropdown.classList.remove('hidden');
@@ -1102,6 +1076,23 @@
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
 
+      const queryKey = removeAccents(productSearchKeyword.trim());
+      let filteredProducts = products;
+      if (showOnlySelectedItems) {
+        filteredProducts = products.filter(p => {
+          const keyId = p.id || p.code;
+          return currentCart[keyId] && currentCart[keyId].qty > 0;
+        });
+      } else if (queryKey !== "") {
+        filteredProducts = products.filter(p => 
+          removeAccents(p.code || '').includes(queryKey) || 
+          removeAccents(p.name || '').includes(queryKey)
+        );
+      }
+
+      const isMobileScreen = window.innerWidth <= 768;
+      const displayProducts = filteredProducts.slice(0, salesProductPageLimit);
+
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '10px'};">
@@ -1149,118 +1140,123 @@
               </button>
             </div>
 
-            <!-- GIAO DIỆN BẢNG CHUẨN CHO MÁY TÍNH -->
-            <div class="table-responsive desktop-table-view">
-              <table>
-                <thead>
-                  <tr>
-                    <th>MAVT</th>
-                    <th>Tên Vật Tư</th>
-                    <th>ĐVT</th>
-                    <th>SL Lẻ (+/-)</th>
-                    <th>SL Thùng (+/-)</th>
-                    <th>Quy Cách</th>
-                    <th>Đơn Giá</th>
-                    <th>Thành Tiền</th>
-                    <th>Tổng SL</th>
-                  </tr>
-                </thead>
-                <tbody id="salesProductTableBody">
-                  ${products.map(p => {
-                    const keyId = p.id || p.code;
-                    const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
-                    const itemTotal = (p.price || 0) * (c.qty || 0);
-                    const mavtLower = removeAccents(p.code || '');
-                    const nameLower = removeAccents(p.name || '');
-                    const hasQty = c.qty > 0;
-                    
-                    const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
-                    const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
+            ${!isMobileScreen ? `
+              <div class="table-responsive desktop-table-view">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>MAVT</th>
+                      <th>Tên Vật Tư</th>
+                      <th>ĐVT</th>
+                      <th>SL Lẻ (+/-)</th>
+                      <th>SL Thùng (+/-)</th>
+                      <th>Quy Cách</th>
+                      <th>Đơn Giá</th>
+                      <th>Thành Tiền</th>
+                      <th>Tổng SL</th>
+                    </tr>
+                  </thead>
+                  <tbody id="salesProductTableBody">
+                    ${displayProducts.map(p => {
+                      const keyId = p.id || p.code;
+                      const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+                      const itemTotal = (p.price || 0) * (c.qty || 0);
+                      const mavtLower = removeAccents(p.code || '');
+                      const nameLower = removeAccents(p.name || '');
+                      const hasQty = c.qty > 0;
+                      
+                      const leVal = c.le > 0 ? c.le : (c.le === 0 ? '0' : '');
+                      const kienVal = c.kien > 0 ? c.kien : (c.kien === 0 ? '0' : '');
 
-                    return `
-                      <tr id="row_item_${keyId}" class="${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}">
-                        <td><b>${p.code}</b></td>
-                        <td><b>${p.name}</b></td>
-                        <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
-                        <td>
-                          <div style="display:flex; align-items:center; gap:2px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                      return `
+                        <tr id="row_item_${keyId}" class="${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}">
+                          <td><b>${p.code}</b></td>
+                          <td><b>${p.name}</b></td>
+                          <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
+                          <td>
+                            <div style="display:flex; align-items:center; gap:2px;">
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)" ontouchend="adjustQty('${keyId}', 'le', -1)">-</button>
+                              <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)" ontouchend="adjustQty('${keyId}', 'le', 1)">+</button>
+                            </div>
+                          </td>
+                          <td>
+                            <div style="display:flex; align-items:center; gap:2px;">
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)" ontouchend="adjustQty('${keyId}', 'kien', -1)">-</button>
+                              <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)" ontouchend="adjustQty('${keyId}', 'kien', 1)">+</button>
+                            </div>
+                          </td>
+                          <td><b>${p.tyLeQuyDoi || 50}</b></td>
+                          <td>${(p.price || 0).toLocaleString()}đ</td>
+                          <td><b style="color:var(--rose);" id="row_total_${keyId}">${itemTotal.toLocaleString()}đ</b></td>
+                          <td><b style="color:var(--primary);" id="total_qty_${keyId}">${c.qty || 0}</b></td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : `
+              <div id="mobileProductListContainer" class="mobile-card-view">
+                ${displayProducts.map(p => {
+                  const keyId = p.id || p.code;
+                  const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+                  const itemTotal = (p.price || 0) * (c.qty || 0);
+                  const mavtLower = removeAccents(p.code || '');
+                  const nameLower = removeAccents(p.name || '');
+                  const hasQty = c.qty > 0;
+                  
+                  const leVal = c.le > 0 ? c.le : (c.le === 0 ? '0' : '');
+                  const kienVal = c.kien > 0 ? c.kien : (c.kien === 0 ? '0' : '');
+
+                  return `
+                    <div id="card_item_${keyId}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" style="padding:10px 12px; margin-bottom:8px;">
+                      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                        <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
+                        <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
+                      </div>
+                      <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
+                      
+                      <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:6px 10px; border-radius:8px; margin-bottom:6px; font-size:12px;">
+                        <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
+                        <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
+                      </div>
+
+                      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
+                        <div>
+                          <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
+                          <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)" ontouchend="adjustQty('${keyId}', 'le', -1)">-</button>
+                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)" ontouchend="adjustQty('${keyId}', 'le', 1)">+</button>
                           </div>
-                        </td>
-                        <td>
-                          <div style="display:flex; align-items:center; gap:2px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                        </div>
+                        <div>
+                          <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
+                          <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)" ontouchend="adjustQty('${keyId}', 'kien', -1)">-</button>
+                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)" ontouchend="adjustQty('${keyId}', 'kien', 1)">+</button>
                           </div>
-                        </td>
-                        <td><b>${p.tyLeQuyDoi || 50}</b></td>
-                        <td>${(p.price || 0).toLocaleString()}đ</td>
-                        <td><b style="color:var(--rose);" id="row_total_${keyId}">${itemTotal.toLocaleString()}đ</b></td>
-                        <td><b style="color:var(--primary);" id="total_qty_${keyId}">${c.qty || 0}</b></td>
-                      </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
-
-            <!-- GIAO DIỆN THẺ DỌC CHO DI ĐỘNG -->
-            <div id="mobileProductListContainer" class="mobile-card-view">
-              ${products.map(p => {
-                const keyId = p.id || p.code;
-                const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
-                const itemTotal = (p.price || 0) * (c.qty || 0);
-                const mavtLower = removeAccents(p.code || '');
-                const nameLower = removeAccents(p.name || '');
-                const hasQty = c.qty > 0;
-                
-                const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
-                const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
-
-                return `
-                  <div id="card_item_${keyId}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" style="padding:10px 12px; margin-bottom:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-                      <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
-                      <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
-                    </div>
-                    <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
-                    
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:6px 10px; border-radius:8px; margin-bottom:6px; font-size:12px;">
-                      <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
-                      <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
-                    </div>
-
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
-                      <div>
-                        <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
-                        <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                          <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                          <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                          <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
                         </div>
                       </div>
-                      <div>
-                        <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
-                        <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                          <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                          <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                          <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
-                        </div>
+                      <div style="text-align:right; font-size:12px;">
+                        Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${keyId}">${itemTotal.toLocaleString()}đ</b>
                       </div>
                     </div>
-                    <div style="text-align:right; font-size:12px;">
-                      Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${keyId}">${itemTotal.toLocaleString()}đ</b>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+
+            ${filteredProducts.length > displayProducts.length ? `
+              <button class="btn btn-sm" style="width:100%; margin-top:10px; justify-content:center; background:#CBD5E1; color:#0F172A; font-weight:800;" onclick="loadMoreSalesProducts()">
+                Xem thêm vật tư (${displayProducts.length}/${filteredProducts.length})...
+              </button>
+            ` : ''}
           </div>
 
-          <!-- STICKY FOOTER CỐ ĐỊNH TỔNG TIỀN, SỐ SKU & NÚT GỬI ĐƠN -->
           <div id="dynamicCartFooter" class="sticky-cart-footer">
             <div>
               <div id="stickyCartSkuCount" style="font-size:11px; color:#94A3B8; font-weight:700;">Đã chọn: ${selectedSkuCount} mã hàng</div>
@@ -1270,7 +1266,6 @@
           </div>
         ` : ''}
       `;
-      setTimeout(() => filterSalesProducts(), 0);
     }
 
     else if (currentTab === 'soGocBH') {
