@@ -90,14 +90,14 @@
   .btn-purple{background:var(--purple-gradient);color:#fff;}
   .btn-sm{padding:7px 12px;font-size:11px;border-radius:10px;}
   
-  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;margin-bottom:80px; min-height: calc(100vh - 120px); width: 100%; overflow: hidden;}
+  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;margin-bottom:80px; min-height: calc(100vh - 120px); width: 100%; overflow: visible;}
   
   .grid-users {display:grid;grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);gap:14px;margin-top:12px; width: 100%;}
   @media(max-width: 992px) {
     .grid-users { grid-template-columns: 1fr !important; }
   }
 
-  .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;margin-bottom:12px; position: relative; width: 100%; overflow: hidden;}
+  .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;margin-bottom:12px; position: relative; width: 100%; overflow: visible;}
   
   .mobile-item-card {
     background: #FFFFFF;
@@ -124,8 +124,8 @@
   input:focus, select:focus { border-color:var(--primary); outline:none; background:#fff; box-shadow:0 0 0 3px rgba(79, 70, 229, 0.12); }
   
   .table-responsive { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 8px; border-radius: 12px; border: 1px solid #E2E8F0; }
-  table { width:100%; border-collapse:separate; border-spacing:0; min-width: 500px; }
-  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #E2E8F0; font-size:12px; vertical-align: middle; word-break: break-word; }
+  table { width:100%; border-collapse:separate; border-spacing:0; min-width: 900px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #E2E8F0; font-size:12px; vertical-align: middle; }
   th { background:#F1F5F9; color:#334155; font-weight:800; text-transform:uppercase; font-size:10px; letter-spacing:0.5px; white-space:nowrap; }
   tr:last-child td { border-bottom:none; }
   tr:hover td { background: #F8FAFC; }
@@ -171,16 +171,16 @@
 
   .autocomplete-wrapper { position: relative; width: 100%; }
   .autocomplete-dropdown {
-    position: absolute;
-    left: 0;
-    width: 100%;
+    position: fixed;
+    left: 12px;
+    right: 12px;
     background: #FFFFFF;
     border: 2px solid var(--primary);
     border-radius: 12px;
-    max-height: 250px;
+    max-height: calc(100vh - 200px);
     overflow-y: auto;
-    z-index: 2000;
-    box-shadow: 0 -10px 35px rgba(0,0,0,0.3);
+    z-index: 9999;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
@@ -565,10 +565,29 @@
     filterSalesProducts();
   };
 
+  // --- LỌC SỔ GỐC: ƯU TIÊN SỐ CHỨNG TỪ (SO CTU) TRƯỚC ---
   window.filterSoGocRows = function(val) {
     if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
     const queryKey = removeAccents(soGocFilterKeyword.trim());
     const rows = document.querySelectorAll('#soGocTableBody tr[data-so-ctu]');
+
+    // Tách chuỗi số chứng từ nếu user gõ dạng "#2" hoặc "2"
+    let cleanSoCtuKey = queryKey.replace('#', '').trim();
+
+    // Sắp xếp lại DOM các dòng theo độ ưu tiên khớp Số Chứng Từ lên đầu
+    const tableBody = document.getElementById('soGocTableBody');
+    if (tableBody && queryKey !== '') {
+      const rowsArray = Array.from(rows);
+      rowsArray.sort((a, b) => {
+        const ctuA = (a.getAttribute('data-so-ctu') || '').toLowerCase();
+        const ctuB = (b.getAttribute('data-so-ctu') || '').toLowerCase();
+        
+        const matchA = ctuA.includes(cleanSoCtuKey) ? 0 : 1;
+        const matchB = ctuB.includes(cleanSoCtuKey) ? 0 : 1;
+        return matchA - matchB;
+      });
+      rowsArray.forEach(r => tableBody.appendChild(r));
+    }
 
     rows.forEach(r => {
       const soCtu = r.getAttribute('data-so-ctu') || '';
@@ -578,8 +597,10 @@
       const tenNv = r.getAttribute('data-ten-nv') || '';
       const ngayCtu = r.getAttribute('data-ngay-ctu') || '';
 
-      const matchKey = queryKey === "" || 
-        soCtu.includes(queryKey) || 
+      // Ưu tiên check số chứng từ trước
+      const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
+      const matchOther = queryKey === "" || 
+        matchSoCtu ||
         maDtpn.includes(queryKey) || 
         maVt.includes(queryKey) || 
         tenHang.includes(queryKey) || 
@@ -587,7 +608,7 @@
 
       const matchDate = soGocFilterDate === "" || ngayCtu === soGocFilterDate;
 
-      r.style.display = (matchKey && matchDate) ? '' : 'none';
+      r.style.display = (matchOther && matchDate) ? '' : 'none';
     });
   };
 
@@ -880,19 +901,12 @@
     dropdownElement.classList.remove('hidden');
     
     const rect = inputElement.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    
-    if (spaceBelow < 250) {
-      dropdownElement.style.top = 'auto';
-      dropdownElement.style.bottom = '100%';
-      dropdownElement.style.marginBottom = '6px';
-      dropdownElement.style.marginTop = '0';
-    } else {
-      dropdownElement.style.top = '100%';
-      dropdownElement.style.bottom = 'auto';
-      dropdownElement.style.marginTop = '6px';
-      dropdownElement.style.marginBottom = '0';
-    }
+    const dropdownTop = rect.bottom + 8;
+    const availableHeight = window.innerHeight - dropdownTop - 20;
+
+    dropdownElement.style.top = `${dropdownTop}px`;
+    dropdownElement.style.bottom = 'auto';
+    dropdownElement.style.maxHeight = `${Math.max(200, availableHeight)}px`;
   }
 
   window.onSalesSearchInput = function(val) {
@@ -921,7 +935,7 @@
         return nameA.localeCompare(nameB);
       });
 
-      matched = matched.slice(0, 15);
+      matched = matched.slice(0, 30);
 
       if (matched.length === 0) {
         showSmartDropdown(inputEl, dropdown, `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy khách hàng phù hợp</div>`);
@@ -1291,7 +1305,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm theo số chứng từ, mã DTPN, mã vật tư, tên hàng hoặc nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Tìm kiếm ưu tiên Số chứng từ (#2...), mã DTPN, tên hàng, nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div class="table-responsive">
@@ -1317,18 +1331,18 @@
               ${flatSoGocRows.length > 0 ? flatSoGocRows.map(r => `
                 <tr data-so-ctu="${r.soCtu}" data-ma-dtpn="${removeAccents(r.maDTPNNo)}" data-ma-vt="${removeAccents(r.maVTHHCo)}" data-ten-hang="${removeAccents(r.tenHangHoa)}" data-ten-nv="${removeAccents(r.tenNhanVien)}" data-ngay-ctu="${r.ngayCtu}">
                   <td><b>#${r.soCtu}</b></td>
-                  <td>${r.ngayCtuFormatted}</td>
+                  <td style="white-space: nowrap;">${r.ngayCtuFormatted}</td>
                   <td><b>${r.maDTPNNo}</b></td>
                   <td>${r.maTuyen}</td>
                   <td>${r.tenTuyen}</td>
                   <td><b>${r.maNhanVien}</b></td>
-                  <td>${r.tenNhanVien}</td>
+                  <td style="white-space: nowrap;">${r.tenNhanVien}</td>
                   <td><b>${r.maVTHHCo}</b></td>
                   <td>${r.tenHangHoa}</td>
                   <td>${r.donViTinh}</td>
                   <td><b style="color:var(--primary);">${r.soLuong}</b></td>
-                  <td>${r.vndDonGia.toLocaleString()}đ</td>
-                  <td><b style="color:var(--rose);">${r.vndThanhTien.toLocaleString()}đ</b></td>
+                  <td style="white-space: nowrap;">${r.vndDonGia.toLocaleString()}đ</td>
+                  <td style="white-space: nowrap;"><b style="color:var(--rose);">${r.vndThanhTien.toLocaleString()}đ</b></td>
                 </tr>
               `).join('') : `
                 <tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
