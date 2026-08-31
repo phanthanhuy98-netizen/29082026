@@ -39,7 +39,7 @@
   }
   
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg-dark);background-image:var(--bg-gradient);color:var(--text-main);padding:8px;min-height:100vh;overflow-x:hidden;padding-bottom:160px;}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg-dark);background-image:var(--bg-gradient);color:var(--text-main);padding:8px;min-height:100vh;overflow-x:hidden;padding-bottom:180px;}
   .app{max-width:1440px;margin:0 auto;}
   
   .login-container {
@@ -126,6 +126,24 @@
   tr:last-child td { border-bottom:none; }
   tr:hover td { background: #F8FAFC; }
 
+  /* STICKY FOOTER CHO PHẦN BÁN HÀNG */
+  .sticky-cart-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1000;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.4);
+    color: #fff;
+  }
+
   @media (max-width: 768px) {
     .desktop-table-view { display: none !important; }
     .mobile-card-view { display: block !important; }
@@ -135,6 +153,7 @@
     .grid { grid-template-columns: 1fr !important; }
     .card { padding: 12px; }
     input, select { font-size: 16px !important; padding: 12px 14px; }
+    .sticky-cart-footer { padding: 10px 16px; }
   }
   @media (min-width: 769px) {
     .desktop-table-view { display: block !important; }
@@ -236,11 +255,9 @@
 
   let currentCart = {};
   let activeVisitedStore = null;
-  let isFilterCollapsed = false;
   let isMapVisible = false;
   let leafletMapInstance = null;
   let managerMarker = null;
-  let isReturnOrderMode = false;
   let orderFilterKeyword = "", orderFilterStatus = "ALL";
 
   let adminSearchPrd = "";
@@ -250,6 +267,7 @@
   
   let productSearchMavtVal = "";
   let productSearchNameVal = "";
+  let showOnlySelectedItems = false; // Biến lọc chỉ xem món đã chọn
   let searchDebounceTimer = null;
 
   let idbDb = null;
@@ -369,7 +387,6 @@
   window.handleCustomerLocationAction = function(storeId, hasLat) {
     const store = stores.find(s => s.id === storeId);
     if (!store) return;
-
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     toast("📍 Đang lấy tọa độ GPS thực tế...");
     navigator.geolocation.getCurrentPosition(async pos => {
@@ -377,42 +394,31 @@
       const lng = Number(pos.coords.longitude);
       try {
         await updateDoc(doc(db, "stores", storeId), {
-          lat,
-          lng,
+          lat, lng,
           pinnedByCode: currentUser.code || 'NV',
           pinnedByName: currentUser.name || 'Nhân viên'
         });
         toast(`✅ Đã ghim định vị thành công cho tiệm: ${store.name}`);
-      } catch (err) {
-        alert("Lỗi cập nhật GPS: " + err.message);
-      }
+      } catch (err) { alert("Lỗi cập nhật GPS: " + err.message); }
     }, () => alert("Không lấy được tọa độ GPS. Vui lòng bật định vị trên thiết bị."), { enableHighAccuracy: true });
   };
 
-  // CHỈ ADMIN MỚI XÓA ĐƯỢC GPS NHƯNG KHÔNG XÓA KHÁCH HÀNG
   window.adminResetCustomerLocation = async function(storeId) {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
-    if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này để ghim lại mới không? (Thông tin khách hàng vẫn được giữ nguyên)")) return;
+    if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
     try {
-      await updateDoc(doc(db, "stores", storeId), {
-        lat: 0,
-        lng: 0,
-        pinnedByCode: "",
-        pinnedByName: ""
-      });
+      await updateDoc(doc(db, "stores", storeId), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "" });
       toast("🔄 Đã xóa định vị cũ thành công!");
-    } catch (err) {
-      alert("Lỗi: " + err.message);
-    }
+    } catch (err) { alert("Lỗi: " + err.message); }
   };
 
   window.selectStoreDirectly = function(storeId) {
     activeVisitedStore = stores.find(s => s.id === storeId);
-    isFilterCollapsed = true;
     salesSearchKhName = activeVisitedStore ? activeVisitedStore.name : '';
     salesSearchKhCode = activeVisitedStore ? (activeVisitedStore.code || '') : '';
     productSearchMavtVal = "";
     productSearchNameVal = "";
+    showOnlySelectedItems = false;
     
     ['salesCodeDropdown', 'salesNameDropdown', 'productMavtDropdown', 'productNameDropdown'].forEach(id => {
       const el = document.getElementById(id);
@@ -425,38 +431,30 @@
 
   window.resetSelectedStore = function() {
     activeVisitedStore = null;
-    isFilterCollapsed = false;
     salesSearchKhName = '';
     salesSearchKhCode = '';
     productSearchMavtVal = "";
     productSearchNameVal = "";
+    showOnlySelectedItems = false;
     currentCart = {};
-    toast("🔄 Đã đổi khách hàng, vui lòng chọn khách hàng mới!");
+    toast("🔄 Đã đổi khách hàng!");
     renderUI();
   };
 
-  // CHECK-IN GPS LIÊN KẾT TRỰC TIẾP VỚI TAB KHÁCH HÀNG
   window.checkinActiveStoreGPS = function() {
     if (!activeVisitedStore) return alert("Chưa có thông tin điểm bán!");
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
-    toast("📍 Đang tiến hành check-in và lưu tọa độ GPS vào hồ sơ khách hàng...");
-    
+    toast("📍 Đang check-in và lưu tọa độ GPS vào hồ sơ khách hàng...");
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
-      
       try {
         const storeRef = doc(db, "stores", activeVisitedStore.id);
         const storeSnap = await getDoc(storeRef);
         const storeData = storeSnap.exists() ? storeSnap.data() : {};
         
-        let updatePayload = {
-          lat: lat,
-          lng: lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên'
-        };
+        let updatePayload = { lat, lng, pinnedByCode: currentUser.code || 'NV', pinnedByName: currentUser.name || 'Nhân viên' };
 
         if (!storeData.address || storeData.address === "Chưa cập nhật địa chỉ") {
           try {
@@ -466,38 +464,21 @@
               updatePayload.address = data.display_name;
               activeVisitedStore.address = data.display_name;
             }
-          } catch (e) {
-            console.log("Không tự động dịch được địa chỉ:", e);
-          }
+          } catch (e) { console.log("Lỗi dịch địa chỉ:", e); }
         }
 
-        // Cập nhật trực tiếp vào document của bảng stores (Tab KH)
         await updateDoc(storeRef, updatePayload);
-
         await addDoc(collection(db, "checkins"), {
-          salesUid: currentUser.uid,
-          salesName: currentUser.name,
-          salesCode: currentUser.code,
-          storeId: activeVisitedStore.id,
-          storeName: activeVisitedStore.name,
-          lat: lat,
-          lng: lng,
-          photo: "",
-          status: "Check-in thành công",
-          createdAt: serverTimestamp()
+          salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
+          storeId: activeVisitedStore.id, storeName: activeVisitedStore.name, lat, lng, photo: "", status: "Check-in thành công", createdAt: serverTimestamp()
         });
 
         activeVisitedStore.lat = lat;
         activeVisitedStore.lng = lng;
-
-        toast(`✅ Check-in thành công! Đã đồng bộ GPS vào tab Khách Hàng.`);
+        toast(`✅ Check-in thành công! Đã đồng bộ GPS.`);
         renderUI();
-      } catch (err) {
-        alert("Lỗi lưu GPS: " + err.message);
-      }
-    }, () => {
-      alert("Không thể lấy tọa độ GPS. Vui lòng bật định vị trên thiết bị của bạn.");
-    }, { enableHighAccuracy: true });
+      } catch (err) { alert("Lỗi lưu GPS: " + err.message); }
+    }, () => alert("Không thể lấy tọa độ GPS."), { enableHighAccuracy: true });
   };
 
   window.updateCartDetail = function(prdId, field, val) {
@@ -514,6 +495,28 @@
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
     updateCartTotalsUI();
+  };
+
+  window.adjustQty = function(prdId, field, delta) {
+    const p = products.find(x => x.id === prdId || x.code === prdId);
+    if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
+    let curVal = Number(currentCart[prdId][field]) || 0;
+    let newVal = Math.max(0, curVal + delta);
+    updateCartDetail(prdId, field, newVal);
+    
+    // Đồng bộ giá trị lên ô input trên UI ngay lập tức
+    const inputEl = document.getElementById(`input_${field}_${prdId}`);
+    if (inputEl) inputEl.value = newVal === 0 ? '' : newVal;
+  };
+
+  window.toggleShowOnlySelected = function() {
+    showOnlySelectedItems = !showOnlySelectedItems;
+    const btn = document.getElementById('toggleSelectedBtn');
+    if (btn) {
+      btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
+      btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đang xem món đã chọn' : '<i class="fa-solid fa-filter"></i> Xem món đã chọn';
+    }
+    applyTableFilterFast();
   };
 
   function updateCartTotalsUI() {
@@ -539,7 +542,10 @@
       }
     });
     const mainTotalEl = document.getElementById('mainCartTotalAmount');
-    if (mainTotalEl) mainTotalEl.innerText = cartTotalAmount.toLocaleString() + ' đ';
+    const footerTotalEl = document.getElementById('stickyCartTotalAmount');
+    const formattedTotal = cartTotalAmount.toLocaleString() + ' đ';
+    if (mainTotalEl) mainTotalEl.innerText = formattedTotal;
+    if (footerTotalEl) footerTotalEl.innerText = formattedTotal;
   }
 
   window.submitOrder = async function() {
@@ -579,7 +585,7 @@
     await addDoc(collection(db, "orders"), { ...orderData, createdAt: serverTimestamp() });
     toast("🚀 Đã gửi đơn hàng thành công!");
     
-    currentCart = {}; activeVisitedStore = null; isFilterCollapsed = false; productSearchMavtVal = ""; productSearchNameVal = ""; renderUI();
+    currentCart = {}; activeVisitedStore = null; productSearchMavtVal = ""; productSearchNameVal = ""; showOnlySelectedItems = false; renderUI();
   };
 
   window.importProductsExcel = function(event) {
@@ -631,13 +637,12 @@
             const batch = writeBatch(db);
             chunk.forEach(p => batch.set(doc(db, "products", p.code), p));
             await batch.commit();
-            toast(`⏳ Đang đẩy: ${Math.min(i + 300, uniqueList.length)} / ${uniqueList.length} vật tư...`);
             await new Promise(r => setTimeout(r, 40));
           }
 
           await saveProductsToLocalCache(uniqueList);
           products = uniqueList;
-          toast(`✅ Đã đẩy thành công ${uniqueList.length} vật tư kèm đơn giá chuẩn!`);
+          toast(`✅ Đã đồng bộ thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
@@ -812,24 +817,17 @@
       if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       
       let matched = stores.filter(s => removeAccents(s.code || '').includes(queryKey));
-      matched.sort((a, b) => {
-        const codeA = removeAccents(a.code || '');
-        const codeB = removeAccents(b.code || '');
-        const startsA = codeA.startsWith(queryKey) ? 0 : 1;
-        const startsB = codeB.startsWith(queryKey) ? 0 : 1;
-        return startsA - startsB;
-      });
       matched = matched.slice(0, 20);
 
       if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy mã KH phù hợp</div>`;
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy mã KH</div>`;
         dropdown.classList.remove('hidden');
         return;
       }
       dropdown.innerHTML = matched.map(s => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
-            <b>${s.code}</b> — ${s.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||''}</small>
+            <b>${s.code}</b> — ${s.name} <small style="color:var(--text-muted);display:block;">${s.address||''}</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}')">CHỌN</button>
         </div>
@@ -847,38 +845,18 @@
       if (!dropdown) return;
       if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       
-      let matched = stores.filter(s => {
-        const nameNorm = removeAccents(s.name || '');
-        const addrNorm = removeAccents(s.address || '');
-        return nameNorm.includes(queryKey) || addrNorm.includes(queryKey);
-      });
-
-      matched.sort((a, b) => {
-        const nameA = removeAccents(a.name || '');
-        const nameB = removeAccents(b.name || '');
-        
-        const startsA = nameA.startsWith(queryKey) ? 0 : 1;
-        const startsB = nameB.startsWith(queryKey) ? 0 : 1;
-        if (startsA !== startsB) return startsA - startsB;
-
-        const exactA = nameA.includes(queryKey) ? 0 : 1;
-        const exactB = nameB.includes(queryKey) ? 0 : 1;
-        if (exactA !== exactB) return exactA - exactB;
-
-        return nameA.localeCompare(nameB);
-      });
-
+      let matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey));
       matched = matched.slice(0, 20);
       
       if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy khách hàng phù hợp</div>`;
+        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy khách hàng</div>`;
         dropdown.classList.remove('hidden');
         return;
       }
       dropdown.innerHTML = matched.map(s => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
-            <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;margin-top:2px;">${s.address||'Chưa cập nhật địa chỉ'}</small>
+            <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;">${s.address||'Chưa có địa chỉ'}</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}')">CHỌN</button>
         </div>
@@ -890,106 +868,13 @@
   window.onProductMavtAutocomplete = function(val) {
     productSearchMavtVal = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      const queryKey = removeAccents(val.trim());
-      const dropdown = document.getElementById('productMavtDropdown');
-      if (!dropdown) return;
-      if (queryKey === "") {
-        dropdown.classList.add('hidden');
-        applyTableFilterFast();
-        return;
-      }
-
-      let matched = products.filter(p => {
-        const code = removeAccents(p.code || '');
-        return code.includes(queryKey);
-      });
-
-      matched.sort((a, b) => {
-        const codeA = removeAccents(a.code || '');
-        const codeB = removeAccents(b.code || '');
-        const partnerA = codeA.slice(0, 2);
-        const partnerB = codeB.slice(0, 2);
-
-        const isMatchPartnerA = partnerA === queryKey ? 0 : 1;
-        const isMatchPartnerB = partnerB === queryKey ? 0 : 1;
-        if (isMatchPartnerA !== isMatchPartnerB) return isMatchPartnerA - isMatchPartnerB;
-
-        const startsA = codeA.startsWith(queryKey) ? 0 : 1;
-        const startsB = codeB.startsWith(queryKey) ? 0 : 1;
-        if (startsA !== startsB) return startsA - startsB;
-
-        return codeA.localeCompare(codeB);
-      });
-
-      matched = matched.slice(0, 20);
-
-      if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy MAVT phù hợp</div>`;
-        dropdown.classList.remove('hidden');
-        applyTableFilterFast();
-        return;
-      }
-      dropdown.innerHTML = matched.map(p => `
-        <div class="autocomplete-item">
-          <div style="flex:1; padding-right:8px;">
-            <b style="color:var(--primary);">[Cty: ${p.code.slice(0,2)}] ${p.code}</b> — ${p.name} <small style="color:var(--text-muted);display:block;margin-top:2px;">ĐVT: ${p.dvt||'hộp'} | Giá: ${(p.price||0).toLocaleString()}đ</small>
-          </div>
-          <button type="button" class="select-row-btn" onclick="selectProductFromAutocomplete('mavt', '${p.code}')">CHỌN</button>
-        </div>
-      `).join('');
-      dropdown.classList.remove('hidden');
-      applyTableFilterFast();
-    }, 60);
+    searchDebounceTimer = setTimeout(() => { applyTableFilterFast(); }, 60);
   };
 
   window.onProductNameAutocomplete = function(val) {
     productSearchNameVal = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      const queryKey = removeAccents(val.trim());
-      const dropdown = document.getElementById('productNameDropdown');
-      if (!dropdown) return;
-      if (queryKey === "") {
-        dropdown.classList.add('hidden');
-        applyTableFilterFast();
-        return;
-      }
-      const matched = products.filter(p => removeAccents(p.name || '').includes(queryKey)).slice(0, 20);
-      if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy Tên vật tư phù hợp</div>`;
-        dropdown.classList.remove('hidden');
-        applyTableFilterFast();
-        return;
-      }
-      dropdown.innerHTML = matched.map(p => `
-        <div class="autocomplete-item">
-          <div style="flex:1; padding-right:8px;">
-            <b>${p.name}</b> <small style="color:var(--primary);display:block;margin-top:2px;">Cty: ${p.code.slice(0,2)} | Mã: ${p.code} | Giá: ${(p.price||0).toLocaleString()}đ</small>
-          </div>
-          <button type="button" class="select-row-btn" onclick="selectProductFromAutocomplete('name', '${p.name}')">CHỌN</button>
-        </div>
-      `).join('');
-      dropdown.classList.remove('hidden');
-      applyTableFilterFast();
-    }, 60);
-  };
-
-  window.selectProductFromAutocomplete = function(type, textVal) {
-    if (type === 'mavt') {
-      productSearchMavtVal = textVal;
-      const inputEl = document.getElementById('tableFilterMavtInput');
-      if (inputEl) inputEl.value = textVal;
-      const dropdown = document.getElementById('productMavtDropdown');
-      if (dropdown) dropdown.classList.add('hidden');
-    } else {
-      productSearchNameVal = textVal;
-      const inputEl = document.getElementById('tableFilterNameInput');
-      if (inputEl) inputEl.value = textVal;
-      const dropdown = document.getElementById('productNameDropdown');
-      if (dropdown) dropdown.classList.add('hidden');
-    }
-    applyTableFilterFast();
+    searchDebounceTimer = setTimeout(() => { applyTableFilterFast(); }, 60);
   };
 
   function applyTableFilterFast() {
@@ -999,31 +884,22 @@
     const tbody = document.getElementById('salesProductTableBody');
     if (tbody) {
       let rows = Array.from(tbody.getElementsByTagName('tr'));
-      if (mavtKey) {
-        rows.sort((rowA, rowB) => {
-          const codeA = rowA.getAttribute('data-mavt') || '';
-          const codeB = rowB.getAttribute('data-mavt') || '';
-          const partnerA = codeA.slice(0, 2);
-          const partnerB = codeB.slice(0, 2);
-
-          const matchPartnerA = partnerA === mavtKey ? 0 : 1;
-          const matchPartnerB = partnerB === mavtKey ? 0 : 1;
-          if (matchPartnerA !== matchPartnerB) return matchPartnerA - matchPartnerB;
-
-          const startsA = codeA.startsWith(mavtKey) ? 0 : 1;
-          const startsB = codeB.startsWith(mavtKey) ? 0 : 1;
-          return startsA - startsB;
-        });
-        rows.forEach(r => tbody.appendChild(r));
-      }
-
       rows.forEach(row => {
         const mavt = row.getAttribute('data-mavt') || '';
         const name = row.getAttribute('data-name') || '';
         const partnerCode = row.getAttribute('data-partner') || '';
+        const keyId = row.getAttribute('data-id') || '';
+        const cartItem = currentCart[keyId];
+        const hasQty = cartItem && cartItem.qty > 0;
+
         const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
         const matchName = !nameKey || name.includes(nameKey);
-        row.style.display = (matchMavt && matchName) ? '' : 'none';
+        
+        if (showOnlySelectedItems) {
+          row.style.display = hasQty ? '' : 'none';
+        } else {
+          row.style.display = (matchMavt && matchName) ? '' : 'none';
+        }
       });
     }
 
@@ -1032,9 +908,18 @@
       const mavt = card.getAttribute('data-mavt') || '';
       const name = card.getAttribute('data-name') || '';
       const partnerCode = card.getAttribute('data-partner') || '';
+      const keyId = card.getAttribute('data-id') || '';
+      const cartItem = currentCart[keyId];
+      const hasQty = cartItem && cartItem.qty > 0;
+
       const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
       const matchName = !nameKey || name.includes(nameKey);
-      card.style.display = (matchMavt && matchName) ? 'block' : 'none';
+
+      if (showOnlySelectedItems) {
+        card.style.display = hasQty ? 'block' : 'none';
+      } else {
+        card.style.display = (matchMavt && matchName) ? 'block' : 'none';
+      }
     });
   }
 
@@ -1051,18 +936,12 @@
       const queryKey = removeAccents(val.trim());
       let filtered = stores;
       if (queryKey !== "") {
-        filtered = stores.filter(s => {
-          const codeNorm = removeAccents(s.code || '');
-          const nameNorm = removeAccents(s.name || '');
-          const addrNorm = removeAccents(s.address || '');
-          const phoneNorm = removeAccents(s.phone || '');
-          return codeNorm.includes(queryKey) || nameNorm.includes(queryKey) || addrNorm.includes(queryKey) || phoneNorm.includes(queryKey);
-        });
+        filtered = stores.filter(s => removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey) || removeAccents(s.phone || '').includes(queryKey));
       }
       const displayList = filtered.slice(0, 30);
       if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
       if (displayList.length === 0) {
-        container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy kết quả khớp với từ khóa "${val}".</div>`;
+        container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy khách hàng phù hợp.</div>`;
         return;
       }
       container.innerHTML = displayList.map(s => {
@@ -1087,7 +966,7 @@
                     <i class="fa-solid fa-location-dot"></i> ${pinnedInfo}
                   </button>
                 `}
-                ${hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')" title="Admin xóa định vị cũ"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
+                ${hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
               </div>
             </div>
             <div class="item-title">${s.name}</div>
@@ -1111,8 +990,7 @@
         filtered = products.filter(p => {
           const code = (p.code || '').toLowerCase();
           const name = (p.name || '').toLowerCase();
-          const partnerCode = code.slice(0, 2);
-          return partnerCode.includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+          return code.slice(0, 2).includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
         });
       }
       const displayList = filtered.slice(0, 30);
@@ -1138,10 +1016,7 @@
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(100)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "products"), async snap => {
       const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (cloudProducts.length > 0) {
-        products = cloudProducts;
-        await saveProductsToLocalCache(cloudProducts);
-      }
+      if (cloudProducts.length > 0) { products = cloudProducts; await saveProductsToLocalCache(cloudProducts); }
       renderUI();
     });
     if (currentUser.role === 'admin') onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
@@ -1165,6 +1040,10 @@
     setNav('navUsers', isAdmin);
 
     const main = document.getElementById('mainContent');
+
+    // Xóa footer cũ nếu có tránh bị lặp
+    const oldFooter = document.getElementById('dynamicCartFooter');
+    if (oldFooter) oldFooter.remove();
 
     if (currentTab === 'dashboard' && backOffice) {
       const totalRev = orders.filter(o=>o.status!=='Đã hủy').reduce((sum, o) => sum + (o.amount || 0), 0);
@@ -1279,7 +1158,6 @@
                   </div>
                 </div>
                 
-                <!-- NÚT CHECK-IN GPS QUẦY HÀNG LIÊN KẾT TRỰC TIẾP VỚI TAB KH -->
                 <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:800; padding:8px 14px;">
                   <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in Quầy' : 'Check-in & Lưu GPS'}
                 </button>
@@ -1297,20 +1175,21 @@
         ${activeVisitedStore ? `
           <div class="card" style="border:2px solid var(--primary); animation: fadeIn 0.3s ease;">
             
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; background: #F1F5F9; padding: 12px; border-radius: 12px;">
-              <div class="autocomplete-wrapper">
-                <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-barcode"></i> Lọc theo MAVT (gõ 2 ký tự đầu mã đối tác hoặc mã):</label>
-                <input type="text" id="tableFilterMavtInput" placeholder="Gõ 2 ký tự đầu hoặc MAVT..." oninput="onProductMavtAutocomplete(this.value)" value="${productSearchMavtVal}" autocomplete="off" style="margin:0; background:#fff;">
-                <div id="productMavtDropdown" class="autocomplete-dropdown hidden"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; flex:1;">
+                <div class="autocomplete-wrapper">
+                  <input type="text" id="tableFilterMavtInput" placeholder="🔍 Lọc theo MAVT..." oninput="onProductMavtAutocomplete(this.value)" value="${productSearchMavtVal}" autocomplete="off" style="margin:0; background:#fff;">
+                </div>
+                <div class="autocomplete-wrapper">
+                  <input type="text" id="tableFilterNameInput" placeholder="🔍 Lọc theo Tên Vật Tư..." oninput="onProductNameAutocomplete(this.value)" value="${productSearchNameVal}" autocomplete="off" style="margin:0; background:#fff;">
+                </div>
               </div>
-              <div class="autocomplete-wrapper">
-                <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;"><i class="fa-solid fa-box"></i> Lọc theo Tên Vật Tư:</label>
-                <input type="text" id="tableFilterNameInput" placeholder="Gõ tên vật tư gợi ý chuyên nghiệp..." oninput="onProductNameAutocomplete(this.value)" value="${productSearchNameVal}" autocomplete="off" style="margin:0; background:#fff;">
-                <div id="productNameDropdown" class="autocomplete-dropdown hidden"></div>
-              </div>
+              <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:800; padding:10px 14px;">
+                <i class="fa-solid fa-filter"></i> ${showOnlySelectedItems ? 'Đang xem món đã chọn' : 'Xem món đã chọn'}
+              </button>
             </div>
 
-            <!-- GIAO DIỆN BẢNG CHUẨN CHO MÁY TÍNH / TABLET NGANG -->
+            <!-- GIAO DIỆN BẢNG CHUẨN CHO MÁY TÍNH -->
             <div class="table-responsive desktop-table-view">
               <table>
                 <thead>
@@ -1318,8 +1197,8 @@
                     <th>Mavt</th>
                     <th>Tên Vật Tư</th>
                     <th>ĐVT</th>
-                    <th>SL Lẻ</th>
-                    <th>SL Thùng</th>
+                    <th>SL Lẻ (+/-)</th>
+                    <th>SL Thùng (+/-)</th>
                     <th>Quy Cách</th>
                     <th>Đơn Giá</th>
                     <th>Thành Tiền</th>
@@ -1334,20 +1213,29 @@
                     const mavtLower = removeAccents(p.code || '');
                     const nameLower = removeAccents(p.name || '');
                     const partnerCode = mavtLower.slice(0, 2);
-                    const mavtKey = removeAccents(productSearchMavtVal);
-                    const nameKey = removeAccents(productSearchNameVal);
-                    const isVisible = (!mavtKey || partnerCode.includes(mavtKey) || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
                     
                     const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
                     const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
 
                     return `
-                      <tr data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}" style="${isVisible ? '' : 'display:none;'}">
+                      <tr data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}">
                         <td><b>[Cty: ${p.code.slice(0,2)}]</b> ${p.code}</td>
                         <td><b>${p.name}</b></td>
                         <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
-                        <td><input type="number" min="0" value="${leVal}" placeholder="" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
-                        <td><input type="number" min="0" value="${kienVal}" placeholder="" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:60px; margin:0; text-align:center; padding:5px;"></td>
+                        <td>
+                          <div style="display:flex; align-items:center; gap:2px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                            <input type="number" min="0" id="input_le_${keyId}" value="${leVal}" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:50px; margin:0; text-align:center; padding:4px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                          </div>
+                        </td>
+                        <td>
+                          <div style="display:flex; align-items:center; gap:2px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                            <input type="number" min="0" id="input_kien_${keyId}" value="${kienVal}" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:50px; margin:0; text-align:center; padding:4px;">
+                            <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                          </div>
+                        </td>
                         <td><b>${p.tyLeQuyDoi || 50}</b></td>
                         <td>${(p.price || 0).toLocaleString()}đ</td>
                         <td><b style="color:var(--rose);" id="row_total_${keyId}">${itemTotal.toLocaleString()}đ</b></td>
@@ -1359,8 +1247,8 @@
               </table>
             </div>
 
-            <!-- GIAO DIỆN THẺ DỌC TỐI ƯU TUYỆT ĐỐI CHO ĐIỆN THOẠI DỌC -->
-            <div class="mobile-card-view" id="salesProductMobileContainer">
+            <!-- GIAO DIỆN THẺ DỌC CHO DI ĐỘNG -->
+            <div class="mobile-card-view">
               ${products.map(p => {
                 const keyId = p.id || p.code;
                 const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
@@ -1368,15 +1256,12 @@
                 const mavtLower = removeAccents(p.code || '');
                 const nameLower = removeAccents(p.name || '');
                 const partnerCode = mavtLower.slice(0, 2);
-                const mavtKey = removeAccents(productSearchMavtVal);
-                const nameKey = removeAccents(productSearchNameVal);
-                const isVisible = (!mavtKey || partnerCode.includes(mavtKey) || mavtLower.includes(mavtKey)) && (!nameKey || nameLower.includes(nameKey));
                 
                 const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
                 const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
 
                 return `
-                  <div class="mobile-item-card product-card-item" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}" style="${isVisible ? 'display:block;' : 'display:none;'}">
+                  <div class="mobile-item-card product-card-item" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
                       <span class="item-code">[Cty: ${p.code.slice(0,2)}] ${p.code}</span>
                       <span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span>
@@ -1388,29 +1273,40 @@
                       <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
                     </div>
 
-                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; align-items:center; background:#F1F5F9; padding:8px; border-radius:8px;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
                       <div>
                         <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
-                        <input type="number" min="0" value="${leVal}" placeholder="0" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:6px; background:#fff;">
+                        <div style="display:flex; align-items:center; gap:2px; margin-top:2px;">
+                          <button type="button" class="btn btn-sm" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                          <input type="number" min="0" value="${leVal}" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff;">
+                          <button type="button" class="btn btn-sm" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                        </div>
                       </div>
                       <div>
                         <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
-                        <input type="number" min="0" value="${kienVal}" placeholder="0" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:6px; background:#fff;">
+                        <div style="display:flex; align-items:center; gap:2px; margin-top:2px;">
+                          <button type="button" class="btn btn-sm" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                          <input type="number" min="0" value="${kienVal}" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff;">
+                          <button type="button" class="btn btn-sm" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                        </div>
                       </div>
-                      <div style="text-align:right;">
-                        <span style="font-size:10px; color:var(--text-muted); display:block;">Thành tiền:</span>
-                        <b style="color:var(--rose); font-size:13px;" id="mobile_row_total_${keyId}">${itemTotal.toLocaleString()}đ</b>
-                      </div>
+                    </div>
+                    <div style="text-align:right; font-size:12px;">
+                      Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${keyId}">${itemTotal.toLocaleString()}đ</b>
                     </div>
                   </div>
                 `;
               }).join('')}
             </div>
+          </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid #E2E8F0; flex-wrap:wrap; gap:10px;">
-              <h3 style="font-size:16px; font-weight:800;">TỔNG TIỀN: <span style="color:var(--rose);" id="mainCartTotalAmount">${cartTotalAmount.toLocaleString()} đ</span></h3>
-              <button class="btn btn-green" style="padding:12px 24px; font-weight:800; font-size:15px; justify-content:center;" onclick="submitOrder()">GỬI ĐƠN HÀNG</button>
+          <!-- STICKY FOOTER CỐ ĐỊNH TỔNG TIỀN & NÚT GỬI ĐƠN -->
+          <div id="dynamicCartFooter" class="sticky-cart-footer">
+            <div>
+              <div style="font-size:11px; color:#94A3B8; font-weight:700;">TỔNG THANH TOÁN</div>
+              <div style="font-size:18px; font-weight:800; color:var(--amber);" id="stickyCartTotalAmount">${cartTotalAmount.toLocaleString()} đ</div>
             </div>
+            <button class="btn btn-green" style="padding:12px 28px; font-weight:800; font-size:15px; border-radius:12px;" onclick="submitOrder()">GỬI ĐƠN HÀNG</button>
           </div>
         ` : `
           <div class="card" style="text-align:center; padding:40px 16px; color:var(--text-muted); font-weight:700;">
@@ -1444,14 +1340,13 @@
         filteredAdminProducts = products.filter(p => {
           const code = (p.code || '').toLowerCase();
           const name = (p.name || '').toLowerCase();
-          const partnerCode = code.slice(0, 2);
-          return partnerCode.includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+          return code.slice(0, 2).includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
         });
       }
 
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư Hàng Hóa (${products.length})</h2>
+          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư (${products.length})</h2>
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
