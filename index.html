@@ -177,24 +177,22 @@
   .autocomplete-wrapper { position: relative; width: 100%; }
   .autocomplete-dropdown {
     position: absolute;
-    top: 100%;
     left: 0;
     width: 100%;
     background: #FFFFFF;
     border: 2px solid var(--primary);
     border-radius: 12px;
-    max-height: 320px;
+    max-height: 200px;
     overflow-y: auto;
     z-index: 2000;
-    box-shadow: 0 15px 35px rgba(0,0,0,0.3);
-    margin-top: 4px;
+    box-shadow: 0 -10px 35px rgba(0,0,0,0.3);
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
   .autocomplete-item {
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-bottom: 1px solid #F1F5F9;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     display: flex;
     justify-content: space-between;
@@ -205,9 +203,9 @@
     background: var(--primary);
     color: #fff;
     border: none;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 10px;
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
@@ -445,29 +443,19 @@
     if (!activeVisitedStore) return alert("Chưa có thông tin điểm bán!");
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
-    toast("📍 Đang check-in và lưu tọa độ GPS...");
+    toast("📍 Đang lấy tọa độ GPS thực tế...");
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
       try {
         const storeRef = doc(db, "stores", activeVisitedStore.id);
-        const storeSnap = await getDoc(storeRef);
-        const storeData = storeSnap.exists() ? storeSnap.data() : {};
         
-        let updatePayload = { lat, lng, pinnedByCode: currentUser.code || 'NV', pinnedByName: currentUser.name || 'Nhân viên' };
+        await updateDoc(storeRef, {
+          lat, lng,
+          pinnedByCode: currentUser.code || 'NV',
+          pinnedByName: currentUser.name || 'Nhân viên'
+        });
 
-        if (!storeData.address || storeData.address === "Chưa cập nhật địa chỉ") {
-          try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=vi`);
-            const data = await res.json();
-            if (data && data.display_name) {
-              updatePayload.address = data.display_name;
-              activeVisitedStore.address = data.display_name;
-            }
-          } catch (e) { console.log("Lỗi dịch địa chỉ:", e); }
-        }
-
-        await updateDoc(storeRef, updatePayload);
         await addDoc(collection(db, "checkins"), {
           salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
           storeId: activeVisitedStore.id, storeName: activeVisitedStore.name, lat, lng, photo: "", status: "Check-in thành công", createdAt: serverTimestamp()
@@ -475,10 +463,13 @@
 
         activeVisitedStore.lat = lat;
         activeVisitedStore.lng = lng;
-        toast(`✅ Check-in thành công! Đã đồng bộ GPS.`);
+        toast(`✅ Check-in thành công! Đã lưu GPS.`);
         renderUI();
       } catch (err) { alert("Lỗi lưu GPS: " + err.message); }
-    }, () => alert("Không thể lấy tọa độ GPS."), { enableHighAccuracy: true });
+    }, (err) => {
+      console.error(err);
+      alert("Không thể lấy tọa độ GPS. Vui lòng kiểm tra quyền truy cập vị trí trên trình duyệt/thiết bị.");
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   };
 
   window.updateCartDetail = function(prdId, field, val) {
@@ -513,7 +504,7 @@
     const btn = document.getElementById('toggleSelectedBtn');
     if (btn) {
       btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
-      btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đang xem món đã chọn' : '<i class="fa-solid fa-filter"></i> Xem món đã chọn';
+      btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đã chọn' : '<i class="fa-solid fa-filter"></i> Đã chọn';
     }
     applyTableFilterFast();
   };
@@ -804,18 +795,38 @@
     } else { toast("Không tìm thấy kết quả khớp trên bản đồ."); }
   };
 
+  function showSmartDropdown(inputElement, dropdownElement, htmlContent) {
+    dropdownElement.innerHTML = htmlContent;
+    dropdownElement.classList.remove('hidden');
+    
+    const rect = inputElement.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    
+    if (spaceBelow < 220) {
+      dropdownElement.style.top = 'auto';
+      dropdownElement.style.bottom = '100%';
+      dropdownElement.style.marginBottom = '4px';
+      dropdownElement.style.marginTop = '0';
+    } else {
+      dropdownElement.style.top = '100%';
+      dropdownElement.style.bottom = 'auto';
+      dropdownElement.style.marginTop = '4px';
+      dropdownElement.style.marginBottom = '0';
+    }
+  }
+
   window.onSalesCodeInput = function(val) {
     salesSearchKhCode = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
       const queryKey = removeAccents(val.trim());
       const dropdown = document.getElementById('salesCodeDropdown');
-      if (!dropdown) return;
+      const inputEl = document.getElementById('salesCodeInput');
+      if (!dropdown || !inputEl) return;
       if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       
       let matched = stores.filter(s => removeAccents(s.code || '').includes(queryKey));
       
-      // Sắp xếp ưu tiên: Mã bắt đầu bằng queryKey lên đầu tiên
       matched.sort((a, b) => {
         const codeA = removeAccents(a.code || '');
         const codeB = removeAccents(b.code || '');
@@ -828,19 +839,17 @@
       matched = matched.slice(0, 20);
 
       if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy mã KH</div>`;
-        dropdown.classList.remove('hidden');
+        showSmartDropdown(inputEl, dropdown, `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy mã KH</div>`);
         return;
       }
-      dropdown.innerHTML = matched.map(s => `
+      showSmartDropdown(inputEl, dropdown, matched.map(s => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
             <b>${s.code}</b> — ${s.name} <small style="color:var(--text-muted);display:block;">${s.address||''}</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}')">CHỌN</button>
         </div>
-      `).join('');
-      dropdown.classList.remove('hidden');
+      `).join(''));
     }, 80);
   };
 
@@ -850,7 +859,8 @@
     searchDebounceTimer = setTimeout(() => {
       const queryKey = removeAccents(val.trim());
       const dropdown = document.getElementById('salesNameDropdown');
-      if (!dropdown) return;
+      const inputEl = document.getElementById('salesNameInput');
+      if (!dropdown || !inputEl) return;
       if (queryKey === "") { dropdown.classList.add('hidden'); return; }
       
       let matched = stores.filter(s => removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey));
@@ -865,19 +875,17 @@
       matched = matched.slice(0, 20);
       
       if (matched.length === 0) {
-        dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy khách hàng</div>`;
-        dropdown.classList.remove('hidden');
+        showSmartDropdown(inputEl, dropdown, `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy khách hàng</div>`);
         return;
       }
-      dropdown.innerHTML = matched.map(s => `
+      showSmartDropdown(inputEl, dropdown, matched.map(s => `
         <div class="autocomplete-item">
           <div style="flex:1; padding-right:8px;">
             <b style="color:var(--primary);">[${s.code||'KH'}]</b> <b>${s.name}</b> <small style="color:var(--text-muted);display:block;">${s.address||'Chưa có địa chỉ'}</small>
           </div>
           <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}')">CHỌN</button>
         </div>
-      `).join('');
-      dropdown.classList.remove('hidden');
+      `).join(''));
     }, 60);
   };
 
