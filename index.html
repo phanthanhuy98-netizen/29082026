@@ -129,7 +129,6 @@
   tr:hover td { background: #F8FAFC; }
   tr.has-selected td { background: #F0FDF4 !important; }
 
-  /* STICKY FOOTER CỐ ĐỊNH TỔNG TIỀN & SỐ LƯỢNG SKU */
   .sticky-cart-footer {
     position: fixed;
     bottom: 0;
@@ -166,10 +165,6 @@
   .stat-card{background:linear-gradient(135deg, #1E1B4B 100%, #312E81 0%);color:#fff;border-radius:16px;padding:16px;box-shadow:0 10px 25px rgba(30,27,75,0.3);position:relative;overflow:hidden;}
   .stat-number{font-size:24px;font-weight:800;color:#F8FAFC;margin-top:4px;font-family:'Quicksand',sans-serif;}
   
-  .progress-bar{background:rgba(255,255,255,0.15);border-radius:8px;height:6px;width:100%;margin-top:8px;overflow:hidden;}
-  .progress-fill{background:var(--emerald-gradient);height:100%;width:0%;border-radius:8px;}
-  
-  #map { height: 350px; width: 100%; border-radius: 14px; margin-top: 10px; z-index: 1; border: 2px solid #E2E8F0; }
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:12px 28px;border-radius:28px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:450px;}
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15, 23, 42, 0.8);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
@@ -405,14 +400,12 @@
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
-  // Cập nhật khắc phục đơ lag và lỗi chạm trên thiết bị di động
   window.selectStoreDirectly = function(storeId, event) {
     if (event) {
       event.preventDefault();
       event.stopPropagation();
     }
 
-    // Ẩn ngay lập tức khung dropdown gợi ý để giải phóng màn hình cảm ứng
     const dropdown = document.getElementById('salesSearchDropdown');
     if (dropdown) dropdown.classList.add('hidden');
 
@@ -425,10 +418,8 @@
 
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
 
-    // Sử dụng setTimeout ngắn để trình duyệt mobile kịp nhận diện hành động chạm trước khi render lại giao diện
     setTimeout(() => {
       renderUI();
-
       setTimeout(() => {
         const productInput = document.getElementById('productSearchInput');
         if (productInput) {
@@ -562,7 +553,6 @@
     if (footerSkuCountEl) footerSkuCountEl.innerText = `Đã chọn: ${selectedSkuCount} mã hàng`;
   }
 
-  // HỆ THỐNG QUẢN LÝ SỐ CHỨNG TỪ TỰ ĐỘNG
   async function getNextSoCtu() {
     try {
       const counterRef = doc(db, "systemCounters", "soCtuCounter");
@@ -589,16 +579,35 @@
     let rawSubtotal = 0;
 
     products.forEach(p => {
-      const keyId = p.id || p.code;
-      const c = currentCart[keyId];
-      if (c && (c.qty > 0 || c.kien > 0 || c.le > 0)) {
-        const itemTotal = (p.price || 0) * (c.qty || 1);
+      const possibleKeys = [p.id, p.code].filter(Boolean);
+      let c = null;
+
+      for (const k of possibleKeys) {
+        if (currentCart[k] && currentCart[k].qty > 0) {
+          c = currentCart[k];
+          break;
+        }
+      }
+
+      if (c && c.qty > 0) {
+        const itemTotal = (p.price || 0) * c.qty;
         rawSubtotal += itemTotal;
-        items.push({ id: p.id||p.code, code: p.code, name: p.name, dvt: p.dvt || 'hộp', qty: c.qty, kien: c.kien, le: c.le, price: p.price });
+        items.push({ 
+          id: p.id || p.code, 
+          code: p.code, 
+          name: p.name, 
+          dvt: p.dvt || 'hộp', 
+          qty: c.qty, 
+          kien: c.kien || 0, 
+          le: c.le || 0, 
+          price: p.price || 0 
+        });
       }
     });
 
-    if (items.length === 0) return alert("Vui lòng chọn số lượng hàng!");
+    if (items.length === 0) {
+      return alert("Vui lòng chọn số lượng hàng trước khi gửi đơn!");
+    }
 
     const unpaidOrdersTotal = orders
       .filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy')
@@ -612,27 +621,43 @@
     const nextSoCtu = await getNextSoCtu();
     const finalAmount = rawSubtotal;
     
+    const currentSalesString = `[${currentUser.code}] ${currentUser.name}`;
+    const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
+
     const orderData = {
       soCtu: nextSoCtu,
-      ngayCtu: new Date().toISOString().slice(0, 10), // YYYY-MM-DD
-      maKH: `${activeVisitedStore.code||'KH'} - ${activeVisitedStore.name}`,
-      nvBan: `[${currentUser.code}] ${currentUser.name}`,
-      salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
-      storeId: activeVisitedStore.id, maDTPN: `${activeVisitedStore.code||'KH'}_${activeVisitedStore.name}`,
-      items, amount: finalAmount, rawSubtotal,
-      isReturnOrder: false, paymentStatus: 'Công nợ', status: 'Chờ duyệt', createdAt: serverTimestamp()
+      ngayCtu: new Date().toISOString().slice(0, 10),
+      maKH: currentCustomerString,
+      nvBan: currentSalesString,
+      salesUid: currentUser.uid, 
+      salesName: currentUser.name, 
+      salesCode: currentUser.code,
+      storeId: activeVisitedStore.id, 
+      maDTPN: `${activeVisitedStore.code || 'KH'}_${activeVisitedStore.name}`,
+      items, 
+      amount: finalAmount, 
+      rawSubtotal,
+      isReturnOrder: false, 
+      paymentStatus: 'Công nợ', 
+      status: 'Chờ duyệt', 
+      createdAt: serverTimestamp()
     };
 
-    await addDoc(collection(db, "orders"), orderData);
-    toast(`🚀 Lưu đơn thành công! Số chứng từ: ${nextSoCtu}`);
-    
-    currentCart = {}; 
-    activeVisitedStore = null; 
-    productSearchKeyword = ""; 
-    showOnlySelectedItems = false; 
+    try {
+      await addDoc(collection(db, "orders"), orderData);
+      toast(`🚀 Lưu đơn thành công! Số chứng từ: ${nextSoCtu}`);
+      
+      currentCart = {}; 
+      activeVisitedStore = null; 
+      productSearchKeyword = ""; 
+      salesSearchKeyword = "";
+      showOnlySelectedItems = false; 
 
-    // Tự động chuyển hướng sang tab Sổ Gốc Bán Hàng
-    switchTab('soGocBH');
+      switchTab('soGocBH');
+    } catch (err) {
+      console.error("Lỗi lưu đơn hàng lên Firestore:", err);
+      alert("Không thể lưu đơn hàng: " + err.message);
+    }
   };
 
   window.exportSoGocExcel = function() {
@@ -790,7 +815,6 @@
     }
   }
 
-  // Cập nhật sự kiện onclick và ontouchend tại danh sách Dropdown KH
   window.onSalesSearchInput = function(val) {
     salesSearchKeyword = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -1183,7 +1207,7 @@
           </div>
         ` : `
           <div class="card" style="text-align:center; padding:40px 20px; background: #FFFFFF; border: 2px dashed #CBD5E1;">
-            <div style="width: 64px; height: 64px; background: #EEF2FF; border-radius: 50%; display: flex; align-items: center; justifyContent: center; margin: 0 auto 16px;">
+            <div style="width: 64px; height: 64px; background: #EEF2FF; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
               <i class="fa-solid fa-store" style="font-size: 28px; color: var(--primary);"></i>
             </div>
             <h3 style="font-size: 16px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">Chưa Chọn Điểm Bán Hàng</h3>
