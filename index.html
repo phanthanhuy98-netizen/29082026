@@ -478,23 +478,38 @@
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   };
 
+  // --- CẬP NHẬT GIỎ HÀNG VÀ CHỈ CHO PHÉP NHẬP SỐ NGUYÊN DƯƠNG ---
   window.updateCartDetail = function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     
-    let cleanVal = val === '' ? 0 : Math.max(0, Math.floor(Number(val) || 0));
+    // Làm sạch đầu vào: Lấy duy nhất ký tự số
+    let cleanStr = String(val !== undefined && val !== null ? val : '').replace(/[^0-9]/g, '');
+    let cleanVal = cleanStr === '' ? 0 : Math.max(0, parseInt(cleanStr, 10));
+    
     currentCart[prdId][field] = cleanVal;
     
     const packRatio = p?.tyLeQuyDoi || 50;
     
     if (field === 'kien' || field === 'le') {
-      currentCart[prdId].qty = (Number(currentCart[prdId].kien) * packRatio) + Number(currentCart[prdId].le);
+      currentCart[prdId].qty = (Number(currentCart[prdId].kien || 0) * packRatio) + Number(currentCart[prdId].le || 0);
     } else if (field === 'qty') {
       const totalQ = cleanVal;
       currentCart[prdId].kien = packRatio > 0 ? Math.floor(totalQ / packRatio) : 0;
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
     
+    // Đồng bộ giá trị vào tất cả các ô nhập (Cả desktop và mobile)
+    const leDisplay = currentCart[prdId].le > 0 ? currentCart[prdId].le : '';
+    const kienDisplay = currentCart[prdId].kien > 0 ? currentCart[prdId].kien : '';
+
+    document.querySelectorAll(`.input-le-${prdId}`).forEach(el => {
+      if (document.activeElement !== el) el.value = leDisplay;
+    });
+    document.querySelectorAll(`.input-kien-${prdId}`).forEach(el => {
+      if (document.activeElement !== el) el.value = kienDisplay;
+    });
+
     const rowEl = document.getElementById(`row_item_${prdId}`);
     const cardEl = document.getElementById(`card_item_${prdId}`);
     const hasQty = currentCart[prdId].qty > 0;
@@ -506,14 +521,37 @@
   };
 
   window.adjustQty = function(prdId, field, delta) {
-    const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     let curVal = Number(currentCart[prdId][field]) || 0;
     let newVal = Math.max(0, curVal + delta);
     updateCartDetail(prdId, field, newVal);
-    
-    const inputEl = document.getElementById(`input_${field}_${prdId}`);
-    if (inputEl) inputEl.value = newVal === 0 ? '' : newVal;
+  };
+
+  // --- LỌC TRỰC TIẾP TRÊN DOM MƯỢT MÀ, KHÔNG BỊ ĐƠ VÀ MẤT PHÍM TRÊN MOBILE ---
+  window.filterSalesProducts = function() {
+    const queryKey = removeAccents(productSearchKeyword.trim());
+    const desktopRows = document.querySelectorAll('#salesProductTableBody tr[data-id]');
+    const mobileCards = document.querySelectorAll('#mobileProductListContainer .product-card-item');
+
+    const processItem = (el) => {
+      const keyId = el.getAttribute('data-id');
+      const mavt = el.getAttribute('data-mavt') || '';
+      const name = el.getAttribute('data-name') || '';
+      const c = currentCart[keyId];
+      const hasQty = c && c.qty > 0;
+
+      let show = true;
+      if (showOnlySelectedItems) {
+        show = hasQty;
+      } else if (queryKey !== '') {
+        show = mavt.includes(queryKey) || name.includes(queryKey);
+      }
+
+      el.style.display = show ? '' : 'none';
+    };
+
+    desktopRows.forEach(processItem);
+    mobileCards.forEach(processItem);
   };
 
   window.toggleShowOnlySelected = function() {
@@ -523,7 +561,7 @@
       btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
       btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đã chọn' : '<i class="fa-solid fa-filter"></i> Đã chọn';
     }
-    renderUI();
+    filterSalesProducts();
   };
 
   function updateCartTotalsUI() {
@@ -633,7 +671,7 @@
     const orderData = {
       soCtu: nextSoCtu,
       ngayCtu: new Date().toISOString().slice(0, 10),
-      maDTPNNo: activeVisitedStore.code || '', // Lấy chuẩn mã khách hàng làm Ma DTPNNo
+      maDTPNNo: activeVisitedStore.code || '',
       maTuyen: activeVisitedStore.routeDay || 'DX1',
       tenTuyen: 'chợ lồng',
       maNhanVien: currentUser.code || '',
@@ -825,7 +863,6 @@
     }
   }
 
-  // --- TỐI ƯU HÓA TÌM KIẾM MƯỢT MÀ VỚI DEBOUNCE 150ms ---
   window.onSalesSearchInput = function(val) {
     salesSearchKeyword = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -869,10 +906,10 @@
     }, 150);
   };
 
+  // Nút nhập tìm kiếm vật tư: Gọi hàm lọc DOM siêu mượt
   window.onProductSearchInput = function(val) {
     productSearchKeyword = val;
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => { renderUI(); }, 150);
+    filterSalesProducts();
   };
 
   window.setSoGocFilterKeyword = function(val) { 
@@ -952,7 +989,7 @@
         filtered = products.filter(p => {
           const code = (p.code || '').toLowerCase();
           const name = (p.name || '').toLowerCase();
-          return code.slice(0, 2).includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+          return code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
         });
       }
       const displayList = filtered.slice(0, 30);
@@ -960,7 +997,7 @@
       container.innerHTML = displayList.map(p => `
         <div class="mobile-item-card">
           <div class="item-header">
-            <span class="item-code">Cty: ${p.code.slice(0,2)} | Mã: ${p.code}</span>
+            <span class="item-code">Mã: ${p.code}</span>
             <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
           </div>
           <div class="item-title">${p.name}</div>
@@ -1014,18 +1051,6 @@
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
 
-      const filteredProductsForSales = products.filter(p => {
-        const key = removeAccents(productSearchKeyword);
-        if (!key) return false;
-        const mavt = removeAccents(p.code || '');
-        const name = removeAccents(p.name || '');
-        return mavt.includes(key) || name.includes(key);
-      });
-
-      const actualSalesList = showOnlySelectedItems 
-        ? products.filter(p => currentCart[p.id || p.code] && currentCart[p.id || p.code].qty > 0)
-        : (productSearchKeyword ? filteredProductsForSales.slice(0, 30) : products.slice(0, 30));
-
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 12px 16px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1078,7 +1103,7 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Mavt</th>
+                    <th>MAVT</th>
                     <th>Tên Vật Tư</th>
                     <th>ĐVT</th>
                     <th>SL Lẻ (+/-)</th>
@@ -1090,34 +1115,33 @@
                   </tr>
                 </thead>
                 <tbody id="salesProductTableBody">
-                  ${actualSalesList.length > 0 ? actualSalesList.map(p => {
+                  ${products.map(p => {
                     const keyId = p.id || p.code;
                     const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                     const itemTotal = (p.price || 0) * (c.qty || 0);
                     const mavtLower = removeAccents(p.code || '');
                     const nameLower = removeAccents(p.name || '');
-                    const partnerCode = mavtLower.slice(0, 2);
                     const hasQty = c.qty > 0;
                     
                     const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
                     const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
 
                     return `
-                      <tr id="row_item_${keyId}" class="${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}">
-                        <td><b>[Cty: ${p.code.slice(0,2)}]</b> ${p.code}</td>
+                      <tr id="row_item_${keyId}" class="${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}">
+                        <td><b>${p.code}</b></td>
                         <td><b>${p.name}</b></td>
                         <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
                         <td>
                           <div style="display:flex; align-items:center; gap:2px;">
                             <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                            <input type="number" min="0" step="1" id="input_le_${keyId}" value="${leVal}" onkeypress="if(['-', '.', ',', 'e', 'E'].includes(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
                             <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
                           </div>
                         </td>
                         <td>
                           <div style="display:flex; align-items:center; gap:2px;">
                             <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                            <input type="number" min="0" step="1" id="input_kien_${keyId}" value="${kienVal}" onkeypress="if(['-', '.', ',', 'e', 'E'].includes(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
                             <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
                           </div>
                         </td>
@@ -1127,29 +1151,28 @@
                         <td><b style="color:var(--primary);" id="total_qty_${keyId}">${c.qty || 0}</b></td>
                       </tr>
                     `;
-                  }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Hãy gõ từ khóa tìm kiếm vật tư ở ô trên để hiển thị danh sách...</td></tr>`}
+                  }).join('')}
                 </tbody>
               </table>
             </div>
 
             <!-- GIAO DIỆN THẺ DỌC CHO DI ĐỘNG -->
-            <div class="mobile-card-view">
-              ${actualSalesList.length > 0 ? actualSalesList.map(p => {
+            <div id="mobileProductListContainer" class="mobile-card-view">
+              ${products.map(p => {
                 const keyId = p.id || p.code;
                 const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                 const itemTotal = (p.price || 0) * (c.qty || 0);
                 const mavtLower = removeAccents(p.code || '');
                 const nameLower = removeAccents(p.name || '');
-                const partnerCode = mavtLower.slice(0, 2);
                 const hasQty = c.qty > 0;
                 
                 const leVal = (c.le !== undefined && c.le !== 0) ? c.le : '';
                 const kienVal = (c.kien !== undefined && c.kien !== 0) ? c.kien : '';
 
                 return `
-                  <div id="card_item_${keyId}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" data-partner="${partnerCode}" style="padding:10px 12px; margin-bottom:8px;">
+                  <div id="card_item_${keyId}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}" data-mavt="${mavtLower}" data-name="${nameLower}" style="padding:10px 12px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-                      <span class="item-code" style="font-size:10px; padding:2px 6px;">[Cty: ${p.code.slice(0,2)}] ${p.code}</span>
+                      <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
                       <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
                     </div>
                     <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
@@ -1164,7 +1187,7 @@
                         <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
                         <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
                           <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                          <input type="number" min="0" step="1" value="${leVal}" onkeypress="if(['-', '.', ',', 'e', 'E'].includes(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                          <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${keyId}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
                           <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
                         </div>
                       </div>
@@ -1172,7 +1195,7 @@
                         <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
                         <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
                           <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                          <input type="number" min="0" step="1" value="${kienVal}" onkeypress="if(['-', '.', ',', 'e', 'E'].includes(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                          <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${keyId}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
                           <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
                         </div>
                       </div>
@@ -1182,7 +1205,7 @@
                     </div>
                   </div>
                 `;
-              }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Hãy gõ từ khóa tìm kiếm vật tư ở ô trên để hiển thị danh sách...</div>`}
+              }).join('')}
             </div>
           </div>
 
@@ -1214,13 +1237,14 @@
           </div>
         `}
       `;
+      // Áp dụng bộ lọc nhanh ngay sau khi giao diện bán hàng hiển thị
+      setTimeout(() => filterSalesProducts(), 0);
     }
 
     else if (currentTab === 'soGocBH') {
       let flatSoGocRows = [];
       orders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
-          // Tự động suy luận mã DTPNNo từ đơn cũ nếu thiếu
           let inferredMaDTPN = o.maDTPNNo || '';
           if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
             inferredMaDTPN = o.maKH.split(' - ')[0].trim();
@@ -1351,7 +1375,7 @@
         filteredAdminProducts = products.filter(p => {
           const code = (p.code || '').toLowerCase();
           const name = (p.name || '').toLowerCase();
-          return code.slice(0, 2).includes(adminSearchPrd) || code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
+          return code.includes(adminSearchPrd) || name.includes(adminSearchPrd);
         });
       }
 
@@ -1361,7 +1385,7 @@
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm vật tư hoặc gõ 2 ký tự đầu mã đối tác..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:0;">
+          <input type="text" placeholder="🔍 Tìm kiếm vật tư theo mã hoặc tên..." oninput="onAdminSearchInput(this.value)" value="${adminSearchPrd}" style="margin:0;">
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <small id="productCount" style="color:var(--text-muted); font-weight:700;">Hiển thị nhanh: <b>${Math.min(filteredAdminProducts.length, 30)}</b> / ${filteredAdminProducts.length} vật tư</small>
@@ -1370,7 +1394,7 @@
           ${filteredAdminProducts.slice(0, 30).map(p => `
             <div class="mobile-item-card">
               <div class="item-header">
-                <span class="item-code">Cty: ${p.code.slice(0,2)} | Mã: ${p.code}</span>
+                <span class="item-code">Mã: ${p.code}</span>
                 <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
               </div>
               <div class="item-title">${p.name}</div>
