@@ -431,6 +431,70 @@
     renderUI();
   };
 
+  // CHECK-IN GPS QUẦY HÀNG (YÊU CẦU 2)
+  window.checkinActiveStoreGPS = function() {
+    if (!activeVisitedStore) return alert("Chưa có thông tin điểm bán!");
+    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
+    
+    toast("📍 Đang tiến hành check-in và lấy tọa độ GPS quầy hàng...");
+    
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const lat = Number(pos.coords.latitude);
+      const lng = Number(pos.coords.longitude);
+      
+      try {
+        const storeRef = doc(db, "stores", activeVisitedStore.id);
+        const storeSnap = await getDoc(storeRef);
+        const storeData = storeSnap.exists() ? storeSnap.data() : {};
+        
+        let updatePayload = {
+          lat: lat,
+          lng: lng,
+          pinnedByCode: currentUser.code || 'NV',
+          pinnedByName: currentUser.name || 'Nhân viên'
+        };
+
+        if (!storeData.address || storeData.address === "Chưa cập nhật địa chỉ") {
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=vi`);
+            const data = await res.json();
+            if (data && data.display_name) {
+              updatePayload.address = data.display_name;
+              activeVisitedStore.address = data.display_name;
+            }
+          } catch (e) {
+            console.log("Không tự động dịch được địa chỉ:", e);
+          }
+        }
+
+        await updateDoc(storeRef, updatePayload);
+
+        await addDoc(collection(db, "checkins"), {
+          salesUid: currentUser.uid,
+          salesName: currentUser.name,
+          salesCode: currentUser.code,
+          storeId: activeVisitedStore.id,
+          storeName: activeVisitedStore.name,
+          lat: lat,
+          lng: lng,
+          photo: "",
+          status: "Check-in thành công",
+          createdAt: serverTimestamp()
+        });
+
+        activeVisitedStore.lat = lat;
+        activeVisitedStore.lng = lng;
+
+        toast(`✅ Check-in thành công tại quầy: ${activeVisitedStore.name}! Đã cập nhật GPS.`);
+        renderUI();
+      } catch (err) {
+        alert("Lỗi lưu GPS: " + err.message);
+      }
+    }, () => {
+      alert("Không thể lấy tọa độ GPS. Vui lòng bật định vị trên thiết bị của bạn.");
+    }, { enableHighAccuracy: true });
+  };
+
   window.updateCartDetail = function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
@@ -818,6 +882,7 @@
     }, 60);
   };
 
+  // ƯU TIÊN MÃ CÔNG TY LÊN ĐẦU (YÊU CẦU 1)
   window.onProductMavtAutocomplete = function(val) {
     productSearchMavtVal = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -830,10 +895,30 @@
         applyTableFilterFast();
         return;
       }
-      const matched = products.filter(p => {
+
+      let matched = products.filter(p => {
         const code = removeAccents(p.code || '');
-        return code.slice(0, 2).includes(queryKey) || code.includes(queryKey);
-      }).slice(0, 20);
+        return code.includes(queryKey);
+      });
+
+      matched.sort((a, b) => {
+        const codeA = removeAccents(a.code || '');
+        const codeB = removeAccents(b.code || '');
+        const partnerA = codeA.slice(0, 2);
+        const partnerB = codeB.slice(0, 2);
+
+        const isMatchPartnerA = partnerA === queryKey ? 0 : 1;
+        const isMatchPartnerB = partnerB === queryKey ? 0 : 1;
+        if (isMatchPartnerA !== isMatchPartnerB) return isMatchPartnerA - isMatchPartnerB;
+
+        const startsA = codeA.startsWith(queryKey) ? 0 : 1;
+        const startsB = codeB.startsWith(queryKey) ? 0 : 1;
+        if (startsA !== startsB) return startsA - startsB;
+
+        return codeA.localeCompare(codeB);
+      });
+
+      matched = matched.slice(0, 20);
 
       if (matched.length === 0) {
         dropdown.innerHTML = `<div class="autocomplete-item" style="color:var(--text-muted); justify-content:center;">Không tìm thấy MAVT phù hợp</div>`;
@@ -909,16 +994,33 @@
 
     const tbody = document.getElementById('salesProductTableBody');
     if (tbody) {
-      const rows = tbody.getElementsByTagName('tr');
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      let rows = Array.from(tbody.getElementsByTagName('tr'));
+      if (mavtKey) {
+        rows.sort((rowA, rowB) => {
+          const codeA = rowA.getAttribute('data-mavt') || '';
+          const codeB = rowB.getAttribute('data-mavt') || '';
+          const partnerA = codeA.slice(0, 2);
+          const partnerB = codeB.slice(0, 2);
+
+          const matchPartnerA = partnerA === mavtKey ? 0 : 1;
+          const matchPartnerB = partnerB === mavtKey ? 0 : 1;
+          if (matchPartnerA !== matchPartnerB) return matchPartnerA - matchPartnerB;
+
+          const startsA = codeA.startsWith(mavtKey) ? 0 : 1;
+          const startsB = codeB.startsWith(mavtKey) ? 0 : 1;
+          return startsA - startsB;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+      }
+
+      rows.forEach(row => {
         const mavt = row.getAttribute('data-mavt') || '';
         const name = row.getAttribute('data-name') || '';
         const partnerCode = row.getAttribute('data-partner') || '';
         const matchMavt = !mavtKey || partnerCode.includes(mavtKey) || mavt.includes(mavtKey);
         const matchName = !nameKey || name.includes(nameKey);
         row.style.display = (matchMavt && matchName) ? '' : 'none';
-      }
+      });
     }
 
     const cards = document.querySelectorAll('.product-card-item');
@@ -981,7 +1083,7 @@
                     <i class="fa-solid fa-location-dot"></i> ${pinnedInfo}
                   </button>
                 `}
-                ${hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')" title="Admin xóa định vị cũ"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
+                {hasCoords && isAdmin ? `<button class="badge badge-danger" style="border:none; cursor:pointer;" onclick="adminResetCustomerLocation('${s.id}')" title="Admin xóa định vị cũ"><i class="fa-solid fa-trash"></i> Xóa GPS</button>` : ''}
               </div>
             </div>
             <div class="item-title">${s.name}</div>
@@ -1163,15 +1265,26 @@
 
           ${activeVisitedStore ? `
             <div style="margin-top:8px; background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%); padding: 14px 18px; border-radius: 12px; color: #fff; box-shadow: 0 4px 15px rgba(30,27,75,0.3);">
-              <div style="font-size:11px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">
-                <i class="fa-solid fa-building"></i> Đang Lập Đơn Cho Điểm Bán:
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <div style="font-size:11px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">
+                    <i class="fa-solid fa-building"></i> Đang Lập Đơn Cho Điểm Bán:
+                  </div>
+                  <div style="font-size:18px; font-weight:800; color:#FFFFFF; line-height:1.3; margin-bottom:6px;">
+                    [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name}
+                  </div>
+                </div>
+                
+                <!-- NÚT CHECK-IN GPS QUẦY HÀNG (YÊU CẦU 2) -->
+                <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:800; padding:8px 14px;">
+                  <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in Quầy' : 'Check-in & Lưu GPS'}
+                </button>
               </div>
-              <div style="font-size:18px; font-weight:800; color:#FFFFFF; line-height:1.3; margin-bottom:6px;">
-                [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name}
-              </div>
-              <div style="font-size:12px; color:#CBD5E1; display:flex; gap:12px; flex-wrap:wrap;">
+
+              <div style="font-size:12px; color:#CBD5E1; display:flex; gap:12px; flex-wrap:wrap; margin-top:6px;">
                 <span><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa cập nhật địa chỉ'}</span>
                 <span>• Nợ cũ: <b style="color:var(--rose);">${unpaidOrdersTotal.toLocaleString()}đ</b></span>
+                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? 'Đã ghim' : 'Chưa có'}</b></span>
               </div>
             </div>
           ` : ''}
@@ -1393,7 +1506,7 @@
                     <button class="btn btn-amber btn-sm" onclick="printReceipt('${o.id}')"><i class="fa-solid fa-print"></i></button>
                     ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-green btn-sm" onclick="approveOrder('${o.id}')">Duyệt</button>` : ''}
                     ${backOffice && o.status==='Chờ duyệt' ? `<button class="btn btn-red btn-sm" onclick="cancelOrder('${o.id}')">Hủy</button>` : ''}
-                    ${(isAdmin||isAccountant) && o.paymentStatus!=='Đã thanh toán' ? `<button class="btn btn-amber btn-sm" onclick="confirmPayment('${o.id}')">TT</button>` : ''}
+                    {(isAdmin||isAccountant) && o.paymentStatus!=='Đã thanh toán' ? `<button class="btn btn-amber btn-sm" onclick="confirmPayment('${o.id}')">TT</button>` : ''}
                   </td>
                 </tr>
               `).join('')}
