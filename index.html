@@ -162,9 +162,6 @@
     .mobile-card-view { display: none !important; }
   }
 
-  .stat-card{background:linear-gradient(135deg, #1E1B4B 100%, #312E81 0%);color:#fff;border-radius:16px;padding:16px;box-shadow:0 10px 25px rgba(30,27,75,0.3);position:relative;overflow:hidden;}
-  .stat-number{font-size:24px;font-weight:800;color:#F8FAFC;margin-top:4px;font-family:'Quicksand',sans-serif;}
-  
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0F172A;color:#fff;padding:12px 28px;border-radius:28px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);text-align:center;width:90%;max-width:450px;}
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15, 23, 42, 0.8);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
@@ -258,6 +255,7 @@
   let productSearchKeyword = ""; 
   let showOnlySelectedItems = false;
   let searchDebounceTimer = null;
+  let customerPageLimit = 20;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -517,7 +515,7 @@
       btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
       btn.innerHTML = showOnlySelectedItems ? '<i class="fa-solid fa-filter-circle-check"></i> Đã chọn' : '<i class="fa-solid fa-filter"></i> Đã chọn';
     }
-    applyTableFilterFast();
+    renderUI();
   };
 
   function updateCartTotalsUI() {
@@ -861,51 +859,8 @@
   window.onProductSearchInput = function(val) {
     productSearchKeyword = val;
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => { applyTableFilterFast(); }, 60);
+    searchDebounceTimer = setTimeout(() => { renderUI(); }, 60);
   };
-
-  function applyTableFilterFast() {
-    const key = removeAccents(productSearchKeyword);
-
-    const tbody = document.getElementById('salesProductTableBody');
-    if (tbody) {
-      let rows = Array.from(tbody.getElementsByTagName('tr'));
-      rows.forEach(row => {
-        const mavt = row.getAttribute('data-mavt') || '';
-        const name = row.getAttribute('data-name') || '';
-        const partnerCode = row.getAttribute('data-partner') || '';
-        const keyId = row.getAttribute('data-id') || '';
-        const cartItem = currentCart[keyId];
-        const hasQty = cartItem && cartItem.qty > 0;
-
-        const matchKeyword = !key || partnerCode.includes(key) || mavt.includes(key) || name.includes(key);
-        
-        if (showOnlySelectedItems) {
-          row.style.display = (hasQty && matchKeyword) ? '' : 'none';
-        } else {
-          row.style.display = matchKeyword ? '' : 'none';
-        }
-      });
-    }
-
-    const cards = document.querySelectorAll('.product-card-item');
-    cards.forEach(card => {
-      const mavt = card.getAttribute('data-mavt') || '';
-      const name = card.getAttribute('data-name') || '';
-      const partnerCode = card.getAttribute('data-partner') || '';
-      const keyId = card.getAttribute('data-id') || '';
-      const cartItem = currentCart[keyId];
-      const hasQty = cartItem && cartItem.qty > 0;
-
-      const matchKeyword = !key || partnerCode.includes(key) || mavt.includes(key) || name.includes(key);
-
-      if (showOnlySelectedItems) {
-        card.style.display = (hasQty && matchKeyword) ? 'block' : 'none';
-      } else {
-        card.style.display = matchKeyword ? 'block' : 'none';
-      }
-    });
-  }
 
   window.setSoGocFilterKeyword = function(val) { soGocFilterKeyword = val.toLowerCase(); renderUI(); };
   window.setSoGocFilterDate = function(val) { soGocFilterDate = val; renderUI(); };
@@ -922,8 +877,8 @@
       if (queryKey !== "") {
         filtered = stores.filter(s => removeAccents(s.code || '').includes(queryKey) || removeAccents(s.name || '').includes(queryKey) || removeAccents(s.address || '').includes(queryKey) || removeAccents(s.phone || '').includes(queryKey));
       }
-      const displayList = filtered.slice(0, 30);
-      if (countEl) countEl.innerHTML = `Hiển thị tối ưu: <b>${displayList.length}</b> / ${filtered.length} kết quả`;
+      const displayList = filtered.slice(0, customerPageLimit);
+      if (countEl) countEl.innerHTML = `Hiển thị nhanh: <b>${displayList.length}</b> / ${filtered.length} khách hàng`;
       if (displayList.length === 0) {
         container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-muted);font-weight:700;">Không tìm thấy khách hàng phù hợp.</div>`;
         return;
@@ -958,8 +913,13 @@
             <div class="item-info"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone || '—'}</div>
           </div>
         `;
-      }).join('');
-    }, 80);
+      }).join('') + (filtered.length > customerPageLimit ? `<button class="btn btn-sm" style="width:100%; margin-top:10px; justify-content:center;" onclick="loadMoreCustomers()">Xem thêm khách hàng...</button>` : '');
+    }, 50);
+  };
+
+  window.loadMoreCustomers = function() {
+    customerPageLimit += 30;
+    onCustomerSearchInput(customerSearchKey);
   };
 
   window.onAdminSearchInput = function(val) {
@@ -1010,7 +970,6 @@
     document.getElementById('userInfo').innerHTML = `[${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);">${currentUser.role}</span>) ${navigator.onLine?'':'<span class="badge badge-danger">Offline</span>'}`;
     const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
     const backOffice = isAdmin || isManager || isAccountant;
-    const isSales = currentUser.role === 'sales';
 
     setNav('navSales', true); 
     setNav('navSoGocBH', true);
@@ -1036,6 +995,18 @@
       });
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
+
+      const filteredProductsForSales = products.filter(p => {
+        const key = removeAccents(productSearchKeyword);
+        if (!key) return false;
+        const mavt = removeAccents(p.code || '');
+        const name = removeAccents(p.name || '');
+        return mavt.includes(key) || name.includes(key);
+      });
+
+      const actualSalesList = showOnlySelectedItems 
+        ? products.filter(p => currentCart[p.id || p.code] && currentCart[p.id || p.code].qty > 0)
+        : (productSearchKeyword ? filteredProductsForSales.slice(0, 30) : products.slice(0, 30));
 
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 12px 16px;">
@@ -1101,7 +1072,7 @@
                   </tr>
                 </thead>
                 <tbody id="salesProductTableBody">
-                  ${products.map(p => {
+                  ${actualSalesList.length > 0 ? actualSalesList.map(p => {
                     const keyId = p.id || p.code;
                     const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                     const itemTotal = (p.price || 0) * (c.qty || 0);
@@ -1138,14 +1109,14 @@
                         <td><b style="color:var(--primary);" id="total_qty_${keyId}">${c.qty || 0}</b></td>
                       </tr>
                     `;
-                  }).join('')}
+                  }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Hãy gõ từ khóa tìm kiếm vật tư ở ô trên để hiển thị danh sách...</td></tr>`}
                 </tbody>
               </table>
             </div>
 
             <!-- GIAO DIỆN THẺ DỌC CHO DI ĐỘNG -->
             <div class="mobile-card-view">
-              ${products.map(p => {
+              ${actualSalesList.length > 0 ? actualSalesList.map(p => {
                 const keyId = p.id || p.code;
                 const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
                 const itemTotal = (p.price || 0) * (c.qty || 0);
@@ -1193,7 +1164,7 @@
                     </div>
                   </div>
                 `;
-              }).join('')}
+              }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Hãy gõ từ khóa tìm kiếm vật tư ở ô trên để hiển thị danh sách...</div>`}
             </div>
           </div>
 
