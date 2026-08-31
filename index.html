@@ -227,6 +227,7 @@
   let currentCart = {};
   let activeVisitedStore = null;
   let soGocFilterKeyword = "", soGocFilterDate = "";
+  let soGocLimitCount = 30;
 
   let adminSearchPrd = "";
   let customerSearchKey = "";
@@ -417,16 +418,18 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
+  // --- XÓA CHỨNG TỪ YÊU CẦU XÁC NHẬN 3 LẦN (DÀNH CHO ADMIN) ---
   window.adminDeleteOrder = async function(orderId, soCtu) {
     if (!currentUser || currentUser.role !== 'admin') {
       return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa đơn hàng!");
     }
-    if (!confirm(`⚠️ CẢNH BÁO LẦN 1: Bạn có thực sự muốn xóa chứng từ #${soCtu} không?`)) return;
-    if (!confirm(`🛑 XÁC NHẬN LẦN CUỐI: Thao tác này sẽ xóa vĩnh viễn chứng từ #${soCtu} khỏi cơ sở dữ liệu cloud! Tiếp tục?`)) return;
+    if (!confirm(`⚠️ CẢNH BÁO LẦN 1: Bạn có thực sự muốn xóa chứng từ ${soCtu} không?`)) return;
+    if (!confirm(`🛑 XÁC NHẬN LẦN 2: Thao tác này sẽ xóa vĩnh viễn chứng từ ${soCtu} khỏi cơ sở dữ liệu cloud! Tiếp tục?`)) return;
+    if (!confirm(`🚨 XÁC NHẬN LẦN CUỐI (LẦN 3): Bạn đã suy nghĩ kỹ chưa? Dữ liệu chứng từ ${soCtu} sẽ mất vĩnh viễn!`)) return;
 
     try {
       await deleteDoc(doc(db, "orders", orderId));
-      toast(`✅ Đã xóa thành công chứng từ #${soCtu}`);
+      toast(`✅ Đã xóa thành công chứng từ ${soCtu}`);
     } catch (err) {
       alert("Lỗi khi xóa chứng từ: " + err.message);
     }
@@ -437,7 +440,8 @@
       return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa toàn bộ đơn hàng!");
     }
     if (!confirm("⚠️ CẢNH BÁO LẦN 1: Bạn có chắc chắn muốn XÓA TẤT CẢ các đơn hàng trong Sổ Gốc không?")) return;
-    if (!confirm("🛑 XÁC NHẬN LẦN CUỐI: Hành động này KHÔNG THỂ HOÀN TÁC và sẽ xóa sạch toàn bộ dữ liệu lịch sử bán hàng! Bạn có thực sự muốn xóa hết?")) return;
+    if (!confirm("🛑 XÁC NHẬN LẦN 2: Hành động này KHÔNG THỂ HOÀN TÁC và sẽ xóa sạch toàn bộ dữ liệu lịch sử bán hàng!")) return;
+    if (!confirm("🚨 XÁC NHẬN LẦN CUỐI (LẦN 3): Bạn thực sự muốn xóa sạch toàn bộ danh sách đơn hàng?")) return;
 
     try {
       toast("⏳ Đang tiến hành xóa toàn bộ đơn hàng...");
@@ -606,7 +610,6 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
-  // --- HIỂN THỊ KHÁCH HÀNG THÔNG MINH: RESPONSIVE BẢNG HOẶC THẺ CARD ---
   window.filterSalesCustomers = function(val) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
@@ -631,7 +634,6 @@
       const isMobileScreen = window.innerWidth <= 768;
 
       if (!isMobileScreen) {
-        // Màn hình máy tính hiển thị dạng bảng chuẩn
         container.innerHTML = `
           <div class="table-responsive" style="max-height: 280px; background: #fff; margin-bottom: 6px;">
             <table style="min-width: 600px;">
@@ -661,7 +663,6 @@
           </div>
         `;
       } else {
-        // Màn hình điện thoại hiển thị dạng THẺ CARD DỌC (Không bao giờ bị tràn hay mất tầm nhìn)
         container.innerHTML = matched.length > 0 ? matched.map(s => `
           <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -916,6 +917,30 @@
     filterSoGocRows();
   };
 
+  window.setQuickDateFilter = function(type) {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let dd = String(today.getDate()).padStart(2, '0');
+    
+    if (type === 'today') {
+      soGocFilterDate = `${yyyy}-${mm}-${dd}`;
+    } else if (type === 'all') {
+      soGocFilterDate = '';
+    }
+    const dateInput = document.getElementById('soGocDateFilter');
+    if (dateInput) dateInput.value = soGocFilterDate;
+    filterSoGocRows();
+  };
+
+  window.loadMoreSoGoc = function() {
+    soGocLimitCount += 30;
+    if (currentTab === 'soGocBH') {
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) renderTabContent('soGocBH', activePane);
+    }
+  };
+
   function updateCartTotalsUI() {
     let cartTotalAmount = 0;
     let selectedSkuCount = 0;
@@ -1046,11 +1071,18 @@
     }
   };
 
+  // --- XUẤT EXCEL (LOẠI BỎ HOÀN TOÀN CỘT THAO TÁC ADMIN) ---
   window.exportSoGocExcel = function() {
     const tableEl = document.getElementById('soGocTable');
     if (!tableEl) return alert("Không có dữ liệu để xuất!");
     
-    const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
+    // Clone bảng để ẩn cột thao tác admin trước khi xuất file
+    const cloneTable = tableEl.cloneNode(true);
+    const adminTh = cloneTable.querySelector('th.admin-action-col');
+    if (adminTh) adminTh.remove();
+    cloneTable.querySelectorAll('td.admin-action-col').forEach(td => td.remove());
+
+    const wb = XLSX.utils.table_to_book(cloneTable, { raw: true });
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
     toast("✅ Đã xuất file Excel Sổ Gốc Bán Hàng thành công!");
@@ -1262,7 +1294,6 @@
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:8px;'}">
             <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
-            <!-- CONTAINER KẾT QUẢ KHÁCH HÀNG THÔNG MINH (CARD CHO MOBILE / TABLE CHO DESKTOP) -->
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</div>
             </div>
@@ -1403,9 +1434,12 @@
               if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
             }
 
+            // LOẠI BỎ DẤU # TRƯỚC SỐ CHỨNG TỪ (HIỂN THỊ DẠNG 1, 2, 5...)
+            let rawSoCtuNum = o.soCtu || 1;
+
             flatSoGocRows.push({
               orderId: o.id,
-              soCtu: o.soCtu || 1,
+              soCtu: rawSoCtuNum,
               ngayCtu: o.ngayCtu || '2026-08-31',
               ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
               maDTPNNo: inferredMaDTPN,
@@ -1423,19 +1457,23 @@
       });
 
       const isAdmin = currentUser && currentUser.role === 'admin';
+      const limitedRows = flatSoGocRows.slice(0, soGocLimitCount);
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (Chi Tiết Giao Dịch)</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <input type="date" id="soGocDateFilter" value="${soGocFilterDate}" onchange="setSoGocFilterDate(this.value)" style="margin:0; width:160px; padding:8px 10px; font-size:12px; background:#fff;">
+            <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('today')">Hôm Nay</button>
+            <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('all')">Tất Cả</button>
+            <input type="date" id="soGocDateFilter" value="${soGocFilterDate}" onchange="setSoGocFilterDate(this.value)" style="margin:0; width:150px; padding:7px 10px; font-size:12px; background:#fff;">
             <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
             ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="adminDeleteAllOrders()"><i class="fa-solid fa-trash-can"></i> Xóa Tất Cả</button>` : ''}
           </div>
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm ưu tiên Số chứng từ (#2...), mã DTPN, tên hàng, nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <!-- HỖ TRỢ TÌM KIẾM CẢ KHI GÕ KHÔNG CÓ DẤU # HOẶC CÓ DẤU # -->
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, tên hàng, nhân viên..." oninput="filterSoGocRows(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div class="table-responsive">
@@ -1453,13 +1491,13 @@
                 <th>So Luong</th>
                 <th>VND Don Gia</th>
                 <th>VND Thanh Tien</th>
-                ${isAdmin ? `<th>Thao Tác Admin</th>` : ''}
+                ${isAdmin ? `<th class="admin-action-col">Thao Tác Admin</th>` : ''}
               </tr>
             </thead>
             <tbody id="soGocTableBody">
-              ${flatSoGocRows.length > 0 ? flatSoGocRows.map(r => `
+              ${limitedRows.length > 0 ? limitedRows.map(r => `
                 <tr data-so-ctu="${r.soCtu}" data-ma-dtpn="${removeAccents(r.maDTPNNo)}" data-ma-vt="${removeAccents(r.maVTHHCo)}" data-ten-hang="${removeAccents(r.tenHangHoa)}" data-ten-nv="${removeAccents(r.tenNhanVien)}" data-ngay-ctu="${r.ngayCtu}">
-                  <td><b>#${r.soCtu}</b></td>
+                  <td><b>${r.soCtu}</b></td>
                   <td style="white-space: nowrap;">${r.ngayCtuFormatted}</td>
                   <td><b>${r.maDTPNNo}</b></td>
                   <td><b>${r.maNhanVien}</b></td>
@@ -1471,7 +1509,7 @@
                   <td style="white-space: nowrap;">${r.vndDonGia.toLocaleString()}đ</td>
                   <td style="white-space: nowrap;"><b style="color:var(--rose);">${r.vndThanhTien.toLocaleString()}đ</b></td>
                   ${isAdmin ? `
-                    <td style="white-space: nowrap;">
+                    <td class="admin-action-col" style="white-space: nowrap;">
                       <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="adminDeleteOrder('${r.orderId}', '${r.soCtu}')"><i class="fa-solid fa-trash"></i> Xóa</button>
                     </td>
                   ` : ''}
@@ -1482,6 +1520,11 @@
             </tbody>
           </table>
         </div>
+        ${flatSoGocRows.length > soGocLimitCount ? `
+          <div style="text-align:center; margin-top:12px;">
+            <button class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn (${soGocLimitCount}/${flatSoGocRows.length})</button>
+          </div>
+        ` : ''}
       `;
       setTimeout(() => filterSoGocRows(), 0);
     }
