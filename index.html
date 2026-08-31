@@ -256,6 +256,7 @@
   let customerSearchKey = "";
   let salesSearchKeyword = ""; 
   let productSearchKeyword = ""; 
+  let customerSearchKeyword = ""; // Biến tìm kiếm khách hàng siêu tốc
   let showOnlySelectedItems = false;
   let salesProductPageLimit = 25;
 
@@ -459,6 +460,7 @@
 
     salesSearchKeyword = '';
     productSearchKeyword = '';
+    customerSearchKeyword = '';
     showOnlySelectedItems = false;
     currentCart = {};
     salesProductPageLimit = 25;
@@ -471,6 +473,7 @@
     activeVisitedStore = null;
     salesSearchKeyword = '';
     productSearchKeyword = '';
+    customerSearchKeyword = '';
     showOnlySelectedItems = false;
     currentCart = {};
     salesProductPageLimit = 25;
@@ -576,15 +579,43 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
-  // --- TÌM KIẾM KHÁCH HÀNG TRỰC TIẾP TRONG TAB BÁN HÀNG ---
+  // --- HÀM TÌM KIẾM KHÁCH HÀNG THỜI GIAN THỰC (TỐI ĐA 10 KẾT QUẢ) ---
   window.filterSalesCustomers = function(val) {
-    const queryKey = removeAccents(val.trim());
-    const rows = document.querySelectorAll('.customer-row-item');
+    customerSearchKeyword = removeAccents(val.trim());
+    const tbody = document.getElementById('salesCustomerTableBody');
+    if (!tbody) return;
+
+    const rows = tbody.querySelectorAll('tr[data-store-row]');
+    let matchedCount = 0;
+
     rows.forEach(r => {
-      const text = r.getAttribute('data-search') || '';
-      const match = queryKey === "" || text.includes(queryKey);
-      r.style.display = match ? '' : 'none';
+      if (customerSearchKeyword === "") {
+        r.style.display = 'none';
+      } else {
+        const code = r.getAttribute('data-code') || '';
+        const name = r.getAttribute('data-name') || '';
+        const address = r.getAttribute('data-address') || '';
+        const phone = r.getAttribute('data-phone') || '';
+
+        const match = code.includes(customerSearchKeyword) || name.includes(customerSearchKeyword) || address.includes(customerSearchKeyword) || phone.includes(customerSearchKeyword);
+        
+        if (match && matchedCount < 10) {
+          r.style.display = '';
+          matchedCount++;
+        } else {
+          r.style.display = 'none';
+        }
+      }
     });
+
+    const hintEl = document.getElementById('customerSearchHint');
+    if (hintEl) {
+      if (customerSearchKeyword === "") {
+        hintEl.innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
+      } else {
+        hintEl.innerText = matchedCount > 0 ? `Hiển thị tối đa ${matchedCount} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
+      }
+    }
   };
 
   // --- TÌM KIẾM VẬT TƯ THỜI GIAN THỰC KHÔNG KHỰNG ---
@@ -776,6 +807,7 @@
       activeVisitedStore = null; 
       productSearchKeyword = ""; 
       salesSearchKeyword = "";
+      customerSearchKeyword = "";
       showOnlySelectedItems = false; 
 
       switchTab('soGocBH');
@@ -966,6 +998,17 @@
       const displayProducts = products.slice(0, salesProductPageLimit);
       const isMobileScreen = window.innerWidth <= 768;
 
+      const displayStoresForSearch = stores.map(s => {
+        const cCode = removeAccents(s.code || '');
+        const cName = removeAccents(s.name || '');
+        const cAddr = removeAccents(s.address || '');
+        const cPhone = removeAccents(s.phone || '');
+        return { ...s, cCode, cName, cAddr, cPhone };
+      });
+
+      const isSearching = customerSearchKeyword.trim() !== "";
+      let currentMatchedCount = 0;
+
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '10px'};">
@@ -976,8 +1019,9 @@
           </div>
 
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:8px;'}">
-            <input type="text" id="salesCustSearch" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" style="margin-bottom:10px; background:#fff; font-size:14px; padding:12px 14px; border:2px solid var(--primary);" autocomplete="off">
-            <div class="table-responsive" style="max-height: 250px; background: #fff;">
+            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
+
+            <div class="table-responsive" style="max-height: 280px; background: #fff; margin-bottom: 6px;">
               <table style="min-width: 600px;">
                 <thead>
                   <tr>
@@ -989,10 +1033,15 @@
                   </tr>
                 </thead>
                 <tbody id="salesCustomerTableBody">
-                  ${stores.map(s => {
-                    const searchText = removeAccents(`${s.code||''} ${s.name||''} ${s.address||''} ${s.phone||''}`);
+                  ${displayStoresForSearch.map(s => {
+                    const match = isSearching && (s.cCode.includes(customerSearchKeyword) || s.cName.includes(customerSearchKeyword) || s.cAddr.includes(customerSearchKeyword) || s.cPhone.includes(customerSearchKeyword));
+                    let showRow = false;
+                    if (isSearching && match && currentMatchedCount < 10) {
+                      showRow = true;
+                      currentMatchedCount++;
+                    }
                     return `
-                      <tr class="customer-row-item" data-search="${searchText}">
+                      <tr data-store-row data-code="${s.cCode}" data-name="${s.cName}" data-address="${s.cAddr}" data-phone="${s.cPhone}" style="${showRow ? '' : 'display:none;'}">
                         <td><b>${s.code || 'KH'}</b></td>
                         <td><b>${s.name}</b></td>
                         <td>${s.address || '—'}</td>
@@ -1006,6 +1055,9 @@
                 </tbody>
               </table>
             </div>
+            <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700;">
+              ${!isSearching ? "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng..." : (currentMatchedCount > 0 ? `Hiển thị tối đa ${currentMatchedCount} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.")}
+            </small>
           </div>
 
           ${activeVisitedStore ? `
