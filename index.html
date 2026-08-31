@@ -306,7 +306,6 @@
               .toLowerCase();
   }
 
-  // Hàm định dạng ngày tháng năm chuẩn DD/MM/YYYY
   function formatDateDDMMYYYY(dateStr) {
     if (!dateStr) return '';
     if (dateStr.includes('-')) {
@@ -628,19 +627,23 @@
     const nextSoCtu = await getNextSoCtu();
     const finalAmount = rawSubtotal;
     
-    const currentSalesString = `[${currentUser.code}] ${currentUser.name}`;
+    const currentSalesString = `${currentUser.name}`;
     const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
 
     const orderData = {
       soCtu: nextSoCtu,
       ngayCtu: new Date().toISOString().slice(0, 10),
+      maDTPNNo: activeVisitedStore.code || '',
+      maTuyen: activeVisitedStore.routeDay || 'DX1',
+      tenTuyen: 'chợ lồng',
+      maNhanVien: currentUser.code || '',
+      tenNhanVien: currentUser.name || '',
       maKH: currentCustomerString,
       nvBan: currentSalesString,
       salesUid: currentUser.uid, 
       salesName: currentUser.name, 
       salesCode: currentUser.code,
       storeId: activeVisitedStore.id, 
-      maDTPN: `${activeVisitedStore.code || 'KH'}_${activeVisitedStore.name}`,
       items, 
       amount: finalAmount, 
       rawSubtotal,
@@ -763,7 +766,7 @@
           if (tenDtpn && tenDtpn !== 'Ten DTPN') {
             rawCustomers.push({
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: 'Thứ 2, Thứ 4, Thứ 6', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: ''
+              routeDay: 'DX1', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: ''
             });
           }
         }
@@ -1211,39 +1214,33 @@
       let flatSoGocRows = [];
       orders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
-          // Tách Mã Khách Hàng và Tên Khách Hàng từ chuỗi "B114CAN - A CAN TLKH"
-          let rawMaKH = o.maKH || o.maDTPN || '';
-          let maKHParts = rawMaKH.split('-');
-          let cleanMaKH = maKHParts[0] ? maKHParts[0].trim() : rawMaKH;
-          let tenKH = maKHParts.slice(1).join('-').trim() || '';
-
           o.items.forEach(item => {
-            // Tách Mã Vật Tư và Tên Hàng Hóa từ chuỗi "01B1 - Suối bình Traly 21 lít..."
             let itemCode = item.code || '';
             let itemName = item.name || '';
-            
-            // Xử lý nếu chuỗi item.code đã dính sẵn tên hoặc item.name có chứa cả code
-            let finalMaVTHH = itemCode;
-            let finalTenHH = itemName;
+            let finalMaVTHHCo = itemCode;
+            let finalTenHangHoa = itemName;
 
-            if (finalMaVTHH.includes('-')) {
-              let pSplit = finalMaVTHH.split('-');
-              finalMaVTHH = pSplit[0].trim();
-              if (!finalTenHH) finalTenHH = pSplit.slice(1).join('-').trim();
+            if (finalMaVTHHCo.includes('-')) {
+              let pSplit = finalMaVTHHCo.split('-');
+              finalMaVTHHCo = pSplit[0].trim();
+              if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
             }
 
             flatSoGocRows.push({
               soCtu: o.soCtu || 1,
               ngayCtu: o.ngayCtu || '2026-08-31',
               ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
-              maKH: cleanMaKH,
-              tenKH: tenKH,
-              nvBan: o.nvBan || o.salesName || '',
-              maVTHH: finalMaVTHH,
-              tenHH: finalTenHH,
-              sl: item.qty || 0,
-              donGia: item.price || 0,
-              thanhTien: (item.price || 0) * (item.qty || 0)
+              maDTPNNo: o.maDTPNNo || '',
+              maTuyen: o.maTuyen || 'DX1',
+              tenTuyen: o.tenTuyen || 'chợ lồng',
+              maNhanVien: o.salesCode || '',
+              tenNhanVien: o.salesName || '',
+              maVTHHCo: finalMaVTHHCo,
+              tenHangHoa: finalTenHangHoa,
+              donViTinh: item.dvt || 'hộp',
+              soLuong: item.qty || 0,
+              vndDonGia: item.price || 0,
+              vndThanhTien: (item.price || 0) * (item.qty || 0)
             });
           });
         }
@@ -1252,11 +1249,10 @@
       const filteredRows = flatSoGocRows.filter(r => {
         const matchKey = soGocFilterKeyword === "" || 
           String(r.soCtu).includes(soGocFilterKeyword) || 
-          removeAccents(r.maKH).includes(soGocFilterKeyword) || 
-          removeAccents(r.tenKH).includes(soGocFilterKeyword) || 
-          removeAccents(r.maVTHH).includes(soGocFilterKeyword) || 
-          removeAccents(r.tenHH).includes(soGocFilterKeyword) || 
-          removeAccents(r.nvBan).includes(soGocFilterKeyword);
+          removeAccents(r.maDTPNNo).includes(soGocFilterKeyword) || 
+          removeAccents(r.maVTHHCo).includes(soGocFilterKeyword) || 
+          removeAccents(r.tenHangHoa).includes(soGocFilterKeyword) || 
+          removeAccents(r.tenNhanVien).includes(soGocFilterKeyword);
         
         const matchDate = soGocFilterDate === "" || r.ngayCtu === soGocFilterDate;
         return matchKey && matchDate;
@@ -1272,23 +1268,26 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm theo số chứng từ, mã KH, tên KH, mã vật tư hoặc nhân viên bán..." oninput="setSoGocFilterKeyword(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Tìm kiếm theo số chứng từ, mã DTPN, mã vật tư, tên hàng hoặc nhân viên..." oninput="setSoGocFilterKeyword(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div class="table-responsive">
           <table id="soGocTable">
             <thead>
               <tr>
-                <th>Số Chứng Từ (SoCtu)</th>
-                <th>Ngày Chứng Từ (NgayCtu)</th>
-                <th>Mã Khách Hàng (MaKH)</th>
-                <th>Tên Khách Hàng</th>
-                <th>Nhân Viên Bán (NVban)</th>
-                <th>Mã Vật Tư Hàng Hóa (MaVTHH)</th>
-                <th>Tên Hàng Hóa</th>
-                <th>Số Lượng (SL)</th>
-                <th>Đơn Giá</th>
-                <th>Thành Tiền</th>
+                <th>So CTu</th>
+                <th>Ngay CTu</th>
+                <th>Ma DTPNNo</th>
+                <th>MaTuyen</th>
+                <th>TenTuyen</th>
+                <th>Ma Nhan Vien</th>
+                <th>TenNhanVien</th>
+                <th>Ma VTHHCo</th>
+                <th>Ten Hang Hoa</th>
+                <th>Don Vi Tinh</th>
+                <th>So Luong</th>
+                <th>VND Don Gia</th>
+                <th>VND Thanh Tien</th>
               </tr>
             </thead>
             <tbody>
@@ -1296,17 +1295,20 @@
                 <tr>
                   <td><b>#${r.soCtu}</b></td>
                   <td>${r.ngayCtuFormatted}</td>
-                  <td><b>${r.maKH}</b></td>
-                  <td><b>${r.tenKH}</b></td>
-                  <td>${r.nvBan}</td>
-                  <td><b>${r.maVTHH}</b></td>
-                  <td>${r.tenHH}</td>
-                  <td><b style="color:var(--primary);">${r.sl}</b></td>
-                  <td>${r.donGia.toLocaleString()}đ</td>
-                  <td><b style="color:var(--rose);">${r.thanhTien.toLocaleString()}đ</b></td>
+                  <td><b>${r.maDTPNNo}</b></td>
+                  <td>${r.maTuyen}</td>
+                  <td>${r.tenTuyen}</td>
+                  <td><b>${r.maNhanVien}</b></td>
+                  <td>${r.tenNhanVien}</td>
+                  <td><b>${r.maVTHHCo}</b></td>
+                  <td>${r.tenHangHoa}</td>
+                  <td>${r.donViTinh}</td>
+                  <td><b style="color:var(--primary);">${r.soLuong}</b></td>
+                  <td>${r.vndDonGia.toLocaleString()}đ</td>
+                  <td><b style="color:var(--rose);">${r.vndThanhTien.toLocaleString()}đ</b></td>
                 </tr>
               `).join('') : `
-                <tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
+                <tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
               `}
             </tbody>
           </table>
