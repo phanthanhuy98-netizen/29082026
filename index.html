@@ -90,7 +90,7 @@
   .btn-purple{background:var(--purple-gradient);color:#fff;}
   .btn-sm{padding:7px 12px;font-size:11px;border-radius:10px;}
   
-  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;margin-bottom:80px; min-height: calc(100vh - 120px); width: 100%; overflow: visible;}
+  .panel{background:#F8FAFC;border-radius:20px;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,0.4);border:1px solid #E2E8F0;margin-bottom:80px; min-height: calc(100vh - 120px); width: 100%; overflow: visible; content-visibility: auto;}
   
   .grid-users {display:grid;grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);gap:14px;margin-top:12px; width: 100%;}
   @media(max-width: 992px) {
@@ -228,11 +228,12 @@
   let adminSearchPrd = "";
   let customerSearchKey = "";
   let salesSearchKeyword = ""; 
-  let productSearchKeyword = ""; // Tìm kiếm vật tư khi lập đơn
-  let customerSearchKeyword = ""; // Tìm kiếm khách hàng khi lập đơn
-  let tabCustomerSearchKey = ""; // Tìm kiếm ở Tab KH
-  let tabProductSearchKey = ""; // Tìm kiếm ở Tab Hàng
+  let productSearchKeyword = ""; 
+  let customerSearchKeyword = ""; 
+  let tabCustomerSearchKey = ""; 
+  let tabProductSearchKey = ""; 
   let showOnlySelectedItems = false;
+  let debounceTimer = null;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -551,164 +552,232 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
-  // --- TÌM KIẾM KHÁCH HÀNG TẠI MÀN HÌNH BÁN HÀNG (TỐI ĐA 10 KẾT QUẢ) ---
+  // --- ÁP DỤNG DEBOUNCE (150ms) CHO TẤT CẢ CÁC HÀM TÌM KIẾM ĐỂ ĐẠT TỐC ĐỘ CAO NHẤT ---
   window.filterSalesCustomers = function(val) {
-    customerSearchKeyword = removeAccents(val.trim());
-    const tbody = document.getElementById('salesCustomerTableBody');
-    if (!tbody) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      customerSearchKeyword = removeAccents(val.trim());
+      const container = document.getElementById('salesCustomerTableBody');
+      if (!container) return;
 
-    const rows = tbody.querySelectorAll('tr[data-store-row]');
-    let matchedCount = 0;
-
-    rows.forEach(r => {
       if (customerSearchKeyword === "") {
-        r.style.display = 'none';
-      } else {
-        const code = r.getAttribute('data-code') || '';
-        const name = r.getAttribute('data-name') || '';
-        const address = r.getAttribute('data-address') || '';
-        const phone = r.getAttribute('data-phone') || '';
-
-        const match = code.includes(customerSearchKeyword) || name.includes(customerSearchKeyword) || address.includes(customerSearchKeyword) || phone.includes(customerSearchKeyword);
-        
-        if (match && matchedCount < 10) {
-          r.style.display = '';
-          matchedCount++;
-        } else {
-          r.style.display = 'none';
-        }
+        container.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>`;
+        document.getElementById('customerSearchHint').innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
+        return;
       }
-    });
 
-    const hintEl = document.getElementById('customerSearchHint');
-    if (hintEl) {
-      if (customerSearchKeyword === "") {
-        hintEl.innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
-      } else {
-        hintEl.innerText = matchedCount > 0 ? `Hiển thị tối đa ${matchedCount} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
-      }
-    }
+      let matched = stores.filter(s => {
+        const cCode = removeAccents(s.code || '');
+        const cName = removeAccents(s.name || '');
+        const cAddr = removeAccents(s.address || '');
+        const cPhone = removeAccents(s.phone || '');
+        return cCode.includes(customerSearchKeyword) || cName.includes(customerSearchKeyword) || cAddr.includes(customerSearchKeyword) || cPhone.includes(customerSearchKeyword);
+      }).slice(0, 10);
+
+      container.innerHTML = matched.length > 0 ? matched.map(s => `
+        <tr>
+          <td><b>${s.code || 'KH'}</b></td>
+          <td><b>${s.name}</b></td>
+          <td>${s.address || '—'}</td>
+          <td>${s.phone || '—'}</td>
+          <td style="text-align:right;">
+            <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN TIỆM</button>
+          </td>
+        </tr>
+      `).join('') : `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`;
+
+      document.getElementById('customerSearchHint').innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
+    }, 150);
   };
 
-  // --- TÌM KIẾM VẬT TƯ KHI LẬP ĐƠN (TỐI ĐA 10 KẾT QUẢ) ---
   window.filterSalesProducts = function(val) {
-    productSearchKeyword = removeAccents(val.trim());
-    const rows = document.querySelectorAll('.product-row-item');
-    const cards = document.querySelectorAll('.product-card-item');
-    let matchedCount = 0;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      productSearchKeyword = removeAccents(val.trim());
+      const isMobileScreen = window.innerWidth <= 768;
+      const container = isMobileScreen ? document.getElementById('mobileProductListContainer') : document.getElementById('salesProductTableBody');
+      const hintEl = document.getElementById('productSearchHint');
+      if (!container) return;
 
-    rows.forEach(r => {
-      const code = r.getAttribute('data-code') || '';
-      const name = r.getAttribute('data-name') || '';
-      const isSelected = r.classList.contains('has-selected');
-      
-      const match = showOnlySelectedItems ? isSelected : (productSearchKeyword !== "" && (code.includes(productSearchKeyword) || name.includes(productSearchKeyword)));
-      
-      if (match && (showOnlySelectedItems || matchedCount < 10)) {
-        r.style.display = '';
-        if (!showOnlySelectedItems) matchedCount++;
-      } else {
-        r.style.display = 'none';
-      }
-    });
-
-    matchedCount = 0;
-    cards.forEach(c => {
-      const code = c.getAttribute('data-code') || '';
-      const name = c.getAttribute('data-name') || '';
-      const isSelected = c.classList.contains('has-selected');
-      
-      const match = showOnlySelectedItems ? isSelected : (productSearchKeyword !== "" && (code.includes(productSearchKeyword) || name.includes(productSearchKeyword)));
-      
-      if (match && (showOnlySelectedItems || matchedCount < 10)) {
-        c.style.display = '';
-        if (!showOnlySelectedItems) matchedCount++;
-      } else {
-        c.style.display = 'none';
-      }
-    });
-
-    const hintEl = document.getElementById('productSearchHint');
-    if (hintEl) {
       if (productSearchKeyword === "" && !showOnlySelectedItems) {
-        hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn...";
-      } else {
-        hintEl.innerText = "";
+        container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</div>`;
+        if (hintEl) hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn...";
+        return;
       }
-    }
+
+      let matched = products.filter(p => {
+        const pCode = removeAccents(p.code || '');
+        const pName = removeAccents(p.name || '');
+        const keyId = p.id || p.code;
+        const c = currentCart[keyId];
+        const hasQty = c && c.qty > 0;
+
+        if (showOnlySelectedItems) return hasQty;
+        return pCode.includes(productSearchKeyword) || pName.includes(productSearchKeyword);
+      }).slice(0, 10);
+
+      if (!isMobileScreen) {
+        container.innerHTML = matched.length > 0 ? matched.map(p => {
+          const keyId = p.id || p.code;
+          const safeK = getSafeKey(keyId);
+          const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+          const itemTotal = (p.price || 0) * (c.qty || 0);
+          const hasQty = c.qty > 0;
+
+          return `
+            <tr id="row_item_${safeK}" class="product-row-item ${hasQty ? 'has-selected' : ''}" data-id="${keyId}">
+              <td><b>${p.code}</b></td>
+              <td><b>${p.name}</b></td>
+              <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
+              <td>
+                <div style="display:flex; align-items:center; gap:2px;">
+                  <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                  <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${safeK}" value="${c.le}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                  <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                </div>
+              </td>
+              <td>
+                <div style="display:flex; align-items:center; gap:2px;">
+                  <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                  <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${safeK}" value="${c.kien}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
+                  <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                </div>
+              </td>
+              <td><b>${p.tyLeQuyDoi || 50}</b></td>
+              <td>${(p.price || 0).toLocaleString()}đ</td>
+              <td><b style="color:var(--rose);" id="row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></td>
+              <td><b style="color:var(--primary);" id="total_qty_${safeK}">${c.qty || 0}</b></td>
+            </tr>
+          `;
+        }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</td></tr>`;
+      } else {
+        container.innerHTML = matched.length > 0 ? matched.map(p => {
+          const keyId = p.id || p.code;
+          const safeK = getSafeKey(keyId);
+          const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+          const itemTotal = (p.price || 0) * (c.qty || 0);
+          const hasQty = c.qty > 0;
+
+          return `
+            <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="padding:10px 12px; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
+                <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
+              </div>
+              <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:6px 10px; border-radius:8px; margin-bottom:6px; font-size:12px;">
+                <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
+                <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
+                <div>
+                  <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
+                  <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
+                    <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${safeK}" value="${c.le}" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                    <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                  </div>
+                </div>
+                <div>
+                  <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
+                  <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
+                    <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${safeK}" value="${c.kien}" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
+                    <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                  </div>
+                </div>
+              </div>
+              <div style="text-align:right; font-size:12px;">Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></div>
+            </div>
+          `;
+        }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
+      }
+      if (hintEl) hintEl.innerText = "";
+    }, 150);
   };
 
-  // --- TÌM KIẾM Ở TAB KHÁCH HÀNG (TỐI ĐA 10 KẾT QUẢ) ---
   window.filterTabCustomers = function(val) {
-    tabCustomerSearchKey = removeAccents(val.trim());
-    const tbody = document.getElementById('tabCustomerTableBody');
-    if (!tbody) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      tabCustomerSearchKey = removeAccents(val.trim());
+      const container = document.getElementById('tabCustomerTableBody');
+      const hintEl = document.getElementById('tabCustSearchHint');
+      if (!container) return;
 
-    const rows = tbody.querySelectorAll('tr[data-tab-cust-row]');
-    let matchedCount = 0;
-
-    rows.forEach(r => {
       if (tabCustomerSearchKey === "") {
-        r.style.display = 'none';
-      } else {
-        const code = r.getAttribute('data-code') || '';
-        const name = r.getAttribute('data-name') || '';
-        const address = r.getAttribute('data-address') || '';
-        const phone = r.getAttribute('data-phone') || '';
-
-        const match = code.includes(tabCustomerSearchKey) || name.includes(tabCustomerSearchKey) || address.includes(tabCustomerSearchKey) || phone.includes(tabCustomerSearchKey);
-        
-        if (match && matchedCount < 10) {
-          r.style.display = '';
-          matchedCount++;
-        } else {
-          r.style.display = 'none';
-        }
+        container.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>`;
+        if (hintEl) hintEl.innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
+        return;
       }
-    });
 
-    const hintEl = document.getElementById('tabCustSearchHint');
-    if (hintEl) {
-      if (tabCustomerSearchKey === "") {
-        hintEl.innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
-      } else {
-        hintEl.innerText = matchedCount > 0 ? `Hiển thị tối đa ${matchedCount} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
-      }
-    }
+      let matched = stores.filter(s => {
+        const cCode = removeAccents(s.code || '');
+        const cName = removeAccents(s.name || '');
+        const cAddr = removeAccents(s.address || '');
+        const cPhone = removeAccents(s.phone || '');
+        return cCode.includes(tabCustomerSearchKey) || cName.includes(tabCustomerSearchKey) || cAddr.includes(tabCustomerSearchKey) || cPhone.includes(tabCustomerSearchKey);
+      }).slice(0, 10);
+
+      container.innerHTML = matched.length > 0 ? matched.map(s => {
+        const hasLat = s.lat && s.lat !== 0;
+        return `
+          <tr>
+            <td><b>${s.code || 'KH'}</b></td>
+            <td><b>${s.name}</b></td>
+            <td>${s.address || '—'}</td>
+            <td>${s.phone || '—'}</td>
+            <td>${s.zalo || '—'}</td>
+            <td>
+              <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">
+                ${hasLat ? `Đã ghim (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})` : 'Chưa có GPS'}
+              </span>
+            </td>
+            <td style="text-align:right; white-space:nowrap;">
+              <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
+              ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
+            </td>
+          </tr>
+        `;
+      }).join('') : `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`;
+
+      if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
+    }, 150);
   };
 
-  // --- TÌM KIẾM Ở TAB HÀNG (TỐI ĐA 10 KẾT QUẢ) ---
   window.filterTabProducts = function(val) {
-    tabProductSearchKey = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.tab-product-card');
-    let matchedCount = 0;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      tabProductSearchKey = removeAccents(val.trim());
+      const container = document.getElementById('productCardsContainer');
+      const hintEl = document.getElementById('tabPrdSearchHint');
+      if (!container) return;
 
-    cards.forEach(c => {
       if (tabProductSearchKey === "") {
-        c.style.display = 'none';
-      } else {
-        const code = c.getAttribute('data-code') || '';
-        const name = c.getAttribute('data-name') || '';
-
-        const match = code.includes(tabProductSearchKey) || name.includes(tabProductSearchKey);
-        
-        if (match && matchedCount < 10) {
-          c.style.display = '';
-          matchedCount++;
-        } else {
-          c.style.display = 'none';
-        }
+        container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>`;
+        if (hintEl) hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...";
+        return;
       }
-    });
 
-    const hintEl = document.getElementById('tabPrdSearchHint');
-    if (hintEl) {
-      if (tabProductSearchKey === "") {
-        hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...";
-      } else {
-        hintEl.innerText = matchedCount > 0 ? `Hiển thị tối đa ${matchedCount} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
-      }
-    }
+      let matched = products.filter(p => {
+        const pCode = removeAccents(p.code || '');
+        const pName = removeAccents(p.name || '');
+        return pCode.includes(tabProductSearchKey) || pName.includes(tabProductSearchKey);
+      }).slice(0, 10);
+
+      container.innerHTML = matched.length > 0 ? matched.map(p => `
+        <div class="mobile-item-card">
+          <div class="item-header">
+            <span class="item-code">Mã: ${p.code}</span>
+            <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
+          </div>
+          <div class="item-title">${p.name}</div>
+          <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
+          <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
+        </div>
+      `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
+
+      if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
+    }, 150);
   };
 
   window.toggleShowOnlySelected = function() {
@@ -1056,28 +1125,7 @@
       });
 
       const unpaidOrdersTotal = activeVisitedStore ? orders.filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy').reduce((s, o) => s + (o.amount || 0), 0) : 0;
-
       const isMobileScreen = window.innerWidth <= 768;
-
-      const displayStoresForSearch = stores.map(s => {
-        const cCode = removeAccents(s.code || '');
-        const cName = removeAccents(s.name || '');
-        const cAddr = removeAccents(s.address || '');
-        const cPhone = removeAccents(s.phone || '');
-        return { ...s, cCode, cName, cAddr, cPhone };
-      });
-
-      const isSearchingCust = customerSearchKeyword.trim() !== "";
-      let currentMatchedCustCount = 0;
-
-      const displayProductsForSearch = products.map(p => {
-        const pCode = removeAccents(p.code || '');
-        const pName = removeAccents(p.name || '');
-        return { ...p, pCode, pName };
-      });
-
-      const isSearchingPrd = productSearchKeyword.trim() !== "";
-      let currentMatchedPrdCount = 0;
 
       main.innerHTML = `
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 16px;">
@@ -1103,30 +1151,12 @@
                   </tr>
                 </thead>
                 <tbody id="salesCustomerTableBody">
-                  ${displayStoresForSearch.map(s => {
-                    const match = isSearchingCust && (s.cCode.includes(customerSearchKeyword) || s.cName.includes(customerSearchKeyword) || s.cAddr.includes(customerSearchKeyword) || s.cPhone.includes(customerSearchKeyword));
-                    let showRow = false;
-                    if (isSearchingCust && match && currentMatchedCustCount < 10) {
-                      showRow = true;
-                      currentMatchedCustCount++;
-                    }
-                    return `
-                      <tr data-store-row data-code="${s.cCode}" data-name="${s.cName}" data-address="${s.cAddr}" data-phone="${s.cPhone}" style="${showRow ? '' : 'display:none;'}">
-                        <td><b>${s.code || 'KH'}</b></td>
-                        <td><b>${s.name}</b></td>
-                        <td>${s.address || '—'}</td>
-                        <td>${s.phone || '—'}</td>
-                        <td style="text-align:right;">
-                          <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN TIỆM</button>
-                        </td>
-                      </tr>
-                    `;
-                  }).join('')}
+                  <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>
                 </tbody>
               </table>
             </div>
             <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700;">
-              ${!isSearchingCust ? "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng..." : (currentMatchedCustCount > 0 ? `Hiển thị tối đa ${currentMatchedCustCount} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.")}
+              Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...
             </small>
           </div>
 
@@ -1161,7 +1191,7 @@
               </button>
             </div>
             <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;">
-              ${!isSearchingPrd && !showOnlySelectedItems ? "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn..." : ""}
+              Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn...
             </small>
 
             ${!isMobileScreen ? `
@@ -1181,112 +1211,13 @@
                     </tr>
                   </thead>
                   <tbody id="salesProductTableBody">
-                    ${displayProductsForSearch.map(p => {
-                      const keyId = p.id || p.code;
-                      const safeK = getSafeKey(keyId);
-                      const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
-                      const itemTotal = (p.price || 0) * (c.qty || 0);
-                      const hasQty = c.qty > 0;
-                      
-                      const match = isSearchingPrd && (p.pCode.includes(productSearchKeyword) || p.pName.includes(productSearchKeyword));
-                      let showRow = false;
-                      if (showOnlySelectedItems && hasQty) {
-                        showRow = true;
-                      } else if (!showOnlySelectedItems && isSearchingPrd && match && currentMatchedPrdCount < 10) {
-                        showRow = true;
-                        currentMatchedPrdCount++;
-                      }
-
-                      const leVal = c.le;
-                      const kienVal = c.kien;
-
-                      return `
-                        <tr id="row_item_${safeK}" class="product-row-item ${hasQty ? 'has-selected' : ''}" data-code="${p.pCode}" data-name="${p.pName}" data-id="${keyId}" style="${showRow ? '' : 'display:none;'}">
-                          <td><b>${p.code}</b></td>
-                          <td><b>${p.name}</b></td>
-                          <td><span class="badge" style="background:#EEF2FF; color:var(--primary);">${p.dvt || 'hộp'}</span></td>
-                          <td>
-                            <div style="display:flex; align-items:center; gap:2px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                              <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${safeK}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
-                            </div>
-                          </td>
-                          <td>
-                            <div style="display:flex; align-items:center; gap:2px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                              <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${safeK}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="width:45px; margin:0; text-align:center; padding:4px;">
-                              <button type="button" class="btn btn-sm" style="padding:4px 6px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
-                            </div>
-                          </td>
-                          <td><b>${p.tyLeQuyDoi || 50}</b></td>
-                          <td>${(p.price || 0).toLocaleString()}đ</td>
-                          <td><b style="color:var(--rose);" id="row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></td>
-                          <td><b style="color:var(--primary);" id="total_qty_${safeK}">${c.qty || 0}</b></td>
-                        </tr>
-                      `;
-                    }).join('')}
+                    <tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</td></tr>
                   </tbody>
                 </table>
               </div>
             ` : `
               <div id="mobileProductListContainer" class="mobile-card-view">
-                ${displayProductsForSearch.map(p => {
-                  const keyId = p.id || p.code;
-                  const safeK = getSafeKey(keyId);
-                  const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
-                  const itemTotal = (p.price || 0) * (c.qty || 0);
-                  const hasQty = c.qty > 0;
-                  
-                  const match = isSearchingPrd && (p.pCode.includes(productSearchKeyword) || p.pName.includes(productSearchKeyword));
-                  let showCard = false;
-                  if (showOnlySelectedItems && hasQty) {
-                    showCard = true;
-                  } else if (!showOnlySelectedItems && isSearchingPrd && match && currentMatchedPrdCount < 10) {
-                    showCard = true;
-                    currentMatchedPrdCount++;
-                  }
-
-                  const leVal = c.le;
-                  const kienVal = c.kien;
-
-                  return `
-                    <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" data-code="${p.pCode}" data-name="${p.pName}" data-id="${keyId}" style="padding:10px 12px; margin-bottom:8px; ${showCard ? '' : 'display:none;'}">
-                      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-                        <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
-                        <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
-                      </div>
-                      <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
-                      
-                      <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:6px 10px; border-radius:8px; margin-bottom:6px; font-size:12px;">
-                        <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
-                        <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
-                      </div>
-
-                      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
-                        <div>
-                          <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
-                          <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-le-${safeK}" value="${leVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
-                          </div>
-                        </div>
-                        <div>
-                          <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
-                          <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                            <input type="text" inputmode="numeric" pattern="[0-9]*" class="input-kien-${safeK}" value="${kienVal}" onkeypress="if(!/[0-9]/.test(event.key)) event.preventDefault();" onfocus="this.select()" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                            <button type="button" class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
-                          </div>
-                        </div>
-                      </div>
-                      <div style="text-align:right; font-size:12px;">
-                        Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
+                <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</div>
               </div>
             `}
           </div>
@@ -1303,17 +1234,6 @@
     }
 
     else if (currentTab === 'customers') {
-      const displayStores = stores.map(s => {
-        const cCode = removeAccents(s.code || '');
-        const cName = removeAccents(s.name || '');
-        const cAddr = removeAccents(s.address || '');
-        const cPhone = removeAccents(s.phone || '');
-        return { ...s, cCode, cName, cAddr, cPhone };
-      });
-
-      const isSearching = tabCustomerSearchKey.trim() !== "";
-      let matchedCount = 0;
-
       main.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Danh Sách Khách Hàng (${stores.length})</h2>
@@ -1340,33 +1260,7 @@
               </tr>
             </thead>
             <tbody id="tabCustomerTableBody">
-              ${displayStores.map(s => {
-                const match = isSearching && (s.cCode.includes(tabCustomerSearchKey) || s.cName.includes(tabCustomerSearchKey) || s.cAddr.includes(tabCustomerSearchKey) || s.cPhone.includes(tabCustomerSearchKey));
-                let showRow = false;
-                if (isSearching && match && matchedCount < 10) {
-                  showRow = true;
-                  matchedCount++;
-                }
-                const hasLat = s.lat && s.lat !== 0;
-                return `
-                  <tr data-tab-cust-row data-code="${s.cCode}" data-name="${s.cName}" data-address="${s.cAddr}" data-phone="${s.cPhone}" style="${showRow ? '' : 'display:none;'}">
-                    <td><b>${s.code || 'KH'}</b></td>
-                    <td><b>${s.name}</b></td>
-                    <td>${s.address || '—'}</td>
-                    <td>${s.phone || '—'}</td>
-                    <td>${s.zalo || '—'}</td>
-                    <td>
-                      <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">
-                        ${hasLat ? `Đã ghim (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})` : 'Chưa có GPS'}
-                      </span>
-                    </td>
-                    <td style="text-align:right; white-space:nowrap;">
-                      <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
-                      ${isAdmin && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
+              <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1481,15 +1375,6 @@
     }
 
     else if (currentTab === 'productsAdmin' && backOffice) {
-      const displayAdminPrds = products.map(p => {
-        const pCode = removeAccents(p.code || '');
-        const pName = removeAccents(p.name || '');
-        return { ...p, pCode, pName };
-      });
-
-      const isSearchingPrdTab = tabProductSearchKey.trim() !== "";
-      let matchedPrdCount = 0;
-
       main.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư (${products.length})</h2>
@@ -1499,25 +1384,7 @@
           <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
         <div id="productCardsContainer">
-          ${displayAdminPrds.map(p => {
-            const match = isSearchingPrdTab && (p.pCode.includes(tabProductSearchKey) || p.pName.includes(tabProductSearchKey));
-            let showCard = false;
-            if (isSearchingPrdTab && match && matchedPrdCount < 10) {
-              showCard = true;
-              matchedPrdCount++;
-            }
-            return `
-              <div class="mobile-item-card tab-product-card" data-code="${p.pCode}" data-name="${p.pName}" style="${showCard ? '' : 'display:none;'}">
-                <div class="item-header">
-                  <span class="item-code">Mã: ${p.code}</span>
-                  <span class="badge" style="background:#F1F5F9;color:var(--purple);">${p.dvt || 'hộp'}</span>
-                </div>
-                <div class="item-title">${p.name}</div>
-                <div class="item-info"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Tồn đầu: <b>${p.stockDau || 0}</b> | Tồn cuối: <b>${p.stockCuoi || 0}</b></div>
-                <div class="item-info"><i class="fa-solid fa-tag" style="color:var(--rose);"></i> Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b></div>
-              </div>
-            `;
-          }).join('')}
+          <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
         </div>
         <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:8px;">
           Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...
