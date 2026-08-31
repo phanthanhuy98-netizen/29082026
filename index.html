@@ -7,14 +7,11 @@
 <meta name="theme-color" content="#0F172A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Quicksand:wght@600;700&display=swap" rel="stylesheet">
-<!-- FontAwesome Vector Icons -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
-<!-- SheetJS for Excel Reading and Exporting -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<!-- Chart.js for Visual Dashboards -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -307,6 +304,18 @@
               .replace(/[\u0300-\u036f]/g, '')
               .replace(/đ/g, 'd').replace(/Đ/g, 'D')
               .toLowerCase();
+  }
+
+  // Hàm định dạng ngày tháng năm chuẩn DD/MM/YYYY
+  function formatDateDDMMYYYY(dateStr) {
+    if (!dateStr) return '';
+    if (dateStr.includes('-')) {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+    return dateStr;
   }
 
   window.handleLogin = async function(e) {
@@ -1202,13 +1211,36 @@
       let flatSoGocRows = [];
       orders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
+          // Tách Mã Khách Hàng và Tên Khách Hàng từ chuỗi "B114CAN - A CAN TLKH"
+          let rawMaKH = o.maKH || o.maDTPN || '';
+          let maKHParts = rawMaKH.split('-');
+          let cleanMaKH = maKHParts[0] ? maKHParts[0].trim() : rawMaKH;
+          let tenKH = maKHParts.slice(1).join('-').trim() || '';
+
           o.items.forEach(item => {
+            // Tách Mã Vật Tư và Tên Hàng Hóa từ chuỗi "01B1 - Suối bình Traly 21 lít..."
+            let itemCode = item.code || '';
+            let itemName = item.name || '';
+            
+            // Xử lý nếu chuỗi item.code đã dính sẵn tên hoặc item.name có chứa cả code
+            let finalMaVTHH = itemCode;
+            let finalTenHH = itemName;
+
+            if (finalMaVTHH.includes('-')) {
+              let pSplit = finalMaVTHH.split('-');
+              finalMaVTHH = pSplit[0].trim();
+              if (!finalTenHH) finalTenHH = pSplit.slice(1).join('-').trim();
+            }
+
             flatSoGocRows.push({
               soCtu: o.soCtu || 1,
               ngayCtu: o.ngayCtu || '2026-08-31',
-              maKH: o.maKH || o.maDTPN || '',
+              ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
+              maKH: cleanMaKH,
+              tenKH: tenKH,
               nvBan: o.nvBan || o.salesName || '',
-              maVTHH: `${item.code} - ${item.name}`,
+              maVTHH: finalMaVTHH,
+              tenHH: finalTenHH,
               sl: item.qty || 0,
               donGia: item.price || 0,
               thanhTien: (item.price || 0) * (item.qty || 0)
@@ -1221,7 +1253,9 @@
         const matchKey = soGocFilterKeyword === "" || 
           String(r.soCtu).includes(soGocFilterKeyword) || 
           removeAccents(r.maKH).includes(soGocFilterKeyword) || 
+          removeAccents(r.tenKH).includes(soGocFilterKeyword) || 
           removeAccents(r.maVTHH).includes(soGocFilterKeyword) || 
+          removeAccents(r.tenHH).includes(soGocFilterKeyword) || 
           removeAccents(r.nvBan).includes(soGocFilterKeyword);
         
         const matchDate = soGocFilterDate === "" || r.ngayCtu === soGocFilterDate;
@@ -1238,7 +1272,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm theo số chứng từ, mã KH, mã vật tư hoặc nhân viên bán..." oninput="setSoGocFilterKeyword(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Tìm kiếm theo số chứng từ, mã KH, tên KH, mã vật tư hoặc nhân viên bán..." oninput="setSoGocFilterKeyword(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div class="table-responsive">
@@ -1248,8 +1282,10 @@
                 <th>Số Chứng Từ (SoCtu)</th>
                 <th>Ngày Chứng Từ (NgayCtu)</th>
                 <th>Mã Khách Hàng (MaKH)</th>
+                <th>Tên Khách Hàng</th>
                 <th>Nhân Viên Bán (NVban)</th>
                 <th>Mã Vật Tư Hàng Hóa (MaVTHH)</th>
+                <th>Tên Hàng Hóa</th>
                 <th>Số Lượng (SL)</th>
                 <th>Đơn Giá</th>
                 <th>Thành Tiền</th>
@@ -1259,16 +1295,18 @@
               ${filteredRows.length > 0 ? filteredRows.map(r => `
                 <tr>
                   <td><b>#${r.soCtu}</b></td>
-                  <td>${r.ngayCtu}</td>
+                  <td>${r.ngayCtuFormatted}</td>
                   <td><b>${r.maKH}</b></td>
+                  <td><b>${r.tenKH}</b></td>
                   <td>${r.nvBan}</td>
                   <td><b>${r.maVTHH}</b></td>
+                  <td>${r.tenHH}</td>
                   <td><b style="color:var(--primary);">${r.sl}</b></td>
                   <td>${r.donGia.toLocaleString()}đ</td>
                   <td><b style="color:var(--rose);">${r.thanhTien.toLocaleString()}đ</b></td>
                 </tr>
               `).join('') : `
-                <tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
+                <tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
               `}
             </tbody>
           </table>
