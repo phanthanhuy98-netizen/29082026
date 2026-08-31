@@ -221,6 +221,10 @@
     { id: "p2", code: "7001SC02", name: "SĐCĐ NSPN Cam 380g.", dvt: "hộp", stockDau: 303, stockCuoi: 255, tyLeQuyDoi: 48, price: 19170 }
   ];
 
+  // --- HASH MAP / INDEXING CACHE ---
+  let storeIndexMap = new Map();
+  let productIndexMap = new Map();
+
   let currentCart = {};
   let activeVisitedStore = null;
   let soGocFilterKeyword = "", soGocFilterDate = "";
@@ -238,13 +242,14 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 4);
+      const request = indexedDB.open("DMS_OfflineDB", 5);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
+        if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
       };
     });
   }
@@ -272,6 +277,29 @@
     });
   }
 
+  async function saveStoresToLocalCache(list) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localStores"], "readwrite");
+      const store = transaction.objectStore("localStores");
+      store.clear();
+      list.forEach(s => store.put(s));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function loadStoresFromLocalCache() {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localStores"], "readonly");
+      const store = transaction.objectStore("localStores");
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   function getSafeKey(code) {
     return "k_" + btoa(unescape(encodeURIComponent(code))).replace(/[^a-zA-Z0-9]/g, "");
   }
@@ -289,6 +317,23 @@
               .replace(/[\u0300-\u036f]/g, '')
               .replace(/đ/g, 'd').replace(/Đ/g, 'D')
               .toLowerCase();
+  }
+
+  // --- XÂY DỰNG HASH MAP INDEX TỪ KHÓA ---
+  function buildStoreIndex() {
+    storeIndexMap.clear();
+    stores.forEach(s => {
+      const textTokens = removeAccents(`${s.code || ''} ${s.name || ''} ${s.address || ''} ${s.phone || ''}`);
+      storeIndexMap.set(s.id, { store: s, searchableText: textTokens });
+    });
+  }
+
+  function buildProductIndex() {
+    productIndexMap.clear();
+    products.forEach(p => {
+      const textTokens = removeAccents(`${p.code || ''} ${p.name || ''}`);
+      productIndexMap.set(p.id || p.code, { product: p, searchableText: textTokens });
+    });
   }
 
   function formatDateDDMMYYYY(dateStr) {
@@ -336,12 +381,27 @@
       currentTab = (profile.role === 'sales') ? 'sales' : 'soGocBH';
     }
 
+    // --- CACHE-FIRST: LOAD TỨC THÌ TỪ LOCAL INDEXEDDB TRƯỚC (< 0.05s) ---
     await initIndexedDB();
-    const cachedPrds = await loadProductsFromLocalCache();
-    if (cachedPrds && cachedPrds.length > 0) products = cachedPrds;
+    const [cachedPrds, cachedStores] = await Promise.all([
+      loadProductsFromLocalCache(),
+      loadStoresFromLocalCache()
+    ]);
 
-    attachListeners();
+    if (cachedPrds && cachedPrds.length > 0) {
+      products = cachedPrds;
+      buildProductIndex();
+    }
+    if (cachedStores && cachedStores.length > 0) {
+      stores = cachedStores;
+      buildStoreIndex();
+    }
+
+    // Render ngay lập tức bằng dữ liệu cache nội bộ để cực kỳ mượt mà
     renderUI();
+
+    // Sau đó mới kích hoạt đồng bộ ngầm (Background Sync) từ Cloud Firestore
+    attachListeners();
   });
 
   window.handleLogout = async function() { await signOut(authSvc); };
@@ -552,7 +612,7 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
-  // --- ÁP DỤNG DEBOUNCE (150ms) CHO TẤT CẢ CÁC HÀM TÌM KIẾM ĐỂ ĐẠT TỐC ĐỘ CAO NHẤT ---
+  // --- TRA CỨU SIÊU TỐC QUA MAP INDEX ---
   window.filterSalesCustomers = function(val) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
@@ -566,13 +626,13 @@
         return;
       }
 
-      let matched = stores.filter(s => {
-        const cCode = removeAccents(s.code || '');
-        const cName = removeAccents(s.name || '');
-        const cAddr = removeAccents(s.address || '');
-        const cPhone = removeAccents(s.phone || '');
-        return cCode.includes(customerSearchKeyword) || cName.includes(customerSearchKeyword) || cAddr.includes(customerSearchKeyword) || cPhone.includes(customerSearchKeyword);
-      }).slice(0, 10);
+      let matched = [];
+      for (const [id, entry] of storeIndexMap.entries()) {
+        if (entry.searchableText.includes(customerSearchKeyword)) {
+          matched.push(entry.store);
+          if (matched.length >= 10) break;
+        }
+      }
 
       container.innerHTML = matched.length > 0 ? matched.map(s => `
         <tr>
@@ -587,7 +647,7 @@
       `).join('') : `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`;
 
       document.getElementById('customerSearchHint').innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
-    }, 150);
+    }, 120);
   };
 
   window.filterSalesProducts = function(val) {
@@ -605,16 +665,21 @@
         return;
       }
 
-      let matched = products.filter(p => {
-        const pCode = removeAccents(p.code || '');
-        const pName = removeAccents(p.name || '');
-        const keyId = p.id || p.code;
+      let matched = [];
+      for (const [id, entry] of productIndexMap.entries()) {
+        const keyId = entry.product.id || entry.product.code;
         const c = currentCart[keyId];
         const hasQty = c && c.qty > 0;
 
-        if (showOnlySelectedItems) return hasQty;
-        return pCode.includes(productSearchKeyword) || pName.includes(productSearchKeyword);
-      }).slice(0, 10);
+        if (showOnlySelectedItems) {
+          if (hasQty) matched.push(entry.product);
+        } else {
+          if (entry.searchableText.includes(productSearchKeyword)) {
+            matched.push(entry.product);
+            if (matched.length >= 10) break;
+          }
+        }
+      }
 
       if (!isMobileScreen) {
         container.innerHTML = matched.length > 0 ? matched.map(p => {
@@ -693,7 +758,7 @@
         }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
       }
       if (hintEl) hintEl.innerText = "";
-    }, 150);
+    }, 120);
   };
 
   window.filterTabCustomers = function(val) {
@@ -710,13 +775,13 @@
         return;
       }
 
-      let matched = stores.filter(s => {
-        const cCode = removeAccents(s.code || '');
-        const cName = removeAccents(s.name || '');
-        const cAddr = removeAccents(s.address || '');
-        const cPhone = removeAccents(s.phone || '');
-        return cCode.includes(tabCustomerSearchKey) || cName.includes(tabCustomerSearchKey) || cAddr.includes(tabCustomerSearchKey) || cPhone.includes(tabCustomerSearchKey);
-      }).slice(0, 10);
+      let matched = [];
+      for (const [id, entry] of storeIndexMap.entries()) {
+        if (entry.searchableText.includes(tabCustomerSearchKey)) {
+          matched.push(entry.store);
+          if (matched.length >= 10) break;
+        }
+      }
 
       container.innerHTML = matched.length > 0 ? matched.map(s => {
         const hasLat = s.lat && s.lat !== 0;
@@ -741,7 +806,7 @@
       }).join('') : `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`;
 
       if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
-    }, 150);
+    }, 120);
   };
 
   window.filterTabProducts = function(val) {
@@ -758,11 +823,13 @@
         return;
       }
 
-      let matched = products.filter(p => {
-        const pCode = removeAccents(p.code || '');
-        const pName = removeAccents(p.name || '');
-        return pCode.includes(tabProductSearchKey) || pName.includes(tabProductSearchKey);
-      }).slice(0, 10);
+      let matched = [];
+      for (const [id, entry] of productIndexMap.entries()) {
+        if (entry.searchableText.includes(tabProductSearchKey)) {
+          matched.push(entry.product);
+          if (matched.length >= 10) break;
+        }
+      }
 
       container.innerHTML = matched.length > 0 ? matched.map(p => `
         <div class="mobile-item-card">
@@ -777,7 +844,7 @@
       `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
 
       if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
-    }, 150);
+    }, 120);
   };
 
   window.toggleShowOnlySelected = function() {
@@ -1012,6 +1079,7 @@
 
           await saveProductsToLocalCache(uniqueList);
           products = uniqueList;
+          buildProductIndex();
           toast(`✅ Đã đồng bộ thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
@@ -1043,6 +1111,7 @@
 
           if (tenDtpn && tenDtpn !== 'Ten DTPN') {
             rawCustomers.push({
+              id: maDtpn || `KH_${i}`,
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
               routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: ''
             });
@@ -1054,7 +1123,10 @@
           for (let i = 0; i < rawCustomers.length; i += 250) {
             const chunk = rawCustomers.slice(i, i + 250);
             const batch = writeBatch(db);
-            chunk.forEach(cust => batch.set(doc(collection(db, "stores")), cust));
+            chunk.forEach(cust => {
+              const ref = doc(db, "stores", cust.id);
+              batch.set(ref, cust);
+            });
             await batch.commit();
             await new Promise(r => setTimeout(r, 50));
           }
@@ -1083,13 +1155,23 @@
   };
   window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); toast("Đã cập nhật trạng thái."); };
 
+  // --- BACKGROUND SYNC LISTENER (ĐỒNG BỘ NGẦM TỪ MÂY) ---
   function attachListeners() {
-    onSnapshot(collection(db, "stores"), snap => { stores = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
+    onSnapshot(collection(db, "stores"), async snap => {
+      stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      buildStoreIndex();
+      await saveStoresToLocalCache(stores); // Cập nhật cache ngầm
+      renderUI();
+    });
     onSnapshot(collection(db, "orders"), snap => { orders = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(100)), snap => { checkins = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
     onSnapshot(collection(db, "products"), async snap => {
       const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (cloudProducts.length > 0) { products = cloudProducts; await saveProductsToLocalCache(cloudProducts); }
+      if (cloudProducts.length > 0) {
+        products = cloudProducts;
+        buildProductIndex();
+        await saveProductsToLocalCache(cloudProducts); // Cập nhật cache ngầm
+      }
       renderUI();
     });
     if (currentUser.role === 'admin') onSnapshot(collection(db, "users"), snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); renderUI(); });
