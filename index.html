@@ -310,7 +310,8 @@
   let tabCustomerSearchKey = ""; 
   let tabProductSearchKey = ""; 
   let showOnlySelectedItems = false;
-  let currentSalesGPS = null; // {lat, lng}
+  let showOnlyPinnedGPS = false; // Biến lọc chỉ hiển thị các KH đã ghim GPS
+  let currentSalesGPS = null;
 
   let idbDb = null;
   function initIndexedDB() {
@@ -401,10 +402,9 @@
     return dateStr;
   }
 
-  // Công thức Haversine tính khoảng cách (mét) giữa 2 tọa độ GPS
   function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
-    const R = 6371e3; // Bán kính trái đất bằng mét
+    const R = 6371e3;
     const φ1 = lat1 * Math.PI/180;
     const φ2 = lat2 * Math.PI/180;
     const Δφ = (lat2-lat1) * Math.PI/180;
@@ -414,7 +414,7 @@
               Math.cos(φ1) * Math.cos(φ2) *
               Math.sin(Δλ/2) * Math.sin(Δλ/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c; // Khoảng cách theo mét
+    return R * c;
   }
 
   function buildStoreIndex() {
@@ -482,7 +482,6 @@
       buildStoreIndex();
     }
 
-    // Tự lấy GPS hiện tại của Sales để gợi ý khoảng cách
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(pos => {
         currentSalesGPS = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -548,11 +547,13 @@
     }
   };
 
+  // Cập nhật tọa độ GPS ngay lập tức và phản hồi thành công/thất bại trực tiếp cho giao diện Tab KH
   window.handleCustomerLocationAction = function(storeId) {
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     toast("📍 Đang lấy tọa độ GPS thực tế...");
+    
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
@@ -563,9 +564,19 @@
           pinnedByCode: currentUser.code || 'NV',
           pinnedByName: currentUser.name || 'Nhân viên'
         });
-        toast(`✅ Đã ghim định vị thành công cho tiệm: ${store.name}`);
-      } catch (err) { alert("Lỗi cập nhật GPS: " + err.message); }
-    }, () => alert("Không lấy được tọa độ GPS."), { enableHighAccuracy: true });
+        // Cập nhật trực tiếp vào mảng local stores để hiển thị ngay lập tức không cần F5
+        store.lat = lat;
+        store.lng = lng;
+        toast(`✅ Ghim GPS thành công cho ${store.name} (${lat.toFixed(4)}, ${lng.toFixed(4)})!`);
+        filterTabCustomers(tabCustomerSearchKey);
+      } catch (err) { 
+        alert("Lỗi cập nhật GPS: " + err.message); 
+        toast(`❌ Ghim GPS thất bại: ${err.message}`);
+      }
+    }, (err) => {
+      alert("Không lấy được tọa độ GPS từ thiết bị.");
+      toast("❌ Lấy tọa độ GPS thất bại!");
+    }, { enableHighAccuracy: true, timeout: 10000 });
   };
 
   window.adminResetCustomerLocation = async function(storeId) {
@@ -573,7 +584,10 @@
     if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
     try {
       await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "" });
+      const store = stores.find(s => String(s.id) === String(storeId));
+      if (store) { store.lat = 0; store.lng = 0; }
       toast("🔄 Đã xóa định vị cũ thành công!");
+      filterTabCustomers(tabCustomerSearchKey);
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
@@ -807,7 +821,6 @@
       }
 
       if (matchRoute && matchKey) {
-        // Tính khoảng cách GPS nếu sales đã có GPS và tiệm đã có ghim tọa độ
         let dist = Infinity;
         if (currentSalesGPS && s.lat && s.lng) {
           dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
@@ -816,7 +829,6 @@
       }
     }
 
-    // Tự động sắp xếp (sort) theo khoảng cách GPS gần nhất lên đầu tiên
     matched.sort((a, b) => a.distance - b.distance);
     const slicedMatched = matched.slice(0, 25);
 
@@ -841,7 +853,7 @@
                 const s = item.store;
                 const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
                 const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
-                const isClosest = item.distance !== Infinity && item.distance <= 100; // Gợi ý nếu trong bán kính 100m
+                const isClosest = item.distance !== Infinity && item.distance <= 100;
 
                 return `
                   <tr style="${isClosest ? 'background: #F0FDF4;' : ''}">
@@ -1006,23 +1018,41 @@
     if (hintEl) hintEl.innerText = "";
   };
 
+  // Nút chuyển đổi chế độ lọc xem tất cả các khách hàng đã ghim vị trí GPS
+  window.togglePinnedGPSFilter = function() {
+    showOnlyPinnedGPS = !showOnlyPinnedGPS;
+    const btn = document.getElementById('togglePinnedGPSBtn');
+    if (btn) {
+      btn.style.background = showOnlyPinnedGPS ? 'var(--primary)' : '#334155';
+      btn.innerHTML = showOnlyPinnedGPS ? '<i class="fa-solid fa-map-pin"></i> Hiển thị tất cả KH' : '<i class="fa-solid fa-map-location-dot"></i> Xem tất cả KH đã ghim GPS';
+    }
+    filterTabCustomers(tabCustomerSearchKey);
+  };
+
   window.filterTabCustomers = function(val) {
-    tabCustomerSearchKey = removeAccents(val.trim());
+    if (val !== undefined) tabCustomerSearchKey = removeAccents(val.trim());
     const container = document.getElementById('tabCustomerTableBody');
     const hintEl = document.getElementById('tabCustSearchHint');
     if (!container) return;
 
-    if (tabCustomerSearchKey === "") {
-      container.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>`;
-      if (hintEl) hintEl.innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
-      return;
-    }
-
     let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
-      if (entry.searchableText.includes(tabCustomerSearchKey)) {
-        matched.push(entry.store);
-        if (matched.length >= 10) break;
+      const s = entry.store;
+      const hasLat = s.lat && s.lat !== 0;
+
+      let matchPinned = true;
+      if (showOnlyPinnedGPS) {
+        matchPinned = hasLat;
+      }
+
+      let matchKey = true;
+      if (tabCustomerSearchKey !== "") {
+        matchKey = entry.searchableText.includes(tabCustomerSearchKey);
+      }
+
+      if (matchPinned && matchKey) {
+        matched.push(s);
+        if (matched.length >= 50) break; // Giới hạn hiển thị 50 kết quả để mượt mà
       }
     }
 
@@ -1041,7 +1071,7 @@
             </span>
           </td>
           <td style="text-align:right; white-space:nowrap;">
-            ${hasLat ? `<a href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
+            ${hasLat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
             <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
             ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </td>
@@ -1049,7 +1079,7 @@
       `;
     }).join('') : `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`;
 
-    if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
+    if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị ${matched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
   };
 
   window.filterTabProducts = function(val) {
@@ -1696,6 +1726,9 @@
       stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
       buildStoreIndex();
       await saveStoresToLocalCache(stores);
+      if (currentTab === 'customers') {
+        filterTabCustomers();
+      }
     });
     onSnapshot(collection(db, "orders"), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
@@ -1890,9 +1923,14 @@
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Danh Sách Khách Hàng (${stores.length})</h2>
-          ${currentUser.role !== 'sales' ? `
-            <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel KH <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
-          ` : ''}
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#334155'}; color:#fff; font-weight:700; font-size:12px;">
+              <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Hiển thị tất cả KH' : 'Xem tất cả KH đã ghim GPS'}
+            </button>
+            ${currentUser.role !== 'sales' ? `
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel KH <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
+            ` : ''}
+          </div>
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
@@ -1913,7 +1951,7 @@
               </tr>
             </thead>
             <tbody id="tabCustomerTableBody">
-              <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</td></tr>
+              <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Đang tải danh sách khách hàng...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1921,6 +1959,7 @@
           Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...
         </small>
       `;
+      setTimeout(() => filterTabCustomers(''), 50);
     }
 
     else if (tab === 'soGocBH') {
