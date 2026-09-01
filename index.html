@@ -169,7 +169,6 @@
     color: #fff;
   }
 
-  /* Responsive toggles: Tự động chuyển table sang card trên màn hình nhỏ hoặc tùy chỉnh */
   @media (max-width: 768px) {
     .desktop-table-view { display: none !important; }
     .mobile-card-view { display: block !important; }
@@ -193,19 +192,6 @@
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(3, 7, 18, 0.85);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
   .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.6);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
-
-  .select-row-btn {
-    background: var(--primary);
-    color: #fff;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    touch-action: manipulation;
-  }
 </style>
 
 <script type="module">
@@ -848,11 +834,6 @@
     const dropdown = document.getElementById('companyDropdownList');
     if (dropdown) dropdown.style.display = 'none';
 
-    if (maCtu) {
-      toast(`📌 Đã ghim Công Ty: ${maCtu}`);
-    } else {
-      toast(`🔄 Đã bỏ ghim Công Ty`);
-    }
     productSearchKeyword = ""; 
     renderUI();
   };
@@ -957,29 +938,40 @@
       currentCart[prdId].le = packRatio > 0 ? totalQ % packRatio : totalQ;
     }
     
-    const leDisplay = currentCart[prdId].le;
-    const kienDisplay = currentCart[prdId].kien;
     const totalQDisplay = currentCart[prdId].qty;
     const itemTotal = (p?.price || 0) * totalQDisplay;
 
+    // Yêu cầu 2: Kiểm tra nếu giá trị sản phẩm vượt quá 20.000.000đ
+    if (itemTotal > 20000000) {
+      const confirmContinue = confirm(`Cảnh báo: Sản phẩm "${p ? p.name : prdId}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá 20.000.000đ. Bạn có tiếp tục hay không?\n\nBấm "OK" để tiếp tục, hoặc "Cancel" để hủy (số lượng sản phẩm này sẽ về 0).`);
+      if (!confirmContinue) {
+        currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
+      }
+    }
+
+    const finalLe = currentCart[prdId].le;
+    const finalKien = currentCart[prdId].kien;
+    const finalQty = currentCart[prdId].qty;
+    const finalItemTotal = (p?.price || 0) * finalQty;
+
     document.querySelectorAll(`.input-le-${safeK}`).forEach(el => {
-      if (document.activeElement !== el) el.value = leDisplay;
+      if (document.activeElement !== el) el.value = finalLe;
     });
     document.querySelectorAll(`.input-kien-${safeK}`).forEach(el => {
-      if (document.activeElement !== el) el.value = kienDisplay;
+      if (document.activeElement !== el) el.value = finalKien;
     });
 
     const rowTotalEl = document.getElementById(`row_total_${safeK}`);
     const mobileRowTotalEl = document.getElementById(`mobile_row_total_${safeK}`);
     const totalQtyEl = document.getElementById(`total_qty_${safeK}`);
 
-    if (rowTotalEl) rowTotalEl.innerText = itemTotal.toLocaleString() + 'đ';
-    if (mobileRowTotalEl) mobileRowTotalEl.innerText = itemTotal.toLocaleString() + 'đ';
-    if (totalQtyEl) totalQtyEl.innerText = totalQDisplay;
+    if (rowTotalEl) rowTotalEl.innerText = finalItemTotal.toLocaleString() + 'đ';
+    if (mobileRowTotalEl) mobileRowTotalEl.innerText = finalItemTotal.toLocaleString() + 'đ';
+    if (totalQtyEl) totalQtyEl.innerText = finalQty;
 
     const rowEl = document.getElementById(`row_item_${safeK}`);
     const cardEl = document.getElementById(`card_item_${safeK}`);
-    const hasQty = totalQDisplay > 0;
+    const hasQty = finalQty > 0;
     
     if (rowEl) rowEl.classList.toggle('has-selected', hasQty);
     if (cardEl) cardEl.classList.toggle('has-selected', hasQty);
@@ -1084,6 +1076,16 @@
       btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#334155';
     }
     filterSalesProducts(productSearchKeyword);
+  };
+
+  // Yêu cầu 3: Hàm xóa trắng nhanh ô tìm kiếm vật tư
+  window.clearProductSearchBox = function() {
+    const inputEl = document.getElementById('productSearchInput');
+    if (inputEl) {
+      inputEl.value = '';
+      filterSalesProducts('');
+      inputEl.focus();
+    }
   };
 
   window.filterSalesProducts = function(val) {
@@ -1488,6 +1490,7 @@
     if (footerSkuCountEl) footerSkuCountEl.innerText = `Đã chọn: ${selectedSkuCount} mã hàng`;
   }
 
+  // Yêu cầu 5: Cập nhật giới hạn số chứng từ từ 1 đến 900.000 xong quay lại 1
   async function getNextSoCtu() {
     try {
       const counterRef = doc(db, "systemCounters", "soCtuCounter");
@@ -1497,14 +1500,14 @@
         currentVal = Number(counterSnap.data().currentVal) || 0;
       }
       currentVal++;
-      if (currentVal > 100000) {
+      if (currentVal > 900000) {
         currentVal = 1;
       }
       await setDoc(counterRef, { currentVal });
       return currentVal;
     } catch (err) {
       console.error("Lỗi cấp phát số chứng từ:", err);
-      return Math.floor(Math.random() * 100000) + 1;
+      return Math.floor(Math.random() * 900000) + 1;
     }
   }
 
@@ -1548,15 +1551,6 @@
 
     if (items.length === 0) {
       return alert("Vui lòng chọn số lượng hàng trước khi gửi đơn!");
-    }
-
-    const unpaidOrdersTotal = orders
-      .filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy' && o.id !== editingOrderId)
-      .reduce((s, o) => s + (o.amount || 0), 0);
-    
-    const storeCreditLimit = activeVisitedStore.creditLimit || 20000000;
-    if ((unpaidOrdersTotal + rawSubtotal) > storeCreditLimit) {
-      return alert(`⛔ Khóa đơn: Vượt hạn mức nợ (${storeCreditLimit.toLocaleString()}đ)!`);
     }
 
     const finalAmount = rawSubtotal;
@@ -1712,7 +1706,7 @@
             rawCustomers.push({
               id: maDtpn || `KH_${i}`,
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
+              routeDay: '', lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
             });
           }
         }
@@ -2063,8 +2057,9 @@
             `}
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
-              <div class="autocomplete-wrapper" style="flex:1;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+              <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 36px 10px 12px; font-size:13px; width: 100%;">
+                <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 8px; background: none; border: none; color: #94A3B8; font-size: 14px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:700; padding:10px 12px; font-size:12px; white-space:nowrap;">
                 <i class="fa-solid fa-filter"></i> Đã chọn
