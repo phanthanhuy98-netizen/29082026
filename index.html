@@ -110,10 +110,7 @@
     width: 100%;
   }
   .mobile-item-card.has-selected { background: #F0FDF4; border-color: #A7F3D0; }
-  .mobile-item-card .item-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; flex-wrap: wrap; gap: 4px; }
-  .mobile-item-card .item-code { background: #EEF2FF; color: var(--primary); padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; }
-  .mobile-item-card .item-title { font-size: 14px; font-weight: 800; color: #0F172A; margin-bottom: 2px; word-break: break-word; }
-  .mobile-item-card .item-info { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; word-break: break-word; }
+  .mobile-item-card.gps-nearest { background: #ECFDF5 !important; border-color: #34D399 !important; box-shadow: 0 4px 15px rgba(16,185,129,0.25); }
 
   .badge{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:14px;font-size:11px;font-weight:700;white-space:nowrap;touch-action:manipulation;cursor:pointer;}
   .badge-success{background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;text-decoration:none;}
@@ -130,6 +127,7 @@
   tr:last-child td { border-bottom:none; }
   tr:hover td { background: #F8FAFC; }
   tr.has-selected td { background: #F0FDF4 !important; }
+  tr.gps-nearest-row td { background: #ECFDF5 !important; font-weight: 700; }
 
   .sticky-cart-footer {
     position: fixed;
@@ -284,17 +282,17 @@
   ];
 
   let routeGroupsList = [
-    { nhomDoiTuong: "0", noiDung: "", ghiChu: "" },
-    { nhomDoiTuong: "1", noiDung: "", ghiChu: "" },
-    { nhomDoiTuong: "2", noiDung: "", ghiChu: "" },
-    { nhomDoiTuong: "10", noiDung: "", ghiChu: "" },
-    { nhomDoiTuong: "11", noiDung: "", ghiChu: "" },
-    { nhomDoiTuong: "12", noiDung: "", ghiChu: "" }
+    { nhomDoiTuong: "0", noiDung: "Đồng Xoài", ghiChu: "Tuyến chính" },
+    { nhomDoiTuong: "1", noiDung: "Chơn Thành", ghiChu: "" },
+    { nhomDoiTuong: "2", noiDung: "Bình Long", ghiChu: "" },
+    { nhomDoiTuong: "10", noiDung: "Phước Long", ghiChu: "" },
+    { nhomDoiTuong: "11", noiDung: "Lộc Ninh", ghiChu: "" },
+    { nhomDoiTuong: "12", noiDung: "Hớn Quản", ghiChu: "" }
   ];
 
   let products = [
-    { id: "p1", code: "57R243+", name: "URC_Nước TL Rồng đỏ H/vải 240ml*6bl*8ly", dvt: "ly", stockDau: 0, stockCuoi: 0, tyLeQuyDoi: 48, price: 2605 },
-    { id: "p2", code: "7001SC02", name: "SĐCĐ NSPN Cam 380g.", dvt: "hộp", stockDau: 303, stockCuoi: 255, tyLeQuyDoi: 48, price: 19170 }
+    { id: "p1", code: "17-57R243+", name: "URC_Nước TL Rồng đỏ H/vải 240ml*6bl*8ly", dvt: "ly", stockDau: 0, stockCuoi: 0, tyLeQuyDoi: 48, price: 2605 },
+    { id: "p2", code: "56-7001SC02", name: "SĐCĐ NSPN Cam 380g.", dvt: "hộp", stockDau: 303, stockCuoi: 255, tyLeQuyDoi: 48, price: 19170 }
   ];
 
   let storeIndexMap = new Map();
@@ -302,11 +300,14 @@
 
   let currentCart = {};
   let activeVisitedStore = null;
+  let selectedRouteCode = "";
+  let selectedCompanyCode = "";
+  let currentSalesLatLng = null;
+
   let soGocFilterKeyword = "", soGocFilterDate = "", soGocSalesFilter = "";
   let soGocLimitCount = 30;
 
   let customerSearchKeyword = ""; 
-  let salesSearchKeyword = ""; 
   let productSearchKeyword = ""; 
   let tabCustomerSearchKey = ""; 
   let tabProductSearchKey = ""; 
@@ -316,7 +317,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 7);
+      const request = indexedDB.open("DMS_OfflineDB", 8);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -324,8 +325,6 @@
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
-        if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
-        if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "nhomDoiTuong" });
       };
     });
   }
@@ -411,15 +410,16 @@
     });
   }
 
-  function formatDateDDMMYYYY(dateStr) {
-    if (!dateStr) return '';
-    if (dateStr.includes('-')) {
-      const parts = dateStr.split('-');
-      if (parts.length === 3) {
-        return `${parts[2]}/${parts[1]}/${parts[0]}`;
-      }
-    }
-    return dateStr;
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
+    const R = 6371; // Radius of the earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   }
 
   window.handleLogin = async function(e) {
@@ -454,6 +454,13 @@
       currentTab = hashTab;
     } else {
       currentTab = (profile.role === 'sales') ? 'sales' : 'soGocBH';
+    }
+
+    // Get current GPS for Sales proximity sorting
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        currentSalesLatLng = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      }, () => {}, { enableHighAccuracy: true });
     }
 
     await initIndexedDB();
@@ -569,6 +576,7 @@
     salesSearchKeyword = '';
     productSearchKeyword = '';
     customerSearchKeyword = '';
+    selectedCompanyCode = '';
     showOnlySelectedItems = false;
     currentCart = {};
 
@@ -581,9 +589,30 @@
     salesSearchKeyword = '';
     productSearchKeyword = '';
     customerSearchKeyword = '';
+    selectedCompanyCode = '';
     showOnlySelectedItems = false;
     currentCart = {};
     toast("🔄 Đã đổi khách hàng!");
+    renderUI();
+  };
+
+  window.onRouteSelected = function(val) {
+    selectedRouteCode = val.trim();
+    toast(selectedRouteCode ? `📌 Đã ghim Tuyến: ${selectedRouteCode}` : "🔄 Đã bỏ chọn tuyến");
+    // Re-trigger filtering
+    const searchInput = document.getElementById('customerSearchInput');
+    if (searchInput) filterSalesCustomers(searchInput.value);
+  };
+
+  window.onCompanySelected = function(val) {
+    const comp = companyList.find(c => c.maCtu === val);
+    if (comp && comp.status === 'Đóng') {
+      alert(`⛔ Mã công ty ${comp.maCtu} (${comp.tenCtu}) đang ở trạng thái ĐÓNG. Admin chưa cho phép bán hàng sản phẩm của công ty này!`);
+      document.getElementById('companySelectBox').value = selectedCompanyCode;
+      return;
+    }
+    selectedCompanyCode = val;
+    toast(selectedCompanyCode ? `📌 Đã ghim Mã Công Ty: ${selectedCompanyCode}` : "🔄 Đã bỏ ghim công ty");
     renderUI();
   };
 
@@ -692,25 +721,47 @@
       const container = document.getElementById('salesCustomerResultContainer');
       if (!container) return;
 
-      if (customerSearchKeyword === "") {
-        container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</div>`;
-        document.getElementById('customerSearchHint').innerText = "Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...";
-        return;
-      }
-
       let matched = [];
       for (const [id, entry] of storeIndexMap.entries()) {
-        if (entry.searchableText.includes(customerSearchKeyword)) {
-          matched.push(entry.store);
-          if (matched.length >= 10) break;
+        const s = entry.store;
+        const sCode = removeAccents(s.code || '');
+        const sName = removeAccents(s.name || '');
+        
+        // Filter by route if selected (route matches first 1-2 chars of customer code/name)
+        let matchRoute = true;
+        if (selectedRouteCode) {
+          const rClean = removeAccents(selectedRouteCode);
+          matchRoute = sCode.startsWith(rClean) || sName.startsWith(rClean);
+        }
+
+        // Filter by keyword
+        let matchKey = true;
+        if (customerSearchKeyword !== "") {
+          matchKey = entry.searchableText.includes(customerSearchKeyword);
+        }
+
+        if (matchRoute && matchKey) {
+          // Calculate GPS distance if available
+          let dist = 999999;
+          if (currentSalesLatLng && s.lat && s.lng) {
+            dist = calculateDistance(currentSalesLatLng.lat, currentSalesLatLng.lng, s.lat, s.lng);
+          }
+          matched.push({ store: s, distance: dist });
         }
       }
 
+      // Sort by proximity if route is selected and GPS available
+      if (selectedRouteCode && currentSalesLatLng) {
+        matched.sort((a, b) => a.distance - b.distance);
+      }
+
+      const sortedStores = matched.map(m => m.store);
+      const limitStores = sortedStores.slice(0, 15);
       const isMobileScreen = window.innerWidth <= 768;
 
       if (!isMobileScreen) {
         container.innerHTML = `
-          <div class="table-responsive" style="max-height: 280px; background: #fff; margin-bottom: 6px;">
+          <div class="table-responsive" style="max-height: 300px; background: #fff; margin-bottom: 6px;">
             <table style="min-width: 600px;">
               <thead>
                 <tr>
@@ -722,38 +773,44 @@
                 </tr>
               </thead>
               <tbody>
-                ${matched.length > 0 ? matched.map(s => `
-                  <tr>
-                    <td><b>${s.code || 'KH'}</b></td>
-                    <td><b>${s.name}</b></td>
-                    <td>${s.address || '—'}</td>
-                    <td>${s.phone || '—'}</td>
-                    <td style="text-align:right;">
-                      <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN TIỆM</button>
-                    </td>
-                  </tr>
-                `).join('') : `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp.</td></tr>`}
+                ${limitStores.length > 0 ? limitStores.map((s, idx) => {
+                  const isNearest = idx === 0 && selectedRouteCode && s.lat && s.lng;
+                  return `
+                    <tr class="${isNearest ? 'gps-nearest-row' : ''}">
+                      <td><b>${s.code || 'KH'}</b> ${isNearest ? '<span class="badge badge-success" style="font-size:9px;">📍 Gần nhất</span>' : ''}</td>
+                      <td><b>${s.name}</b></td>
+                      <td>${s.address || '—'}</td>
+                      <td>${s.phone || '—'}</td>
+                      <td style="text-align:right;">
+                        <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN TIỆM</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('') : `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</td></tr>`}
               </tbody>
             </table>
           </div>
         `;
       } else {
-        container.innerHTML = matched.length > 0 ? matched.map(s => `
-          <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-              <span class="item-code" style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'}</span>
-              <span style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> ${s.phone || '—'}</span>
+        container.innerHTML = limitStores.length > 0 ? limitStores.map((s, idx) => {
+          const isNearest = idx === 0 && selectedRouteCode && s.lat && s.lng;
+          return `
+            <div class="mobile-item-card ${isNearest ? 'gps-nearest' : ''}" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <span class="item-code" style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'}</span>
+                ${isNearest ? '<span class="badge badge-success" style="font-size:10px;"><i class="fa-solid fa-location-dot"></i> Gần nhất đây, ghé tôi đi!</span>' : ''}
+              </div>
+              <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
+              <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
+              <button type="button" class="btn btn-amber" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
+                <i class="fa-solid fa-check"></i> CHỌN TIỆM NÀY
+              </button>
             </div>
-            <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
-            <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
-            <button type="button" class="btn btn-amber" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
-              <i class="fa-solid fa-check"></i> CHỌN TIỆM NÀY
-            </button>
-          </div>
-        `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp.</div>`;
+          `;
+        }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</div>`;
       }
 
-      document.getElementById('customerSearchHint').innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy khách hàng phù hợp.";
+      document.getElementById('customerSearchHint').innerText = limitStores.length > 0 ? `Hiển thị ${limitStores.length} khách hàng theo tuyến và tìm kiếm.` : "Không tìm thấy khách hàng phù hợp.";
     }, 120);
   };
 
@@ -766,24 +823,26 @@
       const hintEl = document.getElementById('productSearchHint');
       if (!container) return;
 
-      if (productSearchKeyword === "" && !showOnlySelectedItems) {
-        container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</div>`;
-        if (hintEl) hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn...";
-        return;
-      }
-
       let matched = [];
       for (const [id, entry] of productIndexMap.entries()) {
-        const keyId = entry.product.id || entry.product.code;
+        const p = entry.product;
+        const keyId = p.id || p.code;
         const c = currentCart[keyId];
         const hasQty = c && c.qty > 0;
 
+        // Company filter check (product code or id starts with company code)
+        let matchCompany = true;
+        if (selectedCompanyCode) {
+          matchCompany = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+        }
+
         if (showOnlySelectedItems) {
-          if (hasQty) matched.push(entry.product);
+          if (hasQty && matchCompany) matched.push(p);
         } else {
-          if (entry.searchableText.includes(productSearchKeyword)) {
-            matched.push(entry.product);
-            if (matched.length >= 10) break;
+          const matchKey = productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword);
+          if (matchCompany && matchKey) {
+            matched.push(p);
+            if (matched.length >= 20) break;
           }
         }
       }
@@ -821,7 +880,7 @@
               <td><b style="color:var(--primary);" id="total_qty_${safeK}">${c.qty || 0}</b></td>
             </tr>
           `;
-        }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</td></tr>`;
+        }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này.</td></tr>`;
       } else {
         container.innerHTML = matched.length > 0 ? matched.map(p => {
           const keyId = p.id || p.code;
@@ -862,7 +921,7 @@
               <div style="text-align:right; font-size:12px;">Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></div>
             </div>
           `;
-        }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
+        }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này.</div>`;
       }
       if (hintEl) hintEl.innerText = "";
     }, 120);
@@ -1212,6 +1271,7 @@
       productSearchKeyword = ""; 
       salesSearchKeyword = "";
       customerSearchKeyword = "";
+      selectedCompanyCode = "";
       showOnlySelectedItems = false; 
 
       switchTab('soGocBH');
@@ -1424,9 +1484,9 @@
 
   window.addNewRoute = function() {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới tuyến!");
-    const nhomDoiTuong = prompt("Nhập nhóm đối tượng:");
+    const nhomDoiTuong = prompt("Nhập nhóm đối tượng (Số tuyến):");
     if (!nhomDoiTuong) return;
-    const noiDung = prompt("Nhập nội dung:") || "";
+    const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
     const ghiChu = prompt("Nhập ghi chú:") || "";
     routeGroupsList.push({ nhomDoiTuong: nhomDoiTuong.trim(), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() });
     renderUI();
@@ -1436,7 +1496,8 @@
   window.updateCompanyField = function(index, field, val) {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
     companyList[index][field] = val;
-    toast("✅ Đã cập nhật thay đổi.");
+    renderUI();
+    toast("✅ Đã cập nhật trạng thái.");
   };
 
   window.updateRouteField = function(index, field, val) {
@@ -1574,14 +1635,24 @@
           </div>
 
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:8px;'}">
+            <!-- Ô TÌM KIẾM TUYẾN KHÁCH HÀNG (NẰM TRÊN, NHỎ BẰNG NỬA Ô DƯỚI) -->
+            <div style="margin-bottom: 6px;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">📌 Tuyến Khách Hàng (Nhập số tuyến, VD: 0, 1, 2...):</label>
+              <select id="routeSelectBox" onchange="onRouteSelected(this.value)" style="background:#fff; padding:8px 12px; font-size:13px; font-weight:700; width:50%; margin:0;">
+                <option value="">-- Tất cả tuyến --</option>
+                ${routeGroupsList.map(r => `<option value="${r.nhomDoiTuong}" ${selectedRouteCode===r.nhomDoiTuong?'selected':''}>Tuyến ${r.nhomDoiTuong} ${r.noiDung?'- '+r.noiDung:''}</option>`).join('')}
+              </select>
+            </div>
+
+            <!-- Ô TÌM KIẾM KHÁCH HÀNG BÊN DƯỚI -->
             <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
             <div id="salesCustomerResultContainer">
-              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm khách hàng...</div>
+              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập từ khóa hoặc chọn tuyến để tìm kiếm khách hàng...</div>
             </div>
 
             <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
-              Vui lòng gõ từ khóa (mã, tên, SĐT, địa chỉ) để tìm kiếm khách hàng...
+              Vui lòng gõ từ khóa hoặc chọn tuyến khách hàng...
             </small>
           </div>
 
@@ -1607,6 +1678,15 @@
         ${activeVisitedStore ? `
           <div class="card" style="border:2px solid var(--primary); padding:12px; animation: fadeIn 0.3s ease;">
             
+            <!-- Ô CHỌN MÃ CÔNG TY BÊN TRONG BÁN HÀNG -->
+            <div style="margin-bottom: 8px;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">🏢 Chọn Mã Công Ty (Chỉ bán hàng của công ty đã ghim):</label>
+              <select id="companySelectBox" onchange="onCompanySelected(this.value)" style="background:#fff; padding:10px 12px; font-size:13px; font-weight:700; width:50%; margin:0;">
+                <option value="">-- Tất cả công ty (Mở) --</option>
+                ${companyList.filter(c => c.status !== 'Đóng').map(c => `<option value="${c.maCtu}" ${selectedCompanyCode===c.maCtu?'selected':''}>${c.maCtu} - ${c.tenCtu}</option>`).join('')}
+              </select>
+            </div>
+
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1;">
                 <input type="text" id="productSearchInput" placeholder="🔍 Tìm kiếm nhanh vật tư theo mã hoặc tên..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
@@ -1656,6 +1736,10 @@
           </div>
         ` : ''}
       `;
+      // Trigger customer list init if route is selected
+      if (selectedRouteCode) {
+        setTimeout(() => filterSalesCustomers(''), 50);
+      }
     }
 
     else if (tab === 'customers') {
