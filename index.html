@@ -55,7 +55,6 @@
     padding: 8px;
     min-height: 100vh;
     overflow-x: hidden;
-    /* KHẮC PHỤC TRIỆT ĐỂ: Tăng khoảng trống dưới cùng để danh sách vật tư không bị footer che khuất */
     padding-bottom: 240px;
   }
 
@@ -149,13 +148,14 @@
 
   .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,0.03);transition:all 0.25s;margin-bottom:12px; position: relative; width: 100%; overflow: visible;}
   
+  /* THẺ VẬT TƯ THU GỌN 50%: Tối ưu hiển thị dày đặc, tên sản phẩm cực to rõ dễ đọc */
   .mobile-item-card {
     background: #FFFFFF;
     border: 1px solid #E2E8F0;
-    border-radius: 12px;
-    padding: 12px;
-    margin-bottom: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.02);
     transition: background 0.2s;
     width: 100%;
   }
@@ -169,7 +169,6 @@
   input, select, textarea { width:100%; max-width: 100%; padding:12px 14px; margin:4px 0 8px; border:1px solid #CBD5E1; border-radius:12px; font-family:inherit; font-size:14px; background:#F8FAFC; transition:all 0.2s; -webkit-appearance: none; }
   input:focus, select:focus { border-color:var(--primary); outline:none; background:#fff; box-shadow:0 0 0 3px rgba(79, 70, 229, 0.12); }
   
-  /* THANH FOOTER CỐ ĐỊNH CHUYÊN NGHIỆP: Hỗ trợ an toàn màn hình khuyết, bo góc sang trọng, đổ bóng nổi bật */
   .sticky-cart-footer {
     position: fixed;
     bottom: 0;
@@ -190,13 +189,11 @@
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
-  /* Trạng thái tự động thu gọn khi bàn phím ảo xuất hiện để không che lấp ô tìm kiếm */
   body.keyboard-open .sticky-cart-footer {
     transform: translateY(110%);
     pointer-events: none;
   }
 
-  /* Nút nổi (Floating pill) hiển thị khi bàn phím mở giúp thao tác nhanh mà không bị che khuất */
   .floating-cart-trigger {
     position: fixed;
     bottom: 24px;
@@ -380,7 +377,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 12);
+      const request = indexedDB.open("DMS_OfflineDB", 13);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -518,7 +515,6 @@
     window.syncOfflineOrders();
   });
 
-  // Tự động phát hiện bàn phím ảo bằng Visual Viewport để xử lý giao diện cực kỳ mượt mà
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
       const keyboardHeight = window.innerHeight - window.visualViewport.height;
@@ -921,6 +917,7 @@
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
+  // QUY TẮC MỚI: Chỉ hỏi cập nhật GPS khi khách hàng CHƯA CÓ tọa độ GPS (lat === 0 hoặc chưa có). Đã có GPS thì TUYỆT ĐỐI KHÔNG HỎI VÀ KHÔNG CHO CẬP NHẬT MỚI.
   window.selectStoreDirectly = async function(storeId, event) {
     if (event) {
       event.preventDefault();
@@ -945,70 +942,76 @@
 
     loadCartDraftFromLocal();
 
-    const updateGPSNow = await window.showCustomConfirm(
-      "Cập Nhật Vị Trí GPS",
-      `Bạn có muốn cập nhật vị trí GPS chính xác của khách hàng "${activeVisitedStore.name}" ngay tại đây không?\n\n• [Cập nhật ngay]: Lấy tọa độ thực tế hiện tại.\n• [Để sau]: Giữ nguyên vị trí (thích hợp khi bán từ xa).`,
-      "fa-location-crosshairs",
-      "Cập nhật ngay",
-      "Để sau"
-    );
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
 
-    if (updateGPSNow) {
-      try {
-        toast("📍 Đang lấy tọa độ GPS chính xác...");
-        const pos = await getHighAccuracyPosition();
-        const lat = Number(pos.lat);
-        const lng = Number(pos.lng);
-        currentSalesGPS = { lat, lng };
+    if (!hasGPSAlready) {
+      const updateGPSNow = await window.showCustomConfirm(
+        "Cập Nhật Vị Trí GPS",
+        `Khách hàng "${activeVisitedStore.name}" chưa có định vị GPS.\nBạn có muốn cập nhật vị trí GPS ngay tại đây không?\n\n• [Cập nhật ngay]: Lấy tọa độ thực tế hiện tại.\n• [Để sau]: Giữ nguyên vị trí.`,
+        "fa-location-crosshairs",
+        "Cập nhật ngay",
+        "Để sau"
+      );
 
-        const existingHistory = activeVisitedStore.pinnedHistory || [];
-        const newHistoryItem = {
-          lat, lng,
-          code: currentUser.code || 'NV',
-          name: currentUser.name || 'Nhân viên',
-          time: new Date().toISOString()
-        };
+      if (updateGPSNow) {
+        try {
+          toast("📍 Đang lấy tọa độ GPS chính xác...");
+          const pos = await getHighAccuracyPosition();
+          const lat = Number(pos.lat);
+          const lng = Number(pos.lng);
+          currentSalesGPS = { lat, lng };
 
-        const checkinPayload = {
-          salesUid: currentUser.uid,
-          salesName: currentUser.name,
-          salesCode: currentUser.code,
-          storeId: String(activeVisitedStore.id),
-          storeName: activeVisitedStore.name,
-          lat, lng,
-          accuracy: pos.accuracy,
-          status: "Check-in thành công"
-        };
-
-        if (navigator.onLine) {
-          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-          await updateDoc(storeRef, {
+          const existingHistory = activeVisitedStore.pinnedHistory || [];
+          const newHistoryItem = {
             lat, lng,
-            pinnedByCode: currentUser.code || 'NV',
-            pinnedByName: currentUser.name || 'Nhân viên',
-            pinnedAt: new Date().toISOString(),
-            pinnedHistory: [...existingHistory, newHistoryItem]
-          });
+            code: currentUser.code || 'NV',
+            name: currentUser.name || 'Nhân viên',
+            time: new Date().toISOString()
+          };
 
-          await addDoc(collection(db, "checkins"), {
-            ...checkinPayload,
-            createdAt: serverTimestamp()
-          });
-        } else {
-          await saveOfflineCheckin(checkinPayload);
+          const checkinPayload = {
+            salesUid: currentUser.uid,
+            salesName: currentUser.name,
+            salesCode: currentUser.code,
+            storeId: String(activeVisitedStore.id),
+            storeName: activeVisitedStore.name,
+            lat, lng,
+            accuracy: pos.accuracy,
+            status: "Check-in thành công"
+          };
+
+          if (navigator.onLine) {
+            const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+            await updateDoc(storeRef, {
+              lat, lng,
+              pinnedByCode: currentUser.code || 'NV',
+              pinnedByName: currentUser.name || 'Nhân viên',
+              pinnedAt: new Date().toISOString(),
+              pinnedHistory: [...existingHistory, newHistoryItem]
+            });
+
+            await addDoc(collection(db, "checkins"), {
+              ...checkinPayload,
+              createdAt: serverTimestamp()
+            });
+          } else {
+            await saveOfflineCheckin(checkinPayload);
+          }
+
+          activeVisitedStore.lat = lat;
+          activeVisitedStore.lng = lng;
+          activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
+          activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
+          activeVisitedStore.pinnedAt = new Date().toISOString();
+          activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+          
+          toast(`✅ Cập nhật vị trí GPS thành công!`);
+        } catch (err) {
+          alert("Không thể lấy tọa độ GPS: " + err.message);
         }
-
-        activeVisitedStore.lat = lat;
-        activeVisitedStore.lng = lng;
-        activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
-        activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
-        activeVisitedStore.pinnedAt = new Date().toISOString();
-        activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
-        
-        toast(`✅ Cập nhật vị trí GPS thành công!`);
-      } catch (err) {
-        alert("Không thể lấy tọa độ GPS: " + err.message);
       }
+    } else {
+      toast(`ℹ️ Khách hàng này đã có định vị GPS. Hệ thống giữ nguyên vị trí cũ.`);
     }
 
     renderUI();
@@ -1085,8 +1088,15 @@
     }
   });
 
+  // HÀM CHECK-IN NÚT RIÊNG: Chỉ áp dụng khi khách hàng chưa có GPS hoặc Admin muốn ép check-in lại. Nếu đã có GPS rồi thì báo thông báo đã ghim và không cho hiện bảng hỏi cập nhật mới.
   window.checkinActiveStoreGPS = async function() {
     if (!activeVisitedStore) return alert("Chưa chọn điểm bán!");
+    
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
+    if (hasGPSAlready) {
+      return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
+    }
+
     toast("📍 Đang lấy tọa độ GPS thực tế...");
 
     try {
@@ -1094,20 +1104,6 @@
       const lat = Number(pos.lat);
       const lng = Number(pos.lng);
       currentSalesGPS = { lat, lng };
-
-      if (activeVisitedStore.lat && activeVisitedStore.lng) {
-        const distance = calculateDistanceMeters(lat, lng, activeVisitedStore.lat, activeVisitedStore.lng);
-        if (distance > 150) {
-          const confirmDistance = await window.showCustomConfirm(
-            "Cảnh Báo Vượt Bán Kính",
-            `⚠️ Bạn đang đứng cách cửa hàng ${Math.round(distance)}m. Vượt quá bán kính cho phép (150m).\nBạn vẫn muốn tiếp tục check-in?`,
-            "fa-triangle-exclamation",
-            "Vẫn check-in",
-            "Hủy"
-          );
-          if (!confirmDistance) return;
-        }
-      }
 
       const existingHistory = activeVisitedStore.pinnedHistory || [];
       const newHistoryItem = {
@@ -1299,7 +1295,7 @@
       const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
 
       return `
-        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid ${isClosest ? '#34D399' : '#E2E8F0'}; border-radius:12px; padding:12px; margin-bottom:8px;">
+        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid ${isClosest ? '#34D399' : '#E2E8F0'}; border-radius:10px; padding:10px; margin-bottom:6px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span class="item-code" style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'} ${isSoldToday ? '✅' : ''}</span>
             <span style="font-size:11px; font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr} ${isClosest ? '(Gần nhất 📍)' : ''}</span>
@@ -1307,12 +1303,12 @@
           <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
           <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
           <div style="font-size:11px; color:var(--text-muted);">👤 NV ghim: <b style="color:var(--primary);">${pName}</b></div>
-          <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
+          <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:4px; padding:8px; font-size:12px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
             <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
           </button>
         </div>
       `;
-    }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</div>`;
+    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:#fff; border-radius:10px;">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</div>`;
 
     const hintEl = document.getElementById('customerSearchHint');
     if (hintEl) hintEl.innerText = slicedMatched.length > 0 ? `Hiển thị ${slicedMatched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
@@ -1336,6 +1332,7 @@
     }
   };
 
+  // ĐÃ THU GỌN Ô VẬT TƯ 50% & TÊN SẢN PHẨM TO RÕ DỄ ĐỌC THEO YÊU CẦU:
   window.filterSalesProducts = function(val) {
     if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
     const container = document.getElementById('mobileProductListContainer');
@@ -1387,38 +1384,38 @@
       const hasQty = c.qty > 0;
 
       return `
-        <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="padding:10px 12px; margin-bottom:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-            <span class="item-code" style="font-size:10px; padding:2px 6px;">${p.code}</span>
-            <span class="badge" style="background:#EEF2FF; color:var(--primary); font-size:11px; padding:3px 8px;">${p.dvt || 'hộp'}</span>
+        <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+            <span class="item-code" style="font-size:10px; padding:1px 5px; background:#EEF2FF; color:var(--primary); font-weight:800; border-radius:4px;">${p.code}</span>
+            <span style="font-size:11px; font-weight:800; color:var(--purple); background:#F8FAFC; padding:1px 6px; border-radius:4px;">${p.dvt || 'hộp'}</span>
           </div>
-          <div class="item-title" style="font-size:13px; font-weight:800; margin-bottom:6px; line-height:1.3;">${p.name}</div>
-          <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:6px 10px; border-radius:8px; margin-bottom:6px; font-size:12px;">
+          <div class="item-title" style="font-size:15px; font-weight:800; color:#0F172A; margin-bottom:4px; line-height:1.2;">${p.name}</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#F8FAFC; padding:4px 8px; border-radius:6px; margin-bottom:4px; font-size:11px;">
             <div>Giá: <b style="color:var(--rose);">${(p.price || 0).toLocaleString()}đ</b></div>
             <div>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
           </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:#F1F5F9; padding:8px; border-radius:8px; margin-bottom:6px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; background:#F1F5F9; padding:6px; border-radius:6px; margin-bottom:4px;">
             <div>
-              <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
-              <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-le-${safeK}" value="${c.le}" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+              <label style="font-size:9px; font-weight:800; color:var(--text-muted); display:block;">SL Lẻ:</label>
+              <div style="display:flex; align-items:center; gap:3px; margin-top:2px;">
+                <button type="button" class="btn btn-sm" style="padding:2px 6px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-le-${safeK}" value="${c.le}" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin:0; text-align:center; padding:2px; background:#fff; font-size:13px; height:26px; font-weight:700;">
+                <button type="button" class="btn btn-sm" style="padding:2px 6px; font-size:11px;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
               </div>
             </div>
             <div>
-              <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
-              <div style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-                <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-kien-${safeK}" value="${c.kien}" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:4px; background:#fff; font-size:14px; height:30px;">
-                <button type="button" class="btn btn-sm" style="padding:4px 8px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+              <label style="font-size:9px; font-weight:800; color:var(--text-muted); display:block;">SL Thùng:</label>
+              <div style="display:flex; align-items:center; gap:3px; margin-top:2px;">
+                <button type="button" class="btn btn-sm" style="padding:2px 6px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-kien-${safeK}" value="${c.kien}" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin:0; text-align:center; padding:2px; background:#fff; font-size:13px; height:26px; font-weight:700;">
+                <button type="button" class="btn btn-sm" style="padding:2px 6px; font-size:11px;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
               </div>
             </div>
           </div>
-          <div style="text-align:right; font-size:12px;">Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></div>
+          <div style="text-align:right; font-size:11px;">Thành tiền: <b style="color:var(--rose); font-size:13px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></div>
         </div>
       `;
-    }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư phù hợp.</div>`;
+    }).join('') : `<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:12px;">Không tìm thấy vật tư phù hợp.</div>`;
     
     if (hintEl) hintEl.innerText = "";
   };
@@ -1471,7 +1468,7 @@
       const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
       
       return `
-        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
+        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:10px; padding:10px; margin-bottom:6px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'}</span>
             <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">${hasLat ? `Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}</span>
@@ -1493,7 +1490,7 @@
           </div>
         </div>
       `;
-    }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp.</div>`;
+    }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
 
     if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị ${matched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
   };
@@ -1519,7 +1516,7 @@
     }
 
     container.innerHTML = matched.length > 0 ? matched.map(p => `
-      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
+      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:10px; padding:10px; margin-bottom:6px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${p.code}</span>
           <span class="badge" style="background:#F1F5F9; color:var(--purple);">${p.dvt || 'hộp'}</span>
@@ -1531,7 +1528,7 @@
         </div>
         <div style="font-size:13px; color:var(--text-muted);">Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b> | Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
       </div>
-    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy vật tư phù hợp.</div>`;
+    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:10px;">Không tìm thấy vật tư phù hợp.</div>`;
 
     if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
   };
@@ -2282,7 +2279,7 @@
                     <button class="btn btn-purple btn-sm" onclick="copyCoordinatesGPS(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)}, '${activeVisitedStore.name.replace(/'/g, "\\'")}')" style="font-weight:700; padding:6px 10px; font-size:11px;"><i class="fa-solid fa-copy"></i> Copy GPS</button>
                   ` : ''}
                   <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:11px; white-space:nowrap;">
-                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in GPS' : 'Lưu GPS'}
+                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Đã ghim GPS' : 'Lưu GPS'}
                   </button>
                 </div>
               </div>
@@ -2334,14 +2331,12 @@
             </div>
           </div>
 
-          <!-- Nút nổi thông minh (Floating pill) hiển thị khi bàn phím ảo bật lên giúp không bị che khuất -->
           <div id="floatingCartTrigger" class="floating-cart-trigger" onclick="scrollToCartFooter()">
             <i class="fa-solid fa-cart-shopping"></i> 
             <span><b id="floatTriggerCount">${selectedSkuCount}</b> mã | <span id="floatTriggerAmount">${cartTotalAmount.toLocaleString()}đ</span></span>
             <i class="fa-solid fa-chevron-up" style="font-size: 10px;"></i>
           </div>
 
-          <!-- Footer cố định giữ giỏ hàng & nút gửi đơn chuyên nghiệp -->
           <div id="dynamicCartFooter" class="sticky-cart-footer">
             <div>
               <div id="stickyCartSkuCount" style="font-size:11px; color:#94A3B8; font-weight:700;">Đã chọn: ${selectedSkuCount} mã hàng</div>
@@ -2418,8 +2413,8 @@
 
             flatExcelRows.push({
               soCtu: o.soCtu || 1,
-              ngayCtu: o.ngayCtu || '2026-08-31',
-              ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
+              ngayCtu: o.ngayCtu || '2026-09-01',
+              ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
               maDTPNNo: inferredMaDTPN,
               maNhanVien: o.salesCode || '',
               tenNhanVien: o.salesName || '',
@@ -2435,8 +2430,8 @@
           groupedOrdersMap.set(o.id, {
             orderId: o.id,
             soCtu: o.soCtu || 1,
-            ngayCtu: o.ngayCtu || '2026-08-31',
-            ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-08-31'),
+            ngayCtu: o.ngayCtu || '2026-09-01',
+            ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
             maDTPNNo: inferredMaDTPN,
             maKH: o.maKH || '',
             maNhanVien: o.salesCode || '',
@@ -2758,7 +2753,7 @@
   <h3 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-key"></i> Đổi Mật Khẩu</h3>
   <form onsubmit="submitChangePassword(event)" style="margin-top:10px;">
     <label>Mật Khẩu Cũ:</label><input type="password" id="oldPassInput" required>
-    <label>Mật Khẩu Mới:</label><input type="password" id="newPassInput" required>
+    <label>Mật Khẩu Mới:</label><input, id="newPassInput" required type="password">
     <label>Xác Nhận Mật Khẩu:</label><input type="password" id="confirmPassInput" required>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button type="submit" class="btn btn-green" style="flex:1;justify-content:center;font-weight:800;">Lưu</button>
