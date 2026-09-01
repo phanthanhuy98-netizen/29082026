@@ -231,7 +231,6 @@
     .panel { padding: 8px !important; border-radius: 14px !important; margin-bottom: 140px !important; min-height: auto !important; }
   }
 
-  /* Đã vô hiệu hóa hoàn toàn class .toast để loại bỏ hoàn toàn các thông báo trôi phía dưới */
   .toast { display: none !important; }
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(3, 7, 18, 0.85);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
@@ -544,9 +543,7 @@
     return "k_" + btoa(unescape(encodeURIComponent(code))).replace(/[^a-zA-Z0-9]/g, "");
   }
 
-  function toast(msg) {
-    // Đã loại bỏ hoàn toàn việc tạo phần tử hiển thị thông báo toast ra khỏi màn hình
-  }
+  function toast(msg) {}
 
   window.showCustomConfirm = function(title, message, iconClass = "fa-triangle-exclamation", confirmText = "Đồng ý", cancelText = "Hủy") {
     return new Promise((resolve) => {
@@ -1039,17 +1036,36 @@
       return;
     }
 
-    container.innerHTML = list.map(c => `
-      <div onclick="selectCompanyFromDropdown('${c.maCtu}', '${c.tenCtu.replace(/'/g, "\\'")}')" style="padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #F1F5F9; font-size: 12px; transition: background 0.15s;" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background='#fff'">
-        <b>[${c.maCtu}]</b> ${c.tenCtu}
-      </div>
-    `).join('');
+    const completedCompanies = new Set();
+    products.forEach(p => {
+      const keyId = p.id || p.code;
+      const c = currentCart[keyId];
+      if (c && c.qty > 0) {
+        let pCode = p.code || '';
+        let cCode = pCode.includes('-') ? pCode.split('-')[0].trim() : pCode;
+        completedCompanies.add(cCode);
+        if (p.companyCode) completedCompanies.add(p.companyCode);
+      }
+    });
+
+    container.innerHTML = list.map(c => {
+      const isDone = completedCompanies.has(c.maCtu);
+      const bgStyle = isDone ? '#ECFDF5' : '#fff';
+      const borderStyle = isDone ? '1px solid #A7F3D0' : '1px solid #F1F5F9';
+      const textBadge = isDone ? '<span style="color: #059669; font-weight: 800; float: right;">✅ Đã bán</span>' : '';
+
+      return `
+        <div onclick="selectCompanyFromDropdown('${c.maCtu}', '${c.tenCtu.replace(/'/g, "\\'")} ')" style="padding: 10px 12px; cursor: pointer; border-bottom: ${borderStyle}; background: ${bgStyle}; font-size: 12px; transition: background 0.15s;" onmouseover="this.style.background='${isDone ? '#D1FAE5' : '#F8FAFC'}'" onmouseout="this.style.background='${bgStyle}'">
+          <b>[${c.maCtu}]</b> ${c.tenCtu} ${textBadge}
+        </div>
+      `;
+    }).join('');
   }
 
   window.selectCompanyFromDropdown = function(maCtu, tenCtu) {
     selectedCompanyCode = maCtu;
     const inputEl = document.getElementById('companySearchBox');
-    if (inputEl) inputEl.value = maCtu ? `${maCtu} - ${tenCtu}` : '';
+    if (inputEl) inputEl.value = maCtu ? `${maCtu} - ${tenCtu.trim()}` : '';
     
     const dropdown = document.getElementById('companyDropdownList');
     if (dropdown) dropdown.style.display = 'none';
@@ -1225,7 +1241,12 @@
       return;
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
     const soldStoreIdsToday = new Set(
       orders.filter(o => o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid) && o.status !== 'Đã hủy')
             .map(o => String(o.storeId))
@@ -1789,8 +1810,14 @@
     const currentSalesString = `${currentUser.name}`;
     const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
 
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
     const orderData = {
-      ngayCtu: new Date().toISOString().slice(0, 10),
+      ngayCtu: todayStr,
       maDTPNNo: activeVisitedStore.code || '',
       maNhanVien: currentUser.code || '',
       tenNhanVien: currentUser.name || '',
@@ -2426,7 +2453,9 @@
       const allGroupedList = Array.from(groupedOrdersMap.values());
       const limitedOrders = allGroupedList.slice(0, soGocLimitCount);
       const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
-      const todayStr = new Date().toISOString().slice(0, 10);
+      
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
