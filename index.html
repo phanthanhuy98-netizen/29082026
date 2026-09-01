@@ -389,6 +389,21 @@
     });
   }
 
+  // Utility Debounce function to optimize heavy filter inputs
+  function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+  }
+
+  const debouncedFilterCustomers = debounce(val => filterSalesCustomers(val), 300);
+  const debouncedFilterProducts = debounce(val => filterSalesProducts(val), 300);
+  const debouncedFilterSoGoc = debounce(val => filterSoGocCards(val), 300);
+  const debouncedFilterTabCust = debounce(val => filterTabCustomers(val), 300);
+  const debouncedFilterTabPrd = debounce(val => filterTabProducts(val), 300);
+
   async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -758,19 +773,6 @@
     }
 
     await initIndexedDB();
-    const [cachedPrds, cachedStores] = await Promise.all([
-      loadProductsFromLocalCache(),
-      loadStoresFromLocalCache()
-    ]);
-
-    if (cachedPrds && cachedPrds.length > 0) {
-      products = cachedPrds;
-      buildProductIndex();
-    }
-    if (cachedStores && cachedStores.length > 0) {
-      stores = cachedStores;
-      buildStoreIndex();
-    }
 
     try {
       const pos = await getHighAccuracyPosition();
@@ -1008,8 +1010,6 @@
           alert("Không thể lấy tọa độ GPS: " + err.message);
         }
       }
-    } else {
-      // Đã lược bỏ hoàn toàn dòng thông báo alert/toast ở đây theo yêu cầu
     }
 
     renderUI();
@@ -1986,6 +1986,9 @@
             await batch.commit();
             await new Promise(r => setTimeout(r, 50));
           }
+          await saveStoresToLocalCache(rawCustomers);
+          stores = rawCustomers;
+          buildStoreIndex();
           toast(`✅ Đã đồng bộ thành công ${rawCustomers.length} khách hàng!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
@@ -1994,208 +1997,51 @@
     reader.readAsArrayBuffer(file);
   };
 
-  window.importCompanyExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        toast("⏳ Đang đọc file Excel Công Ty...");
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
-        
-        let newList = [];
-        for (let i = 0; i < jsonRows.length; i++) {
-          const r = jsonRows[i];
-          const maCtu = r[0] ? String(r[0]).trim() : '';
-          const tenCtu = r[1] ? String(r[1]).trim() : '';
-          if (maCtu && maCtu !== 'MaCTu') {
-            newList.push({ maCtu, tenCtu, status: "Mở" });
-          }
-        }
-        if (newList.length > 0) {
-          companyList = newList;
-          renderUI();
-          toast(`✅ Đã tải thành công ${newList.length} dòng công ty!`);
-        } else {
-          alert("Không tìm thấy dữ liệu hợp lệ trong file!");
-        }
-      } catch (err) { alert("Lỗi đọc file: " + err.message); }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  window.importRoutesExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        toast("⏳ Đang đọc file Excel Tuyến...");
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
-        
-        let newList = [];
-        for (let i = 0; i < jsonRows.length; i++) {
-          const r = jsonRows[i];
-          let nhomVal = r[0] !== undefined && r[0] !== '' ? String(r[0]).trim() : '';
-          const noiDung = r[1] ? String(r[1]).trim() : '';
-          const ghiChu = r[2] ? String(r[2]).trim() : '';
-          if (nhomVal && nhomVal !== 'Nhóm đối tượng') {
-            let intVal = parseInt(nhomVal, 10);
-            if (!isNaN(intVal) && intVal >= 10) {
-              newList.push({ nhomDoiTuong: String(intVal), noiDung, ghiChu });
-            }
-          }
-        }
-        if (newList.length > 0) {
-          routeGroupsList = newList;
-          renderUI();
-          toast(`✅ Đã tải thành công ${newList.length} dòng tuyến!`);
-        } else {
-          alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
-        }
-      } catch (err) { alert("Lỗi đọc file: " + err.message); }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  window.addNewCompany = function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới công ty!");
-    const maCtu = prompt("Nhập mã công ty (MaCTu):");
-    if (!maCtu) return;
-    const tenCtu = prompt("Nhập tên công ty (TenCTu):");
-    if (!tenCtu) return;
-    companyList.push({ maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), status: "Mở" });
-    renderUI();
-    toast("✅ Đã thêm công ty mới thành công.");
-  };
-
-  window.addNewRoute = function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới tuyến!");
-    let valInput = prompt("Nhập nhóm đối tượng (Số nguyên dương >= 10, VD: 10, 11...):");
-    if (!valInput) return;
-    let intVal = parseInt(valInput.trim(), 10);
-    if (isNaN(intVal) || intVal < 10) {
-      return alert("⛔ Nhóm đối tượng phải là số nguyên dương từ 10 trở lên, không được chứa số âm hoặc số thập phân!");
-    }
-    const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
-    const ghiChu = prompt("Nhập ghi chú:") || "";
-    routeGroupsList.push({ nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() });
-    renderUI();
-    toast("✅ Đã thêm tuyến mới thành công.");
-  };
-
-  window.updateCompanyField = function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
-    companyList[index][field] = val;
-    renderUI();
-    toast("✅ Đã cập nhật trạng thái.");
-  };
-
-  window.updateRouteField = function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
-    if (field === 'nhomDoiTuong') {
-      let intVal = parseInt(val.trim(), 10);
-      if (isNaN(intVal) || intVal < 10) {
-        alert("⛔ Nhóm đối tượng bắt buộc là số nguyên dương từ 10 trở lên!");
-        renderUI();
+  // Optimized static loader to minimize Firebase Reads (Read Once + IndexedDB)
+  async function loadStaticDataOptimized() {
+    try {
+      if (!navigator.onLine) {
+        stores = await loadStoresFromLocalCache();
+        products = await loadProductsFromLocalCache();
+        buildStoreIndex();
+        buildProductIndex();
         return;
       }
-      routeGroupsList[index][field] = String(intVal);
-    } else {
-      routeGroupsList[index][field] = val;
-    }
-    renderUI();
-    toast("✅ Đã cập nhật thay đổi.");
-  };
-
-  window.deleteCompanyItem = async function(index) {
-    if (currentUser.role !== 'admin') return;
-    const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
-    if (confirmDel) {
-      companyList.splice(index, 1);
-      renderUI();
-      toast("🗑️ Đã xóa thành công.");
-    }
-  };
-
-  window.deleteRouteItem = async function(index) {
-    if (currentUser.role !== 'admin') return;
-    const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
-    if (confirmDel) {
-      routeGroupsList.splice(index, 1);
-      renderUI();
-      toast("🗑️ Đã xóa thành công.");
-    }
-  };
-
-  window.filterCompanyTable = function(val) {
-    const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.company-card-item');
-    cards.forEach(c => {
-      const text = removeAccents(c.innerText);
-      c.style.display = text.includes(q) ? '' : 'none';
-    });
-  };
-
-  window.filterRouteTable = function(val) {
-    const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.route-card-item');
-    cards.forEach(c => {
-      const text = removeAccents(c.innerText);
-      c.style.display = text.includes(q) ? '' : 'none';
-    });
-  };
-
-  window.addUser = async function(e) {
-    e.preventDefault();
-    const code = document.getElementById('usCode').value.trim();
-    const name = document.getElementById('usName').value.trim();
-    const email = document.getElementById('usEmail').value.trim();
-    const password = document.getElementById('usPass').value.trim();
-    const role = document.getElementById('usRole').value;
-    try {
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
-      await secondaryAuth.signOut();
-      toast("✅ Tạo nhân viên thành công!");
-      document.getElementById('userForm').reset();
-    } catch (err) { alert("Lỗi: " + err.message); }
-  };
-  window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); toast("Đã cập nhật trạng thái."); };
-
-  function attachListeners() {
-    onSnapshot(collection(db, "stores"), async snap => {
-      stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      const storeSnap = await getDocs(collection(db, "stores"));
+      stores = storeSnap.docs.map(d => ({id:d.id, ...d.data()}));
       buildStoreIndex();
       await saveStoresToLocalCache(stores);
-      if (currentTab === 'customers') {
-        filterTabCustomers();
-      }
-    });
-    onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc")), snap => {
+
+      const prdSnap = await getDocs(collection(db, "products"));
+      products = prdSnap.docs.map(d => ({id:d.id, ...d.data()}));
+      buildProductIndex();
+      await saveProductsToLocalCache(products);
+    } catch (e) {
+      console.error("Lỗi tải cache static:", e);
+      stores = await loadStoresFromLocalCache();
+      products = await loadProductsFromLocalCache();
+      buildStoreIndex();
+      buildProductIndex();
+    }
+  }
+
+  function attachListeners() {
+    // Optimized: Load static collections once instead of continuous listeners (saves massive reads)
+    loadStaticDataOptimized();
+
+    // Orders: Limit to last 50 orders by default to save reads and bandwidth
+    onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(50)), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (currentTab === 'soGocBH') {
         const activePane = document.getElementById('tabPane_soGocBH');
         if (activePane) renderTabContent('soGocBH', activePane);
       }
     });
-    onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(100)), snap => {
+
+    onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(50)), snap => {
       checkins = snap.docs.map(d => ({id:d.id, ...d.data()}));
     });
-    onSnapshot(collection(db, "products"), async snap => {
-      const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (cloudProducts.length > 0) {
-        products = cloudProducts;
-        buildProductIndex();
-        await saveProductsToLocalCache(cloudProducts);
-      }
-    });
+
     if (currentUser.role === 'admin') {
       onSnapshot(collection(db, "users"), snap => {
         users = snap.docs.map(d => ({id:d.id, ...d.data()}));
@@ -2276,7 +2122,7 @@
               </select>
             </div>
 
-            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
+            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="debouncedFilterCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Gõ từ khóa để tìm kiếm khách hàng nhanh...</div>
@@ -2335,7 +2181,7 @@
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 36px 10px 12px; font-size:13px; width: 100%;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="debouncedFilterProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 36px 10px 12px; font-size:13px; width: 100%;">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 8px; background: none; border: none; color: #94A3B8; font-size: 14px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:700; padding:10px 12px; font-size:12px; white-space:nowrap;">
@@ -2392,7 +2238,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="debouncedFilterTabCust(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div id="tabCustomerCardContainer">
@@ -2496,7 +2342,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="debouncedFilterSoGoc(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
@@ -2581,7 +2427,7 @@
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="debouncedFilterTabPrd(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
         <div id="productCardsContainer">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
