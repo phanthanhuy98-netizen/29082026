@@ -15,8 +15,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Quicksand:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -168,9 +166,6 @@
     color: #fff;
   }
 
-  #mapModalContainer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 7, 18, 0.85); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 1100; padding: 10px; }
-  #storeMap { width: 100%; height: 350px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #CBD5E1; }
-
   @media (max-width: 768px) {
     .desktop-table-view { display: none !important; }
     .mobile-card-view { display: block !important; }
@@ -242,7 +237,7 @@
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
   
-  const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 }; // Tâm Bình Phước / Đồng Xoài
+  const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
   let companyList = [
     { maCtu: "17", tenCtu: "CTY TNHH MTV Thuốc Lá Thăng Long", status: "Mở" },
@@ -504,7 +499,7 @@
   function buildStoreIndex() {
     storeIndexMap.clear();
     stores.forEach(s => {
-      const textTokens = removeAccents(`${s.code || ''} ${s.name || ''} ${s.address || ''} ${s.phone || ''}`);
+      const textTokens = removeAccents(`${s.code || ''} ${s.name || ''} ${s.address || ''} ${s.phone || ''} ${s.pinnedByName || ''} ${s.pinnedByCode || ''}`);
       storeIndexMap.set(String(s.id), { store: s, searchableText: textTokens });
     });
   }
@@ -617,7 +612,7 @@
     if (!currentUser || currentUser.role !== 'admin') {
       return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa toàn bộ đơn hàng!");
     }
-    if (!confirm("⚠️ CẢNH BÁO LẦN 1: Bạn có chắc chắn muốn XÓA TẤT CẢ các đơn hàng trong Sổ Gốc không?")) return;
+    if (!confirm("⚠️ CẢNH BÁO LẦN 1: Bạn có chắc chắn muốn XÓA TẤT CẢ các đơn hàng trong Sổ Gốc?")) return;
     if (!confirm("🛑 XÁC NHẬN LẦN 2: Hành động này KHÔNG THỂ HOÀN TÁC và sẽ xóa sạch toàn bộ dữ liệu lịch sử bán hàng!")) return;
     if (!confirm("🚨 XÁC NHẬN LẦN CUỐI (LẦN 3): Bạn thực sự muốn xóa sạch toàn bộ danh sách đơn hàng?")) return;
 
@@ -633,150 +628,62 @@
     }
   };
 
-  window.handleCustomerLocationAction = function(storeId) {
+  window.handleCustomerLocationAction = async function(storeId) {
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
-    openStoreMapModal(storeId);
-  };
-
-  window.adminResetCustomerLocation = async function(storeId) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
-    if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
+    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
+    toast("📍 Đang lấy tọa độ GPS thực tế để ghim trực tiếp...");
+    
     try {
-      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedHistory: [] });
-      const store = stores.find(s => String(s.id) === String(storeId));
-      if (store) { store.lat = 0; store.lng = 0; store.pinnedHistory = []; }
-      toast("🔄 Đã xóa định vị cũ thành công!");
-      filterTabCustomers(tabCustomerSearchKey);
-    } catch (err) { alert("Lỗi: " + err.message); }
-  };
+      const pos = await getHighAccuracyPosition();
+      const lat = Number(pos.lat);
+      const lng = Number(pos.lng);
+      currentSalesGPS = { lat, lng };
 
-  let activeMapInstance = null;
-  let activeMapMarker = null;
-
-  window.openStoreMapModal = function(storeId) {
-    const store = stores.find(s => String(s.id) === String(storeId));
-    if (!store) return alert("Không tìm thấy thông tin điểm bán!");
-
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    modalContainer.innerHTML = `
-      <div id="mapModalContainer">
-        <div class="modal-content" style="max-width: 650px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #E2E8F0; padding-bottom:8px;">
-            <h3 style="font-size:15px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-map-location-dot"></i> Bản Đồ GPS: ${store.name}</h3>
-            <button class="btn btn-red btn-sm" onclick="closeStoreMapModal()">Đóng</button>
-          </div>
-          <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
-            Địa chỉ: <b>${store.address || 'Chưa có địa chỉ'}</b>
-          </div>
-          <div id="storeMap"></div>
-          <div style="display:flex; justify-content:space-between; gap:8px;">
-            <button class="btn btn-amber" style="flex:1; justify-content:center;" onclick="pinStoreGPSFromMap('${store.id}')">
-              <i class="fa-solid fa-location-crosshairs"></i> Cập nhật GPS tại vị trí này
-            </button>
-            ${store.lat && store.lng ? `
-              <a href="https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}" target="_blank" class="btn btn-green" style="flex:1; justify-content:center; text-decoration:none;">
-                <i class="fa-solid fa-diamond-turn-right"></i> Mở Google Maps
-              </a>
-            ` : ''}
-          </div>
-        </div>
-      </div>
-    `;
-    modalContainer.classList.remove('hidden');
-
-    setTimeout(() => {
-      const initialLat = store.lat && store.lat !== 0 ? store.lat : (currentSalesGPS ? currentSalesGPS.lat : DEFAULT_MAP_CENTER.lat);
-      const initialLng = store.lng && store.lng !== 0 ? store.lng : (currentSalesGPS ? currentSalesGPS.lng : DEFAULT_MAP_CENTER.lng);
-
-      if (activeMapInstance) {
-        activeMapInstance.remove();
-        activeMapInstance = null;
-      }
-
-      activeMapInstance = L.map('storeMap').setView([initialLat, initialLng], 16);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap'
-      }).addTo(activeMapInstance);
-
-      if (store.lat && store.lng !== 0) {
-        activeMapMarker = L.marker([store.lat, store.lng], { draggable: true }).addTo(activeMapInstance);
-        activeMapMarker.bindPopup(`<b>${store.name}</b><br>Kéo thả marker để chọn chính xác vị trí.`).openPopup();
-        
-        activeMapMarker.on('dragend', function(e) {
-          const coord = e.target.getLatLng();
-          activeVisitedStoreTempGPS = { lat: coord.lat, lng: coord.lng };
-        });
-      } else if (currentSalesGPS) {
-        activeMapMarker = L.marker([currentSalesGPS.lat, currentSalesGPS.lng], { draggable: true }).addTo(activeMapInstance);
-        activeMapMarker.bindPopup(`<b>Vị trí hiện tại của bạn</b><br>Kéo thả đến vị trí cửa hàng.`).openPopup();
-      }
-
-      activeMapInstance.invalidateSize();
-    }, 200);
-  };
-
-  let activeVisitedStoreTempGPS = null;
-
-  window.pinStoreGPSFromMap = async function(storeId) {
-    let targetLat, targetLng;
-    if (activeMapMarker) {
-      const pos = activeMapMarker.getLatLng();
-      targetLat = pos.lat;
-      targetLng = pos.lng;
-    } else if (activeVisitedStoreTempGPS) {
-      targetLat = activeVisitedStoreTempGPS.lat;
-      targetLng = activeVisitedStoreTempGPS.lng;
-    } else if (currentSalesGPS) {
-      targetLat = currentSalesGPS.lat;
-      targetLng = currentSalesGPS.lng;
-    } else {
-      return alert("Không xác định được tọa độ GPS!");
-    }
-
-    try {
-      const store = stores.find(s => String(s.id) === String(storeId));
-      const existingHistory = store?.pinnedHistory || [];
+      const existingHistory = store.pinnedHistory || [];
       const newHistoryItem = {
-        lat: targetLat,
-        lng: targetLng,
+        lat, lng,
         code: currentUser.code || 'NV',
         name: currentUser.name || 'Nhân viên',
         time: new Date().toISOString()
       };
 
       await updateDoc(doc(db, "stores", String(storeId)), {
-        lat: targetLat,
-        lng: targetLng,
+        lat, lng,
         pinnedByCode: currentUser.code || 'NV',
         pinnedByName: currentUser.name || 'Nhân viên',
         pinnedAt: new Date().toISOString(),
         pinnedHistory: [...existingHistory, newHistoryItem]
       });
 
-      if (store) {
-        store.lat = targetLat;
-        store.lng = targetLng;
-        store.pinnedHistory = [...existingHistory, newHistoryItem];
+      store.lat = lat;
+      store.lng = lng;
+      store.pinnedByCode = currentUser.code || 'NV';
+      store.pinnedByName = currentUser.name || 'Nhân viên';
+      store.pinnedAt = new Date().toISOString();
+      store.pinnedHistory = [...existingHistory, newHistoryItem];
+      
+      toast(`✅ Ghim GPS thành công cho ${store.name} (${lat.toFixed(4)}, ${lng.toFixed(4)}) bởi [${currentUser.code}] ${currentUser.name}!`);
+      filterTabCustomers(tabCustomerSearchKey);
+      if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
+        renderUI();
       }
-
-      toast(`✅ Đã ghim GPS thành công cho cửa hàng!`);
-      closeStoreMapModal();
-      renderUI();
-    } catch (err) {
-      alert("Lỗi cập nhật GPS: " + err.message);
+    } catch (err) { 
+      alert("Lỗi cập nhật GPS: " + err.message); 
+      toast(`❌ Ghim GPS thất bại: ${err.message}`);
     }
   };
 
-  window.closeStoreMapModal = function() {
-    if (activeMapInstance) {
-      activeMapInstance.remove();
-      activeMapInstance = null;
-    }
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    modalContainer.innerHTML = '';
-    modalContainer.classList.add('hidden');
+  window.adminResetCustomerLocation = async function(storeId) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
+    if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
+    try {
+      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
+      const store = stores.find(s => String(s.id) === String(storeId));
+      if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
+      toast("🔄 Đã xóa định vị cũ thành công!");
+      filterTabCustomers(tabCustomerSearchKey);
+    } catch (err) { alert("Lỗi: " + err.message); }
   };
 
   window.selectStoreDirectly = function(storeId, event) {
@@ -887,8 +794,8 @@
 
     try {
       const pos = await getHighAccuracyPosition();
-      const lat = pos.lat;
-      const lng = pos.lng;
+      const lat = Number(pos.lat);
+      const lng = Number(pos.lng);
       currentSalesGPS = { lat, lng };
 
       if (activeVisitedStore.lat && activeVisitedStore.lng) {
@@ -940,8 +847,12 @@
 
       activeVisitedStore.lat = lat;
       activeVisitedStore.lng = lng;
+      activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
+      activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
+      activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
-      toast(`✅ Check-in thành công! Đã lưu GPS.`);
+      
+      toast(`✅ Check-in & Ghim GPS thành công bởi [${currentUser.code}] ${currentUser.name}!`);
       renderUI();
     } catch (err) {
       console.error(err);
@@ -1073,7 +984,7 @@
                 <th>Tên Khách Hàng</th>
                 <th>Địa Chỉ</th>
                 <th>Khoảng Cách GPS</th>
-                <th>SĐT</th>
+                <th>Người Ghim GPS</th>
                 <th style="text-align:right;">Thao Tác</th>
               </tr>
             </thead>
@@ -1083,6 +994,7 @@
                 const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
                 const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
                 const isClosest = item.distance !== Infinity && item.distance <= 100;
+                const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : '—';
 
                 return `
                   <tr style="${isClosest ? 'background: #F0FDF4;' : ''}">
@@ -1090,7 +1002,7 @@
                     <td><b>${s.name}</b> ${isClosest ? '<span class="badge" style="background:#10B981; color:#fff; font-size:9px; padding:2px 6px; margin-left:4px;">Gần bạn nhất 📍</span>' : ''}</td>
                     <td>${s.address || '—'}</td>
                     <td><b style="color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};">${distStr}</b></td>
-                    <td>${s.phone || '—'}</td>
+                    <td><span style="font-size:11px; color:var(--text-muted); font-weight:700;">${pName}</span></td>
                     <td style="text-align:right;">
                       <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">${isSoldToday ? '✅ CHỌN BÁN TIẾP' : 'CHỌN TIỆM'}</button>
                     </td>
@@ -1107,6 +1019,7 @@
         const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
         const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
         const isClosest = item.distance !== Infinity && item.distance <= 100;
+        const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
 
         return `
           <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid ${isClosest ? '#34D399' : '#E2E8F0'}; border-radius:12px; padding:12px; margin-bottom:8px;">
@@ -1116,6 +1029,7 @@
             </div>
             <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
             <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
+            <div style="font-size:11px; color:var(--text-muted);">👤 NV ghim: <b style="color:var(--primary);">${pName}</b></div>
             <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
               <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
             </button>
@@ -1292,21 +1206,23 @@
 
     container.innerHTML = matched.length > 0 ? matched.map(s => {
       const hasLat = s.lat && s.lat !== 0;
+      const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
+      
       return `
         <tr>
           <td><b>${s.code || 'KH'}</b></td>
           <td><b>${s.name}</b></td>
           <td>${s.address || '—'}</td>
           <td>${s.phone || '—'}</td>
-          <td>${s.zalo || '—'}</td>
           <td>
             <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">
-              ${hasLat ? `Đã ghim (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})` : 'Chưa có GPS'}
+              ${hasLat ? `Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}
             </span>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">👤 NV: <b>${pInfo}</b></div>
           </td>
+          <td>${s.zalo || '—'}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${hasLat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
-            ${hasLat ? `<button class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; margin-right:4px;" onclick="openStoreMapModal('${s.id}')"><i class="fa-solid fa-map"></i> Bản đồ</button>` : ''}
+            ${hasLat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${Number(s.lat)},${Number(s.lng)}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
             <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
             ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </td>
@@ -1775,7 +1691,7 @@
             rawCustomers.push({
               id: maDtpn || `KH_${i}`,
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedHistory: []
+              routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
             });
           }
         }
@@ -2052,7 +1968,7 @@
               </select>
             </div>
 
-            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
+            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Gõ từ khóa để tìm kiếm khách hàng nhanh...</div>
@@ -2070,9 +1986,7 @@
                   [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name} ${editingOrderId ? '<span style="color:var(--amber); font-size:12px;">(Đang Sửa Đơn)</span>' : ''}
                 </div>
                 <div style="display:flex; gap:4px; flex-shrink:0;">
-                  <button class="btn btn-green btn-sm" onclick="openStoreMapModal('${activeVisitedStore.id}')" style="font-weight:700; padding:6px 10px; font-size:11px; white-space:nowrap;">
-                    <i class="fa-solid fa-map"></i> Bản đồ
-                  </button>
+                  ${activeVisitedStore.lat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${Number(activeVisitedStore.lat)},${Number(activeVisitedStore.lng)}" target="_blank" class="btn btn-green btn-sm" style="font-weight:700; padding:6px 10px; font-size:11px; text-decoration:none;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
                   <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:11px; white-space:nowrap;">
                     <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in GPS' : 'Lưu GPS'}
                   </button>
@@ -2081,7 +1995,7 @@
               <div style="font-size:11px; color:#CBD5E1; display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
                 <span style="word-break:break-word; max-width:280px;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
                 <span>• Nợ: <b style="color:var(--rose);">${unpaidOrdersTotal.toLocaleString()}đ</b></span>
-                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? 'Đã ghim' : 'Chưa'}</b></span>
+                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? `Đã ghim (Bởi ${activeVisitedStore.pinnedByName || 'NV'})` : 'Chưa'}</b></span>
               </div>
             </div>
           ` : ''}
@@ -2174,7 +2088,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để tìm kiếm..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div class="table-responsive">
@@ -2185,8 +2099,8 @@
                 <th>Tên Khách Hàng</th>
                 <th>Địa Chỉ</th>
                 <th>SĐT</th>
+                <th>GPS Tọa Độ & Người Ghim</th>
                 <th>Zalo</th>
-                <th>GPS Tọa Độ</th>
                 <th style="text-align:right;">Thao Tác</th>
               </tr>
             </thead>
