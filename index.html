@@ -376,7 +376,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 13);
+      const request = indexedDB.open("DMS_OfflineDB", 14);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -385,6 +385,7 @@
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
+        if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
       };
     });
   }
@@ -432,6 +433,26 @@
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function saveMetaVersion(versionKey, val) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["metaInfo"], "readwrite");
+      tx.objectStore("metaInfo").put({ key: versionKey, value: val });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function getMetaVersion(versionKey) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["metaInfo"], "readonly");
+      const req = tx.objectStore("metaInfo").get(versionKey);
+      req.onsuccess = () => resolve(req.result ? req.result.value : null);
+      req.onerror = () => reject(req.error);
     });
   }
 
@@ -542,8 +563,6 @@
   function getSafeKey(code) {
     return "k_" + btoa(unescape(encodeURIComponent(code))).replace(/[^a-zA-Z0-9]/g, "");
   }
-
-  function toast(msg) {}
 
   window.showCustomConfirm = function(title, message, iconClass = "fa-triangle-exclamation", confirmText = "Đồng ý", cancelText = "Hủy") {
     return new Promise((resolve) => {
@@ -725,6 +744,47 @@
     }
   };
 
+  // Cơ chế đồng bộ nền ngầm (Background Version Check) cho sản phẩm và khách hàng để kiểm tra cập nhật mới từ Admin
+  async function backgroundSyncMetadataAndCache() {
+    if (!navigator.onLine) return;
+    try {
+      const metaRef = doc(db, "systemMetadata", "appVersionControl");
+      const metaSnap = await getDoc(metaRef);
+      if (metaSnap.exists()) {
+        const cloudDataVersion = metaSnap.data().dataVersion || 1;
+        const localDataVersion = await getMetaVersion("cachedDataVersion") || 0;
+
+        if (cloudDataVersion > localDataVersion) {
+          console.log("Phát hiện dữ liệu mới từ Cloud, đang tiến hành đồng bộ ngầm...");
+          
+          const [prdSnap, storeSnap] = await Promise.all([
+            getDocs(collection(db, "products")),
+            getDocs(collection(db, "stores"))
+          ]);
+
+          const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          if (cloudPrds.length > 0) {
+            products = cloudPrds;
+            buildProductIndex();
+            await saveProductsToLocalCache(cloudPrds);
+          }
+          if (cloudStores.length > 0) {
+            stores = cloudStores;
+            buildStoreIndex();
+            await saveStoresToLocalCache(cloudStores);
+          }
+
+          await saveMetaVersion("cachedDataVersion", cloudDataVersion);
+          console.log("✅ Đồng bộ ngầm hoàn tất thành công!");
+        }
+      }
+    } catch (e) {
+      console.warn("Lỗi đồng bộ ngầm:", e);
+    }
+  }
+
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
@@ -749,7 +809,6 @@
 
     await initIndexedDB();
     
-    // Tối ưu hóa lượt đọc (Reads): Sử dụng getDocs tải 1 lần kết hợp IndexedDB thay vì onSnapshot liên tục gây tốn kém
     try {
       const [cachedPrds, cachedStores] = await Promise.all([
         loadProductsFromLocalCache(),
@@ -781,6 +840,9 @@
           await saveStoresToLocalCache(cloudStores);
         }
       }
+
+      // Kích hoạt đồng bộ ngầm kiểm tra phiên bản dữ liệu mới
+      backgroundSyncMetadataAndCache();
     } catch (e) {
       console.error("Lỗi tải cache ban đầu:", e);
     }
@@ -2172,9 +2234,6 @@
   window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); };
 
   function attachListeners() {
-    // Không dùng onSnapshot cho stores và products để tiết kiệm lượt đọc (reads) tối đa về 0
-    
-    // Chỉ lắng nghe đơn hàng mới nhất cần hiển thị trong sổ gốc
     onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150)), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (currentTab === 'soGocBH') {
@@ -2467,7 +2526,7 @@
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (Gom Nhóm Chứng Từ)</h2>
+          <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (Phân trang & Gom Nhóm)</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('today')">Hôm Nay</button>
             <button class="btn btn-sm" style="background:#334155; color:#fff;" onclick="setQuickDateFilter('all')">Tất Cả</button>
