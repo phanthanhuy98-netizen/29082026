@@ -269,9 +269,6 @@
   const db = getFirestore(app);
   enableIndexedDbPersistence(db).catch(() => {});
 
-  const secondaryApp = initializeApp(firebaseConfig, "secondary");
-  const secondaryAuth = getAuth(secondaryApp);
-
   let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
@@ -389,7 +386,6 @@
     });
   }
 
-  // Utility Debounce function to optimize heavy filter inputs
   function debounce(func, wait) {
     let timeout;
     return function(...args) {
@@ -738,6 +734,30 @@
     });
   }
 
+  async function loadStaticDataOptimized() {
+    try {
+      if (!navigator.onLine) {
+        stores = await loadStoresFromLocalCache();
+        products = await loadProductsFromLocalCache();
+      } else {
+        const storeSnap = await getDocs(collection(db, "stores"));
+        stores = storeSnap.docs.map(d => ({id:d.id, ...d.data()}));
+        await saveStoresToLocalCache(stores);
+
+        const prdSnap = await getDocs(collection(db, "products"));
+        products = prdSnap.docs.map(d => ({id:d.id, ...d.data()}));
+        await saveProductsToLocalCache(products);
+      }
+    } catch (e) {
+      console.error("Lỗi tải cache static, lấy từ IndexedDB:", e);
+      stores = await loadStoresFromLocalCache();
+      products = await loadProductsFromLocalCache();
+    }
+    
+    buildStoreIndex();
+    buildProductIndex();
+  }
+
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
@@ -761,6 +781,7 @@
     if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
     const profile = profileSnap.data();
     if (profile.active === false) { alert("⛔ Tài khoản bị khóa."); await signOut(authSvc); return; }
+    
     currentUser = { uid: user.uid, email: user.email, name: profile.name, code: profile.code, role: profile.role };
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
@@ -773,6 +794,9 @@
     }
 
     await initIndexedDB();
+
+    toast("⏳ Đang đồng bộ dữ liệu hệ thống...");
+    await loadStaticDataOptimized();
 
     try {
       const pos = await getHighAccuracyPosition();
@@ -887,6 +911,7 @@
       store.pinnedAt = new Date().toISOString();
       store.pinnedHistory = [...existingHistory, newHistoryItem];
       
+      buildStoreIndex();
       toast(`✅ Ghim GPS thành công cho ${store.name} (${lat.toFixed(4)}, ${lng.toFixed(4)}) bởi [${currentUser.code}] ${currentUser.name}!`);
       filterTabCustomers(tabCustomerSearchKey);
       if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
@@ -913,6 +938,7 @@
       await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
       const store = stores.find(s => String(s.id) === String(storeId));
       if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
+      buildStoreIndex();
       toast("🔄 Đã xóa định vị cũ thành công!");
       filterTabCustomers(tabCustomerSearchKey);
     } catch (err) { alert("Lỗi: " + err.message); }
@@ -1005,6 +1031,7 @@
           activeVisitedStore.pinnedAt = new Date().toISOString();
           activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
           
+          buildStoreIndex();
           toast(`✅ Cập nhật vị trí GPS thành công!`);
         } catch (err) {
           alert("Không thể lấy tọa độ GPS: " + err.message);
@@ -1147,6 +1174,7 @@
       activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
       
+      buildStoreIndex();
       toast(`✅ Check-in & Ghim GPS thành công bởi [${currentUser.code}] ${currentUser.name}!`);
       renderUI();
     } catch (err) {
@@ -1997,39 +2025,7 @@
     reader.readAsArrayBuffer(file);
   };
 
-  // Optimized static loader to minimize Firebase Reads (Read Once + IndexedDB)
-  async function loadStaticDataOptimized() {
-    try {
-      if (!navigator.onLine) {
-        stores = await loadStoresFromLocalCache();
-        products = await loadProductsFromLocalCache();
-        buildStoreIndex();
-        buildProductIndex();
-        return;
-      }
-      const storeSnap = await getDocs(collection(db, "stores"));
-      stores = storeSnap.docs.map(d => ({id:d.id, ...d.data()}));
-      buildStoreIndex();
-      await saveStoresToLocalCache(stores);
-
-      const prdSnap = await getDocs(collection(db, "products"));
-      products = prdSnap.docs.map(d => ({id:d.id, ...d.data()}));
-      buildProductIndex();
-      await saveProductsToLocalCache(products);
-    } catch (e) {
-      console.error("Lỗi tải cache static:", e);
-      stores = await loadStoresFromLocalCache();
-      products = await loadProductsFromLocalCache();
-      buildStoreIndex();
-      buildProductIndex();
-    }
-  }
-
   function attachListeners() {
-    // Optimized: Load static collections once instead of continuous listeners (saves massive reads)
-    loadStaticDataOptimized();
-
-    // Orders: Limit to last 50 orders by default to save reads and bandwidth
     onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(50)), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (currentTab === 'soGocBH') {
