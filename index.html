@@ -747,20 +747,22 @@
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
-  window.selectStoreDirectly = function(storeId, event) {
+  // Yêu cầu mới: Khi chọn khách hàng, hỏi có cập nhật GPS ngay hay để sau
+  window.selectStoreDirectly = async function(storeId, event) {
     if (event) {
       event.preventDefault();
       event.stopPropagation();
     }
-    activeVisitedStore = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
-    if (!activeVisitedStore) {
-      activeVisitedStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
+    let targetStore = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+    if (!targetStore) {
+      targetStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
     }
-    if (!activeVisitedStore) {
+    if (!targetStore) {
       alert("Không tìm thấy thông tin khách hàng này!");
       return;
     }
 
+    activeVisitedStore = targetStore;
     productSearchKeyword = '';
     customerSearchKeyword = '';
     selectedCompanyCode = '';
@@ -770,7 +772,66 @@
 
     loadCartDraftFromLocal();
 
-    toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
+    // Hỏi sales có muốn cập nhật vị trí khách hàng ngay tại đây hay không
+    const updateGPSNow = confirm(`Bạn có muốn cập nhật vị trí GPS chính xác của khách hàng "${activeVisitedStore.name}" ngay tại đây không?\n\n- Bấm [OK] để Cập nhật ngay.\n- Bấm [Cancel] để Để sau.`);
+    if (updateGPSNow) {
+      try {
+        toast("📍 Đang lấy tọa độ GPS chính xác...");
+        const pos = await getHighAccuracyPosition();
+        const lat = Number(pos.lat);
+        const lng = Number(pos.lng);
+        currentSalesGPS = { lat, lng };
+
+        const existingHistory = activeVisitedStore.pinnedHistory || [];
+        const newHistoryItem = {
+          lat, lng,
+          code: currentUser.code || 'NV',
+          name: currentUser.name || 'Nhân viên',
+          time: new Date().toISOString()
+        };
+
+        const checkinPayload = {
+          salesUid: currentUser.uid,
+          salesName: currentUser.name,
+          salesCode: currentUser.code,
+          storeId: String(activeVisitedStore.id),
+          storeName: activeVisitedStore.name,
+          lat, lng,
+          accuracy: pos.accuracy,
+          status: "Check-in thành công"
+        };
+
+        if (navigator.onLine) {
+          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+          await updateDoc(storeRef, {
+            lat, lng,
+            pinnedByCode: currentUser.code || 'NV',
+            pinnedByName: currentUser.name || 'Nhân viên',
+            pinnedAt: new Date().toISOString(),
+            pinnedHistory: [...existingHistory, newHistoryItem]
+          });
+
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
+        } else {
+          await saveOfflineCheckin(checkinPayload);
+        }
+
+        activeVisitedStore.lat = lat;
+        activeVisitedStore.lng = lng;
+        activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
+        activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
+        activeVisitedStore.pinnedAt = new Date().toISOString();
+        activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+        
+        toast(`✅ Cập nhật vị trí GPS thành công!`);
+      } catch (err) {
+        alert("Không thể lấy tọa độ GPS: " + err.message);
+      }
+    }
+
     renderUI();
   };
 
@@ -782,7 +843,6 @@
     showOnlySelectedItems = false;
     currentCart = {};
     editingOrderId = null;
-    toast("🔄 Đã đổi khách hàng!");
     renderUI();
   };
 
@@ -941,7 +1001,6 @@
     const totalQDisplay = currentCart[prdId].qty;
     const itemTotal = (p?.price || 0) * totalQDisplay;
 
-    // Yêu cầu 2: Kiểm tra nếu giá trị sản phẩm vượt quá 20.000.000đ
     if (itemTotal > 20000000) {
       const confirmContinue = confirm(`Cảnh báo: Sản phẩm "${p ? p.name : prdId}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá 20.000.000đ. Bạn có tiếp tục hay không?\n\nBấm "OK" để tiếp tục, hoặc "Cancel" để hủy (số lượng sản phẩm này sẽ về 0).`);
       if (!confirmContinue) {
@@ -1078,7 +1137,6 @@
     filterSalesProducts(productSearchKeyword);
   };
 
-  // Yêu cầu 3: Hàm xóa trắng nhanh ô tìm kiếm vật tư
   window.clearProductSearchBox = function() {
     const inputEl = document.getElementById('productSearchInput');
     if (inputEl) {
@@ -1490,7 +1548,6 @@
     if (footerSkuCountEl) footerSkuCountEl.innerText = `Đã chọn: ${selectedSkuCount} mã hàng`;
   }
 
-  // Yêu cầu 5: Cập nhật giới hạn số chứng từ từ 1 đến 900.000 xong quay lại 1
   async function getNextSoCtu() {
     try {
       const counterRef = doc(db, "systemCounters", "soCtuCounter");
