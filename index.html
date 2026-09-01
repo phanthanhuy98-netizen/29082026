@@ -310,7 +310,7 @@
   let tabCustomerSearchKey = ""; 
   let tabProductSearchKey = ""; 
   let showOnlySelectedItems = false;
-  let debounceTimer = null;
+  let currentSalesGPS = null; // {lat, lng}
 
   let idbDb = null;
   function initIndexedDB() {
@@ -401,6 +401,22 @@
     return dateStr;
   }
 
+  // Công thức Haversine tính khoảng cách (mét) giữa 2 tọa độ GPS
+  function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    const R = 6371e3; // Bán kính trái đất bằng mét
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c; // Khoảng cách theo mét
+  }
+
   function buildStoreIndex() {
     storeIndexMap.clear();
     stores.forEach(s => {
@@ -466,6 +482,13 @@
       buildStoreIndex();
     }
 
+    // Tự lấy GPS hiện tại của Sales để gợi ý khoảng cách
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        currentSalesGPS = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      }, () => {}, { enableHighAccuracy: true });
+    }
+
     renderUI();
     attachListeners();
   });
@@ -525,7 +548,7 @@
     }
   };
 
-  window.handleCustomerLocationAction = function(storeId, hasLat) {
+  window.handleCustomerLocationAction = function(storeId) {
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
@@ -533,6 +556,7 @@
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
+      currentSalesGPS = { lat, lng };
       try {
         await updateDoc(doc(db, "stores", String(storeId)), {
           lat, lng,
@@ -663,6 +687,7 @@
     navigator.geolocation.getCurrentPosition(async pos => {
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
+      currentSalesGPS = { lat, lng };
       try {
         const storeRef = doc(db, "stores", String(activeVisitedStore.id));
         
@@ -754,9 +779,15 @@
   };
 
   window.filterSalesCustomers = function(val) {
-    customerSearchKeyword = removeAccents(val.trim());
+    if (val !== undefined) customerSearchKeyword = removeAccents(val.trim());
     const container = document.getElementById('salesCustomerResultContainer');
     if (!container) return;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const soldStoreIdsToday = new Set(
+      orders.filter(o => o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid) && o.status !== 'Đã hủy')
+            .map(o => String(o.storeId))
+    );
 
     let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
@@ -776,60 +807,84 @@
       }
 
       if (matchRoute && matchKey) {
-        matched.push(s);
-        if (matched.length >= 25) break;
+        // Tính khoảng cách GPS nếu sales đã có GPS và tiệm đã có ghim tọa độ
+        let dist = Infinity;
+        if (currentSalesGPS && s.lat && s.lng) {
+          dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
+        }
+        matched.push({ store: s, distance: dist });
       }
     }
+
+    // Tự động sắp xếp (sort) theo khoảng cách GPS gần nhất lên đầu tiên
+    matched.sort((a, b) => a.distance - b.distance);
+    const slicedMatched = matched.slice(0, 25);
 
     const isMobileScreen = window.innerWidth <= 768;
 
     if (!isMobileScreen) {
       container.innerHTML = `
         <div class="table-responsive" style="max-height: 300px; background: #fff; margin-bottom: 6px;">
-          <table style="min-width: 600px;">
+          <table style="min-width: 650px;">
             <thead>
               <tr>
                 <th>Mã KH</th>
                 <th>Tên Khách Hàng</th>
                 <th>Địa Chỉ</th>
+                <th>Khoảng Cách GPS</th>
                 <th>SĐT</th>
                 <th style="text-align:right;">Thao Tác</th>
               </tr>
             </thead>
             <tbody>
-              ${matched.length > 0 ? matched.map(s => `
-                <tr>
-                  <td><b>${s.code || 'KH'}</b></td>
-                  <td><b>${s.name}</b></td>
-                  <td>${s.address || '—'}</td>
-                  <td>${s.phone || '—'}</td>
-                  <td style="text-align:right;">
-                    <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">CHỌN TIỆM</button>
-                  </td>
-                </tr>
-              `).join('') : `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</td></tr>`}
+              ${slicedMatched.length > 0 ? slicedMatched.map(item => {
+                const s = item.store;
+                const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
+                const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
+                const isClosest = item.distance !== Infinity && item.distance <= 100; // Gợi ý nếu trong bán kính 100m
+
+                return `
+                  <tr style="${isClosest ? 'background: #F0FDF4;' : ''}">
+                    <td><b>${s.code || 'KH'}</b> ${isSoldToday ? '<span style="color:var(--emerald); font-weight:800;" title="Đã bán hàng trong ngày">✅</span>' : ''}</td>
+                    <td><b>${s.name}</b> ${isClosest ? '<span class="badge" style="background:#10B981; color:#fff; font-size:9px; padding:2px 6px; margin-left:4px;">Gần bạn nhất 📍</span>' : ''}</td>
+                    <td>${s.address || '—'}</td>
+                    <td><b style="color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};">${distStr}</b></td>
+                    <td>${s.phone || '—'}</td>
+                    <td style="text-align:right;">
+                      <button type="button" class="select-row-btn" onclick="selectStoreDirectly('${s.id}', event)">${isSoldToday ? '✅ CHỌN BÁN TIẾP' : 'CHỌN TIỆM'}</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('') : `<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</td></tr>`}
             </tbody>
           </table>
         </div>
       `;
     } else {
-      container.innerHTML = matched.length > 0 ? matched.map(s => `
-        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:12px; margin-bottom:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <span class="item-code" style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'}</span>
-            <span style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-phone" style="color:var(--emerald);"></i> ${s.phone || '—'}</span>
+      container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(item => {
+        const s = item.store;
+        const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
+        const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
+        const isClosest = item.distance !== Infinity && item.distance <= 100;
+
+        return `
+          <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid ${isClosest ? '#34D399' : '#E2E8F0'}; border-radius:12px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <span class="item-code" style="background:#EEF2FF; color:var(--primary); padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">${s.code || 'KH'} ${isSoldToday ? '✅' : ''}</span>
+              <span style="font-size:11px; font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr} ${isClosest ? '(Gần nhất 📍)' : ''}</span>
+            </div>
+            <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
+            <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
+            <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
+              <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
+            </button>
           </div>
-          <div style="font-size:14px; font-weight:800; color:#0F172A; line-height:1.3;">${s.name}</div>
-          <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
-          <button type="button" class="btn btn-amber" style="width:100%; justify-content:center; margin-top:4px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
-            <i class="fa-solid fa-check"></i> CHỌN TIỆM NÀY
-          </button>
-        </div>
-      `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</div>`;
+        `;
+      }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:#fff; border-radius:12px;">Không tìm thấy khách hàng phù hợp tuyến và từ khóa.</div>`;
     }
 
     const hintEl = document.getElementById('customerSearchHint');
-    if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị ${matched.length} khách hàng theo tuyến và tìm kiếm.` : "Không tìm thấy khách hàng phù hợp.";
+    if (hintEl) hintEl.innerText = slicedMatched.length > 0 ? `Đã tự động sắp xếp theo GPS gần nhất (${slicedMatched.length} khách hàng).` : "Không tìm thấy khách hàng phù hợp.";
   };
 
   window.toggleShowOnlySelected = function() {
@@ -1149,7 +1204,7 @@
       });
     }
 
-    toast(`✏️ Đang sửa chứng từ số #${order.soCtu}. Hãy điều chỉnh số lượng và bấm Gửi Đơn.`);
+    toast(`✏️ Đang sửa chứng từ số #${order.soCtu}. Đã tải danh sách hàng hóa lên giao diện.`);
     switchTab('sales');
   };
 
@@ -1715,7 +1770,7 @@
         <div class="card" style="margin-bottom:8px; background:#F8FAFC; border:2px solid ${activeVisitedStore ? '#CBD5E1' : 'var(--primary)'}; padding: 16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '10px'};">
             <h3 style="font-size:14px; font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: #0F172A;">
-              <i class="fa-solid fa-store" style="color:var(--primary);"></i> ${activeVisitedStore ? 'Khách Hàng Đang Chọn:' : 'Tìm Kiếm & Chọn Khách Hàng Nhanh'}
+              <i class="fa-solid fa-store" style="color:var(--primary);"></i> ${activeVisitedStore ? 'Khách Hàng Đang Chọn:' : 'Tìm Kiếm & Chọn Khách Hàng Nhanh (Gợi ý GPS gần nhất)'}
             </h3>
             ${activeVisitedStore ? `<button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách Hàng</button>` : ''}
           </div>
