@@ -314,7 +314,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 9);
+      const request = indexedDB.open("DMS_OfflineDB", 10);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -395,7 +395,7 @@
     storeIndexMap.clear();
     stores.forEach(s => {
       const textTokens = removeAccents(`${s.code || ''} ${s.name || ''} ${s.address || ''} ${s.phone || ''}`);
-      storeIndexMap.set(s.id, { store: s, searchableText: textTokens });
+      storeIndexMap.set(String(s.id), { store: s, searchableText: textTokens });
     });
   }
 
@@ -516,7 +516,7 @@
   };
 
   window.handleCustomerLocationAction = function(storeId, hasLat) {
-    const store = stores.find(s => s.id === storeId);
+    const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     toast("📍 Đang lấy tọa độ GPS thực tế...");
@@ -524,7 +524,7 @@
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
       try {
-        await updateDoc(doc(db, "stores", storeId), {
+        await updateDoc(doc(db, "stores", String(storeId)), {
           lat, lng,
           pinnedByCode: currentUser.code || 'NV',
           pinnedByName: currentUser.name || 'Nhân viên'
@@ -538,7 +538,7 @@
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
     if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
     try {
-      await updateDoc(doc(db, "stores", storeId), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "" });
+      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "" });
       toast("🔄 Đã xóa định vị cũ thành công!");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
@@ -548,8 +548,15 @@
       event.preventDefault();
       event.stopPropagation();
     }
-    activeVisitedStore = stores.find(s => s.id === storeId);
-    if (!activeVisitedStore) return;
+    activeVisitedStore = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+    if (!activeVisitedStore) {
+      // Fallback search
+      activeVisitedStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
+    }
+    if (!activeVisitedStore) {
+      alert("Không tìm thấy thông tin khách hàng này!");
+      return;
+    }
 
     salesSearchKeyword = '';
     productSearchKeyword = '';
@@ -602,7 +609,7 @@
       const lat = Number(pos.coords.latitude);
       const lng = Number(pos.coords.longitude);
       try {
-        const storeRef = doc(db, "stores", activeVisitedStore.id);
+        const storeRef = doc(db, "stores", String(activeVisitedStore.id));
         
         await updateDoc(storeRef, {
           lat, lng,
@@ -612,7 +619,7 @@
 
         await addDoc(collection(db, "checkins"), {
           salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
-          storeId: activeVisitedStore.id, storeName: activeVisitedStore.name, lat, lng, photo: "", status: "Check-in thành công", createdAt: serverTimestamp()
+          storeId: String(activeVisitedStore.id), storeName: activeVisitedStore.name, lat, lng, photo: "", status: "Check-in thành công", createdAt: serverTimestamp()
         });
 
         activeVisitedStore.lat = lat;
@@ -703,7 +710,6 @@
         const s = entry.store;
         const sCode = (s.code || '').trim();
         
-        // 2 ký tự đầu cột MÃ KH là tuyến của khách hàng
         let matchRoute = true;
         if (selectedRouteCode) {
           const prefix2 = sCode.substring(0, 2);
@@ -1460,6 +1466,7 @@
   window.updateRouteField = function(index, field, val) {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
     routeGroupsList[index][field] = val;
+    renderUI();
     toast("✅ Đã cập nhật thay đổi.");
   };
 
@@ -1693,7 +1700,7 @@
           </div>
         ` : ''}
       `;
-      if (selectedRouteCode) {
+      if (selectedRouteCode || customerSearchKeyword) {
         setTimeout(() => filterSalesCustomers(''), 50);
       }
     }
