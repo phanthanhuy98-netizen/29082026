@@ -300,6 +300,7 @@
   let activeVisitedStore = null;
   let selectedRouteCode = "";
   let selectedCompanyCode = "";
+  let editingOrderId = null;
 
   let soGocFilterKeyword = "", soGocFilterDate = "", soGocSalesFilter = "";
   let soGocLimitCount = 30;
@@ -571,6 +572,7 @@
     selectedCompanyCode = '';
     showOnlySelectedItems = false;
     currentCart = {};
+    editingOrderId = null;
 
     toast(`✅ Đã chọn điểm bán: ${activeVisitedStore.name}`);
     renderUI();
@@ -583,6 +585,7 @@
     selectedCompanyCode = '';
     showOnlySelectedItems = false;
     currentCart = {};
+    editingOrderId = null;
     toast("🔄 Đã đổi khách hàng!");
     renderUI();
   };
@@ -594,17 +597,63 @@
     if (searchInput) filterSalesCustomers(searchInput.value);
   };
 
-  window.onCompanySelected = function(val) {
-    const comp = companyList.find(c => c.maCtu === val);
-    if (comp && comp.status === 'Đóng') {
-      alert(`⛔ Mã công ty ${comp.maCtu} (${comp.tenCtu}) đang ở trạng thái ĐÓNG. Admin chưa cho phép bán hàng sản phẩm của công ty này!`);
-      document.getElementById('companySelectBox').value = selectedCompanyCode;
+  window.openCompanyDropdown = function() {
+    const dropdown = document.getElementById('companyDropdownList');
+    if (dropdown) {
+      dropdown.style.display = 'block';
+      renderCompanyDropdownItems(companyList.filter(c => c.status !== 'Đóng'));
+    }
+  };
+
+  window.filterCompanyDropdown = function(keyword) {
+    const dropdown = document.getElementById('companyDropdownList');
+    if (dropdown) dropdown.style.display = 'block';
+    
+    const q = removeAccents(keyword.trim());
+    const filtered = companyList.filter(c => c.status !== 'Đóng' && removeAccents(`${c.maCtu} ${c.tenCtu}`).includes(q));
+    renderCompanyDropdownItems(filtered);
+  };
+
+  function renderCompanyDropdownItems(list) {
+    const container = document.getElementById('companyDropdownItems');
+    if (!container) return;
+    
+    if (list.length === 0) {
+      container.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 12px;">Không tìm thấy công ty phù hợp</div>`;
       return;
     }
-    selectedCompanyCode = val;
-    toast(selectedCompanyCode ? `📌 Đã ghim Mã Công Ty: ${selectedCompanyCode}` : "🔄 Đã bỏ ghim công ty");
+
+    container.innerHTML = list.map(c => `
+      <div onclick="selectCompanyFromDropdown('${c.maCtu}', '${c.tenCtu.replace(/'/g, "\\'")}')" style="padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #F1F5F9; font-size: 12px; transition: background 0.15s;" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background='#fff'">
+        <b>[${c.maCtu}]</b> ${c.tenCtu}
+      </div>
+    `).join('');
+  }
+
+  window.selectCompanyFromDropdown = function(maCtu, tenCtu) {
+    selectedCompanyCode = maCtu;
+    const inputEl = document.getElementById('companySearchBox');
+    if (inputEl) inputEl.value = maCtu ? `${maCtu} - ${tenCtu}` : '';
+    
+    const dropdown = document.getElementById('companyDropdownList');
+    if (dropdown) dropdown.style.display = 'none';
+
+    if (maCtu) {
+      toast(`📌 Đã ghim Công Ty: ${maCtu}`);
+    } else {
+      toast(`🔄 Đã bỏ ghim Công Ty`);
+    }
+    productSearchKeyword = ""; 
     renderUI();
   };
+
+  document.addEventListener('click', function(e) {
+    const box = document.getElementById('companySearchBox');
+    const dropdown = document.getElementById('companyDropdownList');
+    if (box && dropdown && !box.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
 
   window.checkinActiveStoreGPS = function() {
     if (!activeVisitedStore) return alert("Chưa có thông tin điểm bán!");
@@ -793,7 +842,7 @@
   };
 
   window.filterSalesProducts = function(val) {
-    productSearchKeyword = removeAccents(val.trim());
+    if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
     const isMobileScreen = window.innerWidth <= 768;
     const container = isMobileScreen ? document.getElementById('mobileProductListContainer') : document.getElementById('salesProductTableBody');
     const hintEl = document.getElementById('productSearchHint');
@@ -817,7 +866,8 @@
         const matchKey = productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword);
         if (matchCompany && matchKey) {
           matched.push(p);
-          if (matched.length >= 25) break;
+          if (productSearchKeyword === "" && matched.length >= 100) break;
+          if (productSearchKeyword !== "" && matched.length >= 25) break;
         }
       }
     }
@@ -855,7 +905,7 @@
             <td><b style="color:var(--primary);" id="total_qty_${safeK}">${c.qty || 0}</b></td>
           </tr>
         `;
-      }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này.</td></tr>`;
+      }).join('') : `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này. Hãy chọn mã công ty ở trên.</td></tr>`;
     } else {
       container.innerHTML = matched.length > 0 ? matched.map(p => {
         const keyId = p.id || p.code;
@@ -896,7 +946,7 @@
             <div style="text-align:right; font-size:12px;">Thành tiền: <b style="color:var(--rose); font-size:14px;" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</b></div>
           </div>
         `;
-      }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này.</div>`;
+      }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy vật tư của công ty này. Hãy chọn mã công ty ở trên.</div>`;
     }
     if (hintEl) hintEl.innerText = "";
   };
@@ -936,8 +986,9 @@
             </span>
           </td>
           <td style="text-align:right; white-space:nowrap;">
+            ${hasLat ? `<a href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
             <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
-            ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
+            ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </td>
         </tr>
       `;
@@ -1051,6 +1102,55 @@
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
     }
+  };
+
+  window.editOrder = function(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+
+    const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+    const isAdmin = currentUser.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (order.ngayCtu !== todayStr && !isAdmin) {
+      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, không thể chỉnh sửa! (Chỉ được sửa đơn trong ngày).`);
+    }
+
+    let targetStore = stores.find(s => String(s.id) === String(order.storeId));
+    if (!targetStore && order.maDTPNNo) {
+      targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
+    }
+    if (!targetStore) {
+      return alert("Không tìm thấy dữ liệu điểm bán của đơn hàng này trong hệ thống!");
+    }
+
+    activeVisitedStore = targetStore;
+    editingOrderId = order.id;
+
+    currentCart = {};
+    if (order.items && order.items.length > 0) {
+      order.items.forEach(item => {
+        const pKey = item.id || item.code;
+        const productObj = products.find(p => p.id === pKey || p.code === pKey || p.code === item.code);
+        const ratio = productObj?.tyLeQuyDoi || 50;
+        
+        const totalQty = Number(item.qty || 0);
+        const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+        const le = ratio > 0 ? totalQty % ratio : totalQty;
+
+        currentCart[pKey] = {
+          qty: totalQty,
+          kien: kien,
+          le: le
+        };
+      });
+    }
+
+    toast(`✏️ Đang sửa chứng từ số #${order.soCtu}. Hãy điều chỉnh số lượng và bấm Gửi Đơn.`);
+    switchTab('sales');
   };
 
   window.openOrderDetailsModal = function(orderId) {
@@ -1195,7 +1295,7 @@
     }
 
     const unpaidOrdersTotal = orders
-      .filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy')
+      .filter(o => o.storeId === activeVisitedStore.id && o.paymentStatus !== 'Đã thanh toán' && o.status !== 'Đã hủy' && o.id !== editingOrderId)
       .reduce((s, o) => s + (o.amount || 0), 0);
     
     const storeCreditLimit = activeVisitedStore.creditLimit || 20000000;
@@ -1203,14 +1303,11 @@
       return alert(`⛔ Khóa đơn: Vượt hạn mức nợ (${storeCreditLimit.toLocaleString()}đ)!`);
     }
 
-    const nextSoCtu = await getNextSoCtu();
     const finalAmount = rawSubtotal;
-    
     const currentSalesString = `${currentUser.name}`;
     const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
 
     const orderData = {
-      soCtu: nextSoCtu,
       ngayCtu: new Date().toISOString().slice(0, 10),
       maDTPNNo: activeVisitedStore.code || '',
       maNhanVien: currentUser.code || '',
@@ -1226,16 +1323,28 @@
       rawSubtotal,
       isReturnOrder: false, 
       paymentStatus: 'Công nợ', 
-      status: 'Chờ duyệt', 
-      createdAt: serverTimestamp()
+      status: 'Chờ duyệt'
     };
 
     try {
-      await addDoc(collection(db, "orders"), orderData);
-      toast(`🚀 Lưu đơn thành công! Số chứng từ: ${nextSoCtu}`);
+      if (editingOrderId) {
+        const orderRef = doc(db, "orders", editingOrderId);
+        await updateDoc(orderRef, {
+          ...orderData,
+          updatedAt: serverTimestamp()
+        });
+        toast(`✅ Cập nhật thành công đơn hàng thành công!`);
+      } else {
+        const nextSoCtu = await getNextSoCtu();
+        orderData.soCtu = nextSoCtu;
+        orderData.createdAt = serverTimestamp();
+        await addDoc(collection(db, "orders"), orderData);
+        toast(`🚀 Lưu đơn thành công! Số chứng từ: ${nextSoCtu}`);
+      }
       
       currentCart = {}; 
       activeVisitedStore = null; 
+      editingOrderId = null;
       productSearchKeyword = ""; 
       customerSearchKeyword = "";
       selectedCompanyCode = "";
@@ -1612,7 +1721,6 @@
           </div>
 
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:8px;'}">
-            <!-- Ô TÌM KIẾM TUYẾN KHÁCH HÀNG -->
             <div style="margin-bottom: 6px;">
               <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">📌 Tuyến Khách Hàng (Nhập số tuyến, VD: 0, 1, 2...):</label>
               <select id="routeSelectBox" onchange="onRouteSelected(this.value)" style="background:#fff; padding:8px 12px; font-size:13px; font-weight:700; width:50%; margin:0;">
@@ -1621,7 +1729,6 @@
               </select>
             </div>
 
-            <!-- Ô TÌM KIẾM KHÁCH HÀNG BÊN DƯỚI -->
             <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ hoặc SĐT để lọc..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
             <div id="salesCustomerResultContainer">
@@ -1637,7 +1744,7 @@
             <div style="margin-top:8px; background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%); padding: 12px 16px; border-radius: 12px; color: #fff; min-height: 58px; display: flex; flex-direction: column; justify-content: center;">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
                 <div style="font-size:14px; font-weight:800; color:#FFFFFF; line-height:1.35; flex:1; word-break:break-word;">
-                  [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name}
+                  [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name} ${editingOrderId ? '<span style="color:var(--amber); font-size:12px;">(Đang Sửa Đơn)</span>' : ''}
                 </div>
                 <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 12px; font-size:11px; white-space:nowrap; flex-shrink:0;">
                   <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in GPS' : 'Lưu GPS'}
@@ -1654,26 +1761,29 @@
 
         ${activeVisitedStore ? `
           <div class="card" style="border:2px solid var(--primary); padding:12px;">
-            
-            <!-- Ô CHỌN MÃ CÔNG TY BÊN TRONG BÁN HÀNG -->
-            <div style="margin-bottom: 8px;">
-              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">🏢 Chọn Mã Công Ty (Chỉ bán hàng của công ty đã ghim):</label>
-              <select id="companySelectBox" onchange="onCompanySelected(this.value)" style="background:#fff; padding:10px 12px; font-size:13px; font-weight:700; width:50%; margin:0;">
-                <option value="">-- Tất cả công ty (Mở) --</option>
-                ${companyList.filter(c => c.status !== 'Đóng').map(c => `<option value="${c.maCtu}" ${selectedCompanyCode===c.maCtu?'selected':''}>${c.maCtu} - ${c.tenCtu}</option>`).join('')}
-              </select>
+            <div style="margin-bottom: 10px; position: relative;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">🏢 Chọn & Ghim Mã Công Ty (Gõ để tìm nhanh hoặc bấm để xem danh sách):</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="companySearchBox" placeholder="🔍 Gõ mã hoặc tên công ty để lọc nhanh..." value="${selectedCompanyCode ? (companyList.find(c=>c.maCtu===selectedCompanyCode)?.maCtu + ' - ' + companyList.find(c=>c.maCtu===selectedCompanyCode)?.tenCtu) : ''}" oninput="filterCompanyDropdown(this.value)" onfocus="openCompanyDropdown()" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px; font-weight:700; flex: 1;">
+                ${selectedCompanyCode ? `<button class="btn btn-red btn-sm" onclick="selectCompanyFromDropdown('', '')" style="padding:10px 14px;"><i class="fa-solid fa-xmark"></i> Bỏ ghim</button>` : ''}
+              </div>
+
+              <div id="companyDropdownList" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); z-index: 100; margin-top: 4px;">
+                <div style="padding: 8px 12px; font-size: 11px; font-weight: 800; color: var(--text-muted); background: #F1F5F9; border-bottom: 1px solid #E2E8F0;">DANH SÁCH CÔNG TY (Bấm để chọn)</div>
+                <div id="companyDropdownItems"></div>
+              </div>
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Tìm kiếm nhanh vật tư theo mã hoặc tên..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:700; padding:10px 12px; font-size:12px; white-space:nowrap;">
                 <i class="fa-solid fa-filter"></i> Đã chọn
               </button>
             </div>
             <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;">
-              Vui lòng gõ mã hoặc tên vật tư để tìm kiếm và lập đơn...
+              ${selectedCompanyCode ? 'Đang hiển thị toàn bộ sản phẩm của công ty đã chọn.' : 'Vui lòng chọn Mã Công Ty ở trên để hiện danh sách vật tư bán hàng.'}
             </small>
 
             ${!isMobileScreen ? `
@@ -1693,13 +1803,13 @@
                     </tr>
                   </thead>
                   <tbody id="salesProductTableBody">
-                    <tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</td></tr>
+                    <tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Vui lòng chọn Mã Công Ty để bắt đầu lập đơn...</td></tr>
                   </tbody>
                 </table>
               </div>
             ` : `
               <div id="mobileProductListContainer" class="mobile-card-view">
-                <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Gõ mã hoặc tên vật tư để lập đơn...</div>
+                <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Vui lòng chọn Mã Công Ty để bắt đầu lập đơn...</div>
               </div>
             `}
           </div>
@@ -1709,12 +1819,15 @@
               <div id="stickyCartSkuCount" style="font-size:11px; color:#94A3B8; font-weight:700;">Đã chọn: ${selectedSkuCount} mã hàng</div>
               <div style="font-size:18px; font-weight:800; color:var(--amber);" id="stickyCartTotalAmount">${cartTotalAmount.toLocaleString()} đ</div>
             </div>
-            <button class="btn btn-green" style="padding:12px 24px; font-weight:800; font-size:14px; border-radius:12px;" onclick="submitOrder()">GỬI ĐƠN HÀNG</button>
+            <button class="btn btn-green" style="padding:12px 24px; font-weight:800; font-size:14px; border-radius:12px;" onclick="submitOrder()">${editingOrderId ? 'CẬP NHẬT ĐƠN HÀNG' : 'GỬI ĐƠN HÀNG'}</button>
           </div>
         ` : ''}
       `;
       if (selectedRouteCode || customerSearchKeyword) {
         setTimeout(() => filterSalesCustomers(''), 50);
+      }
+      if (selectedCompanyCode) {
+        setTimeout(() => filterSalesProducts(''), 50);
       }
     }
 
@@ -1806,6 +1919,8 @@
             maKH: o.maKH || '',
             maNhanVien: o.salesCode || '',
             tenNhanVien: o.salesName || '',
+            salesCode: o.salesCode || '',
+            salesUid: o.salesUid || '',
             totalQty: orderTotalQty,
             amount: o.amount || 0
           });
@@ -1816,6 +1931,7 @@
       const allGroupedList = Array.from(groupedOrdersMap.values());
       const limitedOrders = allGroupedList.slice(0, soGocLimitCount);
       const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
+      const todayStr = new Date().toISOString().slice(0, 10);
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
@@ -1860,22 +1976,26 @@
               </tr>
             </thead>
             <tbody id="soGocTableBody">
-              ${limitedOrders.length > 0 ? limitedOrders.map(o => `
-                <tr data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}">
-                  <td><b>${o.soCtu}</b></td>
-                  <td style="white-space: nowrap;">${o.ngayCtuFormatted}</td>
-                  <td><b>${o.maDTPNNo}</b></td>
-                  <td>${o.maKH}</td>
-                  <td><b>${o.maNhanVien}</b></td>
-                  <td style="white-space: nowrap;">${o.tenNhanVien}</td>
-                  <td><b style="color:var(--primary);">${o.totalQty}</b></td>
-                  <td style="white-space: nowrap;"><b style="color:var(--rose);">${o.amount.toLocaleString()}đ</b></td>
-                  <td style="text-align:right; white-space: nowrap;">
-                    <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
-                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminDeleteOrder('${o.orderId}', '${o.soCtu}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
-                  </td>
-                </tr>
-              `).join('') : `
+              ${limitedOrders.length > 0 ? limitedOrders.map(o => {
+                const canEdit = (o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid)) || isAdmin;
+                return `
+                  <tr data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}">
+                    <td><b>${o.soCtu}</b></td>
+                    <td style="white-space: nowrap;">${o.ngayCtuFormatted}</td>
+                    <td><b>${o.maDTPNNo}</b></td>
+                    <td>${o.maKH}</td>
+                    <td><b>${o.maNhanVien}</b></td>
+                    <td style="white-space: nowrap;">${o.tenNhanVien}</td>
+                    <td><b style="color:var(--primary);">${o.totalQty}</b></td>
+                    <td style="white-space: nowrap;"><b style="color:var(--rose);">${o.amount.toLocaleString()}đ</b></td>
+                    <td style="text-align:right; white-space: nowrap;">
+                      <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
+                      ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
+                      ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminDeleteOrder('${o.orderId}', '${o.soCtu}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                    </td>
+                  </tr>
+                `;
+              }).join('') : `
                 <tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu giao dịch trong sổ gốc.</td></tr>
               `}
             </tbody>
