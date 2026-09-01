@@ -231,7 +231,8 @@
     .panel { padding: 8px !important; border-radius: 14px !important; margin-bottom: 140px !important; min-height: auto !important; }
   }
 
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#030712;color:#fff;padding:12px 28px;border-radius:28px;font-size:13px;font-weight:700;z-index:1200;box-shadow:0 15px 35px rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.25);text-align:center;width:90%;max-width:450px;}
+  /* Đã vô hiệu hóa hoàn toàn class .toast để loại bỏ hoàn toàn các thông báo trôi phía dưới */
+  .toast { display: none !important; }
   
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(3, 7, 18, 0.85);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
   .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.6);border:1px solid #E2E8F0;}
@@ -268,6 +269,9 @@
   const authSvc = getAuth(app);
   const db = getFirestore(app);
   enableIndexedDbPersistence(db).catch(() => {});
+
+  const secondaryApp = initializeApp(firebaseConfig, "secondary");
+  const secondaryAuth = getAuth(secondaryApp);
 
   let currentUser = null;
   let currentTab = 'sales';
@@ -386,20 +390,6 @@
     });
   }
 
-  function debounce(func, wait) {
-    let timeout;
-    return function(...args) {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
-    };
-  }
-
-  const debouncedFilterCustomers = debounce(val => filterSalesCustomers(val), 300);
-  const debouncedFilterProducts = debounce(val => filterSalesProducts(val), 300);
-  const debouncedFilterSoGoc = debounce(val => filterSoGocCards(val), 300);
-  const debouncedFilterTabCust = debounce(val => filterTabCustomers(val), 300);
-  const debouncedFilterTabPrd = debounce(val => filterTabProducts(val), 300);
-
   async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -487,7 +477,6 @@
             console.error("Đồng bộ check-in lỗi:", e);
           }
         }
-        toast("🔄 Đã đồng bộ dữ liệu check-in offline lên hệ thống!");
       }
     };
   };
@@ -515,7 +504,6 @@
             console.error("Đồng bộ đơn hàng offline lỗi:", e);
           }
         }
-        toast("🔄 Đã đồng bộ các đơn hàng offline lên hệ thống thành công!");
       }
     };
   };
@@ -557,10 +545,7 @@
   }
 
   function toast(msg) {
-    const t = document.createElement('div');
-    t.className = 'toast'; t.innerText = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
+    // Đã loại bỏ hoàn toàn việc tạo phần tử hiển thị thông báo toast ra khỏi màn hình
   }
 
   window.showCustomConfirm = function(title, message, iconClass = "fa-triangle-exclamation", confirmText = "Đồng ý", cancelText = "Hủy") {
@@ -667,9 +652,7 @@
     }
     const textToCopy = `Tọa độ GPS ${storeName || 'KH'}: ${numericLat}, ${numericLng} (https://www.google.com/maps?q=${numericLat},${numericLng})`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        toast(`📋 Đã sao chép tọa độ vào bộ nhớ tạm!`);
-      }).catch(() => {
+      navigator.clipboard.writeText(textToCopy).catch(() => {
         fallbackCopyText(textToCopy);
       });
     } else {
@@ -686,7 +669,6 @@
     textArea.select();
     try {
       document.execCommand('copy');
-      toast(`📋 Đã sao chép tọa độ thành công!`);
     } catch (err) {
       alert("Không thể sao chép tọa độ: " + err);
     }
@@ -734,30 +716,6 @@
     });
   }
 
-  async function loadStaticDataOptimized() {
-    try {
-      if (!navigator.onLine) {
-        stores = await loadStoresFromLocalCache();
-        products = await loadProductsFromLocalCache();
-      } else {
-        const storeSnap = await getDocs(collection(db, "stores"));
-        stores = storeSnap.docs.map(d => ({id:d.id, ...d.data()}));
-        await saveStoresToLocalCache(stores);
-
-        const prdSnap = await getDocs(collection(db, "products"));
-        products = prdSnap.docs.map(d => ({id:d.id, ...d.data()}));
-        await saveProductsToLocalCache(products);
-      }
-    } catch (e) {
-      console.error("Lỗi tải cache static, lấy từ IndexedDB:", e);
-      stores = await loadStoresFromLocalCache();
-      products = await loadProductsFromLocalCache();
-    }
-    
-    buildStoreIndex();
-    buildProductIndex();
-  }
-
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
@@ -781,7 +739,6 @@
     if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
     const profile = profileSnap.data();
     if (profile.active === false) { alert("⛔ Tài khoản bị khóa."); await signOut(authSvc); return; }
-    
     currentUser = { uid: user.uid, email: user.email, name: profile.name, code: profile.code, role: profile.role };
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
@@ -794,9 +751,19 @@
     }
 
     await initIndexedDB();
+    const [cachedPrds, cachedStores] = await Promise.all([
+      loadProductsFromLocalCache(),
+      loadStoresFromLocalCache()
+    ]);
 
-    toast("⏳ Đang đồng bộ dữ liệu hệ thống...");
-    await loadStaticDataOptimized();
+    if (cachedPrds && cachedPrds.length > 0) {
+      products = cachedPrds;
+      buildProductIndex();
+    }
+    if (cachedStores && cachedStores.length > 0) {
+      stores = cachedStores;
+      buildStoreIndex();
+    }
 
     try {
       const pos = await getHighAccuracyPosition();
@@ -845,7 +812,6 @@
 
     try {
       await deleteDoc(doc(db, "orders", orderId));
-      toast(`✅ Đã xóa thành công chứng từ ${soCtu}`);
     } catch (err) {
       alert("Lỗi khi xóa chứng từ: " + err.message);
     }
@@ -865,12 +831,10 @@
     if (!confirmAll) return;
 
     try {
-      toast("⏳ Đang tiến hành xóa toàn bộ đơn hàng...");
       const snapshot = await getDocs(collection(db, "orders"));
       const batch = writeBatch(db);
       snapshot.docs.forEach(d => batch.delete(d.ref));
       await batch.commit();
-      toast("✅ Đã xóa sạch toàn bộ đơn hàng thành công!");
     } catch (err) {
       alert("Lỗi khi xóa tất cả: " + err.message);
     }
@@ -880,7 +844,6 @@
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
-    toast("📍 Đang lấy tọa độ GPS thực tế để ghim trực tiếp...");
     
     try {
       const pos = await getHighAccuracyPosition();
@@ -911,15 +874,12 @@
       store.pinnedAt = new Date().toISOString();
       store.pinnedHistory = [...existingHistory, newHistoryItem];
       
-      buildStoreIndex();
-      toast(`✅ Ghim GPS thành công cho ${store.name} (${lat.toFixed(4)}, ${lng.toFixed(4)}) bởi [${currentUser.code}] ${currentUser.name}!`);
       filterTabCustomers(tabCustomerSearchKey);
       if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
         renderUI();
       }
     } catch (err) { 
       alert("Lỗi cập nhật GPS: " + err.message); 
-      toast(`❌ Ghim GPS thất bại: ${err.message}`);
     }
   };
 
@@ -938,8 +898,6 @@
       await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
       const store = stores.find(s => String(s.id) === String(storeId));
       if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
-      buildStoreIndex();
-      toast("🔄 Đã xóa định vị cũ thành công!");
       filterTabCustomers(tabCustomerSearchKey);
     } catch (err) { alert("Lỗi: " + err.message); }
   };
@@ -981,7 +939,6 @@
 
       if (updateGPSNow) {
         try {
-          toast("📍 Đang lấy tọa độ GPS chính xác...");
           const pos = await getHighAccuracyPosition();
           const lat = Number(pos.lat);
           const lng = Number(pos.lng);
@@ -1030,9 +987,6 @@
           activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
           activeVisitedStore.pinnedAt = new Date().toISOString();
           activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
-          
-          buildStoreIndex();
-          toast(`✅ Cập nhật vị trí GPS thành công!`);
         } catch (err) {
           alert("Không thể lấy tọa độ GPS: " + err.message);
         }
@@ -1055,7 +1009,6 @@
 
   window.onRouteSelected = function(val) {
     selectedRouteCode = val.trim();
-    toast(selectedRouteCode ? `📌 Đã ghim Tuyến: ${selectedRouteCode}` : "🔄 Đã bỏ chọn tuyến");
     const searchInput = document.getElementById('customerSearchInput');
     if (searchInput) filterSalesCustomers(searchInput.value);
   };
@@ -1121,8 +1074,6 @@
       return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
     }
 
-    toast("📍 Đang lấy tọa độ GPS thực tế...");
-
     try {
       const pos = await getHighAccuracyPosition();
       const lat = Number(pos.lat);
@@ -1164,7 +1115,6 @@
         });
       } else {
         await saveOfflineCheckin(checkinPayload);
-        toast("📶 Mất kết nối mạng: Đã lưu check-in vào hàng đợi chờ đồng bộ!");
       }
 
       activeVisitedStore.lat = lat;
@@ -1174,8 +1124,6 @@
       activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
       
-      buildStoreIndex();
-      toast(`✅ Check-in & Ghim GPS thành công bởi [${currentUser.code}] ${currentUser.name}!`);
       renderUI();
     } catch (err) {
       console.error(err);
@@ -1683,7 +1631,6 @@
       });
     }
 
-    toast(`✏️ Đang sửa chứng từ số #${order.soCtu}. Đã tải các mặt hàng trong đơn lên giao diện.`);
     switchTab('sales');
   };
 
@@ -1691,7 +1638,6 @@
     editingOrderId = null;
     activeVisitedStore = null;
     currentCart = {};
-    toast("🔄 Đã hủy thay đổi, quay lại Sổ gốc bán hàng.");
     switchTab('soGocBH');
   };
 
@@ -1869,17 +1815,14 @@
           ...orderData,
           updatedAt: serverTimestamp()
         });
-        toast(`✅ Cập nhật thành công đơn hàng thành công!`);
       } else {
         if (navigator.onLine) {
           const nextSoCtu = await getNextSoCtu();
           orderData.soCtu = nextSoCtu;
           orderData.createdAt = serverTimestamp();
           await addDoc(collection(db, "orders"), orderData);
-          toast(`🚀 Lưu đơn thành công! Số chứng từ: ${nextSoCtu}`);
         } else {
           await saveOfflineOrder(orderData);
-          toast(`📶 Mất kết nối mạng: Đã lưu đơn hàng vào hàng đợi offline chờ đồng bộ!`);
         }
       }
       
@@ -1906,7 +1849,6 @@
     const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
-    toast("✅ Đã xuất file Excel Sổ Gốc Bán Hàng thành công!");
   };
 
   window.importProductsExcel = function(event) {
@@ -1915,7 +1857,6 @@
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc file Excel...");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
@@ -1942,7 +1883,6 @@
           rawProducts.forEach(p => { if (!uniqueMap.has(p.code)) uniqueMap.set(p.code, p); });
           const uniqueList = Array.from(uniqueMap.values());
 
-          toast("⏳ Đang làm sạch cơ sở dữ liệu cũ trên Firestore...");
           const existingSnap = await getDocs(collection(db, "products"));
           const docsArr = existingSnap.docs;
           for (let i = 0; i < docsArr.length; i += 250) {
@@ -1952,7 +1892,6 @@
             await deleteBatch.commit();
           }
 
-          toast(`⏳ Đang đẩy ${uniqueList.length} vật tư lên Cloud Firestore...`);
           for (let i = 0; i < uniqueList.length; i += 300) {
             const chunk = uniqueList.slice(i, i + 300);
             const batch = writeBatch(db);
@@ -1964,7 +1903,6 @@
           await saveProductsToLocalCache(uniqueList);
           products = uniqueList;
           buildProductIndex();
-          toast(`✅ Đã đồng bộ thành công ${uniqueList.length} vật tư!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
@@ -1979,7 +1917,6 @@
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        toast("⏳ Đang đọc file Khách Hàng...");
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
@@ -2003,7 +1940,6 @@
         }
 
         if (rawCustomers.length > 0) {
-          toast(`⏳ Đang đồng bộ ${rawCustomers.length} khách hàng...`);
           for (let i = 0; i < rawCustomers.length; i += 250) {
             const chunk = rawCustomers.slice(i, i + 250);
             const batch = writeBatch(db);
@@ -2014,10 +1950,6 @@
             await batch.commit();
             await new Promise(r => setTimeout(r, 50));
           }
-          await saveStoresToLocalCache(rawCustomers);
-          stores = rawCustomers;
-          buildStoreIndex();
-          toast(`✅ Đã đồng bộ thành công ${rawCustomers.length} khách hàng!`);
           renderUI();
         } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
@@ -2025,8 +1957,181 @@
     reader.readAsArrayBuffer(file);
   };
 
+  window.importCompanyExcel = function(event) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+        
+        let newList = [];
+        for (let i = 0; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          const maCtu = r[0] ? String(r[0]).trim() : '';
+          const tenCtu = r[1] ? String(r[1]).trim() : '';
+          if (maCtu && maCtu !== 'MaCTu') {
+            newList.push({ maCtu, tenCtu, status: "Mở" });
+          }
+        }
+        if (newList.length > 0) {
+          companyList = newList;
+          renderUI();
+        } else {
+          alert("Không tìm thấy dữ liệu hợp lệ trong file!");
+        }
+      } catch (err) { alert("Lỗi đọc file: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  window.importRoutesExcel = function(event) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+        
+        let newList = [];
+        for (let i = 0; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          let nhomVal = r[0] !== undefined && r[0] !== '' ? String(r[0]).trim() : '';
+          const noiDung = r[1] ? String(r[1]).trim() : '';
+          const ghiChu = r[2] ? String(r[2]).trim() : '';
+          if (nhomVal && nhomVal !== 'Nhóm đối tượng') {
+            let intVal = parseInt(nhomVal, 10);
+            if (!isNaN(intVal) && intVal >= 10) {
+              newList.push({ nhomDoiTuong: String(intVal), noiDung, ghiChu });
+            }
+          }
+        }
+        if (newList.length > 0) {
+          routeGroupsList = newList;
+          renderUI();
+        } else {
+          alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
+        }
+      } catch (err) { alert("Lỗi đọc file: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  window.addNewCompany = function() {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới công ty!");
+    const maCtu = prompt("Nhập mã công ty (MaCTu):");
+    if (!maCtu) return;
+    const tenCtu = prompt("Nhập tên công ty (TenCTu):");
+    if (!tenCtu) return;
+    companyList.push({ maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), status: "Mở" });
+    renderUI();
+  };
+
+  window.addNewRoute = function() {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới tuyến!");
+    let valInput = prompt("Nhập nhóm đối tượng (Số nguyên dương >= 10, VD: 10, 11...):");
+    if (!valInput) return;
+    let intVal = parseInt(valInput.trim(), 10);
+    if (isNaN(intVal) || intVal < 10) {
+      return alert("⛔ Nhóm đối tượng phải là số nguyên dương từ 10 trở lên, không được chứa số âm hoặc số thập phân!");
+    }
+    const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
+    const ghiChu = prompt("Nhập ghi chú:") || "";
+    routeGroupsList.push({ nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() });
+    renderUI();
+  };
+
+  window.updateCompanyField = function(index, field, val) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
+    companyList[index][field] = val;
+    renderUI();
+  };
+
+  window.updateRouteField = function(index, field, val) {
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
+    if (field === 'nhomDoiTuong') {
+      let intVal = parseInt(val.trim(), 10);
+      if (isNaN(intVal) || intVal < 10) {
+        alert("⛔ Nhóm đối tượng bắt buộc là số nguyên dương từ 10 trở lên!");
+        renderUI();
+        return;
+      }
+      routeGroupsList[index][field] = String(intVal);
+    } else {
+      routeGroupsList[index][field] = val;
+    }
+    renderUI();
+  };
+
+  window.deleteCompanyItem = async function(index) {
+    if (currentUser.role !== 'admin') return;
+    const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
+    if (confirmDel) {
+      companyList.splice(index, 1);
+      renderUI();
+    }
+  };
+
+  window.deleteRouteItem = async function(index) {
+    if (currentUser.role !== 'admin') return;
+    const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
+    if (confirmDel) {
+      routeGroupsList.splice(index, 1);
+      renderUI();
+    }
+  };
+
+  window.filterCompanyTable = function(val) {
+    const q = removeAccents(val.trim());
+    const cards = document.querySelectorAll('.company-card-item');
+    cards.forEach(c => {
+      const text = removeAccents(c.innerText);
+      c.style.display = text.includes(q) ? '' : 'none';
+    });
+  };
+
+  window.filterRouteTable = function(val) {
+    const q = removeAccents(val.trim());
+    const cards = document.querySelectorAll('.route-card-item');
+    cards.forEach(c => {
+      const text = removeAccents(c.innerText);
+      c.style.display = text.includes(q) ? '' : 'none';
+    });
+  };
+
+  window.addUser = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('usCode').value.trim();
+    const name = document.getElementById('usName').value.trim();
+    const email = document.getElementById('usEmail').value.trim();
+    const password = document.getElementById('usPass').value.trim();
+    const role = document.getElementById('usRole').value;
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await secondaryAuth.signOut();
+      document.getElementById('userForm').reset();
+    } catch (err) { alert("Lỗi: " + err.message); }
+  };
+  window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); };
+
   function attachListeners() {
-    onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(50)), snap => {
+    onSnapshot(collection(db, "stores"), async snap => {
+      stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      buildStoreIndex();
+      await saveStoresToLocalCache(stores);
+      if (currentTab === 'customers') {
+        filterTabCustomers();
+      }
+    });
+
+    onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150)), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (currentTab === 'soGocBH') {
         const activePane = document.getElementById('tabPane_soGocBH');
@@ -2036,6 +2141,15 @@
 
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(50)), snap => {
       checkins = snap.docs.map(d => ({id:d.id, ...d.data()}));
+    });
+
+    onSnapshot(collection(db, "products"), async snap => {
+      const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (cloudProducts.length > 0) {
+        products = cloudProducts;
+        buildProductIndex();
+        await saveProductsToLocalCache(cloudProducts);
+      }
     });
 
     if (currentUser.role === 'admin') {
@@ -2118,7 +2232,7 @@
               </select>
             </div>
 
-            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="debouncedFilterCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
+            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; background:#fff; padding:12px 14px; font-size:14px;">
 
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Gõ từ khóa để tìm kiếm khách hàng nhanh...</div>
@@ -2177,7 +2291,7 @@
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="debouncedFilterProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 36px 10px 12px; font-size:13px; width: 100%;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm chi tiết trong danh sách..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; background:#fff; padding:10px 36px 10px 12px; font-size:13px; width: 100%;">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 8px; background: none; border: none; color: #94A3B8; font-size: 14px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#334155'}; color:#fff; font-weight:700; padding:10px 12px; font-size:12px; white-space:nowrap;">
@@ -2234,7 +2348,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="debouncedFilterTabCust(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div id="tabCustomerCardContainer">
@@ -2338,7 +2452,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:12px;">
-          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="debouncedFilterSoGoc(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
@@ -2423,7 +2537,7 @@
           <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
         </div>
         <div class="card" style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="debouncedFilterTabPrd(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
         </div>
         <div id="productCardsContainer">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
