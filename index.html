@@ -748,18 +748,41 @@
     }
 
     await initIndexedDB();
-    const [cachedPrds, cachedStores] = await Promise.all([
-      loadProductsFromLocalCache(),
-      loadStoresFromLocalCache()
-    ]);
+    
+    // Tối ưu hóa lượt đọc (Reads): Sử dụng getDocs tải 1 lần kết hợp IndexedDB thay vì onSnapshot liên tục gây tốn kém
+    try {
+      const [cachedPrds, cachedStores] = await Promise.all([
+        loadProductsFromLocalCache(),
+        loadStoresFromLocalCache()
+      ]);
 
-    if (cachedPrds && cachedPrds.length > 0) {
-      products = cachedPrds;
-      buildProductIndex();
-    }
-    if (cachedStores && cachedStores.length > 0) {
-      stores = cachedStores;
-      buildStoreIndex();
+      if (cachedPrds && cachedPrds.length > 0) {
+        products = cachedPrds;
+        buildProductIndex();
+      } else {
+        const prdSnap = await getDocs(collection(db, "products"));
+        const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (cloudPrds.length > 0) {
+          products = cloudPrds;
+          buildProductIndex();
+          await saveProductsToLocalCache(cloudPrds);
+        }
+      }
+
+      if (cachedStores && cachedStores.length > 0) {
+        stores = cachedStores;
+        buildStoreIndex();
+      } else {
+        const storeSnap = await getDocs(collection(db, "stores"));
+        const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (cloudStores.length > 0) {
+          stores = cloudStores;
+          buildStoreIndex();
+          await saveStoresToLocalCache(cloudStores);
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi tải cache ban đầu:", e);
     }
 
     try {
@@ -2149,15 +2172,9 @@
   window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); };
 
   function attachListeners() {
-    onSnapshot(collection(db, "stores"), async snap => {
-      stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
-      buildStoreIndex();
-      await saveStoresToLocalCache(stores);
-      if (currentTab === 'customers') {
-        filterTabCustomers();
-      }
-    });
-
+    // Không dùng onSnapshot cho stores và products để tiết kiệm lượt đọc (reads) tối đa về 0
+    
+    // Chỉ lắng nghe đơn hàng mới nhất cần hiển thị trong sổ gốc
     onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150)), snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (currentTab === 'soGocBH') {
@@ -2168,15 +2185,6 @@
 
     onSnapshot(query(collection(db, "checkins"), orderBy("createdAt","desc"), limit(50)), snap => {
       checkins = snap.docs.map(d => ({id:d.id, ...d.data()}));
-    });
-
-    onSnapshot(collection(db, "products"), async snap => {
-      const cloudProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (cloudProducts.length > 0) {
-        products = cloudProducts;
-        buildProductIndex();
-        await saveProductsToLocalCache(cloudProducts);
-      }
     });
 
     if (currentUser.role === 'admin') {
