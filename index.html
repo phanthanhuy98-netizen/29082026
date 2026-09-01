@@ -168,6 +168,9 @@
     color: #fff;
   }
 
+  #mapModalContainer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 7, 18, 0.85); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 1100; padding: 10px; }
+  #storeMap { width: 100%; height: 350px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #CBD5E1; }
+
   @media (max-width: 768px) {
     .desktop-table-view { display: none !important; }
     .mobile-card-view { display: block !important; }
@@ -239,6 +242,8 @@
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
   
+  const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 }; // Tâm Bình Phước / Đồng Xoài
+
   let companyList = [
     { maCtu: "17", tenCtu: "CTY TNHH MTV Thuốc Lá Thăng Long", status: "Mở" },
     { maCtu: "56", tenCtu: "CTY TNHH TM WANT WANT VN", status: "Mở" },
@@ -340,7 +345,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 10);
+      const request = indexedDB.open("DMS_OfflineDB", 11);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -348,6 +353,7 @@
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
       };
     });
   }
@@ -398,6 +404,43 @@
     });
   }
 
+  async function saveOfflineCheckin(checkinData) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
+      tx.objectStore("offlineCheckins").add(checkinData);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  window.syncOfflineCheckins = async function() {
+    if (!navigator.onLine || !idbDb) return;
+    const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
+    const store = tx.objectStore("offlineCheckins");
+    const request = store.getAll();
+    
+    request.onsuccess = async () => {
+      const items = request.result;
+      if (items && items.length > 0) {
+        for (const item of items) {
+          try {
+            await addDoc(collection(db, "checkins"), {
+              ...item,
+              createdAt: serverTimestamp()
+            });
+            const delTx = idbDb.transaction(["offlineCheckins"], "readwrite");
+            delTx.objectStore("offlineCheckins").delete(item.id);
+          } catch (e) {
+            console.error("Đồng bộ check-in lỗi:", e);
+          }
+        }
+        toast("🔄 Đã đồng bộ dữ liệu check-in offline lên hệ thống!");
+      }
+    };
+  };
+  window.addEventListener('online', window.syncOfflineCheckins);
+
   function getSafeKey(code) {
     return "k_" + btoa(unescape(encodeURIComponent(code))).replace(/[^a-zA-Z0-9]/g, "");
   }
@@ -439,6 +482,23 @@
               Math.sin(Δλ/2) * Math.sin(Δλ/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+  }
+
+  function getHighAccuracyPosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("Trình duyệt không hỗ trợ GPS."));
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude, accuracy } = pos.coords;
+          if (accuracy > 200) {
+            console.warn(`Cảnh báo: Độ chính xác GPS thấp (${Math.round(accuracy)}m).`);
+          }
+          resolve({ lat: latitude, lng: longitude, accuracy });
+        },
+        err => reject(err),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    });
   }
 
   function buildStoreIndex() {
@@ -506,14 +566,16 @@
       buildStoreIndex();
     }
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        currentSalesGPS = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      }, () => {}, { enableHighAccuracy: true });
+    try {
+      const pos = await getHighAccuracyPosition();
+      currentSalesGPS = { lat: pos.lat, lng: pos.lng };
+    } catch (e) {
+      currentSalesGPS = DEFAULT_MAP_CENTER;
     }
 
     renderUI();
     attachListeners();
+    syncOfflineCheckins();
   });
 
   window.handleLogout = async function() { await signOut(authSvc); };
@@ -574,43 +636,147 @@
   window.handleCustomerLocationAction = function(storeId) {
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
-    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
-    toast("📍 Đang lấy tọa độ GPS thực tế...");
-    
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const lat = Number(pos.coords.latitude);
-      const lng = Number(pos.coords.longitude);
-      currentSalesGPS = { lat, lng };
-      try {
-        await updateDoc(doc(db, "stores", String(storeId)), {
-          lat, lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên'
-        });
-        store.lat = lat;
-        store.lng = lng;
-        toast(`✅ Ghim GPS thành công cho ${store.name} (${lat.toFixed(4)}, ${lng.toFixed(4)})!`);
-        filterTabCustomers(tabCustomerSearchKey);
-      } catch (err) { 
-        alert("Lỗi cập nhật GPS: " + err.message); 
-        toast(`❌ Ghim GPS thất bại: ${err.message}`);
-      }
-    }, (err) => {
-      alert("Không lấy được tọa độ GPS từ thiết bị.");
-      toast("❌ Lấy tọa độ GPS thất bại!");
-    }, { enableHighAccuracy: true, timeout: 10000 });
+    openStoreMapModal(storeId);
   };
 
   window.adminResetCustomerLocation = async function(storeId) {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
     if (!confirm("Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?")) return;
     try {
-      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "" });
+      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedHistory: [] });
       const store = stores.find(s => String(s.id) === String(storeId));
-      if (store) { store.lat = 0; store.lng = 0; }
+      if (store) { store.lat = 0; store.lng = 0; store.pinnedHistory = []; }
       toast("🔄 Đã xóa định vị cũ thành công!");
       filterTabCustomers(tabCustomerSearchKey);
     } catch (err) { alert("Lỗi: " + err.message); }
+  };
+
+  let activeMapInstance = null;
+  let activeMapMarker = null;
+
+  window.openStoreMapModal = function(storeId) {
+    const store = stores.find(s => String(s.id) === String(storeId));
+    if (!store) return alert("Không tìm thấy thông tin điểm bán!");
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+      <div id="mapModalContainer">
+        <div class="modal-content" style="max-width: 650px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #E2E8F0; padding-bottom:8px;">
+            <h3 style="font-size:15px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-map-location-dot"></i> Bản Đồ GPS: ${store.name}</h3>
+            <button class="btn btn-red btn-sm" onclick="closeStoreMapModal()">Đóng</button>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+            Địa chỉ: <b>${store.address || 'Chưa có địa chỉ'}</b>
+          </div>
+          <div id="storeMap"></div>
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <button class="btn btn-amber" style="flex:1; justify-content:center;" onclick="pinStoreGPSFromMap('${store.id}')">
+              <i class="fa-solid fa-location-crosshairs"></i> Cập nhật GPS tại vị trí này
+            </button>
+            ${store.lat && store.lng ? `
+              <a href="https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}" target="_blank" class="btn btn-green" style="flex:1; justify-content:center; text-decoration:none;">
+                <i class="fa-solid fa-diamond-turn-right"></i> Mở Google Maps
+              </a>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+
+    setTimeout(() => {
+      const initialLat = store.lat && store.lat !== 0 ? store.lat : (currentSalesGPS ? currentSalesGPS.lat : DEFAULT_MAP_CENTER.lat);
+      const initialLng = store.lng && store.lng !== 0 ? store.lng : (currentSalesGPS ? currentSalesGPS.lng : DEFAULT_MAP_CENTER.lng);
+
+      if (activeMapInstance) {
+        activeMapInstance.remove();
+        activeMapInstance = null;
+      }
+
+      activeMapInstance = L.map('storeMap').setView([initialLat, initialLng], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+      }).addTo(activeMapInstance);
+
+      if (store.lat && store.lng !== 0) {
+        activeMapMarker = L.marker([store.lat, store.lng], { draggable: true }).addTo(activeMapInstance);
+        activeMapMarker.bindPopup(`<b>${store.name}</b><br>Kéo thả marker để chọn chính xác vị trí.`).openPopup();
+        
+        activeMapMarker.on('dragend', function(e) {
+          const coord = e.target.getLatLng();
+          activeVisitedStoreTempGPS = { lat: coord.lat, lng: coord.lng };
+        });
+      } else if (currentSalesGPS) {
+        activeMapMarker = L.marker([currentSalesGPS.lat, currentSalesGPS.lng], { draggable: true }).addTo(activeMapInstance);
+        activeMapMarker.bindPopup(`<b>Vị trí hiện tại của bạn</b><br>Kéo thả đến vị trí cửa hàng.`).openPopup();
+      }
+
+      activeMapInstance.invalidateSize();
+    }, 200);
+  };
+
+  let activeVisitedStoreTempGPS = null;
+
+  window.pinStoreGPSFromMap = async function(storeId) {
+    let targetLat, targetLng;
+    if (activeMapMarker) {
+      const pos = activeMapMarker.getLatLng();
+      targetLat = pos.lat;
+      targetLng = pos.lng;
+    } else if (activeVisitedStoreTempGPS) {
+      targetLat = activeVisitedStoreTempGPS.lat;
+      targetLng = activeVisitedStoreTempGPS.lng;
+    } else if (currentSalesGPS) {
+      targetLat = currentSalesGPS.lat;
+      targetLng = currentSalesGPS.lng;
+    } else {
+      return alert("Không xác định được tọa độ GPS!");
+    }
+
+    try {
+      const store = stores.find(s => String(s.id) === String(storeId));
+      const existingHistory = store?.pinnedHistory || [];
+      const newHistoryItem = {
+        lat: targetLat,
+        lng: targetLng,
+        code: currentUser.code || 'NV',
+        name: currentUser.name || 'Nhân viên',
+        time: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, "stores", String(storeId)), {
+        lat: targetLat,
+        lng: targetLng,
+        pinnedByCode: currentUser.code || 'NV',
+        pinnedByName: currentUser.name || 'Nhân viên',
+        pinnedAt: new Date().toISOString(),
+        pinnedHistory: [...existingHistory, newHistoryItem]
+      });
+
+      if (store) {
+        store.lat = targetLat;
+        store.lng = targetLng;
+        store.pinnedHistory = [...existingHistory, newHistoryItem];
+      }
+
+      toast(`✅ Đã ghim GPS thành công cho cửa hàng!`);
+      closeStoreMapModal();
+      renderUI();
+    } catch (err) {
+      alert("Lỗi cập nhật GPS: " + err.message);
+    }
+  };
+
+  window.closeStoreMapModal = function() {
+    if (activeMapInstance) {
+      activeMapInstance.remove();
+      activeMapInstance = null;
+    }
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
   };
 
   window.selectStoreDirectly = function(storeId, event) {
@@ -715,38 +881,72 @@
     }
   });
 
-  window.checkinActiveStoreGPS = function() {
-    if (!activeVisitedStore) return alert("Chưa có thông tin điểm bán!");
-    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
-    
+  window.checkinActiveStoreGPS = async function() {
+    if (!activeVisitedStore) return alert("Chưa chọn điểm bán!");
     toast("📍 Đang lấy tọa độ GPS thực tế...");
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const lat = Number(pos.coords.latitude);
-      const lng = Number(pos.coords.longitude);
+
+    try {
+      const pos = await getHighAccuracyPosition();
+      const lat = pos.lat;
+      const lng = pos.lng;
       currentSalesGPS = { lat, lng };
-      try {
+
+      if (activeVisitedStore.lat && activeVisitedStore.lng) {
+        const distance = calculateDistanceMeters(lat, lng, activeVisitedStore.lat, activeVisitedStore.lng);
+        if (distance > 150) {
+          if (!confirm(`⚠️ Bạn đang đứng cách cửa hàng ${Math.round(distance)}m. Vượt quá bán kính cho phép (150m). Bạn vẫn muốn check-in?`)) {
+            return;
+          }
+        }
+      }
+
+      const existingHistory = activeVisitedStore.pinnedHistory || [];
+      const newHistoryItem = {
+        lat, lng,
+        code: currentUser.code || 'NV',
+        name: currentUser.name || 'Nhân viên',
+        time: new Date().toISOString()
+      };
+
+      const checkinPayload = {
+        salesUid: currentUser.uid,
+        salesName: currentUser.name,
+        salesCode: currentUser.code,
+        storeId: String(activeVisitedStore.id),
+        storeName: activeVisitedStore.name,
+        lat, lng,
+        accuracy: pos.accuracy,
+        status: "Check-in thành công"
+      };
+
+      if (navigator.onLine) {
         const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-        
         await updateDoc(storeRef, {
           lat, lng,
           pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên'
+          pinnedByName: currentUser.name || 'Nhân viên',
+          pinnedAt: new Date().toISOString(),
+          pinnedHistory: [...existingHistory, newHistoryItem]
         });
 
         await addDoc(collection(db, "checkins"), {
-          salesUid: currentUser.uid, salesName: currentUser.name, salesCode: currentUser.code,
-          storeId: String(activeVisitedStore.id), storeName: activeVisitedStore.name, lat, lng, photo: "", status: "Check-in thành công", createdAt: serverTimestamp()
+          ...checkinPayload,
+          createdAt: serverTimestamp()
         });
+      } else {
+        await saveOfflineCheckin(checkinPayload);
+        toast("📶 Mất kết nối mạng: Đã lưu check-in vào hàng đợi chờ đồng bộ!");
+      }
 
-        activeVisitedStore.lat = lat;
-        activeVisitedStore.lng = lng;
-        toast(`✅ Check-in thành công! Đã lưu GPS.`);
-        renderUI();
-      } catch (err) { alert("Lỗi lưu GPS: " + err.message); }
-    }, (err) => {
+      activeVisitedStore.lat = lat;
+      activeVisitedStore.lng = lng;
+      activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+      toast(`✅ Check-in thành công! Đã lưu GPS.`);
+      renderUI();
+    } catch (err) {
       console.error(err);
-      alert("Không thể lấy tọa độ GPS.");
-    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      alert("Không thể lấy tọa độ GPS: " + err.message);
+    }
   };
 
   window.updateCartDetail = function(prdId, field, val) {
@@ -1105,7 +1305,8 @@
             </span>
           </td>
           <td style="text-align:right; white-space:nowrap;">
-            ${hasLat ? `<a href="https://maps.google.com/?q=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
+            ${hasLat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; text-decoration:none; margin-right:4px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</a>` : ''}
+            ${hasLat ? `<button class="btn btn-green btn-sm" style="padding:4px 8px; font-size:10px; margin-right:4px;" onclick="openStoreMapModal('${s.id}')"><i class="fa-solid fa-map"></i> Bản đồ</button>` : ''}
             <button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:10px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
             ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px; margin-left:4px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </td>
@@ -1574,7 +1775,7 @@
             rawCustomers.push({
               id: maDtpn || `KH_${i}`,
               code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: ''
+              routeDay: '', creditLimit: 20000000, lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedHistory: []
             });
           }
         }
@@ -1868,9 +2069,14 @@
                 <div style="font-size:14px; font-weight:800; color:#FFFFFF; line-height:1.35; flex:1; word-break:break-word;">
                   [${activeVisitedStore.code||'KH'}] ${activeVisitedStore.name} ${editingOrderId ? '<span style="color:var(--amber); font-size:12px;">(Đang Sửa Đơn)</span>' : ''}
                 </div>
-                <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 12px; font-size:11px; white-space:nowrap; flex-shrink:0;">
-                  <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in GPS' : 'Lưu GPS'}
-                </button>
+                <div style="display:flex; gap:4px; flex-shrink:0;">
+                  <button class="btn btn-green btn-sm" onclick="openStoreMapModal('${activeVisitedStore.id}')" style="font-weight:700; padding:6px 10px; font-size:11px; white-space:nowrap;">
+                    <i class="fa-solid fa-map"></i> Bản đồ
+                  </button>
+                  <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:11px; white-space:nowrap;">
+                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Check-in GPS' : 'Lưu GPS'}
+                  </button>
+                </div>
               </div>
               <div style="font-size:11px; color:#CBD5E1; display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
                 <span style="word-break:break-word; max-width:280px;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
