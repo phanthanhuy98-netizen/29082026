@@ -167,72 +167,7 @@
   
   input, select, textarea { width:100%; max-width: 100%; padding:12px 14px; margin:4px 0 8px; border:1px solid #CBD5E1; border-radius:12px; font-family:inherit; font-size:14px; background:#F8FAFC; transition:all 0.2s; -webkit-appearance: none; }
   input:focus, select:focus { border-color:var(--primary); outline:none; background:#fff; box-shadow:0 0 0 3px rgba(79, 70, 229, 0.12); }
-  
-  .sticky-cart-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    background: rgba(15, 23, 42, 0.98);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
-    padding: 14px 20px;
-    padding-bottom: max(16px, env(safe-area-inset-bottom));
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    z-index: 1050;
-    box-shadow: 0 -15px 40px rgba(0, 0, 0, 0.7);
-    color: #fff;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  
-  body.keyboard-open .sticky-cart-footer {
-    transform: translateY(110%);
-    pointer-events: none;
-  }
 
-  .floating-cart-trigger {
-    position: fixed;
-    bottom: 24px;
-    right: 20px;
-    background: var(--amber-gradient);
-    color: #0F172A;
-    padding: 12px 20px;
-    border-radius: 30px;
-    font-weight: 800;
-    font-size: 13px;
-    box-shadow: 0 10px 30px rgba(245, 158, 11, 0.6);
-    z-index: 1060;
-    display: none;
-    align-items: center;
-    gap: 8px;
-    border: 2px solid #fff;
-    cursor: pointer;
-    animation: bounceSubtle 1.5s infinite;
-  }
-  body.keyboard-open .floating-cart-trigger {
-    display: flex;
-  }
-  @keyframes bounceSubtle {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
-  }
-
-  @media (max-width: 768px) {
-    body { padding: 4px !important; font-size: 14px !important; padding-bottom: 240px !important; }
-    .app { width: 100% !important; padding: 0 !important; }
-    .topbar { flex-direction: column; align-items: stretch; padding: 10px; gap: 8px; border-radius: 12px; }
-    .nav-btns { display: flex; overflow-x: auto; width: 100%; padding-bottom: 6px; gap: 4px; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
-    .nav-btns::-webkit-scrollbar { display: none; }
-    .card { padding: 10px; }
-    input, select, textarea { font-size: 16px !important; padding: 10px 12px !important; }
-    .panel { padding: 8px !important; border-radius: 14px !important; margin-bottom: 140px !important; min-height: auto !important; }
-  }
-
-  .toast { display: none !important; }
-  
   .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(3, 7, 18, 0.85);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
   .modal-content{background:#fff;padding:24px;border-radius:20px;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.6);border:1px solid #E2E8F0;}
   .hidden{display:none !important;}
@@ -275,7 +210,9 @@
   let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
-  
+  let sessionUnsub = null; // Dùng để lắng nghe đá session đăng nhập đồng thời
+  const currentSessionId = '_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
   let companyList = [
@@ -376,7 +313,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 14);
+      const request = indexedDB.open("DMS_OfflineDB", 15);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -732,19 +669,56 @@
     });
   }
 
+  // --- XỬ LÝ ĐĂNG NHẬP VỚI BẢO MẬT 3 LẦN SAI & CHỐNG ĐĂNG NHẬP 2 MÁY ---
   window.handleLogin = async function(e) {
     e.preventDefault();
     const email = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
+
     try {
-      await signInWithEmailAndPassword(authSvc, email, pass);
+      // 1. Truy vấn thông tin user trong bảng users qua email để kiểm tra trạng thái khóa & số lần sai
+      const usersSnap = await getDocs(collection(db, "users"));
+      let targetUserDoc = null;
+      let targetUserId = null;
+
+      usersSnap.forEach(d => {
+        if (d.data().email && d.data().email.toLowerCase() === email.toLowerCase()) {
+          targetUserDoc = d.data();
+          targetUserId = d.id;
+        }
+      });
+
+      if (targetUserDoc && targetUserDoc.active === false) {
+        return alert("⛔ Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 3 lần!\nVui lòng liên hệ Admin để được mở lại và đổi mật khẩu mới.");
+      }
+
+      const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
+      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0);
+
+      try {
+        await signInWithEmailAndPassword(authSvc, email, pass);
+        // Đăng nhập thành công -> Reset số lần sai về 0
+        localStorage.removeItem(failedAttemptsKey);
+      } catch (authErr) {
+        currentFailed++;
+        localStorage.setItem(failedAttemptsKey, currentFailed);
+
+        if (currentFailed >= 3) {
+          if (targetUserId) {
+            await updateDoc(doc(db, "users", targetUserId), { active: false });
+          }
+          alert("⛔ Bạn đã nhập sai mật khẩu 3 lần!\nTài khoản đã bị KHÓA. Vui lòng liên hệ admin để được mở lại và đổi mật khẩu mới!");
+        } else {
+          alert(`⛔ Mật khẩu không đúng! Bạn còn ${3 - currentFailed} lần thử trước khi tài khoản bị khóa.`);
+        }
+        return;
+      }
     } catch (err) {
       console.error("Lỗi đăng nhập:", err);
       alert("Đăng nhập thất bại: " + err.message);
     }
   };
 
-  // Cơ chế đồng bộ nền ngầm (Background Version Check) cho sản phẩm và khách hàng để kiểm tra cập nhật mới từ Admin
   async function backgroundSyncMetadataAndCache() {
     if (!navigator.onLine) return;
     try {
@@ -755,8 +729,6 @@
         const localDataVersion = await getMetaVersion("cachedDataVersion") || 0;
 
         if (cloudDataVersion > localDataVersion) {
-          console.log("Phát hiện dữ liệu mới từ Cloud, đang tiến hành đồng bộ ngầm...");
-          
           const [prdSnap, storeSnap] = await Promise.all([
             getDocs(collection(db, "products")),
             getDocs(collection(db, "stores"))
@@ -777,7 +749,6 @@
           }
 
           await saveMetaVersion("cachedDataVersion", cloudDataVersion);
-          console.log("✅ Đồng bộ ngầm hoàn tất thành công!");
         }
       }
     } catch (e) {
@@ -788,14 +759,37 @@
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
+      if (sessionUnsub) { sessionUnsub(); sessionUnsub = null; }
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
       return;
     }
+
     const profileSnap = await getDoc(doc(db, "users", user.uid));
     if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
     const profile = profileSnap.data();
-    if (profile.active === false) { alert("⛔ Tài khoản bị khóa."); await signOut(authSvc); return; }
+
+    if (profile.active === false) { 
+      alert("⛔ Tài khoản bị khóa."); 
+      await signOut(authSvc); 
+      return; 
+    }
+
+    // 2. Ghi nhận SessionId hiện tại lên Firestore để kiểm soát đăng nhập 1 máy duy nhất
+    await updateDoc(doc(db, "users", user.uid), { activeSessionId: currentSessionId });
+
+    // Lắng nghe xem có thiết bị khác đăng nhập đè lên không
+    if (sessionUnsub) sessionUnsub();
+    sessionUnsub = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.activeSessionId && data.activeSessionId !== currentSessionId) {
+          alert("⚠️ Đang có người đăng nhập tài khoản hãy kiểm tra lại ngay!!");
+          signOut(authSvc);
+        }
+      }
+    });
+
     currentUser = { uid: user.uid, email: user.email, name: profile.name, code: profile.code, role: profile.role };
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
@@ -841,7 +835,6 @@
         }
       }
 
-      // Kích hoạt đồng bộ ngầm kiểm tra phiên bản dữ liệu mới
       backgroundSyncMetadataAndCache();
     } catch (e) {
       console.error("Lỗi tải cache ban đầu:", e);
@@ -1954,13 +1947,74 @@
     }
   };
 
+  // --- HÀM XUẤT EXCEL CHO CÁC TAB ---
   window.exportSoGocExcel = function() {
     const tableEl = document.getElementById('soGocExportTable');
-    if (!tableEl) return alert("Không có dữ liệu để xuất!");
-    
+    if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
     const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
+  };
+
+  window.exportCustomersExcel = function() {
+    if (stores.length === 0) return alert("Không có danh sách khách hàng để xuất!");
+    const dataToExport = stores.map(s => ({
+      "Mã Khách Hàng": s.code || '',
+      "Tên Khách Hàng": s.name || '',
+      "Địa Chỉ": s.address || '',
+      "Số Điện Thoại": s.phone || '',
+      "Zalo": s.zalo || '',
+      "Vĩ Độ (Lat)": s.lat || 0,
+      "Kinh Độ (Lng)": s.lng || 0,
+      "Nhân Viên Ghim": s.pinnedByName || ''
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "KhachHang");
+    XLSX.writeFile(workbook, `DanhSachKhachHang_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  window.exportProductsExcel = function() {
+    if (products.length === 0) return alert("Không có danh sách vật tư để xuất!");
+    const dataToExport = products.map(p => ({
+      "Mã Vật Tư": p.code || '',
+      "Tên Vật Tư": p.name || '',
+      "Đơn Vị Tính": p.dvt || 'hộp',
+      "Tồn Đầu": p.stockDau || 0,
+      "Tồn Cuối": p.stockCuoi || 0,
+      "Đơn Giá": p.price || 0,
+      "Quy Cách Thùng": p.tyLeQuyDoi || 50
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "VatTu");
+    XLSX.writeFile(workbook, `DanhSachVatTu_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  window.exportRoutesExcel = function() {
+    if (routeGroupsList.length === 0) return alert("Không có danh sách tuyến để xuất!");
+    const dataToExport = routeGroupsList.map(r => ({
+      "Nhóm Đối Tượng": r.nhomDoiTuong || '',
+      "Nội Dung / Tên Tuyến": r.noiDung || '',
+      "Ghi Chú": r.ghiChu || ''
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "TuyenBanHang");
+    XLSX.writeFile(workbook, `DanhSachTuyen_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  window.exportCompanyExcel = function() {
+    if (companyList.length === 0) return alert("Không có danh sách công ty để xuất!");
+    const dataToExport = companyList.map(c => ({
+      "Mã Công Ty (MaCTu)": c.maCtu || '',
+      "Tên Công Ty (TenCTu)": c.tenCtu || '',
+      "Trạng Thái": c.status || 'Mở'
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "CongTy");
+    XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   window.importProductsExcel = function(event) {
@@ -2016,6 +2070,7 @@
           products = uniqueList;
           buildProductIndex();
           renderUI();
+          alert("✅ Nhập danh sách vật tư thành công!");
         } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
     };
@@ -2062,7 +2117,12 @@
             await batch.commit();
             await new Promise(r => setTimeout(r, 50));
           }
+          const storeSnap = await getDocs(collection(db, "stores"));
+          stores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          buildStoreIndex();
+          await saveStoresToLocalCache(stores);
           renderUI();
+          alert("✅ Nhập danh sách khách hàng thành công!");
         } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
     };
@@ -2092,6 +2152,7 @@
         if (newList.length > 0) {
           companyList = newList;
           renderUI();
+          alert("✅ Nhập danh sách công ty thành công!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ trong file!");
         }
@@ -2127,6 +2188,7 @@
         if (newList.length > 0) {
           routeGroupsList = newList;
           renderUI();
+          alert("✅ Nhập danh sách tuyến thành công!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
         }
@@ -2229,9 +2291,14 @@
       await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
       await secondaryAuth.signOut();
       document.getElementById('userForm').reset();
+      alert("✅ Tạo tài khoản thành công!");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
-  window.toggleUserActive = async function(uid, active) { await updateDoc(doc(db, "users", uid), { active }); };
+
+  window.toggleUserActive = async function(uid, active) { 
+    await updateDoc(doc(db, "users", uid), { active }); 
+    alert(active ? "✅ Đã mở khóa tài khoản!" : "🔒 Đã khóa tài khoản thành công!");
+  };
 
   function attachListeners() {
     onSnapshot(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150)), snap => {
@@ -2435,6 +2502,7 @@
             <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#334155'}; color:#fff; font-weight:700; font-size:12px;">
               <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn danh sách ghim' : 'Xem tất cả KH đã ghim GPS'}
             </button>
+            <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
             ${currentUser.role !== 'sales' ? `
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel KH <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}
@@ -2630,7 +2698,10 @@
       container.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <h2 style="font-size:16px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Quản Lý Vật Tư (${products.length})</h2>
-          <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
+          </div>
         </div>
         <div class="card" style="margin-bottom:10px;">
           <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" style="margin:0; background:#fff; padding:10px 12px; font-size:13px;">
@@ -2649,7 +2720,8 @@
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
-          <div style="display:flex; gap:6px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm Tuyến</button>` : ''}
             ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel Tuyến <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
           </div>
@@ -2683,7 +2755,8 @@
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-building" style="color:var(--primary);"></i> DS Mã Công Ty (${companyList.length})</h2>
-          <div style="display:flex; gap:6px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Công Ty</button>` : ''}
             ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel Cty <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
           </div>
