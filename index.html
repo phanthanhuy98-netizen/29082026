@@ -571,7 +571,7 @@
   let selectedCompanyCode = "";
   let editingOrderId = null;
 
-  let soGocFilterKeyword = "", soGocFilterDate = "", soGocSalesFilter = "";
+  let soGocFilterKeyword = "", soGocFilterDateFrom = "", soGocFilterDateTo = "", soGocSalesFilter = "", soGocQuickDate = "all";
   let soGocLimitCount = 30;
 
   let customerSearchKeyword = ""; 
@@ -585,7 +585,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 16);
+      const request = indexedDB.open("DMS_OfflineDB", 17);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -683,6 +683,34 @@
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+  }
+
+  async function cleanupExpiredOrders() {
+    try {
+      const ordersSnap = await getDocs(collection(db, "orders"));
+      const now = new Date();
+      const batch = writeBatch(db);
+      let countDeleted = 0;
+
+      ordersSnap.forEach(d => {
+        const data = d.data();
+        if (data.ngayCtu) {
+          const orderDate = new Date(data.ngayCtu);
+          const diffTime = now - orderDate;
+          const diffDays = diffTime / (1000 * 60 * 60 * 24);
+          if (diffDays >= 6) {
+            batch.delete(d.ref);
+            countDeleted++;
+          }
+        }
+      });
+
+      if (countDeleted > 0) {
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("Lỗi tự động dọn dẹp đơn cũ:", e);
+    }
   }
 
   window.syncOfflineCheckins = async function() {
@@ -1072,6 +1100,7 @@
     }
 
     await initIndexedDB();
+    await cleanupExpiredOrders();
     
     try {
       const [cachedPrds, cachedStores] = await Promise.all([
@@ -1140,49 +1169,6 @@
       alert("✅ Đổi mật khẩu thành công!");
       closeChangePasswordModal();
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
-  };
-
-  window.adminDeleteOrder = async function(orderId, soCtu) {
-    if (!currentUser || currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa đơn hàng!");
-    }
-    const confirmDel = await window.showCustomConfirm(
-      "Xác Nhận Xóa Chứng Từ",
-      `Bạn có thực sự muốn xóa vĩnh viễn chứng từ #${soCtu} không?\nThao tác này không thể hoàn tác!`,
-      "fa-trash-can",
-      "Xóa ngay",
-      "Hủy"
-    );
-    if (!confirmDel) return;
-
-    try {
-      await deleteDoc(doc(db, "orders", orderId));
-    } catch (err) {
-      alert("Lỗi khi xóa chứng từ: " + err.message);
-    }
-  };
-
-  window.adminDeleteAllOrders = async function() {
-    if (!currentUser || currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ có tài khoản Admin mới được quyền xóa toàn bộ đơn hàng!");
-    }
-    const confirmAll = await window.showCustomConfirm(
-      "Xóa Toàn Bộ Đơn Hàng",
-      `⚠️ CẢNH BÁO NGUY HIỂM:\nHành động này sẽ XÓA SẠCH toàn bộ lịch sử bán hàng trong hệ thống. Bạn có chắc chắn muốn tiếp tục?`,
-      "fa-triangle-exclamation",
-      "Xóa sạch tất cả",
-      "Hủy"
-    );
-    if (!confirmAll) return;
-
-    try {
-      const snapshot = await getDocs(collection(db, "orders"));
-      const batch = writeBatch(db);
-      snapshot.docs.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-    } catch (err) {
-      alert("Lỗi khi xóa tất cả: " + err.message);
-    }
   };
 
   window.handleCustomerLocationAction = async function(storeId) {
@@ -1919,7 +1905,15 @@
         maNv.includes(queryKey) || 
         tenNv.includes(queryKey);
 
-      const matchDate = soGocFilterDate === "" || ngayCtu === soGocFilterDate;
+      let matchDate = true;
+      if (soGocFilterDateFrom && soGocFilterDateTo) {
+        matchDate = ngayCtu >= soGocFilterDateFrom && ngayCtu <= soGocFilterDateTo;
+      } else if (soGocFilterDateFrom) {
+        matchDate = ngayCtu >= soGocFilterDateFrom;
+      } else if (soGocFilterDateTo) {
+        matchDate = ngayCtu <= soGocFilterDateTo;
+      }
+
       const matchSales = soGocSalesFilter === "" || maNv === soGocSalesFilter;
 
       const isVisible = matchOther && matchDate && matchSales;
@@ -1934,8 +1928,13 @@
     if (sumEl) sumEl.innerText = totalFilteredAmount.toLocaleString() + ' đ';
   };
 
-  window.setSoGocFilterDate = function(val) {
-    soGocFilterDate = val;
+  window.setSoGocDateFrom = function(val) {
+    soGocFilterDateFrom = val;
+    filterSoGocCards();
+  };
+
+  window.setSoGocDateTo = function(val) {
+    soGocFilterDateTo = val;
     filterSoGocCards();
   };
 
@@ -1944,19 +1943,37 @@
     filterSoGocCards();
   };
 
-  window.setQuickDateFilter = function(type) {
+  window.setSoGocQuickDateFilter = function(type) {
+    soGocQuickDate = type;
     const today = new Date();
     const yyyy = today.getFullYear();
     let mm = String(today.getMonth() + 1).padStart(2, '0');
     let dd = String(today.getDate()).padStart(2, '0');
-    
+    let todayStr = `${yyyy}-${mm}-${dd}`;
+
     if (type === 'today') {
-      soGocFilterDate = `${yyyy}-${mm}-${dd}`;
+      soGocFilterDateFrom = todayStr;
+      soGocFilterDateTo = todayStr;
+    } else if (type === 'week') {
+      const firstDayOfWeek = new Date(today);
+      const day = today.getDay();
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
+      firstDayOfWeek.setDate(diff);
+      soGocFilterDateFrom = firstDayOfWeek.toISOString().slice(0, 10);
+      soGocFilterDateTo = todayStr;
+    } else if (type === 'month') {
+      soGocFilterDateFrom = `${yyyy}-${mm}-01`;
+      soGocFilterDateTo = todayStr;
     } else if (type === 'all') {
-      soGocFilterDate = '';
+      soGocFilterDateFrom = '';
+      soGocFilterDateTo = '';
     }
-    const dateInput = document.getElementById('soGocDateFilter');
-    if (dateInput) dateInput.value = soGocFilterDate;
+
+    const inputFrom = document.getElementById('soGocDateFrom');
+    const inputTo = document.getElementById('soGocDateTo');
+    if (inputFrom) inputFrom.value = soGocFilterDateFrom;
+    if (inputTo) inputTo.value = soGocFilterDateTo;
+
     filterSoGocCards();
   };
 
@@ -1973,14 +1990,15 @@
     if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
     const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-    const isAdmin = currentUser.role === 'admin';
-    if (!isOwner && !isAdmin) {
-      return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
+    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
+      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý (Manager/Admin) để được mở khóa hỗ trợ chỉnh sửa đơn hàng.`);
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (order.ngayCtu !== todayStr && !isAdmin) {
-      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, không thể chỉnh sửa! (Chỉ được sửa đơn trong ngày).`);
+    if (!isOwner && !isManagerOrAdmin) {
+      return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
     }
 
     let targetStore = stores.find(s => String(s.id) === String(order.storeId));
@@ -2619,9 +2637,8 @@
     if (userInfoEl) {
       userInfoEl.innerHTML = `[${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);">${currentUser.role}</span>) ${navigator.onLine?'':'<span class="badge badge-danger">Offline</span>'}`;
     }
-    const isAdmin = currentUser.role === 'admin', isManager = currentUser.role === 'manager', isAccountant = currentUser.role === 'accountant';
+    const isAdmin = currentUser.role === 'admin';
     
-    // ĐÃ MỞ KHÓA: Cho phép tất cả các tài khoản hiển thị đầy đủ các tab
     setNav('navSales', true); 
     setNav('navSoGocBH', true);
     setNav('navCustomers', true); 
@@ -2884,7 +2901,6 @@
         }
       });
 
-      const isAdmin = currentUser && currentUser.role === 'admin';
       const allGroupedList = Array.from(groupedOrdersMap.values());
       const limitedOrders = allGroupedList.slice(0, soGocLimitCount);
       const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
@@ -2897,19 +2913,28 @@
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
             <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="adminDeleteAllOrders()"><i class="fa-solid fa-trash-can"></i> Xóa Tất Cả</button>` : ''}
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--card-border);">
           <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <button class="btn btn-sm" style="background:#E2E8F0; color:#1E293B;" onclick="setQuickDateFilter('today')">Hôm Nay</button>
-            <button class="btn btn-sm" style="background:#E2E8F0; color:#1E293B;" onclick="setQuickDateFilter('all')">Tất Cả</button>
-            <input type="date" id="soGocDateFilter" value="${soGocFilterDate}" onchange="setSoGocFilterDate(this.value)" style="margin:0; width:135px; padding:8px 10px; font-size:12px;">
-            
-            <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; width:130px; padding:8px 10px; font-size:12px;">
-              <option value="">Tất cả NV</option>
-              ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>${code}</option>`).join('')}
+            <button class="btn btn-sm ${soGocQuickDate==='today'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('today')">Hôm Nay</button>
+            <button class="btn btn-sm ${soGocQuickDate==='week'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('week')">Tuần Này</button>
+            <button class="btn btn-sm ${soGocQuickDate==='month'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('month')">Tháng Này</button>
+            <button class="btn btn-sm ${soGocQuickDate==='all'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('all')">Tất Cả</button>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:4px; flex:1; min-width:140px;">
+              <span style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ:</span>
+              <input type="date" id="soGocDateFrom" value="${soGocFilterDateFrom}" onchange="setSoGocDateFrom(this.value)" style="margin:0; padding:8px 10px; font-size:12px;">
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; flex:1; min-width:140px;">
+              <span style="font-size:11px; font-weight:700; color:var(--text-muted);">Đến:</span>
+              <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:8px 10px; font-size:12px;">
+            </div>
+            <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; flex:1; min-width:130px; padding:8px 10px; font-size:12px;">
+              <option value="">-- Tất cả NV --</option>
+              ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>[${code}]</option>`).join('')}
             </select>
           </div>
         </div>
@@ -2925,7 +2950,11 @@
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${limitedOrders.length > 0 ? limitedOrders.map(o => {
-            const canEdit = (o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid)) || isAdmin;
+            const isOwner = (o.salesCode === currentUser.code || o.salesUid === currentUser.uid);
+            const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+            const isToday = o.ngayCtu === todayStr;
+            const canEdit = (isOwner && isToday) || isManagerOrAdmin;
+            
             return `
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}" style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2942,7 +2971,6 @@
                   <div style="display:flex; gap:6px;">
                     <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
                     ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="adminDeleteOrder('${o.orderId}', '${o.soCtu}')"><i class="fa-solid fa-trash"></i></button>` : ''}
                   </div>
                 </div>
               </div>
