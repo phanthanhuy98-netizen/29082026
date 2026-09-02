@@ -376,7 +376,7 @@
   let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
-  let lastVisibleOrderDoc = null; // Con trỏ Cursor sâu cho Sổ Gốc
+  let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
   let sessionUnsub = null;
   const currentSessionId = '_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -1133,6 +1133,7 @@
       role: (profile.role || 'sales').toLowerCase() 
     };
 
+    // 🌟 TỐI ƯU SIÊU TỐC: Hiển thị giao diện ngay lập tức 0 giây chờ đợi
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     
@@ -1143,72 +1144,112 @@
       currentTab = (currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH');
     }
 
-    await initIndexedDB();
-    await cleanupExpiredOrdersOptimized();
-    
-    try {
-      const [cachedPrds, cachedStores, cachedRoutes] = await Promise.all([
-        loadProductsFromLocalCache(),
-        loadStoresFromLocalCache(),
-        loadRoutesFromLocalCache()
-      ]);
-
-      if (cachedPrds && cachedPrds.length > 0) {
-        products = cachedPrds;
-        buildProductIndex();
-      } else {
-        const prdSnap = await getDocs(collection(db, "products"));
-        const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (cloudPrds.length > 0) {
-          products = cloudPrds;
-          buildProductIndex();
-          await saveProductsToLocalCache(cloudPrds);
-        }
-      }
-
-      if (cachedStores && cachedStores.length > 0) {
-        stores = cachedStores;
-        buildStoreIndex();
-      } else {
-        const storeSnap = await getDocs(collection(db, "stores"));
-        const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (cloudStores.length > 0) {
-          stores = cloudStores;
-          buildStoreIndex();
-          await saveStoresToLocalCache(cloudStores);
-        }
-      }
-
-      if (cachedRoutes && cachedRoutes.length > 0) {
-        routeGroupsList = cachedRoutes;
-      } else {
-        const routeSnap = await getDocs(collection(db, "routes"));
-        const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (cloudRoutes.length > 0) {
-          routeGroupsList = cloudRoutes;
-          await saveRoutesToLocalCache(cloudRoutes);
-        }
-      }
-
-      backgroundSyncMetadataAndCache();
-    } catch (e) {
-      console.error("Lỗi tải cache ban đầu:", e);
-    }
-
-    try {
-      const pos = await getHighAccuracyPosition();
-      currentSalesGPS = { lat: pos.lat, lng: pos.lng };
-    } catch (e) {
-      currentSalesGPS = DEFAULT_MAP_CENTER;
-    }
-
     renderUI();
-    attachListeners();
-    syncOfflineCheckins();
-    syncOfflineOrders();
+
+    // Các tác vụ nặng bên dưới chạy bất đồng bộ ngầm phía sau (Không làm đơ/lag UI)
+    setTimeout(async () => {
+      await initIndexedDB();
+      await cleanupExpiredOrdersOptimized();
+      
+      try {
+        const [cachedPrds, cachedStores, cachedRoutes] = await Promise.all([
+          loadProductsFromLocalCache(),
+          loadStoresFromLocalCache(),
+          loadRoutesFromLocalCache()
+        ]);
+
+        if (cachedPrds && cachedPrds.length > 0) {
+          products = cachedPrds;
+          buildProductIndex();
+        } else {
+          const prdSnap = await getDocs(collection(db, "products"));
+          const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudPrds.length > 0) {
+            products = cloudPrds;
+            buildProductIndex();
+            await saveProductsToLocalCache(cloudPrds);
+          }
+        }
+
+        if (cachedStores && cachedStores.length > 0) {
+          stores = cachedStores;
+          buildStoreIndex();
+        } else {
+          const storeSnap = await getDocs(collection(db, "stores"));
+          const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudStores.length > 0) {
+            stores = cloudStores;
+            buildStoreIndex();
+            await saveStoresToLocalCache(cloudStores);
+          }
+        }
+
+        if (cachedRoutes && cachedRoutes.length > 0) {
+          routeGroupsList = cachedRoutes;
+        } else {
+          const routeSnap = await getDocs(collection(db, "routes"));
+          const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudRoutes.length > 0) {
+            routeGroupsList = cloudRoutes;
+            await saveRoutesToLocalCache(cloudRoutes);
+          }
+        }
+
+        backgroundSyncMetadataAndCache();
+      } catch (e) {
+        console.error("Lỗi tải cache ban đầu:", e);
+      }
+
+      try {
+        const pos = await getHighAccuracyPosition();
+        currentSalesGPS = { lat: pos.lat, lng: pos.lng };
+      } catch (e) {
+        currentSalesGPS = DEFAULT_MAP_CENTER;
+      }
+
+      attachListeners();
+      syncOfflineCheckins();
+      syncOfflineOrders();
+    }, 50);
   });
 
-  window.handleLogout = async function() { await signOut(authSvc); };
+  // 🌟 TỐI ƯU ĐĂNG XUẤT (CẢ CHỦ ĐỘNG LẪN OUT ĐỘT NGỘT): Phản hồi siêu tốc 0 khựng
+  window.handleLogout = async function() {
+    // 1. Chuyển ngay màn hình về form đăng nhập lập tức
+    const loginView = document.getElementById('loginView');
+    const appView = document.getElementById('appView');
+    if (loginView) loginView.classList.remove('hidden');
+    if (appView) appView.classList.add('hidden');
+
+    // 2. Chỉ xóa sạch ô mật khẩu, giữ nguyên tên đăng nhập
+    const logPassEl = document.getElementById('logPass');
+    if (logPassEl) {
+      logPassEl.value = '';
+      logPassEl.setAttribute('readonly', 'readonly');
+      setTimeout(() => logPassEl.removeAttribute('readonly'), 100);
+    }
+
+    // 3. Hủy bỏ lắng nghe realtime ngay lập tức
+    if (sessionUnsub) { 
+      sessionUnsub(); 
+      sessionUnsub = null; 
+    }
+
+    // 4. Giải phóng sạch bộ nhớ RAM các mảng dữ liệu tạm
+    currentCart = {};
+    activeVisitedStore = null;
+    editingOrderId = null;
+    orders = [];
+    stores = [];
+
+    // 5. Gọi lệnh signOut ngầm
+    try {
+      await signOut(authSvc);
+    } catch (err) {
+      console.warn("Lỗi đăng xuất:", err);
+    }
+  };
+
   window.openChangePasswordModal = function() { document.getElementById('changePassModal').classList.remove('hidden'); };
   window.closeChangePasswordModal = function() { document.getElementById('changePassModal').classList.add('hidden'); };
 
@@ -3537,7 +3578,7 @@
         <h1 class="brand-title" style="justify-content:center; font-size:18px; color:#fff; margin-bottom: 2px; white-space: nowrap;">DMS ĐẠI ĐÔNG <span>SALES PRO</span></h1>
       </div>
 
-      <form onsubmit="handleLogin(event)">
+      <form onsubmit="handleLogin(event)" autocomplete="off">
         <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Tên đăng nhập hoặc Email:</label>
         <div class="input-icon-group">
           <i class="fa-solid fa-user"></i>
@@ -3547,7 +3588,7 @@
         <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Mật Khẩu:</label>
         <div class="input-icon-group">
           <i class="fa-solid fa-lock"></i>
-          <input type="password" id="logPass" required autocomplete="current-password" placeholder="••••••••">
+          <input type="password" id="logPass" required autocomplete="new-password" placeholder="••••••••">
         </div>
 
         <button class="btn btn-amber" style="width: 100%; padding: 14px; margin-top: 6px; justify-content: center; font-size: 15px; border-radius: 12px; font-weight: 800; box-shadow: 0 6px 20px rgba(217, 119, 6, 0.3);">
