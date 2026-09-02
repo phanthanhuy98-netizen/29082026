@@ -585,7 +585,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 17);
+      const request = indexedDB.open("DMS_OfflineDB", 18);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -924,15 +924,19 @@
     document.body.removeChild(textArea);
   }
 
+  function getDraftKeyForStore(storeId) {
+    return `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${storeId}`;
+  }
+
   function saveCartDraftToLocal() {
     if (!activeVisitedStore) return;
-    const draftKey = `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${activeVisitedStore.id}`;
+    const draftKey = getDraftKeyForStore(activeVisitedStore.id);
     localStorage.setItem(draftKey, JSON.stringify(currentCart));
   }
 
   function loadCartDraftFromLocal() {
     if (!activeVisitedStore) return;
-    const draftKey = `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${activeVisitedStore.id}`;
+    const draftKey = getDraftKeyForStore(activeVisitedStore.id);
     const saved = localStorage.getItem(draftKey);
     if (saved) {
       try {
@@ -940,12 +944,15 @@
       } catch (e) {
         currentCart = {};
       }
+    } else {
+      currentCart = {};
     }
   }
 
-  function clearCartDraftFromLocal() {
-    if (!activeVisitedStore) return;
-    const draftKey = `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${activeVisitedStore.id}`;
+  function clearCartDraftFromLocal(storeId) {
+    const targetId = storeId || (activeVisitedStore ? activeVisitedStore.id : null);
+    if (!targetId) return;
+    const draftKey = getDraftKeyForStore(targetId);
     localStorage.removeItem(draftKey);
   }
 
@@ -1343,7 +1350,28 @@
     renderUI();
   };
 
-  window.resetSelectedStore = function() {
+  window.resetSelectedStore = async function() {
+    let hasUnsavedItems = false;
+    Object.values(currentCart).forEach(c => {
+      if (c && c.qty > 0) hasUnsavedItems = true;
+    });
+
+    if (hasUnsavedItems && activeVisitedStore) {
+      const confirmLeave = await window.showCustomConfirm(
+        "Đổi Khách Hàng",
+        `Bạn đã chọn hàng cho khách "${activeVisitedStore.name}" nhưng chưa gửi đơn lên sổ gốc.\nBạn muốn làm gì với giỏ hàng này?`,
+        "fa-triangle-exclamation",
+        "Gửi đơn ngay",
+        "Bỏ qua / Đổi khách"
+      );
+      if (confirmLeave) {
+        await window.submitOrder();
+        return;
+      } else {
+        clearCartDraftFromLocal(activeVisitedStore.id);
+      }
+    }
+
     activeVisitedStore = null;
     productSearchKeyword = '';
     customerSearchKeyword = '';
@@ -1500,8 +1528,17 @@
   };
 
   window.updateCartDetail = async function(prdId, field, val) {
-    const safeK = getSafeKey(prdId);
     const p = products.find(x => x.id === prdId || x.code === prdId);
+    if (!p) return;
+
+    const rawPrice = Number(p.price || 0);
+    const pNameLower = removeAccents(p.name || '');
+    if (rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck')) {
+      alert("⛔ Vật tư chiết khấu hoặc có giá trị bằng 0đ không được phép bán!");
+      return;
+    }
+
+    const safeK = getSafeKey(prdId);
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     
     let cleanStr = String(val !== undefined && val !== null ? val : '').replace(/[^0-9]/g, '');
@@ -1520,12 +1557,12 @@
     }
     
     const totalQDisplay = currentCart[prdId].qty;
-    const itemTotal = (p?.price || 0) * totalQDisplay;
+    const itemTotal = rawPrice * totalQDisplay;
 
     if (itemTotal > 20000000) {
       const confirmContinue = await window.showCustomConfirm(
         "Cảnh Báo Vượt Mức Giá Trị",
-        `Sản phẩm "${p ? p.name : prdId}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá ngưỡng 20.000.000đ.\n\nBạn có chắc chắn muốn tiếp tục số lượng này không?`,
+        `Sản phẩm "${p.name}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá ngưỡng 20.000.000đ.\n\nBạn có chắc chắn muốn tiếp tục số lượng này không?`,
         "fa-triangle-exclamation",
         "Tiếp tục",
         "Hủy bỏ"
@@ -1538,7 +1575,7 @@
     const finalLe = currentCart[prdId].le;
     const finalKien = currentCart[prdId].kien;
     const finalQty = currentCart[prdId].qty;
-    const finalItemTotal = (p?.price || 0) * finalQty;
+    const finalItemTotal = rawPrice * finalQty;
 
     document.querySelectorAll(`.input-le-${safeK}`).forEach(el => {
       if (document.activeElement !== el) el.value = (finalLe === 0 ? '' : finalLe);
@@ -1567,6 +1604,16 @@
   };
 
   window.adjustQty = function(prdId, field, delta) {
+    const p = products.find(x => x.id === prdId || x.code === prdId);
+    if (p) {
+      const rawPrice = Number(p.price || 0);
+      const pNameLower = removeAccents(p.name || '');
+      if (rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck')) {
+        alert("⛔ Vật tư chiết khấu hoặc có giá trị bằng 0đ không được phép bán!");
+        return;
+      }
+    }
+
     if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
     let curVal = Number(currentCart[prdId][field]) || 0;
     let newVal = curVal + delta;
@@ -1669,6 +1716,10 @@
 
   window.toggleShowOnlySelected = function() {
     showOnlySelectedItems = !showOnlySelectedItems;
+    selectedCompanyCode = "";
+    const compBox = document.getElementById('companySearchBox');
+    if (compBox) compBox.value = "";
+    
     const btn = document.getElementById('toggleSelectedBtn');
     if (btn) {
       btn.style.background = showOnlySelectedItems ? 'var(--primary)' : '#E2E8F0';
@@ -1717,7 +1768,7 @@
         }
 
         if (showOnlySelectedItems) {
-          if (hasQty && matchCompany) matched.push(p);
+          if (hasQty) matched.push(p);
         } else {
           const matchKey = productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword);
           if (matchCompany && matchKey) {
@@ -1733,15 +1784,19 @@
       const keyId = p.id || p.code;
       const safeK = getSafeKey(keyId);
       const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
-      const itemTotal = (p.price || 0) * (c.qty || 0);
+      const rawPrice = Number(p.price || 0);
+      const pNameLower = removeAccents(p.name || '');
+      const isZeroOrDiscount = rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck');
+
+      const itemTotal = rawPrice * (c.qty || 0);
       const hasQty = c.qty > 0;
 
       const displayLe = (c.le === 0 ? '' : c.le);
       const displayKien = (c.kien === 0 ? '' : c.kien);
-      const formattedPrice = (p.price || 0).toLocaleString() + 'đ';
+      const formattedPrice = rawPrice.toLocaleString() + 'đ';
 
       return `
-        <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 8px;">
+        <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 8px; opacity: ${isZeroOrDiscount ? '0.6' : '1'};">
           
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <span class="item-code" style="font-size: 11px; padding: 3px 8px; background: rgba(37, 99, 235, 0.12); color: #2563EB; font-weight: 800; border-radius: 4px;">${p.code}</span>
@@ -1749,7 +1804,7 @@
           </div>
 
           <div class="item-title" style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word; overflow-wrap: break-word; white-space: normal;">
-            ${p.name}
+            ${p.name} ${isZeroOrDiscount ? '<span style="color:var(--rose); font-size:11px;">(⛔ Không được bán)</span>' : ''}
           </div>
 
           <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--card-border);">
@@ -1761,18 +1816,18 @@
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span style="font-size: 11.5px; font-weight: 800; color: var(--text-muted);">Số lượng Lẻ</span>
               <div style="display: flex; align-items: center; gap: 4px;">
-                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" onclick="adjustQty('${keyId}', 'le', -1)">-</button>
-                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-le-${safeK}" value="${displayLe}" oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin: 0; text-align: center; padding: 4px; font-size: 17px; width: 100%; height: 42px; font-weight: 800; border-radius: 8px;">
-                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" onclick="adjustQty('${keyId}', 'le', 1)">+</button>
+                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" ${isZeroOrDiscount ? 'disabled' : ''} onclick="adjustQty('${keyId}', 'le', -1)">-</button>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-le-${safeK}" value="${displayLe}" ${isZeroOrDiscount ? 'disabled' : ''} oninput="updateCartDetail('${keyId}', 'le', this.value)" style="margin: 0; text-align: center; padding: 4px; font-size: 17px; width: 100%; height: 42px; font-weight: 800; border-radius: 8px;">
+                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" ${isZeroOrDiscount ? 'disabled' : ''} onclick="adjustQty('${keyId}', 'le', 1)">+</button>
               </div>
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span style="font-size: 11.5px; font-weight: 800; color: var(--text-muted);">Số lượng Thùng:</span>
               <div style="display: flex; align-items: center; gap: 4px;">
-                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
-                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-kien-${safeK}" value="${displayKien}" oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin: 0; text-align: center; padding: 4px; font-size: 17px; width: 100%; height: 42px; font-weight: 800; border-radius: 8px;">
-                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
+                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" ${isZeroOrDiscount ? 'disabled' : ''} onclick="adjustQty('${keyId}', 'kien', -1)">-</button>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="input-kien-${safeK}" value="${displayKien}" ${isZeroOrDiscount ? 'disabled' : ''} oninput="updateCartDetail('${keyId}', 'kien', this.value)" style="margin: 0; text-align: center; padding: 4px; font-size: 17px; width: 100%; height: 42px; font-weight: 800; border-radius: 8px;">
+                <button type="button" class="btn btn-sm" style="padding: 4px 8px; font-size: 13px; height: 42px; font-weight: 800;" ${isZeroOrDiscount ? 'disabled' : ''} onclick="adjustQty('${keyId}', 'kien', 1)">+</button>
               </div>
             </div>
           </div>
@@ -2298,6 +2353,7 @@
     };
 
     try {
+      const savedStoreId = activeVisitedStore.id;
       if (editingOrderId) {
         const orderRef = doc(db, "orders", editingOrderId);
         await updateDoc(orderRef, {
@@ -2315,7 +2371,7 @@
         }
       }
       
-      clearCartDraftFromLocal();
+      clearCartDraftFromLocal(savedStoreId);
       currentCart = {}; 
       activeVisitedStore = null; 
       editingOrderId = null;
@@ -2339,6 +2395,7 @@
   };
 
   window.exportCustomersExcel = function() {
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
     if (stores.length === 0) return alert("Không có danh sách khách hàng để xuất!");
     const dataToExport = stores.map(s => ({
       "Mã Khách Hàng": s.code || '',
@@ -2357,6 +2414,7 @@
   };
 
   window.exportProductsExcel = function() {
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
     if (products.length === 0) return alert("Không có danh sách vật tư để xuất!");
     const dataToExport = products.map(p => ({
       "Mã Vật Tư": p.code || '',
@@ -2374,6 +2432,7 @@
   };
 
   window.exportRoutesExcel = function() {
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
     if (routeGroupsList.length === 0) return alert("Không có danh sách tuyến để xuất!");
     const dataToExport = routeGroupsList.map(r => ({
       "Nhóm Đối Tượng": r.nhomDoiTuong || '',
@@ -2387,6 +2446,7 @@
   };
 
   window.exportCompanyExcel = function() {
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
     if (companyList.length === 0) return alert("Không có danh sách công ty để xuất!");
     const dataToExport = companyList.map(c => ({
       "Mã Công Ty (MaCTu)": c.maCtu || '',
@@ -2400,6 +2460,7 @@
   };
 
   window.importProductsExcel = function(event) {
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file Excel!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2460,7 +2521,7 @@
   };
 
   window.importCustomersExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Bạn không có quyền tải file khách hàng mới!");
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2512,7 +2573,7 @@
   };
 
   window.importCompanyExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền tải file này!");
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2544,7 +2605,7 @@
   };
 
   window.importRoutesExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền tải file này!");
+    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2694,12 +2755,16 @@
     renderUI();
   };
 
+  window.selectUnsubmittedDraftStore = function(storeId) {
+    selectStoreDirectly(storeId);
+  };
+
   function attachListeners() {
     getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150))).then(snap => {
       orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
-      if (currentTab === 'soGocBH') {
-        const activePane = document.getElementById('tabPane_soGocBH');
-        if (activePane) renderTabContent('soGocBH', activePane);
+      if (currentTab === 'soGocBH' || currentTab === 'sales') {
+        const activePane = document.getElementById(`tabPane_${currentTab}`);
+        if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => console.error("Lỗi tải đơn hàng:", e));
 
@@ -2783,7 +2848,41 @@
         }
       });
 
+      // Lấy danh sách các tiệm user sales đã chọn hàng nháp nhưng chưa gửi đơn
+      let unsubmittedStoresList = [];
+      if (currentUser.role === 'sales') {
+        stores.forEach(s => {
+          if (!activeVisitedStore || String(activeVisitedStore.id) !== String(s.id)) {
+            const draftKey = getDraftKeyForStore(s.id);
+            const savedDraft = localStorage.getItem(draftKey);
+            if (savedDraft) {
+              try {
+                const parsedCart = JSON.parse(savedDraft);
+                let hasItems = false;
+                Object.values(parsedCart).forEach(item => {
+                  if (item && item.qty > 0) hasItems = true;
+                });
+                if (hasItems) {
+                  unsubmittedStoresList.push(s);
+                }
+              } catch (err) {}
+            }
+          }
+        });
+      }
+
       container.innerHTML = `
+        ${unsubmittedStoresList.length > 0 ? `
+          <div style="background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-size: 13px; font-weight: 800; color: #D97706; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> Bạn có đơn hàng chưa gửi lên sổ gốc (${unsubmittedStoresList.length} tiệm):</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${unsubmittedStoresList.map(st => `
+                <button class="btn btn-amber btn-sm" onclick="selectUnsubmittedDraftStore('${st.id}')" style="font-weight:700;"><i class="fa-solid fa-store"></i> ${st.name}</button>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
         <div class="card" style="margin-bottom:10px; border:1px solid ${activeVisitedStore ? 'var(--card-border)' : 'var(--primary)'};">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '8px'};">
             <h3 style="font-size:14px; font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
@@ -2870,11 +2969,11 @@
               </button>
             </div>
             <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;">
-              ${selectedCompanyCode || editingOrderId ? 'Đang hiển thị sản phẩm phù hợp.' : 'Vui lòng chọn Mã Công Ty ở trên để hiện danh sách vật tư bán hàng.'}
+              ${selectedCompanyCode || editingOrderId || showOnlySelectedItems ? 'Đang hiển thị sản phẩm phù hợp.' : 'Vui lòng chọn Mã Công Ty ở trên hoặc bấm "Đã chọn" để xem vật tư đã ghi.'}
             </small>
 
             <div id="mobileProductListContainer">
-              <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Vui lòng chọn Mã Công Ty để bắt đầu lập đơn...</div>
+              <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Vui lòng chọn Mã Công Ty hoặc bấm "Đã chọn" để bắt đầu...</div>
             </div>
           </div>
 
@@ -2899,12 +2998,13 @@
       if (selectedRouteCode || customerSearchKeyword) {
         setTimeout(() => filterSalesCustomers(''), 50);
       }
-      if (selectedCompanyCode || editingOrderId) {
+      if (selectedCompanyCode || editingOrderId || showOnlySelectedItems) {
         setTimeout(() => filterSalesProducts(''), 50);
       }
     }
 
     else if (tab === 'customers') {
+      const isSales = currentUser.role === 'sales';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})</h2>
@@ -2912,8 +3012,8 @@
             <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
               <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
             </button>
-            <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
+            ${!isSales ? `
+              <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
@@ -2937,10 +3037,16 @@
       let groupedOrdersMap = new Map();
       let flatExcelRows = [];
 
+      const isSales = currentUser.role === 'sales';
       const sortedOrders = [...orders].sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
       sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
+          // Nếu là sales, chỉ hiển thị đơn của chính mình
+          if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
+            return;
+          }
+
           let inferredMaDTPN = o.maDTPNNo || '';
           if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
             inferredMaDTPN = o.maKH.split(' - ')[0].trim();
@@ -3007,7 +3113,7 @@
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
-            <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            ${!isSales ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
 
@@ -3027,10 +3133,12 @@
               <span style="font-size:11px; font-weight:700; color:var(--text-muted);">Đến:</span>
               <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:8px 10px; font-size:12px;">
             </div>
-            <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; flex:1; min-width:130px; padding:8px 10px; font-size:12px;">
-              <option value="">-- Tất cả NV --</option>
-              ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>[${code}]</option>`).join('')}
-            </select>
+            ${!isSales ? `
+              <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; flex:1; min-width:130px; padding:8px 10px; font-size:12px;">
+                <option value="">-- Tất cả NV --</option>
+                ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>[${code}]</option>`).join('')}
+              </select>
+            ` : ''}
           </div>
         </div>
 
@@ -3123,12 +3231,15 @@
     }
 
     else if (tab === 'productsAdmin') {
+      const isSales = currentUser.role === 'sales';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Vật Tư (${products.length})</h2>
           <div class="excel-group-btns">
-            <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
+            ${!isSales ? `
+              <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
+            ` : ''}
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
@@ -3145,13 +3256,16 @@
 
     else if (tab === 'routes') {
       const isAdmin = currentUser && currentUser.role === 'admin';
+      const isSales = currentUser.role === 'sales';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
-            <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
+            ${!isSales ? `
+              <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+              ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
+            ` : ''}
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
@@ -3180,13 +3294,16 @@
 
     else if (tab === 'company') {
       const isAdmin = currentUser && currentUser.role === 'admin';
+      const isSales = currentUser.role === 'sales';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-building" style="color:var(--primary);"></i> Mã Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
-            <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
+            ${!isSales ? `
+              <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+              ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
+            ` : ''}
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
@@ -3267,7 +3384,30 @@
   }
 
   function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
-  window.switchTab = function(tab) { currentTab = tab; window.location.hash = tab; renderUI(); };
+  window.switchTab = async function(tab) {
+    if (currentTab === 'sales' && tab !== 'sales' && activeVisitedStore) {
+      let hasItems = false;
+      Object.values(currentCart).forEach(c => {
+        if (c && c.qty > 0) hasItems = true;
+      });
+      if (hasItems) {
+        const confirmSend = await window.showCustomConfirm(
+          "Chưa Gửi Đơn Hàng",
+          `Bạn đã chọn hàng cho tiệm "${activeVisitedStore.name}" nhưng chưa bấm gửi đơn lên sổ gốc.\nBạn muốn làm gì tiếp theo?`,
+          "fa-triangle-exclamation",
+          "Gửi ngay",
+          "Chưa gửi - Cần chỉnh sửa"
+        );
+        if (confirmSend) {
+          await window.submitOrder();
+          return;
+        }
+      }
+    }
+    currentTab = tab;
+    window.location.hash = tab;
+    renderUI();
+  };
 </script>
 </head>
 
