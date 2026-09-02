@@ -571,7 +571,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 20);
+      const request = indexedDB.open("DMS_OfflineDB", 21);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -671,31 +671,22 @@
     });
   }
 
-  async function cleanupExpiredOrders() {
+  async function cleanupExpiredOrdersOptimized() {
     try {
-      const ordersSnap = await getDocs(collection(db, "orders"));
       const now = new Date();
-      const batch = writeBatch(db);
-      let countDeleted = 0;
+      const pastDate = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+      const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
-      ordersSnap.forEach(d => {
-        const data = d.data();
-        if (data.ngayCtu) {
-          const orderDate = new Date(data.ngayCtu);
-          const diffTime = now - orderDate;
-          const diffDays = diffTime / (1000 * 60 * 60 * 24);
-          if (diffDays >= 6) {
-            batch.delete(d.ref);
-            countDeleted++;
-          }
-        }
-      });
-
-      if (countDeleted > 0) {
+      const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(100));
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.forEach(d => batch.delete(d.ref));
         await batch.commit();
       }
     } catch (e) {
-      console.error("Lỗi tự động dọn dẹp đơn cũ:", e);
+      console.error("Lỗi tối ưu dọn dẹp đơn cũ:", e);
     }
   }
 
@@ -1122,7 +1113,7 @@
     }
 
     await initIndexedDB();
-    await cleanupExpiredOrders();
+    await cleanupExpiredOrdersOptimized();
     
     try {
       const [cachedPrds, cachedStores] = await Promise.all([
@@ -1628,6 +1619,14 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
+  let searchDebounceTimer = null;
+  window.debounceFilterSalesCustomers = function(val) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      filterSalesCustomers(val);
+    }, 300);
+  };
+
   window.filterSalesCustomers = function(val) {
     if (val !== undefined) customerSearchKeyword = removeAccents(val.trim());
     const container = document.getElementById('salesCustomerResultContainer');
@@ -1735,6 +1734,14 @@
       filterSalesProducts('');
       inputEl.focus();
     }
+  };
+
+  let productSearchDebounceTimer = null;
+  window.debounceFilterSalesProducts = function(val) {
+    clearTimeout(productSearchDebounceTimer);
+    productSearchDebounceTimer = setTimeout(() => {
+      filterSalesProducts(val);
+    }, 300);
   };
 
   window.filterSalesProducts = function(val) {
@@ -2907,7 +2914,7 @@
               </select>
             </div>
 
-            <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng (VD: 51Duyen1)..." oninput="filterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; padding:13px 15px; font-size:15px;">
+            <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng (VD: 51Duyen1)..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; padding:13px 15px; font-size:15px;">
 
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng (VD: 51Duyen1) để tìm kiếm nhanh...</div>
@@ -2968,7 +2975,7 @@
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="filterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; padding:13px 36px 13px 14px; font-size:14px; width: 100%;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; padding:13px 36px 13px 14px; font-size:14px; width: 100%;">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#E2E8F0'}; color:${showOnlySelectedItems?'#fff':'#1E293B'}; font-weight:700; padding:13px 14px; font-size:12px; white-space:nowrap;">
