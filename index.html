@@ -352,7 +352,7 @@
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, writeBatch, where
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -376,6 +376,8 @@
   let currentUser = null;
   let currentTab = 'sales';
   let stores = [], orders = [], users = [], checkins = [];
+  let lastVisibleOrderDoc = null; // Con trỏ Cursor sâu cho Sổ Gốc
+  let hasMoreOrders = true;
   let sessionUnsub = null;
   const currentSessionId = '_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
@@ -558,7 +560,6 @@
   let editingOrderId = null;
 
   let soGocFilterKeyword = "", soGocFilterDateFrom = "", soGocFilterDateTo = "", soGocSalesFilter = "", soGocQuickDate = "all";
-  let soGocLimitCount = 30;
 
   let customerSearchKeyword = ""; 
   let productSearchKeyword = ""; 
@@ -647,7 +648,7 @@
       const tx = idbDb.transaction(["metaInfo"], "readonly");
       const req = tx.objectStore("metaInfo").get(versionKey);
       req.onsuccess = () => resolve(req.result ? req.result.value : null);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(tx.error);
     });
   }
 
@@ -2062,11 +2063,34 @@
     filterSoGocCards();
   };
 
-  window.loadMoreSoGoc = function() {
-    soGocLimitCount += 30;
-    if (currentTab === 'soGocBH') {
+  // Kỹ thuật Cursor sâu: Tải thêm 30 đơn hàng tiếp theo từ mốc con trỏ hiện tại
+  window.loadMoreSoGoc = async function() {
+    if (!hasMoreOrders || !lastVisibleOrderDoc) return;
+    try {
+      let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
+      const snap = await getDocs(q);
+      
+      if (snap.empty) {
+        hasMoreOrders = false;
+        alert("Đã tải hết toàn bộ lịch sử đơn hàng!");
+        const btn = document.getElementById('loadMoreSoGocBtn');
+        if (btn) btn.style.display = 'none';
+        return;
+      }
+
+      lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+      const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      orders = [...orders, ...newOrders];
+
+      if (snap.docs.length < 30) {
+        hasMoreOrders = false;
+      }
+
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
+    } catch (e) {
+      console.error("Lỗi khi tải thêm đơn hàng:", e);
+      alert("Không thể tải thêm đơn hàng: " + e.message);
     }
   };
 
@@ -2775,8 +2799,16 @@
   };
 
   function attachListeners() {
-    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(150))).then(snap => {
-      orders = snap.docs.map(d => ({id:d.id, ...d.data()}));
+    // Tải đợt đầu tiên 30 đơn hàng mới nhất và lưu trữ Document Snapshot làm con trỏ Cursor
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
+
       if (currentTab === 'soGocBH' || currentTab === 'sales') {
         const activePane = document.getElementById(`tabPane_${currentTab}`);
         if (activePane) renderTabContent(currentTab, activePane);
@@ -3115,7 +3147,6 @@
       });
 
       const allGroupedList = Array.from(groupedOrdersMap.values());
-      const limitedOrders = allGroupedList.slice(0, soGocLimitCount);
       const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
       
       const now = new Date();
@@ -3166,7 +3197,7 @@
         </div>
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
-          ${limitedOrders.length > 0 ? limitedOrders.map(o => {
+          ${allGroupedList.length > 0 ? allGroupedList.map(o => {
             const isOwner = (o.salesCode === currentUser.code || o.salesUid === currentUser.uid);
             const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
             const isToday = o.ngayCtu === todayStr;
@@ -3236,9 +3267,9 @@
           </table>
         </div>
 
-        ${allGroupedList.length > soGocLimitCount ? `
+        ${hasMoreOrders ? `
           <div style="text-align:center; margin-top:10px;">
-            <button class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn (${soGocLimitCount}/${allGroupedList.length})</button>
+            <button id="loadMoreSoGocBtn" class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm 30 đơn hàng cũ hơn...</button>
           </div>
         ` : ''}
       `;
