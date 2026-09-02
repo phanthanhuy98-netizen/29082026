@@ -366,7 +366,7 @@
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, writeBatch
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, writeBatch, where
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -1021,6 +1021,14 @@
 
   async function backgroundSyncMetadataAndCache() {
     if (!navigator.onLine) return;
+    
+    const lastSyncDate = localStorage.getItem('dms_last_sync_date');
+    const todayStr = new Date().toISOString().slice(0, 10);
+    
+    if (lastSyncDate === todayStr) {
+      return;
+    }
+
     try {
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
       const metaSnap = await getDoc(metaRef);
@@ -1051,6 +1059,7 @@
           await saveMetaVersion("cachedDataVersion", cloudDataVersion);
         }
       }
+      localStorage.setItem('dms_last_sync_date', todayStr);
     } catch (e) {
       console.warn("Lỗi đồng bộ ngầm:", e);
     }
@@ -1222,7 +1231,7 @@
   };
 
   window.adminResetCustomerLocation = async function(storeId) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản Admin mới có quyền xóa định vị GPS!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản admin mới có quyền xóa định vị GPS!");
     const confirmReset = await window.showCustomConfirm(
       "Xóa Định Vị GPS",
       "Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?",
@@ -2005,7 +2014,7 @@
     const todayStr = new Date().toISOString().slice(0, 10);
 
     if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
-      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý (Manager/Admin) để được mở khóa hỗ trợ chỉnh sửa đơn hàng.`);
+      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý (Manager/admin) để được mở khóa hỗ trợ chỉnh sửa đơn hàng.`);
     }
 
     if (!isOwner && !isManagerOrAdmin) {
@@ -2043,6 +2052,69 @@
     }
 
     switchTab('sales');
+  };
+
+  window.deleteSingleOrder = async function(orderId) {
+    if (currentUser.role !== 'admin') {
+      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa đơn hàng trực tiếp!");
+    }
+    const confirmDel = await window.showCustomConfirm(
+      "Xóa Đơn Hàng",
+      "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
+      "fa-trash",
+      "Xóa đơn",
+      "Hủy"
+    );
+    if (!confirmDel) return;
+
+    try {
+      await deleteDoc(doc(db, "orders", orderId));
+      orders = orders.filter(o => o.id !== orderId);
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) renderTabContent('soGocBH', activePane);
+      alert("✅ Đã xóa đơn hàng thành công!");
+    } catch (err) {
+      alert("Lỗi khi xóa đơn hàng: " + err.message);
+    }
+  };
+
+  window.deleteAllOrdersByDatePrompt = async function() {
+    if (currentUser.role !== 'admin') {
+      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa toàn bộ đơn hàng theo ngày!");
+    }
+    const dateInput = prompt("Nhập ngày cần xóa toàn bộ đơn hàng (Định dạng YYYY-MM-DD, VD: 2026-09-03):");
+    if (!dateInput) return;
+
+    const targetDate = dateInput.trim();
+    const targetOrders = orders.filter(o => o.ngayCtu === targetDate);
+
+    if (targetOrders.length === 0) {
+      return alert(`Không tìm thấy đơn hàng nào trong ngày ${targetDate} để xóa!`);
+    }
+
+    const confirmDel = await window.showCustomConfirm(
+      "Xóa Hàng Loạt Đơn Hàng",
+      `⚠️ CẢNH BÁO: Bạn sắp xóa toàn bộ ${targetOrders.length} đơn hàng trong ngày ${targetDate}!\nHành động này không thể hoàn tác. Bạn có thực sự chắc chắn không?`,
+      "fa-triangle-exclamation",
+      "Xóa toàn bộ",
+      "Hủy"
+    );
+    if (!confirmDel) return;
+
+    try {
+      const batch = writeBatch(db);
+      targetOrders.forEach(o => {
+        batch.delete(doc(db, "orders", o.id));
+      });
+      await batch.commit();
+
+      orders = orders.filter(o => o.ngayCtu !== targetDate);
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) renderTabContent('soGocBH', activePane);
+      alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng trong ngày ${targetDate}!`);
+    } catch (err) {
+      alert("Lỗi khi xóa hàng loạt: " + err.message);
+    }
   };
 
   window.cancelEditOrder = function() {
@@ -2440,7 +2512,7 @@
   };
 
   window.importCompanyExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2472,7 +2544,7 @@
   };
 
   window.importRoutesExcel = function(event) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền tải file này!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2508,7 +2580,7 @@
   };
 
   window.addNewCompany = function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới công ty!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới công ty!");
     const maCtu = prompt("Nhập mã công ty (MaCTu):");
     if (!maCtu) return;
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
@@ -2518,7 +2590,7 @@
   };
 
   window.addNewRoute = function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền thêm mới tuyến!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới tuyến!");
     let valInput = prompt("Nhập nhóm đối tượng (Số nguyên dương >= 10, VD: 10, 11...):");
     if (!valInput) return;
     let intVal = parseInt(valInput.trim(), 10);
@@ -2532,13 +2604,13 @@
   };
 
   window.updateCompanyField = function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
     companyList[index][field] = val;
     renderUI();
   };
 
   window.updateRouteField = function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ Admin mới có quyền chỉnh sửa!");
+    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
     if (field === 'nhomDoiTuong') {
       let intVal = parseInt(val.trim(), 10);
       if (isNaN(intVal) || intVal < 10) {
@@ -2613,7 +2685,7 @@
   window.toggleUserActive = async function(uid, active) { 
     const targetUser = users.find(u => u.uid === uid);
     if (targetUser && targetUser.email && targetUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
-      return alert("⛔ AN TOÀN HỆ THỐNG: Không được phép khóa tài khoản Admin gốc!");
+      return alert("⛔ AN TOÀN HỆ THỐNG: Không được phép khóa tài khoản admin gốc!");
     }
     await updateDoc(doc(db, "users", uid), { active }); 
     const uIndex = users.findIndex(u => u.uid === uid);
@@ -2928,11 +3000,13 @@
       
       const now = new Date();
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const isAdmin = currentUser.role === 'admin';
 
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
+            ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
             <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
           </div>
         </div>
@@ -2991,8 +3065,8 @@
                   <span style="font-size:12px; font-weight:700;">Tổng tiền: <b style="color:var(--rose); font-size:15px;">${o.amount.toLocaleString()}đ</b></span>
                   <div style="display:flex; gap:6px;">
                     <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
-                    ${canEdit && currentUser.role !== 'manager' ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${canEdit && currentUser.role === 'manager' ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
+                    ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
+                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
                   </div>
                 </div>
               </div>
@@ -3165,7 +3239,7 @@
                 <option value="manager">Manager</option>
                 <option value="accountant">Kế Toán</option>
                 <option value="viewer">Viewer</option>
-                <option value="admin">Admin</option>
+                <option value="admin">admin</option>
               </select>
               <button class="btn btn-green" style="width:100%;margin-top:4px;justify-content:center;font-weight:800;padding:12px;">Tạo NV</button>
             </form>
