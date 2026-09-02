@@ -543,7 +543,7 @@
   ];
 
   let routeGroupsList = [
-    { nhomDoiTuong: "10", noiDung: "Phước Long", ghiChu: "Tuyến chính" }
+    { id: "r10", nhomDoiTuong: "10", noiDung: "Phước Long", ghiChu: "Tuyến chính" }
   ];
 
   let products = [
@@ -572,7 +572,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 21);
+      const request = indexedDB.open("DMS_OfflineDB", 22);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -581,6 +581,7 @@
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
+        if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
       };
     });
@@ -626,6 +627,29 @@
     return new Promise((resolve, reject) => {
       const transaction = idbDb.transaction(["localStores"], "readonly");
       const store = transaction.objectStore("localStores");
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function saveRoutesToLocalCache(list) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localRoutes"], "readwrite");
+      const store = transaction.objectStore("localRoutes");
+      store.clear();
+      list.forEach(r => store.put(r));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function loadRoutesFromLocalCache() {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localRoutes"], "readonly");
+      const store = transaction.objectStore("localRoutes");
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(transaction.error);
@@ -1029,13 +1053,15 @@
         const localDataVersion = await getMetaVersion("cachedDataVersion") || 0;
 
         if (cloudDataVersion > localDataVersion) {
-          const [prdSnap, storeSnap] = await Promise.all([
+          const [prdSnap, storeSnap, routeSnap] = await Promise.all([
             getDocs(collection(db, "products")),
-            getDocs(collection(db, "stores"))
+            getDocs(collection(db, "stores")),
+            getDocs(collection(db, "routes"))
           ]);
 
           const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
           if (cloudPrds.length > 0) {
             products = cloudPrds;
@@ -1046,6 +1072,10 @@
             stores = cloudStores;
             buildStoreIndex();
             await saveStoresToLocalCache(cloudStores);
+          }
+          if (cloudRoutes.length > 0) {
+            routeGroupsList = cloudRoutes;
+            await saveRoutesToLocalCache(cloudRoutes);
           }
 
           await saveMetaVersion("cachedDataVersion", cloudDataVersion);
@@ -1117,9 +1147,10 @@
     await cleanupExpiredOrdersOptimized();
     
     try {
-      const [cachedPrds, cachedStores] = await Promise.all([
+      const [cachedPrds, cachedStores, cachedRoutes] = await Promise.all([
         loadProductsFromLocalCache(),
-        loadStoresFromLocalCache()
+        loadStoresFromLocalCache(),
+        loadRoutesFromLocalCache()
       ]);
 
       if (cachedPrds && cachedPrds.length > 0) {
@@ -1145,6 +1176,17 @@
           stores = cloudStores;
           buildStoreIndex();
           await saveStoresToLocalCache(cloudStores);
+        }
+      }
+
+      if (cachedRoutes && cachedRoutes.length > 0) {
+        routeGroupsList = cachedRoutes;
+      } else {
+        const routeSnap = await getDocs(collection(db, "routes"));
+        const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (cloudRoutes.length > 0) {
+          routeGroupsList = cloudRoutes;
+          await saveRoutesToLocalCache(cloudRoutes);
         }
       }
 
@@ -2063,7 +2105,6 @@
     filterSoGocCards();
   };
 
-  // Kỹ thuật Cursor sâu: Tải thêm 30 đơn hàng tiếp theo từ mốc con trỏ hiện tại
   window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
     try {
@@ -2662,14 +2703,22 @@
           if (nhomVal && nhomVal !== 'Nhóm đối tượng') {
             let intVal = parseInt(nhomVal, 10);
             if (!isNaN(intVal) && intVal >= 10) {
-              newList.push({ nhomDoiTuong: String(intVal), noiDung, ghiChu });
+              newList.push({ id: `route_${intVal}_${i}`, nhomDoiTuong: String(intVal), noiDung, ghiChu });
             }
           }
         }
+
         if (newList.length > 0) {
+          const existingSnap = await getDocs(collection(db, "routes"));
+          const batch = writeBatch(db);
+          existingSnap.forEach(d => batch.delete(d.ref));
+          newList.forEach(r => batch.set(doc(db, "routes", r.id), r));
+          await batch.commit();
+
           routeGroupsList = newList;
+          await saveRoutesToLocalCache(newList);
           renderUI();
-          alert("✅ Nhập danh sách tuyến thành công!");
+          alert("✅ Nhập danh sách tuyến và lưu lên Firebase thành công!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
         }
@@ -2688,7 +2737,7 @@
     renderUI();
   };
 
-  window.addNewRoute = function() {
+  window.addNewRoute = async function() {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới tuyến!");
     let valInput = prompt("Nhập nhóm đối tượng (Số nguyên dương >= 10, VD: 10, 11...):");
     if (!valInput) return;
@@ -2698,8 +2747,19 @@
     }
     const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
     const ghiChu = prompt("Nhập ghi chú:") || "";
-    routeGroupsList.push({ nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() });
-    renderUI();
+    
+    const newRouteId = `route_${intVal}_${Date.now()}`;
+    const newRouteObj = { id: newRouteId, nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() };
+
+    try {
+      await setDoc(doc(db, "routes", newRouteId), newRouteObj);
+      routeGroupsList.push(newRouteObj);
+      await saveRoutesToLocalCache(routeGroupsList);
+      renderUI();
+      alert("✅ Đã thêm và lưu tuyến mới lên Firebase thành công!");
+    } catch (err) {
+      alert("Lỗi khi lưu tuyến: " + err.message);
+    }
   };
 
   window.updateCompanyField = function(index, field, val) {
@@ -2708,8 +2768,9 @@
     renderUI();
   };
 
-  window.updateRouteField = function(index, field, val) {
+  window.updateRouteField = async function(index, field, val) {
     if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
+    
     if (field === 'nhomDoiTuong') {
       let intVal = parseInt(val.trim(), 10);
       if (isNaN(intVal) || intVal < 10) {
@@ -2720,6 +2781,14 @@
       routeGroupsList[index][field] = String(intVal);
     } else {
       routeGroupsList[index][field] = val;
+    }
+
+    const targetRoute = routeGroupsList[index];
+    try {
+      await setDoc(doc(db, "routes", targetRoute.id), targetRoute, { merge: true });
+      await saveRoutesToLocalCache(routeGroupsList);
+    } catch (err) {
+      console.error("Lỗi cập nhật tuyến lên Firebase:", err);
     }
     renderUI();
   };
@@ -2735,10 +2804,18 @@
 
   window.deleteRouteItem = async function(index) {
     if (currentUser.role !== 'admin') return;
-    const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
-    if (confirmDel) {
+    const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa tuyến này không?", "fa-trash", "Xóa", "Hủy");
+    if (!confirmDel) return;
+
+    try {
+      const targetRoute = routeGroupsList[index];
+      await deleteDoc(doc(db, "routes", targetRoute.id));
       routeGroupsList.splice(index, 1);
+      await saveRoutesToLocalCache(routeGroupsList);
       renderUI();
+      alert("✅ Đã xóa tuyến thành công!");
+    } catch (err) {
+      alert("Lỗi khi xóa tuyến: " + err.message);
     }
   };
 
@@ -2799,7 +2876,6 @@
   };
 
   function attachListeners() {
-    // Tải đợt đầu tiên 30 đơn hàng mới nhất và lưu trữ Document Snapshot làm con trỏ Cursor
     getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!snap.empty) {
