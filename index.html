@@ -976,15 +976,17 @@
       const usersSnap = await getDocs(collection(db, "users"));
       let targetUserDoc = null;
       let targetUserId = null;
+      let targetUserRole = 'sales';
 
       usersSnap.forEach(d => {
         if (d.data().email && d.data().email.toLowerCase() === email.toLowerCase()) {
           targetUserDoc = d.data();
           targetUserId = d.id;
+          targetUserRole = d.data().role || 'sales';
         }
       });
 
-      if (targetUserDoc && targetUserDoc.active === false) {
+      if (targetUserDoc && targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
         return alert("⛔ Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!\nVui lòng liên hệ admin để được mở lại và đổi mật khẩu mới.");
       }
 
@@ -995,16 +997,20 @@
         await signInWithEmailAndPassword(authSvc, email, pass);
         localStorage.removeItem(failedAttemptsKey);
       } catch (authErr) {
-        currentFailed++;
-        localStorage.setItem(failedAttemptsKey, currentFailed);
+        if (targetUserRole !== 'viewer') {
+          currentFailed++;
+          localStorage.setItem(failedAttemptsKey, currentFailed);
 
-        if (currentFailed >= 10) {
-          if (targetUserId) {
-            await updateDoc(doc(db, "users", targetUserId), { active: false });
+          if (currentFailed >= 10) {
+            if (targetUserId && targetUserDoc && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+              await updateDoc(doc(db, "users", targetUserId), { active: false });
+            }
+            alert("⛔ Bạn đã nhập sai mật khẩu 10 lần!\nTài khoản đã bị KHÓA. Vui lòng liên hệ admin để được mở lại và đổi mật khẩu mới!");
+          } else {
+            alert(`⛔ Mật khẩu không đúng! Bạn còn ${10 - currentFailed} lần thử trước khi tài khoản bị khóa.`);
           }
-          alert("⛔ Bạn đã nhập sai mật khẩu 10 lần!\nTài khoản đã bị KHÓA. Vui lòng liên hệ admin để được mở lại và đổi mật khẩu mới!");
         } else {
-          alert(`⛔ Mật khẩu không đúng! Bạn còn ${10 - currentFailed} lần thử trước khi tài khoản bị khóa.`);
+          alert("⛔ Mật khẩu không đúng!");
         }
         return;
       }
@@ -1069,7 +1075,7 @@
     if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
     const profile = profileSnap.data();
 
-    if (profile.active === false) { 
+    if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
       alert("⛔ Tài khoản bị khóa."); 
       await signOut(authSvc); 
       return; 
@@ -1096,7 +1102,7 @@
     if (hashTab && ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].includes(hashTab)) {
       currentTab = hashTab;
     } else {
-      currentTab = (profile.role === 'sales') ? 'sales' : 'soGocBH';
+      currentTab = (profile.role === 'sales') ? 'sales' : (profile.role === 'viewer' ? 'customers' : 'soGocBH');
     }
 
     await initIndexedDB();
@@ -1172,6 +1178,7 @@
   };
 
   window.handleCustomerLocationAction = async function(storeId) {
+    if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Xem chung chỉ có quyền tra cứu, không được ghim GPS!");
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
@@ -1812,6 +1819,9 @@
       }
     }
 
+    const isViewer = currentUser.role === 'viewer';
+    const isAdmin = currentUser.role === 'admin';
+
     container.innerHTML = matched.length > 0 ? matched.map(s => {
       const hasLat = s.lat && s.lat !== 0;
       const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
@@ -1834,8 +1844,8 @@
               <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
               <button class="btn btn-purple btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="copyCoordinatesGPS(${Number(s.lat)}, ${Number(s.lng)}, '${s.name.replace(/'/g, "\\'")}')"><i class="fa-solid fa-copy"></i> Copy GPS</button>
             ` : ''}
-            <button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>
-            ${currentUser.role === 'admin' && hasLat ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
+            ${!isViewer ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
+            ${isAdmin && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </div>
         </div>
       `;
@@ -1893,7 +1903,7 @@
     cards.forEach(card => {
       const soCtu = card.getAttribute('data-so-ctu') || '';
       const maDtpn = card.getAttribute('data-ma-dtpn') || '';
-      const maNv = card.getAttribute('data-ma-nv') || '';
+      const maNv = (card.getAttribute('data-ma-nv') || '').trim().toLowerCase();
       const tenNv = card.getAttribute('data-ten-nv') || '';
       const ngayCtu = card.getAttribute('data-ngay-ctu') || '';
       const orderAmount = Number(card.getAttribute('data-order-amount')) || 0;
@@ -1914,7 +1924,8 @@
         matchDate = ngayCtu <= soGocFilterDateTo;
       }
 
-      const matchSales = soGocSalesFilter === "" || maNv === soGocSalesFilter;
+      const selectedSales = (soGocSalesFilter || '').trim().toLowerCase();
+      const matchSales = selectedSales === "" || maNv === selectedSales;
 
       const isVisible = matchOther && matchDate && matchSales;
       card.style.display = isVisible ? '' : 'none';
@@ -2600,6 +2611,10 @@
   };
 
   window.toggleUserActive = async function(uid, active) { 
+    const targetUser = users.find(u => u.uid === uid);
+    if (targetUser && targetUser.email && targetUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
+      return alert("⛔ AN TOÀN HỆ THỐNG: Không được phép khóa tài khoản Admin gốc!");
+    }
     await updateDoc(doc(db, "users", uid), { active }); 
     const uIndex = users.findIndex(u => u.uid === uid);
     if(uIndex > -1) users[uIndex].active = active;
@@ -2620,7 +2635,7 @@
       checkins = snap.docs.map(d => ({id:d.id, ...d.data()}));
     }).catch(e => {});
 
-    if (currentUser && currentUser.role === 'admin') {
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
         users = snap.docs.map(d => ({id:d.id, ...d.data()}));
         if (currentTab === 'users') {
@@ -2638,14 +2653,20 @@
       userInfoEl.innerHTML = `[${currentUser.code}] ${currentUser.name} (<span style="color:var(--amber);">${currentUser.role}</span>) ${navigator.onLine?'':'<span class="badge badge-danger">Offline</span>'}`;
     }
     const isAdmin = currentUser.role === 'admin';
+    const isManager = currentUser.role === 'manager';
+    const isViewer = currentUser.role === 'viewer';
     
-    setNav('navSales', true); 
-    setNav('navSoGocBH', true);
+    setNav('navSales', !isViewer); 
+    setNav('navSoGocBH', !isViewer);
     setNav('navCustomers', true); 
-    setNav('navProductsAdmin', true);
-    setNav('navRoutes', true);
-    setNav('navCompany', true);
-    setNav('navUsers', isAdmin);
+    setNav('navProductsAdmin', !isViewer);
+    setNav('navRoutes', !isViewer);
+    setNav('navCompany', !isViewer);
+    setNav('navUsers', isAdmin || isManager);
+
+    if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].includes(currentTab)) {
+      currentTab = 'customers';
+    }
 
     ['sales', 'customers', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].forEach(tabName => {
       const pane = document.getElementById(`tabPane_${tabName}`);
@@ -2655,7 +2676,7 @@
     const activePane = document.getElementById(`tabPane_${currentTab}`);
     if (activePane) {
       activePane.style.display = 'block';
-      if (currentTab === 'users' && users.length === 0 && currentUser.role === 'admin') {
+      if (currentTab === 'users' && users.length === 0 && (isAdmin || isManager)) {
         getDocs(collection(db, "users")).then(snap => {
           users = snap.docs.map(d => ({id:d.id, ...d.data()}));
           renderTabContent(currentTab, activePane);
@@ -2820,7 +2841,7 @@
               <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
             </button>
             <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${currentUser.role !== 'sales' ? `
+            ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
@@ -3138,7 +3159,13 @@
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Email đăng nhập:</label><input type="email" id="usUsername" autocomplete="off" placeholder="VD: nv01@dms.com" required style="margin-bottom:6px;">
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật khẩu:</label><input type="password" id="usPass" autocomplete="new-password" placeholder="Mật khẩu" required style="margin-bottom:6px;">
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Phân quyền:</label>
-              <select id="usRole" style="margin-bottom:8px;"><option value="sales">Sales</option><option value="manager">Giám Sát</option><option value="accountant">Kế Toán</option><option value="admin">Admin</option></select>
+              <select id="usRole" style="margin-bottom:8px;">
+                <option value="sales">Sales</option>
+                <option value="manager">Giám Sát (Manager)</option>
+                <option value="accountant">Kế Toán</option>
+                <option value="viewer">Xem chung / Tra cứu (Viewer)</option>
+                <option value="admin">Admin</option>
+              </select>
               <button class="btn btn-green" style="width:100%;margin-top:4px;justify-content:center;font-weight:800;padding:12px;">Tạo NV</button>
             </form>
           </div>
