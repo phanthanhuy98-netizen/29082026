@@ -2196,9 +2196,21 @@
   };
 
   window.deleteSingleOrder = async function(orderId) {
-    if (currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa đơn hàng trực tiếp!");
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+
+    const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
+      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự xóa!`);
     }
+
+    if (!isOwner && !isManagerOrAdmin) {
+      return alert("⛔ Bạn không có quyền xóa đơn hàng của nhân viên khác!");
+    }
+
     const confirmDel = await window.showCustomConfirm(
       "Xóa Đơn Hàng",
       "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
@@ -2501,7 +2513,7 @@
   };
 
   window.exportCustomersExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
     if (stores.length === 0) return alert("Không có danh sách khách hàng để xuất!");
     const dataToExport = stores.map(s => ({
       "Mã Khách Hàng": s.code || '',
@@ -2520,7 +2532,7 @@
   };
 
   window.exportProductsExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
     if (products.length === 0) return alert("Không có danh sách vật tư để xuất!");
     const dataToExport = products.map(p => ({
       "Mã Vật Tư": p.code || '',
@@ -2538,7 +2550,7 @@
   };
 
   window.exportRoutesExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
     if (routeGroupsList.length === 0) return alert("Không có danh sách tuyến để xuất!");
     const dataToExport = routeGroupsList.map(r => ({
       "Nhóm Đối Tượng": r.nhomDoiTuong || '',
@@ -2552,7 +2564,7 @@
   };
 
   window.exportCompanyExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
     if (companyList.length === 0) return alert("Không có danh sách công ty để xuất!");
     const dataToExport = companyList.map(c => ({
       "Mã Công Ty (MaCTu)": c.maCtu || '',
@@ -2566,7 +2578,7 @@
   };
 
   window.importProductsExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file Excel!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file Excel!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2627,7 +2639,7 @@
   };
 
   window.importCustomersExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file khách hàng mới!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2679,7 +2691,7 @@
   };
 
   window.importCompanyExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2711,7 +2723,7 @@
   };
 
   window.importRoutesExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
+    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -3150,6 +3162,7 @@
 
     else if (tab === 'customers') {
       const isSales = currentUser.role === 'sales';
+      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})</h2>
@@ -3157,7 +3170,7 @@
             <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
               <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
             </button>
-            ${!isSales ? `
+            ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}
@@ -3251,13 +3264,14 @@
       const now = new Date();
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const isAdmin = currentUser.role === 'admin';
+      const isViewer = currentUser.role === 'viewer';
 
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
-            ${!isSales ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
+            ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
 
@@ -3301,6 +3315,7 @@
             const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
             const isToday = o.ngayCtu === todayStr;
             const canEdit = (isOwner && isToday) || isManagerOrAdmin;
+            const canDelete = (isOwner && isToday) || isAdmin;
             const timeStr = formatOrderTime(o.createdAt);
             
             return `
@@ -3319,7 +3334,7 @@
                   <div style="display:flex; gap:6px;">
                     <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
                     ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                    ${canDelete ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
                   </div>
                 </div>
               </div>
@@ -3377,11 +3392,12 @@
 
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
+      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Vật Tư (${products.length})</h2>
           <div class="excel-group-btns">
-            ${!isSales ? `
+            ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importProductsExcel(event)" style="display:none;"></label>
             ` : ''}
@@ -3402,12 +3418,13 @@
     else if (tab === 'routes') {
       const isAdmin = currentUser && currentUser.role === 'admin';
       const isSales = currentUser.role === 'sales';
+      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
-            ${!isSales ? `
+            ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
@@ -3440,12 +3457,13 @@
     else if (tab === 'company') {
       const isAdmin = currentUser && currentUser.role === 'admin';
       const isSales = currentUser.role === 'sales';
+      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-building" style="color:var(--primary);"></i> Mã Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
             ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
-            ${!isSales ? `
+            ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
