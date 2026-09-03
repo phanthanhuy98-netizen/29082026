@@ -280,6 +280,42 @@
   .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
   .hidden{display:none !important;}
 
+  /* Toast Notification Styles */
+  #toastContainer {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .toast-item {
+    background: rgba(15, 23, 42, 0.92);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    pointer-events: auto;
+    animation: slideInRight 0.3s ease-out;
+  }
+  .toast-success { border-left: 4px solid #10B981; }
+  .toast-error { border-left: 4px solid #F43F5E; }
+  .toast-warning { border-left: 4px solid #F59E0B; }
+
+  @keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
   .tab-header-actions {
     display: flex;
     justify-content: space-between;
@@ -402,6 +438,29 @@
     royalNavy: { name: 'Hải Quân', bgDark: '#172554', bgGrad: 'radial-gradient(circle at 50% 0%, #1E3A8A 0%, #172554 100%)', panelBg: 'rgba(30, 58, 138, 0.85)', cardBg: 'rgba(29, 78, 216, 0.65)', textMain: '#EFF6FF', textMuted: '#BFDBFE', border: 'rgba(191, 219, 254, 0.2)' },
     mysticTeal: { name: 'Huyền Bí', bgDark: '#042F2E', bgGrad: 'radial-gradient(circle at 50% 0%, #134E4A 0%, #042F2E 100%)', panelBg: 'rgba(19, 78, 74, 0.85)', cardBg: 'rgba(15, 118, 110, 0.65)', textMain: '#F0FDFA', textMuted: '#99F6E4', border: 'rgba(153, 246, 228, 0.2)' },
     slateMinimal: { name: 'Xám Slat', bgDark: '#0F172A', bgGrad: 'radial-gradient(circle at 50% 0%, #1E293B 0%, #0F172A 100%)', panelBg: 'rgba(30, 41, 59, 0.85)', cardBg: 'rgba(51, 65, 85, 0.7)', textMain: '#F8FAFC', textMuted: '#94A3B8', border: 'rgba(148, 163, 184, 0.2)' }
+  };
+
+  // Toast Notification System
+  window.showToast = function(message, type = 'success') {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toastContainer';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    let icon = 'fa-circle-check';
+    if (type === 'error') icon = 'fa-circle-exclamation';
+    if (type === 'warning') icon = 'fa-triangle-exclamation';
+    
+    toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${message}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
   };
 
   window.applyTheme = function(themeKey) {
@@ -568,7 +627,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 23);
+      const request = indexedDB.open("DMS_OfflineDB", 24);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -711,6 +770,7 @@
     }
   }
 
+  // Auto-Retry Sync Queue
   window.syncOfflineCheckins = async function() {
     if (!navigator.onLine || !idbDb) return;
     const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
@@ -730,6 +790,7 @@
             delTx.objectStore("offlineCheckins").delete(item.id);
           } catch (e) {}
         }
+        showToast("Đã đồng bộ dữ liệu check-in ngoại tuyến lên hệ thống!", "success");
       }
     };
   };
@@ -748,6 +809,7 @@
             const nextSoCtu = await getNextSoCtu();
             const { id, ...payload } = item;
             payload.soCtu = nextSoCtu;
+            payload.updatedAt = new Date().toISOString();
             payload.createdAt = serverTimestamp();
             await addDoc(collection(db, "orders"), payload);
             
@@ -755,6 +817,7 @@
             delTx.objectStore("offlineOrders").delete(item.id);
           } catch (e) {}
         }
+        showToast("Đã tự động đẩy các đơn hàng ngoại tuyến lên sổ gốc thành công!", "success");
       }
     };
   };
@@ -831,6 +894,48 @@
     });
   };
 
+  // Manual GPS Fallback Modal
+  window.promptManualGPSInput = function() {
+    return new Promise((resolve) => {
+      const modalContainer = document.getElementById('dynamicModalContainer');
+      modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:9999;">
+          <div class="modal-content" style="max-width: 380px; text-align: left; padding: 22px; border-radius: 18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+              <h3 style="font-size: 15px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-location-dot" style="color:var(--amber);"></i> Nhập Tọa Độ GPS Thủ Công</h3>
+              <button class="btn btn-red btn-sm" onclick="cancelManualGPS()">Hủy</button>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Do thiết bị không bắt được tín hiệu GPS, vui lòng dán hoặc nhập tọa độ vĩ độ, kinh độ dự phòng:</p>
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Vĩ độ (Latitude):</label>
+            <input type="text" id="manualLatInput" placeholder="VD: 11.5448" style="margin-bottom: 8px; padding: 10px; font-size: 14px;">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Kinh độ (Longitude):</label>
+            <input type="text" id="manualLngInput" placeholder="VD: 106.9056" style="margin-bottom: 14px; padding: 10px; font-size: 14px;">
+            <button class="btn btn-amber" style="width:100%; justify-content:center; padding: 12px; font-weight:800;" onclick="submitManualGPS()">Xác Nhận Tọa Độ</button>
+          </div>
+        </div>
+      `;
+      modalContainer.classList.remove('hidden');
+
+      window.cancelManualGPS = () => {
+        modalContainer.innerHTML = '';
+        modalContainer.classList.add('hidden');
+        resolve(null);
+      };
+
+      window.submitManualGPS = () => {
+        const lat = parseFloat(document.getElementById('manualLatInput').value);
+        const lng = parseFloat(document.getElementById('manualLngInput').value);
+        if (isNaN(lat) || isNaN(lng)) {
+          showToast("Tọa độ không hợp lệ!", "error");
+          return;
+        }
+        modalContainer.innerHTML = '';
+        modalContainer.classList.add('hidden');
+        resolve({ lat, lng, accuracy: 50 });
+      };
+    });
+  };
+
   function removeAccents(str) {
     if (!str) return '';
     return str.normalize('NFD')
@@ -878,8 +983,14 @@
           const { latitude, longitude, accuracy } = pos.coords;
           resolve({ lat: latitude, lng: longitude, accuracy });
         },
-        err => reject(err),
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        async err => {
+          // Fallback to manual entry if high accuracy fails or times out
+          showToast("Không bắt được GPS tự động, vui lòng nhập thủ công.", "warning");
+          const manual = await promptManualGPSInput();
+          if (manual) resolve(manual);
+          else reject(err);
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     });
   }
@@ -888,7 +999,7 @@
     const numericLat = Number(lat);
     const numericLng = Number(lng);
     if (!numericLat || !numericLng) {
-      return alert("Điểm này chưa có tọa độ GPS hợp lệ để chỉ đường!");
+      return showToast("Điểm này chưa có tọa độ GPS hợp lệ để chỉ đường!", "error");
     }
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     if (isIOS) {
@@ -902,11 +1013,13 @@
     const numericLat = Number(lat);
     const numericLng = Number(lng);
     if (!numericLat || !numericLng) {
-      return alert("Khách hàng này chưa có tọa độ GPS để sao chép!");
+      return showToast("Khách hàng này chưa có tọa độ GPS để sao chép!", "error");
     }
     const textToCopy = `Tọa độ GPS ${storeName || 'KH'}: ${numericLat}, ${numericLng} (https://www.google.com/maps?q=${numericLat},${numericLng})`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy).catch(() => {
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        showToast("Đã sao chép tọa độ GPS thành công!", "success");
+      }).catch(() => {
         fallbackCopyText(textToCopy);
       });
     } else {
@@ -923,8 +1036,9 @@
     textArea.select();
     try {
       document.execCommand('copy');
+      showToast("Đã sao chép tọa độ GPS!", "success");
     } catch (err) {
-      alert("Không thể sao chép tọa độ: " + err);
+      showToast("Không thể sao chép tọa độ", "error");
     }
     document.body.removeChild(textArea);
   }
@@ -999,7 +1113,8 @@
       });
 
       if (targetUserDoc && targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-        return alert("⛔ Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!\nVui lòng liên hệ admin để được mở lại và đổi mật khẩu mới.");
+        showToast("Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!", "error");
+        return;
       }
 
       const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
@@ -1008,6 +1123,7 @@
       try {
         await signInWithEmailAndPassword(authSvc, email, pass);
         localStorage.removeItem(failedAttemptsKey);
+        showToast("Đăng nhập thành công!", "success");
       } catch (authErr) {
         if (targetUserRole !== 'viewer') {
           currentFailed++;
@@ -1017,17 +1133,17 @@
             if (targetUserId && targetUserDoc && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
               await updateDoc(doc(db, "users", targetUserId), { active: false });
             }
-            alert("⛔ Bạn đã nhập sai mật khẩu 10 lần!\nTài khoản đã bị KHÓA. Vui lòng liên hệ admin để được mở lại và đổi mật khẩu mới!");
+            showToast("Tài khoản đã bị KHÓA do nhập sai mật khẩu 10 lần!", "error");
           } else {
-            alert(`⛔ Mật khẩu không đúng! Bạn còn ${10 - currentFailed} lần thử trước khi tài khoản bị khóa.`);
+            showToast(`Mật khẩu không đúng! Còn ${10 - currentFailed} lần thử.`, "warning");
           }
         } else {
-          alert("⛔ Mật khẩu không đúng!");
+          showToast("Mật khẩu không đúng!", "error");
         }
         return;
       }
     } catch (err) {
-      alert("Đăng nhập thất bại: " + err.message);
+      showToast("Đăng nhập thất bại: " + err.message, "error");
     }
   };
 
@@ -1037,9 +1153,7 @@
     const lastSyncDate = localStorage.getItem('dms_last_sync_date');
     const todayStr = new Date().toISOString().slice(0, 10);
     
-    if (lastSyncDate === todayStr) {
-      return;
-    }
+    if (lastSyncDate === todayStr) return;
 
     try {
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
@@ -1100,11 +1214,14 @@
     }
 
     const profileSnap = await getDoc(doc(db, "users", user.uid));
-    if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
+    if (!profileSnap.exists()) {
+      showToast("Tài khoản chưa được cấu hình phân quyền.", "error");
+      return;
+    }
     const profile = profileSnap.data();
 
     if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
-      alert("⛔ Tài khoản bị khóa."); 
+      showToast("Tài khoản bị khóa.", "error");
       await signOut(authSvc); 
       return; 
     }
@@ -1116,7 +1233,7 @@
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.activeSessionId && data.activeSessionId !== currentSessionId) {
-          alert("⚠️ Đang có người đăng nhập tài khoản hãy kiểm tra lại ngay!!");
+          showToast("Tài khoản đang đăng nhập ở thiết bị khác!", "error");
           signOut(authSvc);
         }
       }
@@ -1221,14 +1338,8 @@
       setTimeout(() => logPassEl.removeAttribute('readonly'), 100);
     }
 
-    if (sessionUnsub) { 
-      sessionUnsub(); 
-      sessionUnsub = null; 
-    }
-    if (ordersUnsub) {
-      ordersUnsub();
-      ordersUnsub = null;
-    }
+    if (sessionUnsub) { sessionUnsub(); sessionUnsub = null; }
+    if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
 
     currentCart = {};
     activeVisitedStore = null;
@@ -1251,21 +1362,28 @@
     const oldP = document.getElementById('oldPassInput').value;
     const newP = document.getElementById('newPassInput').value;
     const confirmP = document.getElementById('confirmPassInput').value;
-    if (newP !== confirmP) return alert("Mật khẩu mới không trùng khớp!");
+    if (newP !== confirmP) {
+      showToast("Mật khẩu mới không trùng khớp!", "error");
+      return;
+    }
     try {
       const cred = EmailAuthProvider.credential(authSvc.currentUser.email, oldP);
       await reauthenticateWithCredential(authSvc.currentUser, cred);
       await updatePassword(authSvc.currentUser, newP);
-      alert("✅ Đổi mật khẩu thành công!");
+      showToast("Đổi mật khẩu thành công!", "success");
       closeChangePasswordModal();
-    } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
+    } catch (err) {
+      showToast("Mật khẩu cũ không đúng.", "error");
+    }
   };
 
   window.handleCustomerLocationAction = async function(storeId) {
-    if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu, không được ghim GPS!");
+    if (currentUser.role === 'viewer') {
+      showToast("Tài khoản Viewer không được phép ghim GPS!", "warning");
+      return;
+    }
     const store = stores.find(s => String(s.id) === String(storeId));
     if (!store) return;
-    if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
     try {
       const pos = await getHighAccuracyPosition();
@@ -1296,17 +1414,21 @@
       store.pinnedAt = new Date().toISOString();
       store.pinnedHistory = [...existingHistory, newHistoryItem];
       
+      showToast("Cập nhật GPS thành công!", "success");
       filterTabCustomers(tabCustomerSearchKey);
       if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
         renderUI();
       }
     } catch (err) { 
-      alert("Lỗi cập nhật GPS: " + err.message); 
+      showToast("Lỗi cập nhật GPS: " + err.message, "error"); 
     }
   };
 
   window.adminResetCustomerLocation = async function(storeId) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản admin mới có quyền xóa định vị GPS!");
+    if (currentUser.role !== 'admin') {
+      showToast("Chỉ tài khoản admin mới có quyền xóa GPS!", "warning");
+      return;
+    }
     const confirmReset = await window.showCustomConfirm(
       "Xóa Định Vị GPS",
       "Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?",
@@ -1320,8 +1442,11 @@
       await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
       const store = stores.find(s => String(s.id) === String(storeId));
       if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
+      showToast("Đã xóa tọa độ GPS thành công!", "success");
       filterTabCustomers(tabCustomerSearchKey);
-    } catch (err) { alert("Lỗi: " + err.message); }
+    } catch (err) {
+      showToast("Lỗi: " + err.message, "error");
+    }
   };
 
   window.selectStoreDirectly = async function(storeId, event) {
@@ -1334,7 +1459,7 @@
       targetStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
     }
     if (!targetStore) {
-      alert("Không tìm thấy thông tin khách hàng này!");
+      showToast("Không tìm thấy thông tin khách hàng này!", "error");
       return;
     }
 
@@ -1353,7 +1478,7 @@
     if (!hasGPSAlready) {
       const updateGPSNow = await window.showCustomConfirm(
         "Cập Nhật Vị Trí GPS",
-        `Khách hàng "${activeVisitedStore.name}" chưa có định vị GPS.\nBạn có muốn cập nhật vị trí GPS ngay tại đây không?\n\n• [Cập nhật ngay]: Lấy tọa độ thực tế hiện tại.\n• [Để sau]: Giữ nguyên vị trí.`,
+        `Khách hàng "${activeVisitedStore.name}" chưa có định vị GPS.\nBạn có muốn cập nhật vị trí GPS ngay tại đây không?`,
         "fa-location-crosshairs",
         "Cập nhật ngay",
         "Để sau"
@@ -1409,8 +1534,9 @@
           activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
           activeVisitedStore.pinnedAt = new Date().toISOString();
           activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+          showToast("Check-in & lưu GPS thành công!", "success");
         } catch (err) {
-          alert("Không thể lấy tọa độ GPS: " + err.message);
+          showToast("Không thể lấy tọa độ GPS: " + err.message, "error");
         }
       }
     }
@@ -1531,11 +1657,12 @@
   });
 
   window.checkinActiveStoreGPS = async function() {
-    if (!activeVisitedStore) return alert("Chưa chọn điểm bán!");
+    if (!activeVisitedStore) return showToast("Chưa chọn điểm bán!", "warning");
     
     const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
     if (hasGPSAlready) {
-      return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
+      showToast(`Khách hàng "${activeVisitedStore.name}" đã có định vị GPS từ trước.`, "warning");
+      return;
     }
 
     try {
@@ -1588,13 +1715,14 @@
       activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
       
+      showToast("Ghim GPS thành công!", "success");
       renderUI();
     } catch (err) {
-      console.error(err);
-      alert("Không thể lấy tọa độ GPS: " + err.message);
+      showToast("Không thể lấy tọa độ GPS: " + err.message, "error");
     }
   };
 
+  // DOM Optimization: Targeted Partial Updates
   window.updateCartDetail = async function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!p) return;
@@ -1602,7 +1730,7 @@
     const rawPrice = Number(p.price || 0);
     const pNameLower = removeAccents(p.name || '');
     if (rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck')) {
-      alert("⛔ Vật tư chiết khấu hoặc có giá trị bằng 0đ không được phép bán!");
+      showToast("Vật tư chiết khấu hoặc có giá trị 0đ không được bán!", "error");
       return;
     }
 
@@ -1630,7 +1758,7 @@
     if (itemTotal > 20000000) {
       const confirmContinue = await window.showCustomConfirm(
         "Cảnh Báo Vượt Mức Giá Trị",
-        `Sản phẩm "${p.name}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá ngưỡng 20.000.000đ.\n\nBạn có chắc chắn muốn tiếp tục số lượng này không?`,
+        `Sản phẩm "${p.name}" có tổng tiền ${itemTotal.toLocaleString()}đ vượt quá ngưỡng 20.000.000đ.\nBạn có chắc chắn muốn tiếp tục không?`,
         "fa-triangle-exclamation",
         "Tiếp tục",
         "Hủy bỏ"
@@ -1645,6 +1773,7 @@
     const finalQty = currentCart[prdId].qty;
     const finalItemTotal = rawPrice * finalQty;
 
+    // Targeted DOM updates without re-rendering entire lists
     document.querySelectorAll(`.input-le-${safeK}`).forEach(el => {
       if (document.activeElement !== el) el.value = (finalLe === 0 ? '' : finalLe);
     });
@@ -1677,7 +1806,7 @@
       const rawPrice = Number(p.price || 0);
       const pNameLower = removeAccents(p.name || '');
       if (rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck')) {
-        alert("⛔ Vật tư chiết khấu hoặc có giá trị bằng 0đ không được phép bán!");
+        showToast("Vật tư chiết khấu hoặc 0đ không được bán!", "error");
         return;
       }
     }
@@ -1710,7 +1839,7 @@
     if (!container) return;
 
     if (customerSearchKeyword === "" && !selectedRouteCode) {
-      container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng (VD: 51Duyen1) để tìm kiếm nhanh...</div>`;
+      container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>`;
       const hintEl = document.getElementById('customerSearchHint');
       if (hintEl) hintEl.innerText = "Vui lòng nhập mã khách hàng hoặc chọn tuyến...";
       return;
@@ -1776,7 +1905,7 @@
               <span style="font-size:11px; font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>
             </div>
           </div>
-          <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
+          <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
           <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
           <div style="font-size:11px; color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
           <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:2px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
@@ -1887,10 +2016,10 @@
           
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <span class="item-code" style="font-size: 11px; padding: 3px 8px; background: rgba(37, 99, 235, 0.12); color: #2563EB; font-weight: 800; border-radius: 4px;">${p.code}</span>
-            <span style="font-size: 11px; background: rgba(37,99,235,0.12); color: var(--primary); padding: 3px 8px; border-radius: 4px; font-weight: 800;">${p.dvt || 'cây'}_Q/c ${p.tyLeQuyDoi || 50}</span>
+            <span style="font-size: 11px; background: rgba(37,99,235,0.12); color: var(--primary); padding: 3px 8px; border-radius: 4px; font-weight: 800;">${p.dvt || 'cây'}_Q/C ${p.tyLeQuyDoi || 50}</span>
           </div>
 
-          <div class="item-title" style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word; overflow-wrap: break-word; white-space: normal;">
+          <div class="item-title" style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word; white-space: normal;">
             ${p.name}
           </div>
 
@@ -1944,8 +2073,8 @@
     if (!container) return;
 
     if (tabCustomerSearchKey === "" && !showOnlyPinnedGPS) {
-      container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút "Xem KH ghim GPS".</div>`;
-      if (hintEl) hintEl.innerText = "Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm hoặc chọn xem KH đã ghim.";
+      container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút xem KH ghim GPS.</div>`;
+      if (hintEl) hintEl.innerText = "Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm.";
       return;
     }
 
@@ -1955,14 +2084,10 @@
       const hasLat = s.lat && s.lat !== 0;
 
       let matchPinned = true;
-      if (showOnlyPinnedGPS) {
-        matchPinned = hasLat;
-      }
+      if (showOnlyPinnedGPS) matchPinned = hasLat;
 
       let matchKey = true;
-      if (tabCustomerSearchKey !== "") {
-        matchKey = entry.searchableText.includes(tabCustomerSearchKey);
-      }
+      if (tabCustomerSearchKey !== "") matchKey = entry.searchableText.includes(tabCustomerSearchKey);
 
       if (matchPinned && matchKey) {
         matched.push(s);
@@ -1983,7 +2108,7 @@
             <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">${s.code || 'KH'}</span>
             <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">${hasLat ? `Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}</span>
           </div>
-          <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
+          <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
           <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
           <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted);">
             <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
@@ -2031,7 +2156,7 @@
           <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">${p.code}</span>
           <span class="badge" style="background:var(--panel-bg); color:var(--text-main); border:1px solid var(--card-border);">${p.dvt || 'cây'}_Q/C: ${p.tyLeQuyDoi || 50}</span>
         </div>
-        <div style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${p.name}">${p.name}</div>
+        <div style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; white-space: normal;" title="${p.name}">${p.name}</div>
         <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); background:var(--panel-bg); padding:8px 10px; border-radius:8px;">
           <span>Tồn đầu: <b>${p.stockDau || 0}</b></span>
           <span>Tồn cuối: <b>${p.stockCuoi || 0}</b></span>
@@ -2090,20 +2215,9 @@
     if (sumEl) sumEl.innerText = totalFilteredAmount.toLocaleString() + ' đ';
   };
 
-  window.setSoGocDateFrom = function(val) {
-    soGocFilterDateFrom = val;
-    filterSoGocCards();
-  };
-
-  window.setSoGocDateTo = function(val) {
-    soGocFilterDateTo = val;
-    filterSoGocCards();
-  };
-
-  window.setSoGocSalesFilter = function(val) {
-    soGocSalesFilter = val;
-    filterSoGocCards();
-  };
+  window.setSoGocDateFrom = function(val) { soGocFilterDateFrom = val; filterSoGocCards(); };
+  window.setSoGocDateTo = function(val) { soGocFilterDateTo = val; filterSoGocCards(); };
+  window.setSoGocSalesFilter = function(val) { soGocSalesFilter = val; filterSoGocCards(); };
 
   window.setSoGocQuickDateFilter = function(type) {
     soGocQuickDate = type;
@@ -2147,7 +2261,7 @@
       
       if (snap.empty) {
         hasMoreOrders = false;
-        alert("Đã tải hết toàn bộ lịch sử đơn hàng!");
+        showToast("Đã tải hết toàn bộ lịch sử đơn hàng!", "warning");
         const btn = document.getElementById('loadMoreSoGocBtn');
         if (btn) btn.style.display = 'none';
         return;
@@ -2157,32 +2271,31 @@
       const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       orders = [...orders, ...newOrders];
 
-      if (snap.docs.length < 30) {
-        hasMoreOrders = false;
-      }
+      if (snap.docs.length < 30) hasMoreOrders = false;
 
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
     } catch (e) {
-      console.error("Lỗi khi tải thêm đơn hàng:", e);
-      alert("Không thể tải thêm đơn hàng: " + e.message);
+      showToast("Không thể tải thêm đơn hàng: " + e.message, "error");
     }
   };
 
   window.editOrder = function(orderId) {
     const order = orders.find(o => o.id === orderId);
-    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+    if (!order) return showToast("Không tìm thấy thông tin đơn hàng!", "error");
 
     const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
     const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
     const todayStr = new Date().toISOString().slice(0, 10);
 
     if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
-      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý (Manager/admin) để được mở khóa hỗ trợ chỉnh sửa đơn hàng.`);
+      showToast("Đơn hàng đã qua ngày mới, nhân viên không được tự sửa!", "error");
+      return;
     }
 
     if (!isOwner && !isManagerOrAdmin) {
-      return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
+      showToast("Bạn không có quyền sửa đơn hàng của nhân viên khác!", "error");
+      return;
     }
 
     let targetStore = stores.find(s => String(s.id) === String(order.storeId));
@@ -2190,7 +2303,8 @@
       targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
     }
     if (!targetStore) {
-      return alert("Không tìm thấy dữ liệu điểm bán của đơn hàng này trong hệ thống!");
+      showToast("Không tìm thấy dữ liệu điểm bán của đơn hàng này!", "error");
+      return;
     }
 
     activeVisitedStore = targetStore;
@@ -2207,11 +2321,7 @@
         const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
         const le = ratio > 0 ? totalQty % ratio : totalQty;
 
-        currentCart[pKey] = {
-          qty: totalQty,
-          kien: kien,
-          le: le
-        };
+        currentCart[pKey] = { qty: totalQty, kien, le };
       });
     }
 
@@ -2220,7 +2330,8 @@
 
   window.deleteSingleOrder = async function(orderId) {
     if (currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa đơn hàng trực tiếp!");
+      showToast("Chỉ tài khoản admin mới có quyền xóa đơn hàng!", "warning");
+      return;
     }
     const confirmDel = await window.showCustomConfirm(
       "Xóa Đơn Hàng",
@@ -2236,29 +2347,31 @@
       orders = orders.filter(o => o.id !== orderId);
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
-      alert("✅ Đã xóa đơn hàng thành công!");
+      showToast("Đã xóa đơn hàng thành công!", "success");
     } catch (err) {
-      alert("Lỗi khi xóa đơn hàng: " + err.message);
+      showToast("Lỗi khi xóa đơn hàng: " + err.message, "error");
     }
   };
 
   window.deleteAllOrdersByDatePrompt = async function() {
     if (currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa toàn bộ đơn hàng theo ngày!");
+      showToast("Chỉ tài khoản admin mới có quyền xóa hàng loạt!", "warning");
+      return;
     }
-    const dateInput = prompt("Nhập ngày cần xóa toàn bộ đơn hàng (Định dạng YYYY-MM-DD, VD: 2026-09-03):");
+    const dateInput = prompt("Nhập ngày cần xóa toàn bộ đơn hàng (YYYY-MM-DD):");
     if (!dateInput) return;
 
     const targetDate = dateInput.trim();
     const targetOrders = orders.filter(o => o.ngayCtu === targetDate);
 
     if (targetOrders.length === 0) {
-      return alert(`Không tìm thấy đơn hàng nào trong ngày ${targetDate} để xóa!`);
+      showToast(`Không tìm thấy đơn hàng nào trong ngày ${targetDate}!`, "warning");
+      return;
     }
 
     const confirmDel = await window.showCustomConfirm(
       "Xóa Hàng Loạt Đơn Hàng",
-      `⚠️ CẢNH BÁO: Bạn sắp xóa toàn bộ ${targetOrders.length} đơn hàng trong ngày ${targetDate}!\nHành động này không thể hoàn tác. Bạn có thực sự chắc chắn không?`,
+      `CẢNH BÁO: Sắp xóa toàn bộ ${targetOrders.length} đơn hàng trong ngày ${targetDate}!\nHành động này không thể hoàn tác.`,
       "fa-triangle-exclamation",
       "Xóa toàn bộ",
       "Hủy"
@@ -2267,17 +2380,15 @@
 
     try {
       const batch = writeBatch(db);
-      targetOrders.forEach(o => {
-        batch.delete(doc(db, "orders", o.id));
-      });
+      targetOrders.forEach(o => batch.delete(doc(db, "orders", o.id)));
       await batch.commit();
 
       orders = orders.filter(o => o.ngayCtu !== targetDate);
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
-      alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng trong ngày ${targetDate}!`);
+      showToast(`Đã xóa thành công ${targetOrders.length} đơn hàng ngày ${targetDate}!`, "success");
     } catch (err) {
-      alert("Lỗi khi xóa hàng loạt: " + err.message);
+      showToast("Lỗi khi xóa hàng loạt: " + err.message, "error");
     }
   };
 
@@ -2346,9 +2457,7 @@
     let selectedSkuCount = 0;
 
     Object.values(currentCart).forEach(c => {
-      if (c && c.qty > 0) {
-        selectedSkuCount++;
-      }
+      if (c && c.qty > 0) selectedSkuCount++;
     });
 
     products.forEach(p => {
@@ -2386,14 +2495,14 @@
       });
       return newSeq;
     } catch (err) {
-      console.error("Lỗi transaction cấp số chứng từ:", err);
       return Math.floor(Math.random() * 900000) + 1;
     }
   }
 
+  // Conflict Resolution & Offline Order Sync with updatedAt tracking
   window.submitOrder = async function() {
     if (!activeVisitedStore) {
-      alert("⚠️ Vui lòng chọn khách hàng trước khi gửi đơn hàng!");
+      showToast("Vui lòng chọn khách hàng trước khi gửi đơn hàng!", "warning");
       const custInput = document.getElementById('customerSearchInput');
       if (custInput) custInput.focus();
       return;
@@ -2437,7 +2546,7 @@
       });
 
       if (items.length === 0) {
-        alert("Vui lòng chọn số lượng hàng trước khi gửi đơn!");
+        showToast("Vui lòng chọn số lượng hàng trước khi gửi đơn!", "warning");
         if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "GỬI ĐƠN"; }
         return;
       }
@@ -2468,7 +2577,8 @@
         rawSubtotal,
         isReturnOrder: false, 
         paymentStatus: 'Công nợ', 
-        status: 'Chờ duyệt'
+        status: 'Chờ duyệt',
+        updatedAt: new Date().toISOString()
       };
 
       const savedStoreId = activeVisitedStore.id;
@@ -2477,24 +2587,44 @@
         try {
           if (editingOrderId) {
             const orderRef = doc(db, "orders", editingOrderId);
+            // Conflict check via updatedAt
+            const existingSnap = await getDoc(orderRef);
+            if (existingSnap.exists()) {
+              const cloudData = existingSnap.data();
+              if (cloudData.updatedAt && orderData.updatedAt < cloudData.updatedAt) {
+                const forceOverride = await window.showCustomConfirm(
+                  "Phát Hiện Xung Đột Dữ Liệu",
+                  "Đơn hàng này vừa được chỉnh sửa trên thiết bị khác. Bạn có muốn ghi đè lên bản mới nhất không?",
+                  "fa-triangle-exclamation",
+                  "Ghi đè",
+                  "Hủy"
+                );
+                if (!forceOverride) {
+                  if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "GỬI ĐƠN"; }
+                  return;
+                }
+              }
+            }
+
             await updateDoc(orderRef, {
               ...orderData,
               updatedAt: serverTimestamp()
             });
+            showToast("Cập nhật đơn hàng thành công!", "success");
           } else {
             const nextSoCtu = await getNextSoCtu();
             orderData.soCtu = nextSoCtu;
             orderData.createdAt = serverTimestamp();
             await addDoc(collection(db, "orders"), orderData);
+            showToast("Gửi đơn hàng thành công lên sổ gốc!", "success");
           }
         } catch (err) {
-          console.warn("Mất mạng khi đang gửi, lưu offline:", err);
           await saveOfflineOrder(orderData);
-          alert("⚠️ Đang mất mạng! Đã lưu đơn hàng cục bộ và sẽ tự động đẩy lên sổ gốc khi có kết nối mạng lại.");
+          showToast("Mất mạng! Đã lưu đơn hàng cục bộ để tự động đồng bộ sau.", "warning");
         }
       } else {
         await saveOfflineOrder(orderData);
-        alert("⚠️ Thiết bị đang offline! Đã lưu đơn hàng vào hàng đợi, sẽ tự động đồng bộ qua sổ gốc ngay khi có mạng.");
+        showToast("Thiết bị offline! Đã lưu hàng đợi, sẽ tự động đồng bộ khi có mạng.", "warning");
       }
       
       clearCartDraftFromLocal(savedStoreId);
@@ -2517,34 +2647,36 @@
 
   window.exportSoGocExcel = function() {
     const tableEl = document.getElementById('soGocExportTable');
-    if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
+    if (!tableEl) return showToast("Không có dữ liệu sổ gốc để xuất!", "error");
     const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
+    showToast("Xuất Excel thành công!", "success");
   };
 
   window.exportCustomersExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
-    if (stores.length === 0) return alert("Không có danh sách khách hàng để xuất!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền xuất file!", "warning");
+    if (stores.length === 0) return showToast("Không có danh sách khách hàng!", "warning");
     const dataToExport = stores.map(s => ({
       "Mã Khách Hàng": s.code || '',
       "Tên Khách Hàng": s.name || '',
       "Địa Chỉ": s.address || '',
       "Số Điện Thoại": s.phone || '',
       "Zalo": s.zalo || '',
-      "Vĩ Độ (Lat)": s.lat || 0,
-      "Kinh Độ (Lng)": s.lng || 0,
+      "Vĩ Độ": s.lat || 0,
+      "Kinh Độ": s.lng || 0,
       "Nhân Viên Ghim": s.pinnedByName || ''
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "KhachHang");
     XLSX.writeFile(workbook, `DanhSachKhachHang_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast("Xuất danh sách khách hàng thành công!", "success");
   };
 
   window.exportProductsExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
-    if (products.length === 0) return alert("Không có danh sách vật tư để xuất!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền xuất file!", "warning");
+    if (products.length === 0) return showToast("Không có danh sách vật tư!", "warning");
     const dataToExport = products.map(p => ({
       "Mã Vật Tư": p.code || '',
       "Tên Vật Tư": p.name || '',
@@ -2552,44 +2684,47 @@
       "Tồn Đầu": p.stockDau || 0,
       "Tồn Cuối": p.stockCuoi || 0,
       "Đơn Giá": p.price || 0,
-      "Quy Cách Thùng": p.tyLeQuyDoi || 50
+      "Quy Cách": p.tyLeQuyDoi || 50
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "VatTu");
     XLSX.writeFile(workbook, `DanhSachVatTu_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast("Xuất danh sách vật tư thành công!", "success");
   };
 
   window.exportRoutesExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
-    if (routeGroupsList.length === 0) return alert("Không có danh sách tuyến để xuất!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền xuất file!", "warning");
+    if (routeGroupsList.length === 0) return showToast("Không có danh sách tuyến!", "warning");
     const dataToExport = routeGroupsList.map(r => ({
       "Nhóm Đối Tượng": r.nhomDoiTuong || '',
-      "Nội Dung / Tên Tuyến": r.noiDung || '',
+      "Nội Dung": r.noiDung || '',
       "Ghi Chú": r.ghiChu || ''
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TuyenBanHang");
     XLSX.writeFile(workbook, `DanhSachTuyen_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast("Xuất danh sách tuyến thành công!", "success");
   };
 
   window.exportCompanyExcel = function() {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền xuất file Excel!");
-    if (companyList.length === 0) return alert("Không có danh sách công ty để xuất!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền xuất file!", "warning");
+    if (companyList.length === 0) return showToast("Không có danh sách công ty!", "warning");
     const dataToExport = companyList.map(c => ({
-      "Mã Công Ty (MaCTu)": c.maCtu || '',
-      "Tên Công Ty (TenCTu)": c.tenCtu || '',
+      "Mã Công Ty": c.maCtu || '',
+      "Tên Công Ty": c.tenCtu || '',
       "Trạng Thái": c.status || 'Mở'
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "CongTy");
     XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast("Xuất danh sách công ty thành công!", "success");
   };
 
   window.importProductsExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file Excel!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền nhập file!", "warning");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2609,7 +2744,7 @@
           if (code && code !== 'Ma VTHH' && code !== 'undefined') {
             rawProducts.push({
               id: code,
-              code: code, name: name, dvt: dvt,
+              code, name, dvt,
               stockDau: Number(r[3]) || 0, stockCuoi: Number(r[4]) || 0,
               price: Number(r[5]) || 0, tyLeQuyDoi: Number(r[6]) || 50
             });
@@ -2642,15 +2777,15 @@
           products = uniqueList;
           buildProductIndex();
           renderUI();
-          alert("✅ Nhập danh sách vật tư thành công!");
-        } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
-      } catch (err) { alert("Lỗi: " + err.message); }
+          showToast("Nhập danh sách vật tư thành công!", "success");
+        } else { showToast("Không tìm thấy dữ liệu vật tư hợp lệ!", "warning"); }
+      } catch (err) { showToast("Lỗi: " + err.message, "error"); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   window.importCustomersExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file khách hàng mới!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền nhập file!", "warning");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2694,15 +2829,15 @@
           buildStoreIndex();
           await saveStoresToLocalCache(stores);
           renderUI();
-          alert("✅ Nhập danh sách khách hàng thành công!");
-        } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
-      } catch (err) { alert("Lỗi: " + err.message); }
+          showToast("Nhập danh sách khách hàng thành công!", "success");
+        } else { showToast("Không tìm thấy dữ liệu khách hàng!", "warning"); }
+      } catch (err) { showToast("Lỗi: " + err.message, "error"); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   window.importCompanyExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền nhập file!", "warning");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2724,17 +2859,17 @@
         if (newList.length > 0) {
           companyList = newList;
           renderUI();
-          alert("✅ Nhập danh sách công ty thành công!");
+          showToast("Nhập danh sách công ty thành công!", "success");
         } else {
-          alert("Không tìm thấy dữ liệu hợp lệ trong file!");
+          showToast("Không tìm thấy dữ liệu hợp lệ trong file!", "warning");
         }
-      } catch (err) { alert("Lỗi đọc file: " + err.message); }
+      } catch (err) { showToast("Lỗi đọc file: " + err.message, "error"); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   window.importRoutesExcel = function(event) {
-    if (currentUser.role === 'sales') return alert("⛔ Tài khoản Sales không có quyền tải file này!");
+    if (currentUser.role === 'sales') return showToast("Tài khoản Sales không có quyền nhập file!", "warning");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2768,32 +2903,34 @@
           routeGroupsList = newList;
           await saveRoutesToLocalCache(newList);
           renderUI();
-          alert("✅ Nhập danh sách tuyến và lưu lên Firebase thành công!");
+          showToast("Nhập danh sách tuyến thành công!", "success");
         } else {
-          alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
+          showToast("Nhóm đối tượng phải là số nguyên >= 10!", "warning");
         }
-      } catch (err) { alert("Lỗi đọc file: " + err.message); }
+      } catch (err) { showToast("Lỗi đọc file: " + err.message, "error"); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   window.addNewCompany = function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới công ty!");
+    if (currentUser.role !== 'admin') return showToast("Chỉ admin mới có quyền thêm công ty!", "warning");
     const maCtu = prompt("Nhập mã công ty (MaCTu):");
     if (!maCtu) return;
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
     if (!tenCtu) return;
     companyList.push({ maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), status: "Mở" });
     renderUI();
+    showToast("Đã thêm công ty thành công!", "success");
   };
 
   window.addNewRoute = async function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới tuyến!");
-    let valInput = prompt("Nhập nhóm đối tượng (Số nguyên dương >= 10, VD: 10, 11...):");
+    if (currentUser.role !== 'admin') return showToast("Chỉ admin mới có quyền thêm tuyến!", "warning");
+    let valInput = prompt("Nhập nhóm đối tượng (Số nguyên >= 10):");
     if (!valInput) return;
     let intVal = parseInt(valInput.trim(), 10);
     if (isNaN(intVal) || intVal < 10) {
-      return alert("⛔ Nhóm đối tượng phải là số nguyên dương từ 10 trở lên, không được chứa số âm hoặc số thập phân!");
+      showToast("Nhóm đối tượng phải là số nguyên dương từ 10 trở lên!", "error");
+      return;
     }
     const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
     const ghiChu = prompt("Nhập ghi chú:") || "";
@@ -2806,25 +2943,24 @@
       routeGroupsList.push(newRouteObj);
       await saveRoutesToLocalCache(routeGroupsList);
       renderUI();
-      alert("✅ Đã thêm và lưu tuyến mới lên Firebase thành công!");
+      showToast("Đã thêm tuyến thành công!", "success");
     } catch (err) {
-      alert("Lỗi khi lưu tuyến: " + err.message);
+      showToast("Lỗi khi lưu tuyến: " + err.message, "error");
     }
   };
 
   window.updateCompanyField = function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
+    if (currentUser.role !== 'admin') return;
     companyList[index][field] = val;
     renderUI();
   };
 
   window.updateRouteField = async function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
-    
+    if (currentUser.role !== 'admin') return;
     if (field === 'nhomDoiTuong') {
       let intVal = parseInt(val.trim(), 10);
       if (isNaN(intVal) || intVal < 10) {
-        alert("⛔ Nhóm đối tượng bắt buộc là số nguyên dương từ 10 trở lên!");
+        showToast("Nhóm đối tượng phải từ 10 trở lên!", "error");
         renderUI();
         return;
       }
@@ -2837,9 +2973,7 @@
     try {
       await setDoc(doc(db, "routes", targetRoute.id), targetRoute, { merge: true });
       await saveRoutesToLocalCache(routeGroupsList);
-    } catch (err) {
-      console.error("Lỗi cập nhật tuyến lên Firebase:", err);
-    }
+    } catch (e) {}
     renderUI();
   };
 
@@ -2849,6 +2983,7 @@
     if (confirmDel) {
       companyList.splice(index, 1);
       renderUI();
+      showToast("Đã xóa công ty!", "success");
     }
   };
 
@@ -2863,27 +2998,23 @@
       routeGroupsList.splice(index, 1);
       await saveRoutesToLocalCache(routeGroupsList);
       renderUI();
-      alert("✅ Đã xóa tuyến thành công!");
+      showToast("Đã xóa tuyến thành công!", "success");
     } catch (err) {
-      alert("Lỗi khi xóa tuyến: " + err.message);
+      showToast("Lỗi khi xóa tuyến: " + err.message, "error");
     }
   };
 
   window.filterCompanyTable = function(val) {
     const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.company-card-item');
-    cards.forEach(c => {
-      const text = removeAccents(c.innerText);
-      c.style.display = text.includes(q) ? '' : 'none';
+    document.querySelectorAll('.company-card-item').forEach(c => {
+      c.style.display = removeAccents(c.innerText).includes(q) ? '' : 'none';
     });
   };
 
   window.filterRouteTable = function(val) {
     const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.route-card-item');
-    cards.forEach(c => {
-      const text = removeAccents(c.innerText);
-      c.style.display = text.includes(q) ? '' : 'none';
+    document.querySelectorAll('.route-card-item').forEach(c => {
+      c.style.display = removeAccents(c.innerText).includes(q) ? '' : 'none';
     });
   };
 
@@ -2893,8 +3024,7 @@
     const name = document.getElementById('usName').value.trim();
     const usernameInput = document.getElementById('usUsername').value.trim();
     const password = document.getElementById('usPass').value.trim();
-    const roleInput = document.getElementById('usRole').value.trim();
-    const role = roleInput.toLowerCase();
+    const role = document.getElementById('usRole').value.trim().toLowerCase();
     
     const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
 
@@ -2903,21 +3033,22 @@
       await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
       await secondaryAuth.signOut();
       document.getElementById('userForm').reset();
-      alert("✅ Tạo tài khoản thành công!");
+      showToast("Tạo tài khoản thành công!", "success");
       users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code, role, active: true });
       renderUI();
-    } catch (err) { alert("Lỗi: " + err.message); }
+    } catch (err) { showToast("Lỗi: " + err.message, "error"); }
   };
 
   window.toggleUserActive = async function(uid, active) { 
     const targetUser = users.find(u => u.uid === uid);
     if (targetUser && targetUser.email && targetUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
-      return alert("⛔ AN TOÀN HỆ THỐNG: Không được phép khóa tài khoản admin gốc!");
+      showToast("Không được phép khóa admin gốc!", "error");
+      return;
     }
     await updateDoc(doc(db, "users", uid), { active }); 
     const uIndex = users.findIndex(u => u.uid === uid);
     if(uIndex > -1) users[uIndex].active = active;
-    alert(active ? "✅ Đã mở khóa tài khoản!" : "🔒 Đã khóa tài khoản thành công!");
+    showToast(active ? "Đã mở khóa tài khoản!" : "Đã khóa tài khoản thành công!", "success");
     renderUI();
   };
 
@@ -2942,7 +3073,7 @@
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }, (error) => {
-      console.error("Lỗi lắng nghe đơn hàng realtime:", error);
+      console.error("Lỗi lắng nghe đơn hàng:", error);
     });
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
@@ -3008,17 +3139,13 @@
       let selectedSkuCount = 0;
       
       Object.values(currentCart).forEach(c => {
-        if (c && c.qty > 0) {
-          selectedSkuCount++;
-        }
+        if (c && c.qty > 0) selectedSkuCount++;
       });
 
       products.forEach(p => {
         const keyId = p.id || p.code;
         const c = currentCart[keyId];
-        if (c && c.qty > 0) {
-          cartTotalAmount += (p.price || 0) * c.qty;
-        }
+        if (c && c.qty > 0) cartTotalAmount += (p.price || 0) * c.qty;
       });
 
       let unsubmittedStoresList = [];
@@ -3034,9 +3161,7 @@
                 Object.values(parsedCart).forEach(item => {
                   if (item && item.qty > 0) hasItems = true;
                 });
-                if (hasItems) {
-                  unsubmittedStoresList.push(s);
-                }
+                if (hasItems) unsubmittedStoresList.push(s);
               } catch (err) {}
             }
           }
@@ -3046,7 +3171,7 @@
       container.innerHTML = `
         ${unsubmittedStoresList.length > 0 ? `
           <div style="background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
-            <div style="font-size: 13px; font-weight: 800; color: #D97706; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> Bạn có đơn hàng chưa gửi lên sổ gốc (${unsubmittedStoresList.length} tiệm):</div>
+            <div style="font-size: 13px; font-weight: 800; color: #D97706; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> Có đơn hàng chưa gửi (${unsubmittedStoresList.length} tiệm):</div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${unsubmittedStoresList.map(st => `
                 <button class="btn btn-amber btn-sm" onclick="selectUnsubmittedDraftStore('${st.id}')" style="font-weight:700;"><i class="fa-solid fa-store"></i> ${st.name}</button>
@@ -3075,7 +3200,7 @@
             <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng (VD: 51Duyen1)..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; padding:13px 15px; font-size:15px;">
 
             <div id="salesCustomerResultContainer">
-              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng (VD: 51Duyen1) để tìm kiếm nhanh...</div>
+              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>
             </div>
 
             <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
@@ -3099,7 +3224,7 @@
                   </button>
                 </div>
               </div>
-              <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal; margin-bottom: 4px;" title="${activeVisitedStore.name}">
+              <div style="font-size: calc(15px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; white-space: normal; margin-bottom: 4px;" title="${activeVisitedStore.name}">
                 ${activeVisitedStore.name}
               </div>
               <div style="font-size:11.5px; color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;">
@@ -3167,12 +3292,8 @@
           </div>
         ` : ''}
       `;
-      if (selectedRouteCode || customerSearchKeyword) {
-        setTimeout(() => filterSalesCustomers(''), 50);
-      }
-      if (selectedCompanyCode || editingOrderId || showOnlySelectedItems) {
-        setTimeout(() => filterSalesProducts(''), 50);
-      }
+      if (selectedRouteCode || customerSearchKeyword) setTimeout(() => filterSalesCustomers(''), 50);
+      if (selectedCompanyCode || editingOrderId || showOnlySelectedItems) setTimeout(() => filterSalesProducts(''), 50);
     }
 
     else if (tab === 'customers') {
@@ -3192,14 +3313,14 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; padding:13px 15px; font-size:14px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; padding:13px 15px; font-size:14px;">
         </div>
 
         <div id="tabCustomerCardContainer">
-          <div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút "Xem KH ghim GPS".</div>
+          <div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm.</div>
         </div>
         <small id="tabCustSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
-          Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm hoặc chọn xem KH đã ghim.
+          Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm.
         </small>
       `;
       setTimeout(() => filterTabCustomers(''), 50);
@@ -3214,9 +3335,7 @@
 
       sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
-          if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
-            return;
-          }
+          if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) return;
 
           let inferredMaDTPN = o.maDTPNNo || '';
           if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
@@ -3283,7 +3402,7 @@
         <div class="tab-header-actions">
           <h2 style="font-size:15px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
-            ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
+            ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa theo ngày</button>` : ''}
             ${!isSales ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
@@ -3319,7 +3438,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; padding:13px 15px; font-size:14px;">
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ, mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; padding:13px 15px; font-size:14px;">
         </div>
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
@@ -3336,7 +3455,7 @@
                   <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:800;">CTu #${o.soCtu}</span>
                   <span style="font-size:11.5px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
                 </div>
-                <div style="font-size: calc(14px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${o.maKH}</div>
+                <div style="font-size: calc(14px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; white-space: normal;">${o.maKH}</div>
                 <div style="display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-muted); background:var(--panel-bg); padding:6px 10px; border-radius:6px;">
                   <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
                   <span>SL: <b style="color:#2563EB;">${o.totalQty}</b></span>
@@ -3360,33 +3479,13 @@
           <table id="soGocExportTable">
             <thead>
               <tr>
-                <th>So CTu</th>
-                <th>Ngay CTu</th>
-                <th>Ma DTPNNo</th>
-                <th>Ma Nhan Vien</th>
-                <th>TenNhanVien</th>
-                <th>Ma VTHHCo</th>
-                <th>Ten Hang Hoa</th>
-                <th>Don Vi Tinh</th>
-                <th>So Luong</th>
-                <th>VND Don Gia</th>
-                <th>VND Thanh Tien</th>
+                <th>So CTu</th><th>Ngay CTu</th><th>Ma DTPNNo</th><th>Ma Nhan Vien</th><th>TenNhanVien</th><th>Ma VTHHCo</th><th>Ten Hang Hoa</th><th>Don Vi Tinh</th><th>So Luong</th><th>VND Don Gia</th><th>VND Thanh Tien</th>
               </tr>
             </thead>
             <tbody>
               ${flatExcelRows.map(r => `
                 <tr>
-                  <td><b>${r.soCtu}</b></td>
-                  <td>${r.ngayCtuFormatted}</td>
-                  <td><b>${r.maDTPNNo}</b></td>
-                  <td><b>${r.maNhanVien}</b></td>
-                  <td>${r.tenNhanVien}</td>
-                  <td><b>${r.maVTHHCo}</b></td>
-                  <td>${r.tenHangHoa}</td>
-                  <td>${r.donViTinh}</td>
-                  <td><b>${r.soLuong}</b></td>
-                  <td>${r.vndDonGia}</td>
-                  <td><b>${r.vndThanhTien}</b></td>
+                  <td><b>${r.soCtu}</b></td><td>${r.ngayCtuFormatted}</td><td><b>${r.maDTPNNo}</b></td><td><b>${r.maNhanVien}</b></td><td>${r.tenNhanVien}</td><td><b>${r.maVTHHCo}</b></td><td>${r.tenHangHoa}</td><td>${r.donViTinh}</td><td><b>${r.soLuong}</b></td><td>${r.vndDonGia}</td><td><b>${r.vndThanhTien}</b></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3499,12 +3598,6 @@
                 </div>
               </div>
               <div style="font-size:14px; font-weight:800; color:var(--text-main);">${isAdmin ? `<input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" style="margin:4px 0 0; padding:10px 12px; font-size:14px;">` : (c.tenCtu || '')}</div>
-              ${isAdmin ? `
-                <div style="margin-top:4px;">
-                  <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block;">Sửa mã công ty:</label>
-                  <input type="text" value="${c.maCtu || ''}" onchange="updateCompanyField(${idx}, 'maCtu', this.value)" style="margin:4px 0 0; padding:10px 12px; font-size:14px; width:130px;">
-                </div>
-              ` : ''}
             </div>
           `).join('')}
         </div>
@@ -3546,7 +3639,7 @@
                   <div style="font-size:14px; font-weight:800; color:var(--text-main);">${u.name}</div>
                   <div style="font-size:12px; color:var(--text-muted);">Email: <b>${u.email || ''}</b></div>
                 </div>
-              `).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted);">Chưa có nhân viên nào trong hệ thống.</div>`}
+              `).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted);">Chưa có nhân viên nào.</div>`}
             </div>
           </div>
         </div>
@@ -3583,6 +3676,8 @@
 </head>
 
 <body>
+<div id="toastContainer"></div>
+
 <div class="app">
   <div id="loginView" class="login-container">
     <div class="login-card">
@@ -3652,7 +3747,7 @@
   <h3 style="font-size:15px; font-weight:800; margin-bottom:10px;"><i class="fa-solid fa-key"></i> Đổi Mật Khẩu</h3>
   <form onsubmit="submitChangePassword(event)" style="margin-top:8px;">
     <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật Khẩu Cũ:</label><input type="password" id="oldPassInput" required>
-    <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật Khẩu New:</label><input id="newPassInput" required type="password">
+    <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật Khẩu Mới:</label><input id="newPassInput" required type="password">
     <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Xác Nhận Mật Khẩu:</label><input type="password" id="confirmPassInput" required>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button type="submit" class="btn btn-green" style="flex:1;justify-content:center;font-weight:800;padding:12px;">Lưu</button>
