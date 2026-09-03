@@ -280,6 +280,7 @@
   .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
   .hidden{display:none !important;}
 
+  /* Toast Notification Styles */
   #toastContainer {
     position: fixed;
     top: 20px;
@@ -378,7 +379,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
     getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-    updatePassword, reauthenticateWithCredential, EmailAuthProvider
+    updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
@@ -399,6 +400,9 @@
   const authSvc = getAuth(app);
   const db = getFirestore(app);
   enableIndexedDbPersistence(db).catch(() => {});
+
+  const secondaryApp = initializeApp(firebaseConfig, "secondary");
+  const secondaryAuth = getAuth(secondaryApp);
 
   let currentUser = null;
   let currentTab = 'sales';
@@ -436,6 +440,7 @@
     slateMinimal: { name: 'Xám Slat', bgDark: '#0F172A', bgGrad: 'radial-gradient(circle at 50% 0%, #1E293B 0%, #0F172A 100%)', panelBg: 'rgba(30, 41, 59, 0.85)', cardBg: 'rgba(51, 65, 85, 0.7)', textMain: '#F8FAFC', textMuted: '#94A3B8', border: 'rgba(148, 163, 184, 0.2)' }
   };
 
+  // Toast Notification System
   window.showToast = function(message, type = 'success') {
     let container = document.getElementById('toastContainer');
     if (!container) {
@@ -765,6 +770,7 @@
     }
   }
 
+  // Auto-Retry Sync Queue
   window.syncOfflineCheckins = async function() {
     if (!navigator.onLine || !idbDb) return;
     const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
@@ -888,6 +894,7 @@
     });
   };
 
+  // Manual GPS Fallback Modal
   window.promptManualGPSInput = function() {
     return new Promise((resolve) => {
       const modalContainer = document.getElementById('dynamicModalContainer');
@@ -977,6 +984,7 @@
           resolve({ lat: latitude, lng: longitude, accuracy });
         },
         async err => {
+          // Fallback to manual entry if high accuracy fails or times out
           showToast("Không bắt được GPS tự động, vui lòng nhập thủ công.", "warning");
           const manual = await promptManualGPSInput();
           if (manual) resolve(manual);
@@ -1087,51 +1095,53 @@
     e.preventDefault();
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
-    const searchEmail = usernameInput.includes('@') ? usernameInput.toLowerCase() : (usernameInput.toLowerCase() + '@dms.com');
+    
+    const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
 
     try {
       const usersSnap = await getDocs(collection(db, "users"));
       let targetUserDoc = null;
       let targetUserId = null;
+      let targetUserRole = 'sales';
 
       usersSnap.forEach(d => {
-        const data = d.data();
-        if (data.email && data.email.toLowerCase() === searchEmail) {
-          targetUserDoc = data;
+        if (d.data().email && d.data().email.toLowerCase() === email.toLowerCase()) {
+          targetUserDoc = d.data();
           targetUserId = d.id;
+          targetUserRole = (d.data().role || 'sales').toLowerCase();
         }
       });
 
-      if (!targetUserDoc) {
-        showToast("Tài khoản không tồn tại trên hệ thống!", "error");
+      if (targetUserDoc && targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+        showToast("Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!", "error");
         return;
       }
 
-      if (targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-        showToast("Tài khoản của bạn đã bị khóa!", "error");
+      const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
+      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0);
+
+      try {
+        await signInWithEmailAndPassword(authSvc, email, pass);
+        localStorage.removeItem(failedAttemptsKey);
+        showToast("Đăng nhập thành công!", "success");
+      } catch (authErr) {
+        if (targetUserRole !== 'viewer') {
+          currentFailed++;
+          localStorage.setItem(failedAttemptsKey, currentFailed);
+
+          if (currentFailed >= 10) {
+            if (targetUserId && targetUserDoc && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+              await updateDoc(doc(db, "users", targetUserId), { active: false });
+            }
+            showToast("Tài khoản đã bị KHÓA do nhập sai mật khẩu 10 lần!", "error");
+          } else {
+            showToast(`Mật khẩu không đúng! Còn ${10 - currentFailed} lần thử.`, "warning");
+          }
+        } else {
+          showToast("Mật khẩu không đúng!", "error");
+        }
         return;
       }
-
-      if (targetUserDoc.password && targetUserDoc.password !== pass) {
-        showToast("Mật khẩu không đúng!", "error");
-        return;
-      }
-
-      currentUser = {
-        uid: targetUserId,
-        email: targetUserDoc.email,
-        name: targetUserDoc.name,
-        code: targetUserDoc.code,
-        role: (targetUserDoc.role || 'sales').toLowerCase()
-      };
-
-      document.getElementById('loginView').classList.add('hidden');
-      document.getElementById('appView').classList.remove('hidden');
-      
-      currentTab = (currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH');
-      renderUI();
-      showToast("Đăng nhập thành công!", "success");
-
     } catch (err) {
       showToast("Đăng nhập thất bại: " + err.message, "error");
     }
@@ -1187,13 +1197,132 @@
     }
   }
 
-  // Tự động kích hoạt khi tải trang, không bắt buộc gọi onAuthStateChanged của Auth cũ nữa
-  window.addEventListener('DOMContentLoaded', async () => {
+  onAuthStateChanged(authSvc, async (user) => {
     const savedTheme = localStorage.getItem('dms_theme_pref') || 'softWhite';
     applyTheme(savedTheme);
 
     const savedZoom = localStorage.getItem('dms_zoom_pref') || '1';
     applyAppZoom(savedZoom);
+
+    if (!user) {
+      currentUser = null;
+      if (sessionUnsub) { sessionUnsub(); sessionUnsub = null; }
+      if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
+      document.getElementById('loginView').classList.remove('hidden');
+      document.getElementById('appView').classList.add('hidden');
+      return;
+    }
+
+    const profileSnap = await getDoc(doc(db, "users", user.uid));
+    if (!profileSnap.exists()) {
+      showToast("Tài khoản chưa được cấu hình phân quyền.", "error");
+      return;
+    }
+    const profile = profileSnap.data();
+
+    if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
+      showToast("Tài khoản bị khóa.", "error");
+      await signOut(authSvc); 
+      return; 
+    }
+
+    await updateDoc(doc(db, "users", user.uid), { activeSessionId: currentSessionId });
+
+    if (sessionUnsub) sessionUnsub();
+    sessionUnsub = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.activeSessionId && data.activeSessionId !== currentSessionId) {
+          showToast("Tài khoản đang đăng nhập ở thiết bị khác!", "error");
+          signOut(authSvc);
+        }
+      }
+    });
+
+    currentUser = { 
+      uid: user.uid, 
+      email: user.email, 
+      name: profile.name, 
+      code: profile.code, 
+      role: (profile.role || 'sales').toLowerCase() 
+    };
+
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appView').classList.remove('hidden');
+    
+    const hashTab = window.location.hash.replace('#', '');
+    if (hashTab && ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].includes(hashTab)) {
+      currentTab = hashTab;
+    } else {
+      currentTab = (currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH');
+    }
+
+    renderUI();
+
+    setTimeout(async () => {
+      await initIndexedDB();
+      await cleanupExpiredOrdersOptimized();
+      
+      try {
+        const [cachedPrds, cachedStores, cachedRoutes] = await Promise.all([
+          loadProductsFromLocalCache(),
+          loadStoresFromLocalCache(),
+          loadRoutesFromLocalCache()
+        ]);
+
+        if (cachedPrds && cachedPrds.length > 0) {
+          products = cachedPrds;
+          buildProductIndex();
+        } else {
+          const prdSnap = await getDocs(collection(db, "products"));
+          const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudPrds.length > 0) {
+            products = cloudPrds;
+            buildProductIndex();
+            await saveProductsToLocalCache(cloudPrds);
+          }
+        }
+
+        if (cachedStores && cachedStores.length > 0) {
+          stores = cachedStores;
+          buildStoreIndex();
+        } else {
+          const storeSnap = await getDocs(collection(db, "stores"));
+          const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudStores.length > 0) {
+            stores = cloudStores;
+            buildStoreIndex();
+            await saveStoresToLocalCache(cloudStores);
+          }
+        }
+
+        if (cachedRoutes && cachedRoutes.length > 0) {
+          routeGroupsList = cachedRoutes;
+        } else {
+          const routeSnap = await getDocs(collection(db, "routes"));
+          const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (cloudRoutes.length > 0) {
+            routeGroupsList = cloudRoutes;
+            await saveRoutesToLocalCache(cloudRoutes);
+          }
+        }
+
+        backgroundSyncMetadataAndCache();
+      } catch (e) {
+        console.error("Lỗi tải cache ban đầu:", e);
+      }
+
+      try {
+        const pos = await getHighAccuracyPosition();
+        currentSalesGPS = { lat: pos.lat, lng: pos.lng };
+      } catch (e) {
+        currentSalesGPS = DEFAULT_MAP_CENTER;
+      }
+
+      attachListeners();
+      window.syncOfflineCheckins();
+      window.syncOfflineOrders();
+    }, 50);
   });
 
   window.handleLogout = async function() {
@@ -1212,14 +1341,17 @@
     if (sessionUnsub) { sessionUnsub(); sessionUnsub = null; }
     if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
 
-    currentUser = null;
     currentCart = {};
     activeVisitedStore = null;
     editingOrderId = null;
     orders = [];
     stores = [];
 
-    showToast("Đã đăng xuất thành công!", "success");
+    try {
+      await signOut(authSvc);
+    } catch (err) {
+      console.warn("Lỗi đăng xuất:", err);
+    }
   };
 
   window.openChangePasswordModal = function() { document.getElementById('changePassModal').classList.remove('hidden'); };
@@ -1235,22 +1367,13 @@
       return;
     }
     try {
-      const userRef = doc(db, "users", currentUser.uid);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        showToast("Không tìm thấy thông tin tài khoản!", "error");
-        return;
-      }
-      const userData = userSnap.data();
-      if (userData.password && userData.password !== oldP) {
-        showToast("Mật khẩu cũ không đúng.", "error");
-        return;
-      }
-      await updateDoc(userRef, { password: newP });
+      const cred = EmailAuthProvider.credential(authSvc.currentUser.email, oldP);
+      await reauthenticateWithCredential(authSvc.currentUser, cred);
+      await updatePassword(authSvc.currentUser, newP);
       showToast("Đổi mật khẩu thành công!", "success");
       closeChangePasswordModal();
     } catch (err) {
-      showToast("Lỗi đổi mật khẩu: " + err.message, "error");
+      showToast("Mật khẩu cũ không đúng.", "error");
     }
   };
 
@@ -1599,6 +1722,7 @@
     }
   };
 
+  // DOM Optimization: Targeted Partial Updates
   window.updateCartDetail = async function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!p) return;
@@ -1649,6 +1773,7 @@
     const finalQty = currentCart[prdId].qty;
     const finalItemTotal = rawPrice * finalQty;
 
+    // Targeted DOM updates without re-rendering entire lists
     document.querySelectorAll(`.input-le-${safeK}`).forEach(el => {
       if (document.activeElement !== el) el.value = (finalLe === 0 ? '' : finalLe);
     });
@@ -2204,17 +2329,10 @@
   };
 
   window.deleteSingleOrder = async function(orderId) {
-    const order = orders.find(o => o.id === orderId);
-    const isAdmin = currentUser.role === 'admin';
-    const isOwner = order && (order.salesCode === currentUser.code || order.salesUid === currentUser.uid);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const isToday = order && order.ngayCtu === todayStr;
-
-    if (!isAdmin && !(isOwner && isToday)) {
-      showToast("Bạn chỉ có quyền xóa đơn hàng của chính mình trong ngày!", "warning");
+    if (currentUser.role !== 'admin') {
+      showToast("Chỉ tài khoản admin mới có quyền xóa đơn hàng!", "warning");
       return;
     }
-
     const confirmDel = await window.showCustomConfirm(
       "Xóa Đơn Hàng",
       "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
@@ -2381,6 +2499,7 @@
     }
   }
 
+  // Conflict Resolution & Offline Order Sync with updatedAt tracking
   window.submitOrder = async function() {
     if (!activeVisitedStore) {
       showToast("Vui lòng chọn khách hàng trước khi gửi đơn hàng!", "warning");
@@ -2468,6 +2587,7 @@
         try {
           if (editingOrderId) {
             const orderRef = doc(db, "orders", editingOrderId);
+            // Conflict check via updatedAt
             const existingSnap = await getDoc(orderRef);
             if (existingSnap.exists()) {
               const cloudData = existingSnap.data();
@@ -2906,28 +3026,17 @@
     const password = document.getElementById('usPass').value.trim();
     const role = document.getElementById('usRole').value.trim().toLowerCase();
     
-    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
-    const newUserId = 'usr_' + Date.now();
+    const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
 
     try {
-      await setDoc(doc(db, "users", newUserId), {
-        uid: newUserId,
-        email,
-        password,
-        name,
-        code,
-        role,
-        active: true,
-        createdAt: serverTimestamp()
-      });
-
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await secondaryAuth.signOut();
       document.getElementById('userForm').reset();
-      showToast("Tạo tài khoản thành công! User có thể đăng nhập ngay.", "success");
-      users.push({ id: newUserId, uid: newUserId, email, name, code, role, active: true });
+      showToast("Tạo tài khoản thành công!", "success");
+      users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code, role, active: true });
       renderUI();
-    } catch (err) { 
-      showToast("Lỗi: " + err.message, "error"); 
-    }
+    } catch (err) { showToast("Lỗi: " + err.message, "error"); }
   };
 
   window.toggleUserActive = async function(uid, active) { 
@@ -3338,7 +3447,6 @@
             const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
             const isToday = o.ngayCtu === todayStr;
             const canEdit = (isOwner && isToday) || isManagerOrAdmin;
-            const canDelete = isAdmin || (isOwner && isToday);
             const timeStr = formatOrderTime(o.createdAt);
             
             return `
@@ -3357,7 +3465,7 @@
                   <div style="display:flex; gap:6px;">
                     <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
                     ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${canDelete ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
                   </div>
                 </div>
               </div>
