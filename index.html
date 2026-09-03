@@ -555,6 +555,7 @@
   let selectedRouteCode = "";
   let selectedCompanyCode = "";
   let editingOrderId = null;
+  let isSubmittingOrder = false; // Chống bấm đúp (Idempotency Guard)
 
   let soGocFilterKeyword = "", soGocFilterDateFrom = "", soGocFilterDateTo = "", soGocSalesFilter = "", soGocQuickDate = "all";
 
@@ -746,7 +747,7 @@
       if (items && items.length > 0) {
         for (const item of items) {
           try {
-            const nextSoCtu = await getNextSoCtu();
+            const nextSoCtu = await getNextSoCtuWithRetry();
             const { id, ...payload } = item;
             payload.soCtu = nextSoCtu;
             payload.createdAt = serverTimestamp();
@@ -2230,8 +2231,14 @@
     try {
       await deleteDoc(doc(db, "orders", orderId));
       orders = orders.filter(o => o.id !== orderId);
+      
       const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) renderTabContent('soGocBH', activePane);
+      if (activePane) {
+        renderTabContent('soGocBH', activePane);
+      } else {
+        filterSoGocCards();
+      }
+      
       alert("✅ Đã xóa đơn hàng thành công!");
     } catch (err) {
       alert("Lỗi khi xóa đơn hàng: " + err.message);
@@ -2270,7 +2277,11 @@
 
       orders = orders.filter(o => o.ngayCtu !== targetDate);
       const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) renderTabContent('soGocBH', activePane);
+      if (activePane) {
+        renderTabContent('soGocBH', activePane);
+      } else {
+        filterSoGocCards();
+      }
       alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng trong ngày ${targetDate}!`);
     } catch (err) {
       alert("Lỗi khi xóa hàng loạt: " + err.message);
@@ -2366,28 +2377,32 @@
     if (floatTriggerCount) floatTriggerCount.innerText = selectedSkuCount;
   }
 
-  async function getNextSoCtu() {
+  async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "soCtuCounter");
-    try {
-      const newSeq = await runTransaction(db, async (transaction) => {
-        const counterSnap = await transaction.get(counterRef);
-        let currentVal = 0;
-        if (counterSnap.exists()) {
-          currentVal = Number(counterSnap.data().currentVal) || 0;
-        }
-        currentVal++;
-        if (currentVal > 900000) currentVal = 1;
-        transaction.set(counterRef, { currentVal });
-        return currentVal;
-      });
-      return newSeq;
-    } catch (err) {
-      console.error("Lỗi transaction cấp số chứng từ:", err);
-      return Math.floor(Math.random() * 900000) + 1;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const newSeq = await runTransaction(db, async (transaction) => {
+          const counterSnap = await transaction.get(counterRef);
+          let currentVal = 0;
+          if (counterSnap.exists()) {
+            currentVal = Number(counterSnap.data().currentVal) || 0;
+          }
+          currentVal++;
+          if (currentVal > 900000) currentVal = 1;
+          transaction.set(counterRef, { currentVal });
+          return currentVal;
+        });
+        return newSeq;
+      } catch (err) {
+        if (attempt === retries - 1) throw err;
+        await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
+      }
     }
   }
 
   window.submitOrder = async function() {
+    if (isSubmittingOrder) return; // Chống bấm đúp (Idempotency Lock)
+    
     if (!activeVisitedStore) {
       alert("⚠️ Vui lòng chọn khách hàng trước khi gửi đơn hàng!");
       const custInput = document.getElementById('customerSearchInput');
@@ -2400,6 +2415,7 @@
       submitBtn.disabled = true;
       submitBtn.innerText = "ĐANG GỬI...";
     }
+    isSubmittingOrder = true;
 
     try {
       const items = [];
@@ -2435,6 +2451,7 @@
       if (items.length === 0) {
         alert("Vui lòng chọn số lượng hàng trước khi gửi đơn!");
         if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "GỬI ĐƠN"; }
+        isSubmittingOrder = false;
         return;
       }
 
@@ -2485,7 +2502,7 @@
             };
             orders = orders.map(o => o.id === editingOrderId ? updatedLocalOrder : o);
           } else {
-            const nextSoCtu = await getNextSoCtu();
+            const nextSoCtu = await getNextSoCtuWithRetry();
             orderData.soCtu = nextSoCtu;
             orderData.createdAt = serverTimestamp();
             const docRef = await addDoc(collection(db, "orders"), orderData);
@@ -2517,7 +2534,9 @@
       showOnlySelectedItems = false; 
 
       switchTab('soGocBH');
+      window.scrollTo({ top: 0, behavior: 'instant' }); // Ép cuộn lên đỉnh ngay lập tức không giật trên máy yếu
     } finally {
+      isSubmittingOrder = false;
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.innerText = "GỬI ĐƠN";
