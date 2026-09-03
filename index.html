@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>DMS ĐẠI ĐÔNG - SALES PRO</title>
+<title>DMS ĐẠI ĐÔNG - SALES PRO ENTERPRISE</title>
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -39,6 +39,15 @@
     --text-main: #1E293B;
     --text-muted: #64748B;
     --app-zoom: 1;
+
+    /* Custom Per-Tab Colors (Default) */
+    --tab-sales-color: #F59E0B;
+    --tab-sogoc-color: #10B981;
+    --tab-cust-color: #0D9488;
+    --tab-prod-color: #3B82F6;
+    --tab-route-color: #8B5CF6;
+    --tab-comp-color: #DB2777;
+    --tab-user-color: #D97706;
   }
   
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
@@ -405,6 +414,9 @@
     slateMinimal: { name: 'Xám Slat', bgDark: '#0F172A', bgGrad: 'radial-gradient(circle at 50% 0%, #1E293B 0%, #0F172A 100%)', panelBg: 'rgba(30, 41, 59, 0.85)', cardBg: 'rgba(51, 65, 85, 0.7)', textMain: '#F8FAFC', textMuted: '#94A3B8', border: 'rgba(148, 163, 184, 0.2)' }
   };
 
+  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
+  let currentTabOrder = [...defaultTabOrder];
+
   window.applyTheme = function(themeKey) {
     const t = themePresets[themeKey] || themePresets.softWhite;
     const root = document.documentElement;
@@ -415,7 +427,11 @@
     root.style.setProperty('--text-main', t.textMain);
     root.style.setProperty('--text-muted', t.textMuted);
     root.style.setProperty('--card-border', t.border);
-    localStorage.setItem('dms_theme_pref', themeKey);
+    if (currentUser) {
+      localStorage.setItem(`dms_theme_pref_${currentUser.uid}`, themeKey);
+    } else {
+      localStorage.setItem('dms_theme_pref', themeKey);
+    }
   };
 
   window.applyAppZoom = function(zoomVal) {
@@ -424,20 +440,96 @@
     if (val > 1.2) val = 1.2;
     const root = document.documentElement;
     root.style.setProperty('--app-zoom', val);
-    localStorage.setItem('dms_zoom_pref', val);
+    if (currentUser) {
+      localStorage.setItem(`dms_zoom_pref_${currentUser.uid}`, val);
+    } else {
+      localStorage.setItem('dms_zoom_pref', val);
+    }
     const indicator = document.getElementById('zoomPercentageIndicator');
     if (indicator) indicator.innerText = Math.round(val * 100) + '%';
   };
+
+  window.applyTabColor = function(tabName, colorVal) {
+    const root = document.documentElement;
+    root.style.setProperty(`--tab-${tabName}-color`, colorVal);
+    if (currentUser) {
+      localStorage.setItem(`dms_tabcolor_${currentUser.uid}_${tabName}`, colorVal);
+    }
+    renderTabBarOrder();
+  };
+
+  window.moveTabPosition = function(index, direction) {
+    const newIdx = index + direction;
+    if (newIdx < 0 || newIdx >= currentTabOrder.length) return;
+    const temp = currentTabOrder[index];
+    currentTabOrder[index] = currentTabOrder[newIdx];
+    currentTabOrder[newIdx] = temp;
+
+    if (currentUser) {
+      localStorage.setItem(`dms_taborder_${currentUser.uid}`, JSON.stringify(currentTabOrder));
+    }
+    renderTabBarOrder();
+    openSettingsModal(); // Refresh modal view
+  };
+
+  function loadUserCustomPreferences() {
+    if (!currentUser) return;
+    const uid = currentUser.uid;
+
+    const savedTheme = localStorage.getItem(`dms_theme_pref_${uid}`) || localStorage.getItem('dms_theme_pref') || 'softWhite';
+    applyTheme(savedTheme);
+
+    const savedZoom = localStorage.getItem(`dms_zoom_pref_${uid}`) || localStorage.getItem('dms_zoom_pref') || '1';
+    applyAppZoom(savedZoom);
+
+    const savedOrder = localStorage.getItem(`dms_taborder_${uid}`);
+    if (savedOrder) {
+      try {
+        currentTabOrder = JSON.parse(savedOrder);
+      } catch (e) {
+        currentTabOrder = [...defaultTabOrder];
+      }
+    } else {
+      currentTabOrder = [...defaultTabOrder];
+    }
+
+    ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].forEach(tabName => {
+      const savedColor = localStorage.getItem(`dms_tabcolor_${uid}_${tabName}`);
+      if (savedColor) {
+        document.documentElement.style.setProperty(`--tab-${tabName}-color`, savedColor);
+      }
+    });
+  }
 
   window.openSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     const currentZoom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-zoom')) || 1;
     
+    const tabLabels = {
+      sales: "Bán Hàng",
+      soGocBH: "Sổ Gốc BH",
+      customers: "Khách Hàng",
+      productsAdmin: "Vật Tư",
+      routes: "Tuyến",
+      company: "Công Ty",
+      users: "Nhân Viên"
+    };
+
+    const tabDefaultColors = {
+      sales: "#F59E0B",
+      soGocBH: "#10B981",
+      customers: "#0D9488",
+      productsAdmin: "#3B82F6",
+      routes: "#8B5CF6",
+      company: "#DB2777",
+      users: "#D97706"
+    };
+
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex; z-index:9999;">
-        <div class="modal-content" style="max-width: 440px; text-align: left; padding: 22px; border-radius: 18px; animation: scaleIn 0.2s ease-out;">
+        <div class="modal-content" style="max-width: 480px; text-align: left; padding: 22px; border-radius: 18px; animation: scaleIn 0.2s ease-out;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px;">
-            <h3 style="font-size: 16px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-gear" style="color:var(--amber);"></i> Cài Đặt Giao Diện & Kích Thước</h3>
+            <h3 style="font-size: 16px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-gear" style="color:var(--amber);"></i> Cài Đặt Giao Diện Doanh Nghiệp</h3>
             <button class="btn btn-red btn-sm" onclick="closeSettingsModal()">Đóng</button>
           </div>
 
@@ -453,9 +545,30 @@
             <input type="range" min="0.5" max="1.2" step="0.05" value="${currentZoom}" oninput="applyAppZoom(this.value)" style="width:100%; cursor:pointer; accent-color: var(--amber);">
           </div>
 
+          <div style="margin-bottom: 20px;">
+            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;"><i class="fa-solid fa-compass" style="color:var(--amber);"></i> Sắp Xếp Vị Trí & Màu Sắc Các Tab:</label>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding-right: 4px;">
+              ${currentTabOrder.map((tKey, idx) => {
+                const curColor = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || tabDefaultColors[tKey];
+                return `
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 8px 12px; border-radius: 10px; border: 1px solid var(--card-border);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <input type="color" value="${curColor}" onchange="applyTabColor('${tKey}', this.value)" style="width: 28px; height: 28px; border: none; cursor: pointer; padding: 0; background: none;">
+                      <span style="font-weight: 800; font-size: 13px; color: var(--text-main);">${tabLabels[tKey]}</span>
+                    </div>
+                    <div style="display: flex; gap: 4px;">
+                      <button class="btn btn-sm" style="padding: 6px 10px; font-weight: 800;" ${idx === 0 ? 'disabled style="opacity: 0.4;"' : ''} onclick="moveTabPosition(${idx}, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+                      <button class="btn btn-sm" style="padding: 6px 10px; font-weight: 800;" ${idx === currentTabOrder.length - 1 ? 'disabled style="opacity: 0.4;"' : ''} onclick="moveTabPosition(${idx}, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
           <div>
-            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;"><i class="fa-solid fa-palette" style="color:var(--amber);"></i> Chọn Giao Diện Màu Nền:</label>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 240px; overflow-y: auto; padding-right: 2px;">
+            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;"><i class="fa-solid fa-palette" style="color:var(--amber);"></i> Chọn Giao Diện Màu Nền Tổng Thể:</label>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 180px; overflow-y: auto; padding-right: 2px;">
               ${Object.keys(themePresets).map(k => `
                 <button class="btn" style="justify-content: center; padding: 9px 4px; font-weight: 700; font-size: 11px; background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" onclick="applyTheme('${k}')" title="${themePresets[k].name}">
                   ${themePresets[k].name}
@@ -570,7 +683,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 24);
+      const request = indexedDB.open("DMS_OfflineDB", 25);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1093,12 +1206,6 @@
   }
 
   onAuthStateChanged(authSvc, async (user) => {
-    const savedTheme = localStorage.getItem('dms_theme_pref') || 'softWhite';
-    applyTheme(savedTheme);
-
-    const savedZoom = localStorage.getItem('dms_zoom_pref') || '1';
-    applyAppZoom(savedZoom);
-
     if (!user) {
       currentUser = null;
       document.getElementById('loginView').classList.remove('hidden');
@@ -1124,15 +1231,17 @@
       role: (profile.role || 'sales').toLowerCase() 
     };
 
+    loadUserCustomPreferences();
+
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     
     const hashTab = window.location.hash.replace('#', '');
-    if (hashTab && ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].includes(hashTab)) {
+    if (hashTab && currentTabOrder.includes(hashTab)) {
       currentTab = hashTab;
     } else {
       const savedLastTab = localStorage.getItem('dms_last_active_tab');
-      currentTab = savedLastTab && ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].includes(savedLastTab) ? savedLastTab : ((currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH'));
+      currentTab = savedLastTab && currentTabOrder.includes(savedLastTab) ? savedLastTab : ((currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH'));
     }
 
     renderUI();
@@ -3012,6 +3121,8 @@
       currentTab = 'customers';
     }
 
+    renderTabBarOrder();
+
     ['sales', 'customers', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].forEach(tabName => {
       const pane = document.getElementById(`tabPane_${tabName}`);
       if (pane) pane.style.display = 'none';
@@ -3029,6 +3140,36 @@
         renderTabContent(currentTab, activePane);
       }
     }
+  }
+
+  function renderTabBarOrder() {
+    const tabBar = document.getElementById('mobileTabBarContainer');
+    if (!tabBar) return;
+
+    const tabConfigMap = {
+      sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
+      soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
+      customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: true },
+      productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
+      routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
+      company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
+      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
+    };
+
+    tabBar.innerHTML = currentTabOrder.map(tKey => {
+      const cfg = tabConfigMap[tKey];
+      if (!cfg || !cfg.perm) return '';
+      const customCol = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || cfg.defaultColor;
+
+      return `
+        <button id="${cfg.id}" class="btn btn-sm" style="background: ${customCol}; color: #FFFFFF; font-weight: 800;" onclick="switchTab('${tKey}')">
+          <i class="fa-solid ${cfg.icon}"></i> ${cfg.label}
+        </button>
+      `;
+    }).join('') + `
+      <button class="btn btn-purple btn-sm" style="font-weight: 800;" onclick="openChangePasswordModal()" title="Đổi mật khẩu"><i class="fa-solid fa-key"></i> Đổi MK</button>
+      <button class="btn btn-red btn-sm" style="font-weight: 800;" onclick="handleLogout()" title="Đăng xuất"><i class="fa-solid fa-power-off"></i> Thoát</button>
+    `;
   }
 
   function renderTabContent(tab, container) {
@@ -3662,24 +3803,14 @@
       <div class="topbar-left">
         <div class="topbar-top-row">
           <div class="brand-title"><i class="fa-solid fa-network-wired" style="color:var(--amber);"></i> DMS ĐẠI ĐÔNG</div>
-          <button class="btn btn-sm" style="background: rgba(0, 0, 0, 0.05); color: var(--text-main); padding: 8px 12px; border-radius: 10px; font-size: 15px;" onclick="openSettingsModal()" title="Cài đặt giao diện & cỡ chữ"><i class="fa-solid fa-gear" style="color: var(--amber);"></i></button>
+          <button class="btn btn-sm" style="background: rgba(0, 0, 0, 0.05); color: var(--text-main); padding: 8px 12px; border-radius: 10px; font-size: 15px;" onclick="openSettingsModal()" title="Cài đặt giao diện & vị trí tab"><i class="fa-solid fa-gear" style="color: var(--amber);"></i></button>
         </div>
         <small id="userInfo" style="color:var(--text-muted); font-size:11px; font-weight:600; width: 100%;"></small>
       </div>
     </div>
     
     <div class="panel" style="padding-top: 4px;">
-      <div class="mobile-tab-bar">
-        <button id="navSales" class="btn btn-amber btn-sm hidden" onclick="switchTab('sales')"><i class="fa-solid fa-cart-shopping"></i> Bán Hàng</button>
-        <button id="navSoGocBH" class="btn btn-green btn-sm hidden" onclick="switchTab('soGocBH')"><i class="fa-solid fa-book"></i> Sổ Gốc BH</button>
-        <button id="navCustomers" class="btn btn-cyan btn-sm hidden" onclick="switchTab('customers')"><i class="fa-solid fa-address-book"></i> KH</button>
-        <button id="navProductsAdmin" class="btn btn-blue btn-sm hidden" onclick="switchTab('productsAdmin')"><i class="fa-solid fa-boxes-stacked"></i> Hàng</button>
-        <button id="navRoutes" class="btn btn-purple btn-sm hidden" onclick="switchTab('routes')"><i class="fa-solid fa-route"></i> Tuyến</button>
-        <button id="navCompany" class="btn btn-pink btn-sm hidden" onclick="switchTab('company')"><i class="fa-solid fa-building"></i> Cty</button>
-        <button id="navUsers" class="btn btn-amber btn-sm hidden" onclick="switchTab('users')"><i class="fa-solid fa-users"></i> NV</button>
-        <button class="btn btn-purple btn-sm" onclick="openChangePasswordModal()" title="Đổi mật khẩu"><i class="fa-solid fa-key"></i> Đổi MK</button>
-        <button class="btn btn-red btn-sm" onclick="handleLogout()" title="Đăng xuất"><i class="fa-solid fa-power-off"></i> Thoát</button>
-      </div>
+      <div id="mobileTabBarContainer" class="mobile-tab-bar"></div>
 
       <div id="tabPane_sales" style="display:none;"></div>
       <div id="tabPane_customers" style="display:none;"></div>
