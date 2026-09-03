@@ -75,8 +75,6 @@
     max-width: 420px;
     padding: 32px 24px;
     background: rgba(18, 18, 18, 0.9);
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 20px;
     box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(59, 130, 246, 0.15);
@@ -121,7 +119,6 @@
     align-items:center;
     color:var(--text-main);
     background:var(--panel-bg);
-    backdrop-filter:blur(20px);
     padding:10px 14px;
     border-radius:14px;
     box-shadow:0 10px 25px rgba(0,0,0,0.1);
@@ -212,8 +209,6 @@
   
   .panel{
     background:var(--panel-bg);
-    backdrop-filter:blur(24px);
-    -webkit-backdrop-filter:blur(24px);
     border-radius:16px;
     padding:12px;
     box-shadow:0 20px 40px rgba(0,0,0,0.08);
@@ -231,8 +226,6 @@
 
   .card{
     background:var(--card-bg);
-    backdrop-filter:blur(16px);
-    -webkit-backdrop-filter:blur(16px);
     border:1px solid var(--card-border);
     border-radius:14px;
     padding:12px;
@@ -245,7 +238,6 @@
   
   .mobile-item-card {
     background: var(--card-bg);
-    backdrop-filter: blur(12px);
     border: 1px solid var(--card-border);
     border-radius: 12px;
     padding: 12px;
@@ -276,8 +268,8 @@
   input:focus, select:focus { border-color:var(--primary); outline:none; box-shadow:0 0 0 3px rgba(37, 99, 235, 0.15); }
   option { background: var(--card-bg); color: var(--text-main); }
 
-  .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0, 0, 0, 0.6);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
-  .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
+  .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0, 0, 0, 0.6);display:flex;justify-content:center;align-items:center;z-index:999;padding:10px;}
+  .modal-content{background:var(--panel-bg);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
   .hidden{display:none !important;}
 
   #toastContainer {
@@ -298,7 +290,6 @@
     font-size: 13px;
     font-weight: 700;
     box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.15);
     display: flex;
     align-items: center;
@@ -339,7 +330,6 @@
     left: 0;
     width: 100%;
     background: var(--panel-bg);
-    backdrop-filter: blur(20px);
     border-top: 1px solid var(--card-border);
     padding: 10px 16px;
     display: flex;
@@ -1025,51 +1015,29 @@
     const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
 
     try {
-      const usersSnap = await getDocs(collection(db, "users"));
-      let targetUserDoc = null;
-      let targetUserId = null;
-      let targetUserRole = 'sales';
-
-      usersSnap.forEach(d => {
-        if (d.data().email && d.data().email.toLowerCase() === email.toLowerCase()) {
-          targetUserDoc = d.data();
-          targetUserId = d.id;
-          targetUserRole = (d.data().role || 'sales').toLowerCase();
+      // ĐĂNG NHẬP TRỰC TIẾP TỪNG TÀI KHOẢN QUA AUTH SỐNG, TRÁNH QUÉT TOÀN BỘ USERS
+      await signInWithEmailAndPassword(authSvc, email, pass);
+      
+      const userRef = doc(db, "users", authSvc.currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        if (uData.active === false && uData.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+          await signOut(authSvc);
+          showToast("Tài khoản của bạn đã bị khóa!", "error");
+          return;
         }
-      });
-
-      if (targetUserDoc && targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-        showToast("Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!", "error");
-        return;
       }
 
       const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
-      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0);
-
-      try {
-        await signInWithEmailAndPassword(authSvc, email, pass);
-        localStorage.removeItem(failedAttemptsKey);
-        showToast("Đăng nhập thành công!", "success");
-      } catch (authErr) {
-        if (targetUserRole !== 'viewer') {
-          currentFailed++;
-          localStorage.setItem(failedAttemptsKey, currentFailed);
-
-          if (currentFailed >= 10) {
-            if (targetUserId && targetUserDoc && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-              await updateDoc(doc(db, "users", targetUserId), { active: false });
-            }
-            showToast("Tài khoản đã bị KHÓA do nhập sai mật khẩu 10 lần!", "error");
-          } else {
-            showToast(`Mật khẩu không đúng! Còn ${10 - currentFailed} lần thử.`, "warning");
-          }
-        } else {
-          showToast("Mật khẩu không đúng!", "error");
-        }
-        return;
-      }
+      localStorage.removeItem(failedAttemptsKey);
+      showToast("Đăng nhập thành công!", "success");
     } catch (err) {
-      showToast("Đăng nhập thất bại: " + err.message, "error");
+      const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
+      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
+      localStorage.setItem(failedAttemptsKey, currentFailed);
+
+      showToast("Sai tên đăng nhập hoặc mật khẩu!", "error");
     }
   };
 
@@ -1337,7 +1305,8 @@
       store.pinnedAt = new Date().toISOString();
       store.pinnedHistory = [...existingHistory, newHistoryItem];
 
-      await setDoc(doc(db, "systemMetadata", "masterStores"), { list: stores });
+      // GHIM GPS ĐỘC LẬP TỪNG TÀI LIỆU TRÁNH LỖI DUNG LƯỢNG 1MB FIRESTORE
+      await setDoc(doc(db, "stores", String(storeId)), store, { merge: true });
       await saveStoresToLocalCache(stores);
       buildStoreIndex();
       
@@ -1369,7 +1338,7 @@
       const store = stores.find(s => String(s.id) === String(storeId));
       if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
       
-      await setDoc(doc(db, "systemMetadata", "masterStores"), { list: stores });
+      await setDoc(doc(db, "stores", String(storeId)), store, { merge: true });
       await saveStoresToLocalCache(stores);
       buildStoreIndex();
 
@@ -1448,7 +1417,7 @@
           activeVisitedStore.pinnedAt = new Date().toISOString();
           activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
 
-          await setDoc(doc(db, "systemMetadata", "masterStores"), { list: stores });
+          await setDoc(doc(db, "stores", String(activeVisitedStore.id)), activeVisitedStore, { merge: true });
           await saveStoresToLocalCache(stores);
           buildStoreIndex();
 
@@ -1624,7 +1593,7 @@
       activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
 
-      await setDoc(doc(db, "systemMetadata", "masterStores"), { list: stores });
+      await setDoc(doc(db, "stores", String(activeVisitedStore.id)), activeVisitedStore, { merge: true });
       await saveStoresToLocalCache(stores);
       buildStoreIndex();
 
@@ -3149,7 +3118,7 @@
                   ${selectedCompanyCode ? `<button class="btn btn-red btn-sm" onclick="selectCompanyFromDropdown('', '')" style="padding:13px 14px;"><i class="fa-solid fa-xmark"></i></button>` : ''}
                 </div>
 
-                <div id="companyDropdownList" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 280px; overflow-y: auto; background: var(--panel-bg); backdrop-filter: blur(20px); border: 1px solid var(--card-border); border-radius: 12px; box-shadow: 0 15px 40px rgba(0,0,0,0.25); z-index: 100; margin-top: 4px;">
+                <div id="companyDropdownList" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 280px; overflow-y: auto; background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; box-shadow: 0 15px 40px rgba(0,0,0,0.25); z-index: 100; margin-top: 4px;">
                   <div style="padding: 10px 14px; font-size: 12px; font-weight: 800; color: var(--text-muted); background: rgba(0, 0, 0, 0.03); border-bottom: 1px solid var(--card-border);">DANH SÁCH CÔNG TY</div>
                   <div id="companyDropdownItems"></div>
                 </div>
