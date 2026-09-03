@@ -750,8 +750,15 @@
             const { id, ...payload } = item;
             payload.soCtu = nextSoCtu;
             payload.createdAt = serverTimestamp();
-            await addDoc(collection(db, "orders"), payload);
+            const docRef = await addDoc(collection(db, "orders"), payload);
             
+            const syncedLocalOrder = {
+              id: docRef.id,
+              ...payload,
+              createdAt: new Date()
+            };
+            orders.unshift(syncedLocalOrder);
+
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
           } catch (e) {}
@@ -2470,11 +2477,25 @@
               ...orderData,
               updatedAt: serverTimestamp()
             });
+
+            const updatedLocalOrder = {
+              id: editingOrderId,
+              ...orderData,
+              createdAt: new Date()
+            };
+            orders = orders.map(o => o.id === editingOrderId ? updatedLocalOrder : o);
           } else {
             const nextSoCtu = await getNextSoCtu();
             orderData.soCtu = nextSoCtu;
             orderData.createdAt = serverTimestamp();
-            await addDoc(collection(db, "orders"), orderData);
+            const docRef = await addDoc(collection(db, "orders"), orderData);
+
+            const newLocalOrder = {
+              id: docRef.id,
+              ...orderData,
+              createdAt: new Date()
+            };
+            orders.unshift(newLocalOrder);
           }
         } catch (err) {
           console.warn("Mất mạng khi đang gửi, lưu offline:", err);
