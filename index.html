@@ -106,6 +106,8 @@
     font-size: calc(14px * var(--app-zoom)) !important;
     font-weight: 700;
     width: 100%;
+    text-transform: none !important;
+    -webkit-text-size-adjust: 100%;
   }
   .login-card input::placeholder { color: #94A3B8 !important; font-weight: 500; }
   .login-card input:focus { 
@@ -272,6 +274,8 @@
     background:var(--card-bg); 
     color: var(--text-main); 
     -webkit-appearance: none; 
+    text-transform: none;
+    -webkit-text-size-adjust: 100%;
   }
   input:focus, select:focus { border-color:var(--primary); outline:none; box-shadow:0 0 0 3px rgba(37, 99, 235, 0.15); }
   option { background: var(--card-bg); color: var(--text-main); }
@@ -373,8 +377,6 @@
   let stores = [], orders = [], users = [];
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
-  let sessionUnsub = null;
-  const currentSessionId = '_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
@@ -567,7 +569,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 23);
+      const request = indexedDB.open("DMS_OfflineDB", 24);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -981,7 +983,7 @@
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
-    const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
+    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
       const usersSnap = await getDocs(collection(db, "users"));
@@ -990,7 +992,7 @@
       let targetUserRole = 'sales';
 
       usersSnap.forEach(d => {
-        if (d.data().email && d.data().email.toLowerCase() === email.toLowerCase()) {
+        if (d.data().email && d.data().email.toLowerCase() === email) {
           targetUserDoc = d.data();
           targetUserId = d.id;
           targetUserRole = (d.data().role || 'sales').toLowerCase();
@@ -1001,7 +1003,7 @@
         return alert("⛔ Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!\nVui lòng liên hệ admin để được mở lại và đổi mật khẩu mới.");
       }
 
-      const failedAttemptsKey = `failed_attempts_${email.toLowerCase()}`;
+      const failedAttemptsKey = `failed_attempts_${email}`;
       let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0);
 
       try {
@@ -1091,7 +1093,6 @@
 
     if (!user) {
       currentUser = null;
-      if (sessionUnsub) { sessionUnsub(); sessionUnsub = null; }
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
       return;
@@ -1106,19 +1107,6 @@
       await signOut(authSvc); 
       return; 
     }
-
-    await updateDoc(doc(db, "users", user.uid), { activeSessionId: currentSessionId });
-
-    if (sessionUnsub) sessionUnsub();
-    sessionUnsub = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.activeSessionId && data.activeSessionId !== currentSessionId) {
-          alert("⚠️ Đang có người đăng nhập tài khoản hãy kiểm tra lại ngay!!");
-          signOut(authSvc);
-        }
-      }
-    });
 
     currentUser = { 
       uid: user.uid, 
@@ -1217,11 +1205,6 @@
       logPassEl.value = '';
       logPassEl.setAttribute('readonly', 'readonly');
       setTimeout(() => logPassEl.removeAttribute('readonly'), 100);
-    }
-
-    if (sessionUnsub) { 
-      sessionUnsub(); 
-      sessionUnsub = null; 
     }
 
     currentCart = {};
@@ -1881,7 +1864,7 @@
           
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <span class="item-code" style="font-size: 11px; padding: 3px 8px; background: rgba(37, 99, 235, 0.12); color: #2563EB; font-weight: 800; border-radius: 4px;">${p.code}</span>
-            <span style="font-size: 11px; background: rgba(37,99,235,0.12); color: var(--primary); padding: 3px 8px; border-radius: 4px; font-weight: 800;">${p.dvt || 'cây'}_Q/c ${p.tyLeQuyDoi || 50}</span>
+            <span style="font-size: 11px; background: rgba(37,99,235,0.12); color: var(--primary); padding: 3px 8px; border-radius: 4px; font-weight: 800;">${p.dvt || 'cây'}_Q/C ${p.tyLeQuyDoi || 50}</span>
           </div>
 
           <div class="item-title" style="font-size: calc(16px * var(--app-zoom)); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word; overflow-wrap: break-word; white-space: normal;">
@@ -2890,7 +2873,7 @@
     const roleInput = document.getElementById('usRole').value.trim();
     const role = roleInput.toLowerCase();
     
-    const email = usernameInput.includes('@') ? usernameInput : usernameInput + '@dms.com';
+    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
       const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
@@ -3062,7 +3045,7 @@
               </select>
             </div>
 
-            <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng (VD: 51Duyen1)..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" style="margin:0 0 8px 0; padding:13px 15px; font-size:15px;">
+            <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng (VD: 51Duyen1)..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0 0 8px 0; padding:13px 15px; font-size:15px;">
 
             <div id="salesCustomerResultContainer">
               <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng (VD: 51Duyen1) để tìm kiếm nhanh...</div>
@@ -3106,7 +3089,7 @@
               <div style="margin-bottom: 8px; position: relative;">
                 <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">🏢 Chọn & Ghim Mã Công Ty:</label>
                 <div style="display: flex; gap: 6px; align-items: center;">
-                  <input type="text" id="companySearchBox" placeholder="🔍 Gõ mã hoặc tên công ty để lọc nhanh..." value="${selectedCompanyCode ? (companyList.find(c=>c.maCtu===selectedCompanyCode)?.maCtu + ' - ' + companyList.find(c=>c.maCtu===selectedCompanyCode)?.tenCtu) : ''}" oninput="filterCompanyDropdown(this.value)" onfocus="openCompanyDropdown()" autocomplete="off" style="margin:0; background:rgba(217, 119, 6, 0.05); border: 1px solid rgba(217, 119, 6, 0.3); padding:13px 15px; font-size:14px; font-weight:700; flex: 1;">
+                  <input type="text" id="companySearchBox" placeholder="🔍 Gõ mã hoặc tên công ty để lọc nhanh..." value="${selectedCompanyCode ? (companyList.find(c=>c.maCtu===selectedCompanyCode)?.maCtu + ' - ' + companyList.find(c=>c.maCtu===selectedCompanyCode)?.tenCtu) : ''}" oninput="filterCompanyDropdown(this.value)" onfocus="openCompanyDropdown()" autocomplete="off" autocapitalize="none" style="margin:0; background:rgba(217, 119, 6, 0.05); border: 1px solid rgba(217, 119, 6, 0.3); padding:13px 15px; font-size:14px; font-weight:700; flex: 1;">
                   ${selectedCompanyCode ? `<button class="btn btn-red btn-sm" onclick="selectCompanyFromDropdown('', '')" style="padding:13px 14px;"><i class="fa-solid fa-xmark"></i></button>` : ''}
                 </div>
 
@@ -3123,7 +3106,7 @@
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; padding:13px 36px 13px 14px; font-size:14px; width: 100%;">
+                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 36px 13px 14px; font-size:14px; width: 100%;">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
               <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#E2E8F0'}; color:${showOnlySelectedItems?'#fff':'#1E293B'}; font-weight:700; padding:13px 14px; font-size:12px; white-space:nowrap;">
@@ -3182,7 +3165,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" style="margin:0; padding:13px 15px; font-size:14px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size:14px;">
         </div>
 
         <div id="tabCustomerCardContainer">
@@ -3309,7 +3292,7 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; padding:13px 15px; font-size:14px;">
+          <input type="text" placeholder="🔍 Tìm kiếm số chứng từ (1, 2...), mã DTPN, nhân viên..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size:14px;">
         </div>
 
         <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
@@ -3405,7 +3388,7 @@
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" style="margin:0; padding:13px 15px; font-size:14px;">
+          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size:14px;">
         </div>
         <div id="productCardsContainer">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
@@ -3431,7 +3414,7 @@
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm nhóm đối tượng, nội dung, ghi chú..." style="margin:0; padding:13px 15px; font-size:14px;" oninput="filterRouteTable(this.value)">
+          <input type="text" placeholder="🔍 Tìm kiếm nhóm đối tượng, nội dung, ghi chú..." style="margin:0; padding:13px 15px; font-size:14px;" autocomplete="off" autocapitalize="none" oninput="filterRouteTable(this.value)">
         </div>
         <div id="routeCardContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${routeGroupsList.map((r, idx) => `
@@ -3469,7 +3452,7 @@
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm mã công ty, tên công ty..." style="margin:0; padding:13px 15px; font-size:14px;" oninput="filterCompanyTable(this.value)">
+          <input type="text" placeholder="🔍 Tìm kiếm mã công ty, tên công ty..." style="margin:0; padding:13px 15px; font-size:14px;" autocomplete="off" autocapitalize="none" oninput="filterCompanyTable(this.value)">
         </div>
         <div id="companyCardContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${companyList.map((c, idx) => `
@@ -3508,9 +3491,9 @@
           <div class="card">
             <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--text-main);">Tạo Tài Khoản</h3>
             <form id="userForm" onsubmit="addUser(event)">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mã NV:</label><input type="text" id="usCode" autocomplete="off" placeholder="VD: NV01" required style="margin-bottom:6px;">
+              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mã NV:</label><input type="text" id="usCode" autocomplete="off" autocapitalize="none" placeholder="VD: NV01" required style="margin-bottom:6px;">
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Tên NV:</label><input type="text" id="usName" autocomplete="off" placeholder="VD: Nguyễn Văn A" required style="margin-bottom:6px;">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Email đăng nhập:</label><input type="email" id="usUsername" autocomplete="off" placeholder="VD: nv01@dms.com" required style="margin-bottom:6px;">
+              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Email đăng nhập:</label><input type="email" id="usUsername" autocomplete="off" autocapitalize="none" placeholder="VD: nv01@dms.com" required style="margin-bottom:6px;">
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật khẩu:</label><input type="password" id="usPass" autocomplete="new-password" placeholder="Mật khẩu" required style="margin-bottom:6px;">
               <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Phân quyền:</label>
               <select id="usRole" required style="margin-bottom:8px; padding:13px 15px; font-size:14px; font-weight:700; width:100%;">
@@ -3587,7 +3570,7 @@
         <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Tên đăng nhập hoặc Email:</label>
         <div class="input-icon-group">
           <i class="fa-solid fa-user"></i>
-          <input type="text" id="logUser" required autocomplete="username" placeholder="Nhập tên đăng nhập...">
+          <input type="text" id="logUser" required autocomplete="username" autocapitalize="none" placeholder="Nhập tên đăng nhập...">
         </div>
 
         <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Mật Khẩu:</label>
