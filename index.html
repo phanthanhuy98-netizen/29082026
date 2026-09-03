@@ -280,7 +280,6 @@
   .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
   .hidden{display:none !important;}
 
-  /* Toast Notification Styles */
   #toastContainer {
     position: fixed;
     top: 20px;
@@ -440,7 +439,6 @@
     slateMinimal: { name: 'Xám Slat', bgDark: '#0F172A', bgGrad: 'radial-gradient(circle at 50% 0%, #1E293B 0%, #0F172A 100%)', panelBg: 'rgba(30, 41, 59, 0.85)', cardBg: 'rgba(51, 65, 85, 0.7)', textMain: '#F8FAFC', textMuted: '#94A3B8', border: 'rgba(148, 163, 184, 0.2)' }
   };
 
-  // Toast Notification System
   window.showToast = function(message, type = 'success') {
     let container = document.getElementById('toastContainer');
     if (!container) {
@@ -770,7 +768,6 @@
     }
   }
 
-  // Auto-Retry Sync Queue
   window.syncOfflineCheckins = async function() {
     if (!navigator.onLine || !idbDb) return;
     const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
@@ -894,7 +891,6 @@
     });
   };
 
-  // Manual GPS Fallback Modal
   window.promptManualGPSInput = function() {
     return new Promise((resolve) => {
       const modalContainer = document.getElementById('dynamicModalContainer');
@@ -984,7 +980,6 @@
           resolve({ lat: latitude, lng: longitude, accuracy });
         },
         async err => {
-          // Fallback to manual entry if high accuracy fails or times out
           showToast("Không bắt được GPS tự động, vui lòng nhập thủ công.", "warning");
           const manual = await promptManualGPSInput();
           if (manual) resolve(manual);
@@ -1722,7 +1717,6 @@
     }
   };
 
-  // DOM Optimization: Targeted Partial Updates
   window.updateCartDetail = async function(prdId, field, val) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!p) return;
@@ -1773,7 +1767,6 @@
     const finalQty = currentCart[prdId].qty;
     const finalItemTotal = rawPrice * finalQty;
 
-    // Targeted DOM updates without re-rendering entire lists
     document.querySelectorAll(`.input-le-${safeK}`).forEach(el => {
       if (document.activeElement !== el) el.value = (finalLe === 0 ? '' : finalLe);
     });
@@ -2329,10 +2322,17 @@
   };
 
   window.deleteSingleOrder = async function(orderId) {
-    if (currentUser.role !== 'admin') {
-      showToast("Chỉ tài khoản admin mới có quyền xóa đơn hàng!", "warning");
+    const order = orders.find(o => o.id === orderId);
+    const isAdmin = currentUser.role === 'admin';
+    const isOwner = order && (order.salesCode === currentUser.code || order.salesUid === currentUser.uid);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const isToday = order && order.ngayCtu === todayStr;
+
+    if (!isAdmin && !(isOwner && isToday)) {
+      showToast("Bạn chỉ có quyền xóa đơn hàng của chính mình trong ngày!", "warning");
       return;
     }
+
     const confirmDel = await window.showCustomConfirm(
       "Xóa Đơn Hàng",
       "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
@@ -2499,7 +2499,6 @@
     }
   }
 
-  // Conflict Resolution & Offline Order Sync with updatedAt tracking
   window.submitOrder = async function() {
     if (!activeVisitedStore) {
       showToast("Vui lòng chọn khách hàng trước khi gửi đơn hàng!", "warning");
@@ -2587,7 +2586,6 @@
         try {
           if (editingOrderId) {
             const orderRef = doc(db, "orders", editingOrderId);
-            // Conflict check via updatedAt
             const existingSnap = await getDoc(orderRef);
             if (existingSnap.exists()) {
               const cloudData = existingSnap.data();
@@ -3447,6 +3445,7 @@
             const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
             const isToday = o.ngayCtu === todayStr;
             const canEdit = (isOwner && isToday) || isManagerOrAdmin;
+            const canDelete = isAdmin || (isOwner && isToday);
             const timeStr = formatOrderTime(o.createdAt);
             
             return `
@@ -3465,7 +3464,7 @@
                   <div style="display:flex; gap:6px;">
                     <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
                     ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${isAdmin ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                    ${canDelete ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
                   </div>
                 </div>
               </div>
