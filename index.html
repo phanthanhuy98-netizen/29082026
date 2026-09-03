@@ -40,7 +40,6 @@
     --text-muted: #64748B;
     --app-zoom: 1;
 
-    /* Custom Per-Tab Colors (Default) */
     --tab-sales-color: #F59E0B;
     --tab-sogoc-color: #10B981;
     --tab-cust-color: #0D9488;
@@ -63,6 +62,22 @@
     overflow-x: hidden;
     padding-bottom: 240px;
     font-size: calc(14px * var(--app-zoom));
+  }
+
+  /* Chế độ thu gọn (Compact View) */
+  body.compact-mode .mobile-item-card {
+    padding: 6px 8px !important;
+    margin-bottom: 4px !important;
+    gap: 3px !important;
+  }
+  body.compact-mode input, body.compact-mode select {
+    padding: 8px 10px !important;
+    font-size: calc(13px * var(--app-zoom)) !important;
+    margin: 2px 0 4px !important;
+  }
+  body.compact-mode .btn {
+    padding: 6px 8px !important;
+    font-size: calc(11px * var(--app-zoom)) !important;
   }
 
   .app{max-width:1440px;margin:0 auto; width: 100%;}
@@ -417,6 +432,106 @@
   let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
+  // Helper Functions mới tích hợp
+  window.triggerHaptic = function(duration = 35) {
+    const isEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
+    if (isEnabled && navigator.vibrate) {
+      navigator.vibrate(duration);
+    }
+  };
+
+  window.playSystemSound = function(type = 'success') {
+    const isEnabled = localStorage.getItem('dms_pref_sound') !== 'false';
+    if (!isEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      if (type === 'success') {
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else {
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      }
+    } catch (e) {}
+  };
+
+  let wakeLockSentinel = null;
+  async function toggleScreenWakeLock(enable) {
+    try {
+      if (enable && 'wakeLock' in navigator) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+      } else if (wakeLockSentinel) {
+        await wakeLockSentinel.release();
+        wakeLockSentinel = null;
+      }
+    } catch (err) {}
+  }
+
+  window.syncAllTabColors = function(colorVal) {
+    const defaultTabs = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
+    defaultTabs.forEach(tKey => {
+      document.documentElement.style.setProperty(`--tab-${tKey}-color`, colorVal);
+      if (currentUser) {
+        localStorage.setItem(`dms_tabcolor_${currentUser.uid}_${tKey}`, colorVal);
+      }
+    });
+    renderTabBarOrder();
+    openSettingsModal();
+  };
+
+  window.resetDefaultTabColors = function() {
+    const tabDefaultColors = {
+      sales: "#F59E0B", soGocBH: "#10B981", customers: "#0D9488",
+      productsAdmin: "#3B82F6", routes: "#8B5CF6", company: "#DB2777", users: "#D97706"
+    };
+    Object.keys(tabDefaultColors).forEach(tKey => {
+      document.documentElement.style.setProperty(`--tab-${tKey}-color`, tabDefaultColors[tKey]);
+      if (currentUser) {
+        localStorage.removeItem(`dms_tabcolor_${currentUser.uid}_${tKey}`);
+      }
+    });
+    renderTabBarOrder();
+    openSettingsModal();
+  };
+
+  window.clearAndSyncLocalCache = async function() {
+    const confirmClean = await window.showCustomConfirm(
+      "Làm Mới Bộ Nhớ Đệm",
+      "Thao tác này sẽ xóa cache cục bộ (IndexedDB) và tải lại toàn bộ danh sách vật tư, khách hàng mới nhất từ máy chủ.\nBạn có muốn tiếp tục?",
+      "fa-database",
+      "Đồng ý",
+      "Hủy"
+    );
+    if (!confirmClean) return;
+
+    try {
+      if (idbDb) {
+        const tx = idbDb.transaction(["localProducts", "localStores", "localRoutes"], "readwrite");
+        tx.objectStore("localProducts").clear();
+        tx.objectStore("localStores").clear();
+        tx.objectStore("localRoutes").clear();
+      }
+      localStorage.removeItem('dms_last_sync_date');
+      await saveMetaVersion("cachedDataVersion", 0);
+      alert("✅ Đã xóa cache thành công! Ứng dụng sẽ tự động tải lại dữ liệu mới.");
+      window.location.reload();
+    } catch (e) {
+      alert("Lỗi khi xóa cache: " + e.message);
+    }
+  };
+
   window.applyTheme = function(themeKey) {
     const t = themePresets[themeKey] || themePresets.softWhite;
     const root = document.documentElement;
@@ -469,7 +584,7 @@
       localStorage.setItem(`dms_taborder_${currentUser.uid}`, JSON.stringify(currentTabOrder));
     }
     renderTabBarOrder();
-    openSettingsModal(); // Refresh modal view
+    openSettingsModal();
   };
 
   function loadUserCustomPreferences() {
@@ -504,6 +619,13 @@
   window.openSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     const currentZoom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-zoom')) || 1;
+    const isCompact = document.body.classList.contains('compact-mode');
+    const hapticEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
+    const soundEnabled = localStorage.getItem('dms_pref_sound') !== 'false';
+    const wakeLockEnabled = localStorage.getItem('dms_pref_wakelock') === 'true';
+    const defaultStartupTab = localStorage.getItem('dms_default_startup_tab') || 'sales';
+    const gpsFrequency = localStorage.getItem('dms_pref_gps_freq') || 'high';
+    const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
     
     const tabLabels = {
       sales: "Bán Hàng",
@@ -527,38 +649,49 @@
 
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex; z-index:9999;">
-        <div class="modal-content" style="max-width: 480px; text-align: left; padding: 22px; border-radius: 18px; animation: scaleIn 0.2s ease-out;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px;">
-            <h3 style="font-size: 16px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-gear" style="color:var(--amber);"></i> Cài Đặt Giao Diện Doanh Nghiệp</h3>
+        <div class="modal-content" style="max-width: 520px; text-align: left; padding: 20px; border-radius: 18px; max-height: 90vh; overflow-y: auto; animation: scaleIn 0.2s ease-out;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
+            <h3 style="font-size: 15px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-gear" style="color:var(--amber);"></i> Cài Đặt & Tùy Chỉnh Nâng Cao</h3>
             <button class="btn btn-red btn-sm" onclick="closeSettingsModal()">Đóng</button>
           </div>
 
-          <div style="margin-bottom: 20px;">
-            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;">
-              🔍 Phóng To / Thu Nhỏ (50% - 120%) (<span id="zoomPercentageIndicator" style="color:var(--amber); font-weight:800;">${Math.round(currentZoom * 100)}%</span>):
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 12.5px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 6px;">
+              🔍 Kích Thước Chữ / Độ Phóng Đại (<span id="zoomPercentageIndicator" style="color:var(--amber);">${Math.round(currentZoom * 100)}%</span>):
             </label>
-            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-              <button class="btn btn-sm" style="flex:1; padding: 10px; font-weight:800;" onclick="applyAppZoom(0.5)">Min (50%)</button>
-              <button class="btn btn-amber btn-sm" style="flex:1; padding: 10px; font-weight:800;" onclick="applyAppZoom(1)">Mặc định (100%)</button>
-              <button class="btn btn-sm" style="flex:1; padding: 10px; font-weight:800;" onclick="applyAppZoom(1.2)">Max (120%)</button>
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+              <button class="btn btn-sm" style="flex:1;" onclick="applyAppZoom(0.5); triggerHaptic(20);">Min (50%)</button>
+              <button class="btn btn-amber btn-sm" style="flex:1;" onclick="applyAppZoom(1); triggerHaptic(20);">Mặc định</button>
+              <button class="btn btn-sm" style="flex:1;" onclick="applyAppZoom(1.2); triggerHaptic(20);">Max (120%)</button>
             </div>
             <input type="range" min="0.5" max="1.2" step="0.05" value="${currentZoom}" oninput="applyAppZoom(this.value)" style="width:100%; cursor:pointer; accent-color: var(--amber);">
           </div>
 
-          <div style="margin-bottom: 20px;">
-            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;"><i class="fa-solid fa-compass" style="color:var(--amber);"></i> Sắp Xếp Vị Trí & Màu Sắc Các Tab:</label>
-            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding-right: 4px;">
+          <div style="margin-bottom: 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+              <label style="font-size: 12.5px; font-weight: 800; color: var(--text-muted);"><i class="fa-solid fa-palette"></i> Màu Sắc & Vị Trí Tab:</label>
+              <button class="btn btn-sm" style="font-size: 10px; padding: 4px 8px;" onclick="resetDefaultTabColors()">Khôi phục mặc định</button>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: var(--panel-bg); padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);">
+              <span style="font-size: 11.5px; font-weight:700;">Đồng bộ 1 màu toàn bộ tab:</span>
+              <input type="color" value="#3B82F6" onchange="syncAllTabColors(this.value)" style="width: 32px; height: 28px; border: none; cursor: pointer; background:none;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; padding-right: 2px;">
               ${currentTabOrder.map((tKey, idx) => {
                 const curColor = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || tabDefaultColors[tKey];
+                const isHidden = hiddenTabs.includes(tKey);
                 return `
-                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 8px 12px; border-radius: 10px; border: 1px solid var(--card-border);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--card-border);">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                      <input type="color" value="${curColor}" onchange="applyTabColor('${tKey}', this.value)" style="width: 28px; height: 28px; border: none; cursor: pointer; padding: 0; background: none;">
-                      <span style="font-weight: 800; font-size: 13px; color: var(--text-main);">${tabLabels[tKey]}</span>
+                      <input type="color" value="${curColor}" onchange="applyTabColor('${tKey}', this.value)" style="width: 24px; height: 24px; border: none; cursor: pointer; padding: 0; background: none;">
+                      <span style="font-weight: 700; font-size: 12px; color: var(--text-main);">${tabLabels[tKey]}</span>
                     </div>
-                    <div style="display: flex; gap: 4px;">
-                      <button class="btn btn-sm" style="padding: 6px 10px; font-weight: 800;" ${idx === 0 ? 'disabled style="opacity: 0.4;"' : ''} onclick="moveTabPosition(${idx}, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-                      <button class="btn btn-sm" style="padding: 6px 10px; font-weight: 800;" ${idx === currentTabOrder.length - 1 ? 'disabled style="opacity: 0.4;"' : ''} onclick="moveTabPosition(${idx}, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+                    <div style="display: flex; gap: 4px; align-items:center;">
+                      <label style="font-size: 11px; color: var(--text-muted); display:flex; align-items:center; gap:3px; cursor:pointer;">
+                        <input type="checkbox" ${isHidden ? '' : 'checked'} onchange="toggleTabVisibility('${tKey}', this.checked)"> Hiện
+                      </label>
+                      <button class="btn btn-sm" style="padding: 4px 8px;" ${idx === 0 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+                      <button class="btn btn-sm" style="padding: 4px 8px;" ${idx === currentTabOrder.length - 1 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, 1)"><i class="fa-solid fa-arrow-down"></i></button>
                     </div>
                   </div>
                 `;
@@ -566,15 +699,43 @@
             </div>
           </div>
 
-          <div>
-            <label style="font-size: 13px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 8px;"><i class="fa-solid fa-palette" style="color:var(--amber);"></i> Chọn Giao Diện Màu Nền Tổng Thể:</label>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 180px; overflow-y: auto; padding-right: 2px;">
-              ${Object.keys(themePresets).map(k => `
-                <button class="btn" style="justify-content: center; padding: 9px 4px; font-weight: 700; font-size: 11px; background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" onclick="applyTheme('${k}')" title="${themePresets[k].name}">
-                  ${themePresets[k].name}
-                </button>
-              `).join('')}
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; background:var(--panel-bg); padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); cursor:pointer;">
+              <input type="checkbox" ${isCompact ? 'checked' : ''} onchange="toggleCompactView(this.checked)"> Chế độ thu gọn
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; background:var(--panel-bg); padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); cursor:pointer;">
+              <input type="checkbox" ${hapticEnabled ? 'checked' : ''} onchange="localStorage.setItem('dms_pref_haptic', this.checked)"> Rung phản hồi
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; background:var(--panel-bg); padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); cursor:pointer;">
+              <input type="checkbox" ${soundEnabled ? 'checked' : ''} onchange="localStorage.setItem('dms_pref_sound', this.checked)"> Âm thanh (Sound FX)
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; background:var(--panel-bg); padding:8px 10px; border-radius:8px; border:1px solid var(--card-border); cursor:pointer;">
+              <input type="checkbox" ${wakeLockEnabled ? 'checked' : ''} onchange="localStorage.setItem('dms_pref_wakelock', this.checked); toggleScreenWakeLock(this.checked);"> Giữ sáng màn hình
+            </label>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 4px;">Tab ưu tiên khởi động:</label>
+              <select onchange="localStorage.setItem('dms_default_startup_tab', this.value)" style="margin:0; padding:8px; font-size:12px;">
+                <option value="sales" ${defaultStartupTab==='sales'?'selected':''}>Bán Hàng</option>
+                <option value="soGocBH" ${defaultStartupTab==='soGocBH'?'selected':''}>Sổ Gốc BH</option>
+                <option value="customers" ${defaultStartupTab==='customers'?'selected':''}>Khách Hàng</option>
+              </select>
             </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 800; color: var(--text-muted); display: block; margin-bottom: 4px;">Tần suất GPS (Pin):</label>
+              <select onchange="localStorage.setItem('dms_pref_gps_freq', this.value)" style="margin:0; padding:8px; font-size:12px;">
+                <option value="high" ${gpsFrequency==='high'?'selected':''}>Chính xác cao</option>
+                <option value="balanced" ${gpsFrequency==='balanced'?'selected':''}>Cân bằng (Tiết kiệm)</option>
+                <option value="battery" ${gpsFrequency==='battery'?'selected':''}>Tiết kiệm pin tối đa</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--card-border); padding-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11.5px; color: var(--text-muted);">Dữ liệu offline & cache:</span>
+            <button class="btn btn-amber btn-sm" onclick="clearAndSyncLocalCache()"><i class="fa-solid fa-rotate"></i> Làm mới bộ nhớ đệm</button>
           </div>
         </div>
       </div>
@@ -586,6 +747,28 @@
     const modalContainer = document.getElementById('dynamicModalContainer');
     modalContainer.innerHTML = '';
     modalContainer.classList.add('hidden');
+  };
+
+  window.toggleCompactView = function(isCompact) {
+    if (isCompact) {
+      document.body.classList.add('compact-mode');
+      localStorage.setItem('dms_pref_compact', 'true');
+    } else {
+      document.body.classList.remove('compact-mode');
+      localStorage.setItem('dms_pref_compact', 'false');
+    }
+    triggerHaptic(15);
+  };
+
+  window.toggleTabVisibility = function(tabName, isVisible) {
+    let hidden = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
+    if (!isVisible) {
+      if (!hidden.includes(tabName)) hidden.push(tabName);
+    } else {
+      hidden = hidden.filter(t => t !== tabName);
+    }
+    localStorage.setItem('dms_hidden_tabs', JSON.stringify(hidden));
+    renderTabBarOrder();
   };
 
   let companyList = [
@@ -995,13 +1178,17 @@
   function getHighAccuracyPosition() {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) return reject(new Error("Trình duyệt không hỗ trợ GPS."));
+      const gpsFreq = localStorage.getItem('dms_pref_gps_freq') || 'high';
+      const enableHighAcc = gpsFreq === 'high';
+      const timeoutVal = gpsFreq === 'battery' ? 8000 : 15000;
+      
       navigator.geolocation.getCurrentPosition(
         pos => {
           const { latitude, longitude, accuracy } = pos.coords;
           resolve({ lat: latitude, lng: longitude, accuracy });
         },
         err => reject(err),
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        { enableHighAccuracy: enableHighAcc, timeout: timeoutVal, maximumAge: 0 }
       );
     });
   }
@@ -1130,6 +1317,7 @@
       try {
         await signInWithEmailAndPassword(authSvc, email, pass);
         localStorage.removeItem(failedAttemptsKey);
+        triggerHaptic(40);
       } catch (authErr) {
         if (targetUserRole !== 'viewer') {
           currentFailed++;
@@ -1237,11 +1425,12 @@
     document.getElementById('appView').classList.remove('hidden');
     
     const hashTab = window.location.hash.replace('#', '');
+    const defaultStartup = localStorage.getItem('dms_default_startup_tab') || 'sales';
     if (hashTab && currentTabOrder.includes(hashTab)) {
       currentTab = hashTab;
     } else {
       const savedLastTab = localStorage.getItem('dms_last_active_tab');
-      currentTab = savedLastTab && currentTabOrder.includes(savedLastTab) ? savedLastTab : ((currentUser.role === 'sales') ? 'sales' : (currentUser.role === 'viewer' ? 'customers' : 'soGocBH'));
+      currentTab = savedLastTab && currentTabOrder.includes(savedLastTab) ? savedLastTab : defaultStartup;
     }
 
     renderUI();
@@ -1395,6 +1584,7 @@
       if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
         renderUI();
       }
+      triggerHaptic(30);
     } catch (err) { 
       alert("Lỗi cập nhật GPS: " + err.message); 
     }
@@ -1510,6 +1700,7 @@
       }
     }
 
+    triggerHaptic(25);
     renderUI();
   };
 
@@ -1683,6 +1874,7 @@
       activeVisitedStore.pinnedAt = new Date().toISOString();
       activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
       
+      triggerHaptic(30);
       renderUI();
     } catch (err) {
       console.error(err);
@@ -1764,6 +1956,7 @@
 
     saveCartDraftToLocal();
     updateCartTotalsUI();
+    triggerHaptic(10);
   };
 
   window.adjustQty = function(prdId, field, delta) {
@@ -2651,6 +2844,8 @@
       selectedCompanyCode = "";
       showOnlySelectedItems = false; 
 
+      playSystemSound('success');
+      triggerHaptic(50);
       switchTab('soGocBH');
       window.scrollTo({ top: 0, behavior: 'instant' });
     } finally {
@@ -3146,6 +3341,8 @@
     const tabBar = document.getElementById('mobileTabBarContainer');
     if (!tabBar) return;
 
+    const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
+
     const tabConfigMap = {
       sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
       soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
@@ -3158,7 +3355,7 @@
 
     tabBar.innerHTML = currentTabOrder.map(tKey => {
       const cfg = tabConfigMap[tKey];
-      if (!cfg || !cfg.perm) return '';
+      if (!cfg || !cfg.perm || hiddenTabs.includes(tKey)) return '';
       const customCol = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || cfg.defaultColor;
 
       return `
@@ -3764,6 +3961,16 @@
     window.location.hash = tab;
     renderUI();
   };
+
+  // Khôi phục trạng thái Compact View khi tải trang
+  if (localStorage.getItem('dms_pref_compact') === 'true') {
+    document.body.classList.add('compact-mode');
+  }
+
+  // Khôi phục Wake Lock nếu đã bật
+  if (localStorage.getItem('dms_pref_wakelock') === 'true') {
+    toggleScreenWakeLock(true);
+  }
 </script>
 </head>
 
