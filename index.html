@@ -809,7 +809,6 @@
             <button class="btn btn-red btn-sm" onclick="closeSettingsModal()">Đóng</button>
           </div>
 
-          <!-- Nhóm 1: Cỡ chữ tổng thể & Kiểu chữ -->
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-font"></i> 1. Cỡ Chữ Chung & Kiểu Chữ (Font Family)</div>
             
@@ -833,7 +832,6 @@
             </div>
           </div>
 
-          <!-- Nhóm 2: Phân tách cỡ chữ chi tiết từng thành phần -->
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-text-height"></i> 2. Phân Tách Cỡ Chữ Chi Tiết</div>
             
@@ -866,7 +864,6 @@
             </div>
           </div>
 
-          <!-- Nhóm 3: Màu Sắc Ô Box & Màu Sắc Chi Tiết Vật Tư -->
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-palette"></i> 3. Màu Sắc Box & Thành Phần Vật Tư</div>
             
@@ -898,7 +895,6 @@
             </div>
           </div>
 
-          <!-- Nhóm 4: Giao Diện Nền & Tiện Ích -->
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-desktop"></i> 4. Giao Diện Nền Tổng Thể</div>
             
@@ -918,7 +914,6 @@
             </div>
           </div>
 
-          <!-- Nhóm 5: Màu Sắc & Vị Trí Tab -->
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
               <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-palette"></i> 5. Màu Sắc & Vị Trí Tab</div>
@@ -1528,11 +1523,6 @@
   async function backgroundSyncMetadataAndCache() {
     if (!navigator.onLine) return;
     
-    const lastSyncDate = localStorage.getItem('dms_last_sync_date');
-    const todayStr = new Date().toISOString().slice(0, 10);
-    
-    if (lastSyncDate === todayStr) return;
-
     try {
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
       const metaSnap = await getDoc(metaRef);
@@ -1569,7 +1559,6 @@
           await saveMetaVersion("cachedDataVersion", cloudDataVersion);
         }
       }
-      localStorage.setItem('dms_last_sync_date', todayStr);
     } catch (e) {
       console.warn("Lỗi đồng bộ ngầm:", e);
     }
@@ -3270,10 +3259,13 @@
     XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  // ==================== TỐI ƯU TIẾT KIỆM TÀI NGUYÊN FIREBASE: ĐỐI CHIẾU CỤC BỘ & UPSERT ====================
+
   window.importProductsExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file Excel!");
     const file = event.target.files[0];
     if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
@@ -3291,42 +3283,60 @@
           if (code && code !== 'Ma VTHH' && code !== 'undefined') {
             rawProducts.push({
               id: code,
-              code: code, name: name, dvt: dvt,
-              stockDau: Number(r[3]) || 0, stockCuoi: Number(r[4]) || 0,
-              price: Number(r[5]) || 0, tyLeQuyDoi: Number(r[6]) || 50
+              code: code, 
+              name: name, 
+              dvt: dvt,
+              stockDau: Number(r[3]) || 0, 
+              stockCuoi: Number(r[4]) || 0,
+              price: Number(r[5]) || 0, 
+              tyLeQuyDoi: Number(r[6]) || 50
             });
           }
         }
 
-        if (rawProducts.length > 0) {
-          const uniqueMap = new Map();
-          rawProducts.forEach(p => { if (!uniqueMap.has(p.code)) uniqueMap.set(p.code, p); });
-          const uniqueList = Array.from(uniqueMap.values());
+        if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ trong file!");
 
-          const existingSnap = await getDocs(collection(db, "products"));
-          const docsArr = existingSnap.docs;
-          for (let i = 0; i < docsArr.length; i += 250) {
-            const chunk = docsArr.slice(i, i + 250);
-            const deleteBatch = writeBatch(db);
-            chunk.forEach(d => deleteBatch.delete(d.ref));
-            await deleteBatch.commit();
+        const existingPrdMap = new Map();
+        products.forEach(p => existingPrdMap.set(p.code, p));
+
+        let itemsToUpsert = [];
+        rawProducts.forEach(newP => {
+          const oldP = existingPrdMap.get(newP.code);
+          if (!oldP || oldP.name !== newP.name || oldP.price !== newP.price || oldP.stockCuoi !== newP.stockCuoi || oldP.tyLeQuyDoi !== newP.tyLeQuyDoi) {
+            itemsToUpsert.push(newP);
           }
+        });
 
-          for (let i = 0; i < uniqueList.length; i += 300) {
-            const chunk = uniqueList.slice(i, i + 300);
-            const batch = writeBatch(db);
-            chunk.forEach(p => batch.set(doc(db, "products", p.code), p));
-            await batch.commit();
-            await new Promise(r => setTimeout(r, 40));
-          }
+        if (itemsToUpsert.length === 0) {
+          return alert("ℹ️ Tất cả vật tư trong file Excel đã đồng bộ với hệ thống, không có thay đổi mới nào cần ghi!");
+        }
 
-          await saveProductsToLocalCache(uniqueList);
-          products = uniqueList;
-          buildProductIndex();
-          renderUI();
-          alert("✅ Nhập danh sách vật tư thành công!");
-        } else { alert("Không tìm thấy dữ liệu vật tư hợp lệ!"); }
-      } catch (err) { alert("Lỗi: " + err.message); }
+        for (let i = 0; i < itemsToUpsert.length; i += 300) {
+          const chunk = itemsToUpsert.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(p => batch.set(doc(db, "products", p.code), p, { merge: true }));
+          await batch.commit();
+        }
+
+        const metaRef = doc(db, "systemMetadata", "appVersionControl");
+        const metaSnap = await getDoc(metaRef);
+        let currentVersion = metaSnap.exists() ? (metaSnap.data().dataVersion || 1) : 1;
+        let newVersion = currentVersion + 1;
+        await setDoc(metaRef, { dataVersion: newVersion }, { merge: true });
+        await saveMetaVersion("cachedDataVersion", newVersion);
+
+        const updatedMap = new Map();
+        products.forEach(p => updatedMap.set(p.code, p));
+        itemsToUpsert.forEach(p => updatedMap.set(p.code, p));
+        products = Array.from(updatedMap.values());
+
+        buildProductIndex();
+        await saveProductsToLocalCache(products);
+        renderUI();
+        alert(`✅ Đã tối ưu thành công! Chỉ ghi mới/cập nhật ${itemsToUpsert.length} vật tư thay đổi lên Firebase (Tiết kiệm hàng chục ngàn lượt ghi).`);
+      } catch (err) { 
+        alert("Lỗi: " + err.message); 
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -3335,6 +3345,7 @@
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
     if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
@@ -3360,75 +3371,79 @@
           }
         }
 
-        if (rawCustomers.length > 0) {
-          const existingSnap = await getDocs(collection(db, "stores"));
-          const existingStoresMap = new Map();
-          existingSnap.forEach(d => {
-            const data = d.data();
-            if (data.code) existingStoresMap.set(String(data.code).trim(), { id: d.id, ...data });
-            existingStoresMap.set(String(d.id).trim(), { id: d.id, ...data });
-          });
+        if (rawCustomers.length === 0) return alert("Không tìm thấy dữ liệu khách hàng trong file!");
 
-          const batch = writeBatch(db);
-          let batchCount = 0;
+        const existingStoresMap = new Map();
+        stores.forEach(s => {
+          if (s.code) existingStoresMap.set(String(s.code).trim(), s);
+          existingStoresMap.set(String(s.id).trim(), s);
+        });
 
-          for (const cust of rawCustomers) {
-            const matchKey = cust.code;
-            const existing = existingStoresMap.get(matchKey) || existingStoresMap.get(cust.name);
+        let storesToUpsert = [];
+        rawCustomers.forEach(cust => {
+          const matchKey = cust.code;
+          const existing = existingStoresMap.get(matchKey) || existingStoresMap.get(cust.name);
 
-            let docRef;
-            let storeData;
-
-            if (existing) {
-              docRef = doc(db, "stores", existing.id);
-              storeData = {
-                ...existing,
-                code: cust.code,
-                name: cust.name,
-                address: cust.address || existing.address || '',
-                phone: cust.phone || existing.phone || '',
-                zalo: cust.zalo || existing.zalo || ''
-              };
-            } else {
-              const newId = cust.code || `KH_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-              docRef = doc(db, "stores", newId);
-              storeData = {
-                id: newId,
-                code: cust.code,
-                name: cust.name,
-                address: cust.address || '',
-                phone: cust.phone || '',
-                zalo: cust.zalo || '',
-                routeDay: '',
-                lat: 0,
-                lng: 0,
-                pinnedByCode: '',
-                pinnedByName: '',
-                pinnedAt: '',
-                pinnedHistory: []
-              };
-            }
-
-            batch.set(docRef, storeData, { merge: true });
-            batchCount++;
-            if (batchCount >= 400) {
-              await batch.commit();
-              batchCount = 0;
-            }
+          if (!existing) {
+            const newId = cust.code || `KH_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            storesToUpsert.push({
+              id: newId,
+              code: cust.code,
+              name: cust.name,
+              address: cust.address || '',
+              phone: cust.phone || '',
+              zalo: cust.zalo || '',
+              routeDay: '', lat: 0, lng: 0,
+              pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
+            });
+          } else if (existing.name !== cust.name || existing.address !== cust.address || existing.phone !== cust.phone || existing.zalo !== cust.zalo) {
+            storesToUpsert.push({
+              ...existing,
+              code: cust.code,
+              name: cust.name,
+              address: cust.address || existing.address || '',
+              phone: cust.phone || existing.phone || '',
+              zalo: cust.zalo || existing.zalo || ''
+            });
           }
+        });
 
-          if (batchCount > 0) {
-            await batch.commit();
-          }
+        if (storesToUpsert.length === 0) {
+          return alert("ℹ️ Tất cả khách hàng trong file Excel đã đồng bộ, không có thay đổi mới nào!");
+        }
 
-          const storeSnap = await getDocs(collection(db, "stores"));
-          stores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          buildStoreIndex();
-          await saveStoresToLocalCache(stores);
-          renderUI();
-          alert("✅ Nhập và đồng bộ danh sách khách hàng thành công (không trùng lặp, đã đè ghi chú cũ nếu trùng mã)!");
-        } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
-      } catch (err) { alert("Lỗi: " + err.message); }
+        const batch = writeBatch(db);
+        let batchCount = 0;
+
+        storesToUpsert.forEach(storeData => {
+          const docRef = doc(db, "stores", String(storeData.id));
+          batch.set(docRef, storeData, { merge: true });
+          batchCount++;
+        });
+
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+
+        const metaRef = doc(db, "systemMetadata", "appVersionControl");
+        const metaSnap = await getDoc(metaRef);
+        let currentVersion = metaSnap.exists() ? (metaSnap.data().dataVersion || 1) : 1;
+        let newVersion = currentVersion + 1;
+        await setDoc(metaRef, { dataVersion: newVersion }, { merge: true });
+        await saveMetaVersion("cachedDataVersion", newVersion);
+
+        const updatedStoreMap = new Map();
+        stores.forEach(s => updatedStoreMap.set(String(s.id), s));
+        storesToUpsert.forEach(s => updatedStoreMap.set(String(s.id), s));
+        stores = Array.from(updatedStoreMap.values());
+
+        buildStoreIndex();
+        await saveStoresToLocalCache(stores);
+        renderUI();
+        alert(`✅ Đã tối ưu thành công! Chỉ cập nhật/thêm mới ${storesToUpsert.length} khách hàng thay đổi lên Firebase.`);
+      } catch (err) { 
+        alert("Lỗi: " + err.message); 
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -3689,10 +3704,6 @@
     localStorage.setItem('dms_last_active_tab', tabName);
     renderUI();
   };
-
-  function setNav(navId, isAllowed) {
-    // Helper placeholder if needed
-  }
 
   function renderUI() {
     if (!currentUser) return;
