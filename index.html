@@ -1481,50 +1481,50 @@
     const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
-      const usersSnap = await getDocs(collection(db, "users"));
-      let targetUserDoc = null;
-      let targetUserId = null;
-      let targetUserRole = 'sales';
+      const userCredential = await signInWithEmailAndPassword(authSvc, email, pass);
+      const authUser = userCredential.user;
 
-      usersSnap.forEach(d => {
-        if (d.data().email && d.data().email.toLowerCase() === email) {
-          targetUserDoc = d.data();
-          targetUserId = d.id;
-          targetUserRole = (d.data().role || 'sales').toLowerCase();
-        }
-      });
+      const userDocRef = doc(db, "users", authUser.uid);
+      let userSnap = await getDoc(userDocRef);
 
-      if (targetUserDoc && targetUserDoc.active === false && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-        return alert("⛔ Tài khoản của bạn đã bị khóa do nhập sai mật khẩu quá 10 lần!\nVui lòng liên hệ admin để được mở lại và đổi mật khẩu mới.");
-      }
-
-      const failedAttemptsKey = `failed_attempts_${email}`;
-      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0);
-
-      try {
-        await signInWithEmailAndPassword(authSvc, email, pass);
-        localStorage.removeItem(failedAttemptsKey);
-        triggerHaptic(40);
-      } catch (authErr) {
-        if (targetUserRole !== 'viewer') {
-          currentFailed++;
-          localStorage.setItem(failedAttemptsKey, currentFailed);
-
-          if (currentFailed >= 10) {
-            if (targetUserId && targetUserDoc && targetUserDoc.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-              await updateDoc(doc(db, "users", targetUserId), { active: false });
-            }
-            alert("⛔ Bạn đã nhập sai mật khẩu 10 lần!\nTài khoản đã bị KHÓA. Vui lòng liên hệ admin để được mở lại và đổi mật khẩu mới!");
-          } else {
-            alert(`⛔ Mật khẩu không đúng! Bạn còn ${10 - currentFailed} lần thử trước khi tài khoản bị khóa.`);
+      if (!userSnap.exists()) {
+        const usersQuerySnap = await getDocs(collection(db, "users"));
+        usersQuerySnap.forEach(d => {
+          const data = d.data();
+          if (data.email && data.email.toLowerCase() === email.toLowerCase()) {
+            userSnap = d;
           }
-        } else {
-          alert("⛔ Mật khẩu không đúng!");
-        }
-        return;
+        });
       }
-    } catch (err) {
-      alert("Đăng nhập thất bại: " + err.message);
+
+      if (!userSnap || !userSnap.exists()) {
+        await signOut(authSvc);
+        return alert("⛔ Tài khoản này tồn tại trên Auth nhưng chưa được cấu hình phân quyền trong bảng users của CSDL Firestore!");
+      }
+
+      const profile = userSnap.data();
+      const userRole = (profile.role || 'sales').toLowerCase();
+
+      if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+        await signOut(authSvc);
+        return alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ quản trị viên để mở lại.");
+      }
+
+      localStorage.removeItem(`failed_attempts_${email}`);
+      triggerHaptic(40);
+
+    } catch (authErr) {
+      console.error("Lỗi đăng nhập:", authErr);
+      
+      const failedAttemptsKey = `failed_attempts_${email}`;
+      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
+      localStorage.setItem(failedAttemptsKey, currentFailed);
+
+      if (currentFailed >= 10) {
+        alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
+      } else {
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
+      }
     }
   };
 
@@ -3439,18 +3439,22 @@
         const rawProducts = Array.from(uniqueMap.values());
         if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ trong file!");
 
+        const batch = writeBatch(db);
+        rawProducts.forEach(p => {
+          const docRef = doc(db, "products", String(p.code));
+          batch.set(docRef, p);
+        });
+        await batch.commit();
+
         products = rawProducts;
         buildProductIndex();
-
-        await Promise.all([
-          saveProductsToLocalCache(products),
-          uploadFullDataJsonToCloud()
-        ]);
+        await saveProductsToLocalCache(products);
+        await uploadFullDataJsonToCloud();
 
         renderUI();
-        alert(`✅ Cập nhật thành công ${products.length} vật tư mới! Toàn bộ máy nhân viên sẽ tự động đồng bộ.`);
+        alert(`✅ Đã đẩy thành công ${products.length} vật tư lên Firebase Firestore!`);
       } catch (err) { 
-        alert("Lỗi: " + err.message); 
+        alert("Lỗi đẩy lên Firebase: " + err.message); 
       }
     };
     reader.readAsArrayBuffer(file);
@@ -3493,18 +3497,22 @@
         const rawCustomers = Array.from(uniqueCustomerMap.values());
         if (rawCustomers.length === 0) return alert("Không tìm thấy dữ liệu khách hàng trong file!");
 
+        const batch = writeBatch(db);
+        rawCustomers.forEach(s => {
+          const docRef = doc(db, "stores", String(s.id));
+          batch.set(docRef, s, { merge: true });
+        });
+        await batch.commit();
+
         stores = rawCustomers;
         buildStoreIndex();
-
-        await Promise.all([
-          saveStoresToLocalCache(stores),
-          uploadFullDataJsonToCloud()
-        ]);
+        await saveStoresToLocalCache(stores);
+        await uploadFullDataJsonToCloud();
 
         renderUI();
-        alert(`✅ Cập nhật thành công ${stores.length} khách hàng mới! Toàn bộ máy nhân viên sẽ tự động đồng bộ.`);
+        alert(`✅ Đã đẩy thành công ${stores.length} khách hàng lên Firebase Firestore!`);
       } catch (err) { 
-        alert("Lỗi: " + err.message); 
+        alert("Lỗi đẩy lên Firebase: " + err.message); 
       }
     };
     reader.readAsArrayBuffer(file);
@@ -3570,17 +3578,22 @@
 
         let newList = Array.from(uniqueMap.values());
         if (newList.length > 0) {
+          const batch = writeBatch(db);
+          newList.forEach(r => {
+            const docRef = doc(db, "routes", String(r.id));
+            batch.set(docRef, r);
+          });
+          await batch.commit();
+
           routeGroupsList = newList;
-          await Promise.all([
-            saveRoutesToLocalCache(newList),
-            uploadFullDataJsonToCloud()
-          ]);
+          await saveRoutesToLocalCache(newList);
+          await uploadFullDataJsonToCloud();
           renderUI();
-          alert("✅ Nhập danh sách tuyến thành công và đồng bộ lên mây!");
+          alert("✅ Đã đẩy danh sách tuyến lên Firebase Firestore thành công!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ!");
         }
-      } catch (err) { alert("Lỗi đọc file: " + err.message); }
+      } catch (err) { alert("Lỗi đẩy lên Firebase: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
   };
