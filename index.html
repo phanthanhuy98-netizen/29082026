@@ -308,6 +308,29 @@
   .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
   .hidden{display:none !important;}
 
+  /* Toast Notification */
+  .update-toast {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: var(--emerald-gradient);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 13px;
+    box-shadow: 0 10px 25px rgba(5, 150, 105, 0.3);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: slideInDown 0.3s ease-out;
+  }
+  @keyframes slideInDown {
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
   .tab-header-actions {
     display: flex;
     justify-content: space-between;
@@ -459,6 +482,9 @@
     getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
     serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import {
+    getStorage, ref, uploadString, getDownloadURL
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
@@ -473,6 +499,7 @@
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
   const db = getFirestore(app);
+  const storageSvc = getStorage(app);
   enableIndexedDbPersistence(db).catch(() => {});
 
   const secondaryApp = initializeApp(firebaseConfig, "secondary");
@@ -530,6 +557,21 @@
       }
     } catch (e) {}
   };
+
+  function showUpdateToast(msg) {
+    const existing = document.getElementById('globalUpdateToast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'globalUpdateToast';
+    toast.className = 'update-toast';
+    toast.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> <span>${msg}</span>`;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      if (toast && toast.parentNode) toast.remove();
+    }, 3500);
+  }
 
   let wakeLockSentinel = null;
   async function toggleScreenWakeLock(enable) {
@@ -810,6 +852,13 @@
           </div>
 
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-sync"></i> Đồng bộ dữ liệu thủ công</div>
+              <button class="btn btn-amber btn-sm" onclick="window.forceCheckManualUpdate(true)"><i class="fa-solid fa-download"></i> Kiểm tra cập nhật mới</button>
+            </div>
+          </div>
+
+          <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-font"></i> 1. Cỡ Chữ Chung & Kiểu Chữ (Font Family)</div>
             
             <div style="margin-bottom: 10px; display:flex; justify-content:space-between; align-items:center;">
@@ -1023,7 +1072,7 @@
     { maCtu: "62", tenCtu: "CTY TNHH VN NAM ĐẠT", status: "Mở" },
     { maCtu: "60", tenCtu: "CTY TNHH Công Nghệ Thực Phẩm Nhật Hồng", status: "Mở" },
     { maCtu: "15", tenCtu: "CTY TNHH TM Mã Hoa", status: "Mở" },
-    { maCtu: "51", tenCtu: "Cơ Sở Sản Xuất Kẹo Dừa Thanh Bình", status: "Mở" },
+    { maCtu: "51", tenCơ: "Cơ Sở Sản Xuất Kẹo Dừa Thanh Bình", status: "Mở" },
     { maCtu: "64", tenCtu: "CTY TNHH TM Ngọc Thiên Bảo", status: "Mở" },
     { maCtu: "59", tenCtu: "Cơ Sở Sản Xuất Bánh Kẹo Hiệp Phong", status: "Mở" },
     { maCtu: "54", tenCtu: "CTCP THỰC PHẨM Á LONG", status: "Mở" },
@@ -1076,7 +1125,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 25);
+      const request = indexedDB.open("DMS_OfflineDB", 26);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1520,49 +1569,74 @@
     }
   };
 
-  async function backgroundSyncMetadataAndCache() {
+  // ==================== CƠ CHẾ ĐỒNG BỘ JSON CACHE QUA FIREBASE STORAGE ====================
+
+  async function uploadFullDataJsonToCloud() {
     if (!navigator.onLine) return;
-    
+    try {
+      const payload = {
+        version: Date.now(),
+        products: products,
+        stores: stores,
+        routes: routeGroupsList
+      };
+      const jsonStr = JSON.stringify(payload);
+      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
+      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
+
+      // Cập nhật version lên metadata trên Firestore
+      const metaRef = doc(db, "systemMetadata", "appVersionControl");
+      await setDoc(metaRef, { dataVersion: payload.version }, { merge: true });
+    } catch (e) {
+      console.warn("Lỗi upload JSON cache lên Cloud Storage:", e);
+    }
+  }
+
+  window.forceCheckManualUpdate = async function(isManual = false) {
+    if (!navigator.onLine) {
+      if (isManual) alert("⛔ Không có kết nối mạng để kiểm tra cập nhật!");
+      return;
+    }
     try {
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
       const metaSnap = await getDoc(metaRef);
-      if (metaSnap.exists()) {
-        const cloudDataVersion = metaSnap.data().dataVersion || 1;
-        const localDataVersion = await getMetaVersion("cachedDataVersion") || 0;
+      if (!metaSnap.exists()) return;
 
-        if (cloudDataVersion > localDataVersion) {
-          const [prdSnap, storeSnap, routeSnap] = await Promise.all([
-            getDocs(collection(db, "products")),
-            getDocs(collection(db, "stores")),
-            getDocs(collection(db, "routes"))
+      const cloudVersion = metaSnap.data().dataVersion || 1;
+      const localVersion = await getMetaVersion("cachedDataVersion") || 0;
+
+      if (cloudVersion > localVersion) {
+        const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
+        const downloadUrl = await getDownloadURL(fileRef);
+        const response = await fetch(downloadUrl);
+        const data = await response.json();
+
+        if (data && data.products && data.stores) {
+          products = data.products;
+          stores = data.stores;
+          if (data.routes && data.routes.length > 0) routeGroupsList = data.routes;
+
+          buildProductIndex();
+          buildStoreIndex();
+
+          await Promise.all([
+            saveProductsToLocalCache(products),
+            saveStoresToLocalCache(stores),
+            saveRoutesToLocalCache(routeGroupsList),
+            saveMetaVersion("cachedDataVersion", cloudVersion)
           ]);
 
-          const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-          if (cloudPrds.length > 0) {
-            products = cloudPrds;
-            buildProductIndex();
-            await saveProductsToLocalCache(cloudPrds);
-          }
-          if (cloudStores.length > 0) {
-            stores = cloudStores;
-            buildStoreIndex();
-            await saveStoresToLocalCache(cloudStores);
-          }
-          if (cloudRoutes.length > 0) {
-            routeGroupsList = cloudRoutes;
-            await saveRoutesToLocalCache(cloudRoutes);
-          }
-
-          await saveMetaVersion("cachedDataVersion", cloudDataVersion);
+          renderUI();
+          showUpdateToast(`✨ Đã cập nhật thành công (${products.length} vật tư, ${stores.length} khách hàng)!`);
         }
+      } else {
+        if (isManual) alert("ℹ️ Dữ liệu của bạn đã là phiên bản mới nhất.");
       }
     } catch (e) {
-      console.warn("Lỗi đồng bộ ngầm:", e);
+      console.warn("Lỗi kiểm tra cập nhật ngầm:", e);
+      if (isManual) alert("Lỗi khi tải cập nhật: " + e.message);
     }
-  }
+  };
 
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
@@ -1620,41 +1694,17 @@
         if (cachedPrds && cachedPrds.length > 0) {
           products = cachedPrds;
           buildProductIndex();
-        } else {
-          const prdSnap = await getDocs(collection(db, "products"));
-          const cloudPrds = prdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          if (cloudPrds.length > 0) {
-            products = cloudPrds;
-            buildProductIndex();
-            await saveProductsToLocalCache(cloudPrds);
-          }
         }
-
         if (cachedStores && cachedStores.length > 0) {
           stores = cachedStores;
           buildStoreIndex();
-        } else {
-          const storeSnap = await getDocs(collection(db, "stores"));
-          const cloudStores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          if (cloudStores.length > 0) {
-            stores = cloudStores;
-            buildStoreIndex();
-            await saveStoresToLocalCache(cloudStores);
-          }
         }
-
         if (cachedRoutes && cachedRoutes.length > 0) {
           routeGroupsList = cachedRoutes;
-        } else {
-          const routeSnap = await getDocs(collection(db, "routes"));
-          const cloudRoutes = routeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          if (cloudRoutes.length > 0) {
-            routeGroupsList = cloudRoutes;
-            await saveRoutesToLocalCache(cloudRoutes);
-          }
         }
 
-        backgroundSyncMetadataAndCache();
+        // Tự động kiểm tra cập nhật ngầm qua file JSON cache trên Storage
+        await window.forceCheckManualUpdate(false);
       } catch (e) {
         console.error("Lỗi tải cache ban đầu:", e);
       }
@@ -3259,7 +3309,7 @@
     XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  // ==================== CƠ CHẾ TỐI ƯU: CLIENT-SIDE DIFFING & DEDUPLICATION (MAP RAM) ====================
+  // ==================== CẬP NHẬT DỮ LIỆU ĐỒNG BỘ QUA FIREBASE STORAGE JSON CACHE ====================
 
   window.importProductsExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file Excel!");
@@ -3273,7 +3323,6 @@
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
         
-        // Bước 1: Deduplication trực tiếp trên RAM sử dụng Map
         const uniqueMap = new Map();
         for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
@@ -3298,46 +3347,16 @@
         const rawProducts = Array.from(uniqueMap.values());
         if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ trong file!");
 
-        // Bước 2: Client-side Diffing (Đối chiếu cục bộ với dữ liệu cũ trên RAM/Cache)
-        const existingPrdMap = new Map();
-        products.forEach(p => existingPrdMap.set(p.code, p));
-
-        let itemsToUpsert = [];
-        rawProducts.forEach(newP => {
-          const oldP = existingPrdMap.get(newP.code);
-          if (!oldP || oldP.name !== newP.name || oldP.price !== newP.price || oldP.stockCuoi !== newP.stockCuoi || oldP.tyLeQuyDoi !== newP.tyLeQuyDoi) {
-            itemsToUpsert.push(newP);
-          }
-        });
-
-        if (itemsToUpsert.length === 0) {
-          return alert("ℹ️ Tất cả vật tư trong file Excel đã đồng bộ với hệ thống, không có thay đổi mới nào cần ghi!");
-        }
-
-        // Bước 3: Ghi tối ưu lên Firebase (Upsert các bản ghi thực sự thay đổi/phát sinh mới)
-        for (let i = 0; i < itemsToUpsert.length; i += 300) {
-          const chunk = itemsToUpsert.slice(i, i + 300);
-          const batch = writeBatch(db);
-          chunk.forEach(p => batch.set(doc(db, "products", p.code), p, { merge: true }));
-          await batch.commit();
-        }
-
-        const metaRef = doc(db, "systemMetadata", "appVersionControl");
-        const metaSnap = await getDoc(metaRef);
-        let currentVersion = metaSnap.exists() ? (metaSnap.data().dataVersion || 1) : 1;
-        let newVersion = currentVersion + 1;
-        await setDoc(metaRef, { dataVersion: newVersion }, { merge: true });
-        await saveMetaVersion("cachedDataVersion", newVersion);
-
-        const updatedMap = new Map();
-        products.forEach(p => updatedMap.set(p.code, p));
-        itemsToUpsert.forEach(p => updatedMap.set(p.code, p));
-        products = Array.from(updatedMap.values());
-
+        products = rawProducts;
         buildProductIndex();
-        await saveProductsToLocalCache(products);
+
+        await Promise.all([
+          saveProductsToLocalCache(products),
+          uploadFullDataJsonToCloud()
+        ]);
+
         renderUI();
-        alert(`✅ Đã tối ưu thành công bằng thuật toán Diffing & Deduplication!\n- Loại bỏ trùng lặp hoàn toàn.\n- Chỉ ghi/cập nhật ${itemsToUpsert.length} vật tư phát sinh mới lên Firebase (Tiết kiệm hàng ngàn lượt Write).`);
+        alert(`✅ Cập nhật thành công ${products.length} vật tư mới! Toàn bộ máy nhân viên sẽ tự động đồng bộ.`);
       } catch (err) { 
         alert("Lỗi: " + err.message); 
       }
@@ -3357,7 +3376,6 @@
         const workbook = XLSX.read(data, { type: 'array' });
         const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
         
-        // Bước 1: Deduplication bằng Map trên RAM
         const uniqueCustomerMap = new Map();
         for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
@@ -3368,11 +3386,14 @@
           const zalo = r[4] ? String(r[4]).trim() : '';
 
           if (tenDtpn && tenDtpn !== 'Ten DTPN') {
-            const key = maDtpn || tenDtpn;
-            uniqueCustomerMap.set(key, {
-              code: maDtpn || `KH${i}`,
+            const codeVal = maDtpn || `KH${i}`;
+            uniqueCustomerMap.set(codeVal, {
+              id: codeVal,
+              code: codeVal,
               name: tenDtpn,
-              address, phone, zalo
+              address, phone, zalo,
+              routeDay: '', lat: 0, lng: 0,
+              pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
             });
           }
         }
@@ -3380,76 +3401,16 @@
         const rawCustomers = Array.from(uniqueCustomerMap.values());
         if (rawCustomers.length === 0) return alert("Không tìm thấy dữ liệu khách hàng trong file!");
 
-        // Bước 2: Client-side Diffing đối chiếu cục bộ
-        const existingStoresMap = new Map();
-        stores.forEach(s => {
-          if (s.code) existingStoresMap.set(String(s.code).trim(), s);
-          existingStoresMap.set(String(s.id).trim(), s);
-        });
-
-        let storesToUpsert = [];
-        rawCustomers.forEach(cust => {
-          const matchKey = cust.code;
-          const existing = existingStoresMap.get(matchKey) || existingStoresMap.get(cust.name);
-
-          if (!existing) {
-            const newId = cust.code || `KH_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-            storesToUpsert.push({
-              id: newId,
-              code: cust.code,
-              name: cust.name,
-              address: cust.address || '',
-              phone: cust.phone || '',
-              zalo: cust.zalo || '',
-              routeDay: '', lat: 0, lng: 0,
-              pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
-            });
-          } else if (existing.name !== cust.name || existing.address !== cust.address || existing.phone !== cust.phone || existing.zalo !== cust.zalo) {
-            storesToUpsert.push({
-              ...existing,
-              code: cust.code,
-              name: cust.name,
-              address: cust.address || existing.address || '',
-              phone: cust.phone || existing.phone || '',
-              zalo: cust.zalo || existing.zalo || ''
-            });
-          }
-        });
-
-        if (storesToUpsert.length === 0) {
-          return alert("ℹ️ Tất cả khách hàng trong file Excel đã đồng bộ, không có thay đổi mới nào!");
-        }
-
-        // Bước 3: Batch Write tối ưu
-        const batch = writeBatch(db);
-        let batchCount = 0;
-
-        storesToUpsert.forEach(storeData => {
-          const docRef = doc(db, "stores", String(storeData.id));
-          batch.set(docRef, storeData, { merge: true });
-          batchCount++;
-        });
-
-        if (batchCount > 0) {
-          await batch.commit();
-        }
-
-        const metaRef = doc(db, "systemMetadata", "appVersionControl");
-        const metaSnap = await getDoc(metaRef);
-        let currentVersion = metaSnap.exists() ? (metaSnap.data().dataVersion || 1) : 1;
-        let newVersion = currentVersion + 1;
-        await setDoc(metaRef, { dataVersion: newVersion }, { merge: true });
-        await saveMetaVersion("cachedDataVersion", newVersion);
-
-        const updatedStoreMap = new Map();
-        stores.forEach(s => updatedStoreMap.set(String(s.id), s));
-        storesToUpsert.forEach(s => updatedStoreMap.set(String(s.id), s));
-        stores = Array.from(updatedStoreMap.values());
-
+        stores = rawCustomers;
         buildStoreIndex();
-        await saveStoresToLocalCache(stores);
+
+        await Promise.all([
+          saveStoresToLocalCache(stores),
+          uploadFullDataJsonToCloud()
+        ]);
+
         renderUI();
-        alert(`✅ Đã tối ưu thành công bằng Client-side Diffing & Map Deduplication!\n- Đã lọc sạch đúp dòng trên RAM.\n- Chỉ đồng bộ ${storesToUpsert.length} khách hàng phát sinh mới lên Firebase.`);
+        alert(`✅ Cập nhật thành công ${stores.length} khách hàng mới! Toàn bộ máy nhân viên sẽ tự động đồng bộ.`);
       } catch (err) { 
         alert("Lỗi: " + err.message); 
       }
@@ -3481,7 +3442,7 @@
         if (newList.length > 0) {
           companyList = newList;
           renderUI();
-          alert("✅ Nhập danh sách công ty thành công (Đã lọc đúp trên RAM)!");
+          alert("✅ Nhập danh sách công ty thành công!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ trong file!");
         }
@@ -3517,18 +3478,15 @@
 
         let newList = Array.from(uniqueMap.values());
         if (newList.length > 0) {
-          const existingSnap = await getDocs(collection(db, "routes"));
-          const batch = writeBatch(db);
-          existingSnap.forEach(d => batch.delete(d.ref));
-          newList.forEach(r => batch.set(doc(db, "routes", r.id), r));
-          await batch.commit();
-
           routeGroupsList = newList;
-          await saveRoutesToLocalCache(newList);
+          await Promise.all([
+            saveRoutesToLocalCache(newList),
+            uploadFullDataJsonToCloud()
+          ]);
           renderUI();
-          alert("✅ Nhập danh sách tuyến, lọc đúp sạch sẽ và lưu lên Firebase thành công!");
+          alert("✅ Nhập danh sách tuyến thành công và đồng bộ lên mây!");
         } else {
-          alert("Không tìm thấy dữ liệu hợp lệ (Nhóm đối tượng phải là số nguyên >= 10)!");
+          alert("Không tìm thấy dữ liệu hợp lệ!");
         }
       } catch (err) { alert("Lỗi đọc file: " + err.message); }
     };
@@ -3551,7 +3509,7 @@
     if (!valInput) return;
     let intVal = parseInt(valInput.trim(), 10);
     if (isNaN(intVal) || intVal < 10) {
-      return alert("⛔ Nhóm đối tượng phải là số nguyên dương từ 10 trở lên, không được chứa số âm hoặc số thập phân!");
+      return alert("⛔ Nhóm đối tượng phải là số nguyên dương từ 10 trở lên!");
     }
     const noiDung = prompt("Nhập nội dung/Tên tuyến:") || "";
     const ghiChu = prompt("Nhập ghi chú:") || "";
@@ -3560,11 +3518,13 @@
     const newRouteObj = { id: newRouteId, nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() };
 
     try {
-      await setDoc(doc(db, "routes", newRouteId), newRouteObj);
       routeGroupsList.push(newRouteObj);
-      await saveRoutesToLocalCache(routeGroupsList);
+      await Promise.all([
+        saveRoutesToLocalCache(routeGroupsList),
+        uploadFullDataJsonToCloud()
+      ]);
       renderUI();
-      alert("✅ Đã thêm và lưu tuyến mới lên Firebase thành công!");
+      alert("✅ Đã thêm tuyến mới thành công!");
     } catch (err) {
       alert("Lỗi khi lưu tuyến: " + err.message);
     }
@@ -3577,27 +3537,15 @@
   };
 
   window.updateRouteField = async function(index, field, val) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền chỉnh sửa!");
-    
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
     if (field === 'nhomDoiTuong') {
       let intVal = parseInt(val.trim(), 10);
-      if (isNaN(intVal) || intVal < 10) {
-        alert("⛔ Nhóm đối tượng bắt buộc là số nguyên dương từ 10 trở lên!");
-        renderUI();
-        return;
-      }
+      if (isNaN(intVal) || intVal < 10) return alert("Nhóm đối tượng phải >= 10");
       routeGroupsList[index][field] = String(intVal);
     } else {
       routeGroupsList[index][field] = val;
     }
-
-    const targetRoute = routeGroupsList[index];
-    try {
-      await setDoc(doc(db, "routes", targetRoute.id), targetRoute, { merge: true });
-      await saveRoutesToLocalCache(routeGroupsList);
-    } catch (err) {
-      console.error("Lỗi cập nhật tuyến lên Firebase:", err);
-    }
+    await saveRoutesToLocalCache(routeGroupsList);
     renderUI();
   };
 
@@ -3615,16 +3563,13 @@
     const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa tuyến này không?", "fa-trash", "Xóa", "Hủy");
     if (!confirmDel) return;
 
-    try {
-      const targetRoute = routeGroupsList[index];
-      await deleteDoc(doc(db, "routes", targetRoute.id));
-      routeGroupsList.splice(index, 1);
-      await saveRoutesToLocalCache(routeGroupsList);
-      renderUI();
-      alert("✅ Đã xóa tuyến thành công!");
-    } catch (err) {
-      alert("Lỗi khi xóa tuyến: " + err.message);
-    }
+    routeGroupsList.splice(index, 1);
+    await Promise.all([
+      saveRoutesToLocalCache(routeGroupsList),
+      uploadFullDataJsonToCloud()
+    ]);
+    renderUI();
+    alert("✅ Đã xóa tuyến thành công!");
   };
 
   window.filterCompanyTable = function(val) {
