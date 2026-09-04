@@ -568,7 +568,6 @@
     const savedZoom = localStorage.getItem(`dms_zoom_pref_${uid}`) || localStorage.getItem('dms_zoom_pref') || '1';
     applyAppZoom(savedZoom);
 
-    // Super Admin custom styles
     const savedPadding = localStorage.getItem('dms_super_box_padding');
     const savedSearchFont = localStorage.getItem('dms_super_search_font');
     const savedFontFamily = localStorage.getItem('dms_super_font_family');
@@ -627,7 +626,6 @@
     const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
     const currentThemeKey = localStorage.getItem('dms_theme_pref_' + (currentUser ? currentUser.uid : '')) || localStorage.getItem('dms_theme_pref') || 'softWhite';
     
-    // Super Admin specific settings
     const isSuperAdmin = currentUser && (currentUser.email?.toLowerCase() === 'phanthanhhuy98@gmail.com' || currentUser.role === 'admin');
     const currentBoxPadding = getComputedStyle(document.documentElement).getPropertyValue('--box-padding').trim() || '13px 15px';
     const currentSearchFont = getComputedStyle(document.documentElement).getPropertyValue('--search-font-size').trim() || '14px';
@@ -1301,7 +1299,7 @@
   }
 
   function saveCartDraftToLocal() {
-    if (!activeVisitedStore) return;
+    if (!activeVisitedStore || editingOrderId) return;
     const draftKey = getDraftKeyForStore(activeVisitedStore.id);
     localStorage.setItem(draftKey, JSON.stringify(currentCart));
   }
@@ -1766,7 +1764,7 @@
       if (c && c.qty > 0) hasUnsavedItems = true;
     });
 
-    if (hasUnsavedItems && activeVisitedStore) {
+    if (hasUnsavedItems && activeVisitedStore && !editingOrderId) {
       const confirmLeave = await window.showCustomConfirm(
         "Đổi Khách Hàng",
         `Bạn đã chọn hàng cho khách "${activeVisitedStore.name}" nhưng chưa gửi đơn lên sổ gốc.\nBạn muốn làm gì với giỏ hàng này?`,
@@ -2165,6 +2163,82 @@
     }, 300);
   };
 
+  window.openAddProductModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeAddProductModal()">
+        <div class="modal-content" style="max-width: 500px; max-height: 80vh; display: flex; flexDirection: column;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
+            <h3 style="font-size:15px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-cart-plus"></i> Thêm Sản Phẩm Mới Vào Đơn</h3>
+            <button class="btn btn-red btn-sm" onclick="closeAddProductModal()">Đóng</button>
+          </div>
+          <div style="margin-bottom: 10px;">
+            <input type="text" id="modalProductSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư cần thêm..." oninput="filterModalProductList(this.value)" autocomplete="off" style="margin:0; padding:12px; font-size:14px;">
+          </div>
+          <div id="modalProductResultsContainer" style="overflow-y: auto; max-height: 350px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="text-align: center; color: var(--text-muted); padding: 20px;">Nhập tên hoặc mã vật tư để tìm kiếm...</div>
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+    setTimeout(() => {
+      const inp = document.getElementById('modalProductSearchInput');
+      if (inp) inp.focus();
+      filterModalProductList('');
+    }, 50);
+  };
+
+  window.closeAddProductModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  };
+
+  window.filterModalProductList = function(keyword) {
+    const container = document.getElementById('modalProductResultsContainer');
+    if (!container) return;
+    const q = removeAccents(keyword.trim());
+
+    let matched = [];
+    for (const [id, entry] of productIndexMap.entries()) {
+      const p = entry.product;
+      const rawPrice = Number(p.price || 0);
+      const pNameLower = removeAccents(p.name || '');
+      if (rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck')) continue;
+
+      if (q === "" || entry.searchableText.includes(q)) {
+        matched.push(p);
+        if (matched.length >= 25) break;
+      }
+    }
+
+    container.innerHTML = matched.length > 0 ? matched.map(p => {
+      const keyId = p.id || p.code;
+      const isAlreadyAdded = currentCart[keyId] && currentCart[keyId].qty > 0;
+      return `
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:12px; font-weight:800; color:var(--primary);">[${p.code}] - ${(p.price || 0).toLocaleString()}đ</div>
+            <div style="font-size:13px; font-weight:700; color:var(--text-main); word-break:break-word;">${p.name}</div>
+          </div>
+          <button class="btn ${isAlreadyAdded ? 'btn-green' : 'btn-amber'} btn-sm" style="flex-shrink:0; padding:8px 12px; font-weight:800;" onclick="addProductToCartFromModal('${keyId}')">
+            ${isAlreadyAdded ? 'Đã có trong đơn' : '+ Chọn thêm'}
+          </button>
+        </div>
+      `;
+    }).join('') : `<div style="text-align:center; color:var(--text-muted); padding:20px;">Không tìm thấy vật tư phù hợp.</div>`;
+  };
+
+  window.addProductToCartFromModal = function(prdId) {
+    if (!currentCart[prdId] || currentCart[prdId].qty === 0) {
+      currentCart[prdId] = { kien: 0, le: 1, qty: 1 };
+      updateCartDetail(prdId, 'le', 1);
+    }
+    closeAddProductModal();
+    renderUI();
+  };
+
   window.filterSalesProducts = function(val) {
     if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
     const container = document.getElementById('mobileProductListContainer');
@@ -2173,31 +2247,41 @@
 
     let matched = [];
 
-    // Nếu đang sửa đơn hàng, cho phép tìm kiếm và thêm vật tư mới thoải mái từ toàn bộ danh sách sản phẩm kho!
-    for (const [id, entry] of productIndexMap.entries()) {
-      const p = entry.product;
-      const keyId = p.id || p.code;
-      const c = currentCart[keyId];
-      const hasQty = c && c.qty > 0;
-
-      const rawPrice = Number(p.price || 0);
-      const pNameLower = removeAccents(p.name || '');
-      const isZeroOrDiscount = rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck');
-
-      if (isZeroOrDiscount && !hasQty) continue;
-
-      let matchCompany = true;
-      if (selectedCompanyCode && !editingOrderId) {
-        matchCompany = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+    // NẾU ĐANG SỬA ĐƠN HÀNG HOẶC ĐANG CHỌN, HIỂN THỊ CÁC SẢN PHẨM ĐÃ CÓ TRONG ĐƠN (CÓ QTY > 0)
+    if (editingOrderId || showOnlySelectedItems) {
+      for (const [id, entry] of productIndexMap.entries()) {
+        const p = entry.product;
+        const keyId = p.id || p.code;
+        const c = currentCart[keyId];
+        const hasQty = c && c.qty > 0;
+        if (hasQty) {
+          if (productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword)) {
+            matched.push(p);
+          }
+        }
       }
+    } else {
+      for (const [id, entry] of productIndexMap.entries()) {
+        const p = entry.product;
+        const keyId = p.id || p.code;
+        const c = currentCart[keyId];
+        const hasQty = c && c.qty > 0;
 
-      if (showOnlySelectedItems) {
-        if (hasQty) matched.push(p);
-      } else {
+        const rawPrice = Number(p.price || 0);
+        const pNameLower = removeAccents(p.name || '');
+        const isZeroOrDiscount = rawPrice === 0 || pNameLower.includes('chiet khau') || pNameLower.includes('ck');
+
+        if (isZeroOrDiscount && !hasQty) continue;
+
+        let matchCompany = true;
+        if (selectedCompanyCode) {
+          matchCompany = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+        }
+
         const matchKey = productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword);
         if (matchCompany && matchKey) {
           matched.push(p);
-          if (productSearchKeyword === "" && matched.length >= 30 && !editingOrderId) break;
+          if (productSearchKeyword === "" && matched.length >= 30) break;
           if (productSearchKeyword !== "" && matched.length >= 30) break;
         }
       }
@@ -2254,7 +2338,7 @@
 
         </div>
       `;
-    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); font-size:12px;">Không tìm thấy vật tư phù hợp.</div>`;
+    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); font-size:12px;">${editingOrderId ? 'Chưa có sản phẩm nào trong đơn hàng. Bấm nút "Thêm sản phẩm mới" ở dưới để thêm.' : 'Không tìm thấy vật tư phù hợp.'}</div>`;
     
     if (hintEl) hintEl.innerText = "";
   };
@@ -3449,7 +3533,7 @@
       });
 
       let unsubmittedStoresList = [];
-      if (currentUser.role === 'sales') {
+      if (currentUser.role === 'sales' && !editingOrderId) {
         stores.forEach(s => {
           if (!activeVisitedStore || String(activeVisitedStore.id) !== String(s.id)) {
             const draftKey = getDraftKeyForStore(s.id);
@@ -3487,7 +3571,7 @@
             <h3 style="font-size:14px; font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
               <i class="fa-solid fa-store" style="color:var(--primary);"></i> ${activeVisitedStore ? 'Khách Hàng Đang Chọn:' : 'Nhập Mã Khách Hàng (VD: 51Duyen1)'}
             </h3>
-            ${activeVisitedStore ? `<button class="btn btn-amber btn-sm" style="padding:5px 10px; font-size:11px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách</button>` : ''}
+            ${activeVisitedStore && !editingOrderId ? `<button class="btn btn-amber btn-sm" style="padding:5px 10px; font-size:11px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách</button>` : ''}
           </div>
 
           <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:6px;'}">
@@ -3514,7 +3598,7 @@
             <div style="margin-top:8px; background: rgba(37, 99, 235, 0.08); padding: 12px 14px; border-radius: 12px; color: var(--text-main); min-height: 52px; display: flex; flex-direction: column; justify-content: center; border: 1px solid rgba(37, 99, 235, 0.25);">
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
                 <div style="font-size:11px; font-weight:800; color:var(--text-muted);" class="meta-info-item">
-                  [${activeVisitedStore.code||'KH'}] ${editingOrderId ? '<span style="color:var(--amber);">(Đang Sửa)</span>' : ''}
+                  [${activeVisitedStore.code||'KH'}] ${editingOrderId ? '<span style="color:var(--amber);">(Đang Sửa Đơn Hàng)</span>' : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
                   ${activeVisitedStore.lat ? `
@@ -3539,40 +3623,23 @@
 
         ${activeVisitedStore ? `
           <div class="card" style="border:1px solid var(--primary); margin-bottom: 100px;">
-            ${!editingOrderId ? `
-              <div style="margin-bottom: 8px; position: relative;">
-                <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">🏢 Chọn & Ghim Mã Công Ty:</label>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <input type="text" id="companySearchBox" placeholder="🔍 Gõ mã hoặc tên công ty để lọc nhanh..." value="${selectedCompanyCode ? (companyList.find(c=>c.maCtu===selectedCompanyCode)?.maCtu + ' - ' + companyList.find(c=>c.maCtu===selectedCompanyCode)?.tenCtu) : ''}" oninput="filterCompanyDropdown(this.value)" onfocus="openCompanyDropdown()" autocomplete="off" autocapitalize="none" style="margin:0; background:rgba(217, 119, 6, 0.05); border: 1px solid rgba(217, 119, 6, 0.3); padding:13px 15px; font-size:14px; font-weight:700; flex: 1;">
-                  ${selectedCompanyCode ? `<button class="btn btn-red btn-sm" onclick="selectCompanyFromDropdown('', '')" style="padding:13px 14px;"><i class="fa-solid fa-xmark"></i></button>` : ''}
-                </div>
-
-                <div id="companyDropdownList" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 280px; overflow-y: auto; background: var(--panel-bg); backdrop-filter: blur(20px); border: 1px solid var(--card-border); border-radius: 12px; box-shadow: 0 15px 40px rgba(0,0,0,0.25); z-index: 100; margin-top: 4px;">
-                  <div style="padding: 10px 14px; font-size: 12px; font-weight: 800; color: var(--text-muted); background: rgba(0, 0, 0, 0.03); border-bottom: 1px solid var(--card-border);">DANH SÁCH CÔNG TY</div>
-                  <div id="companyDropdownItems"></div>
-                </div>
+            ${editingOrderId ? `
+              <div style="background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); padding: 10px; border-radius: 10px; margin-bottom: 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <span style="font-size: 12px; font-weight: 700; color: #059669;">✏️ Sửa đơn: Danh sách vật tư hiện tại của đơn. Bấm nút bên cạnh để thêm sản phẩm mới.</span>
+                <button class="btn btn-green btn-sm" style="font-weight: 800; padding: 8px 12px; flex-shrink: 0;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm sản phẩm mới</button>
               </div>
-            ` : `
-              <div style="background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); padding: 10px; border-radius: 10px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #059669;">
-                ✏️ Đang sửa đơn hàng: Có thể tìm kiếm và <b>thêm sản phẩm mới</b> từ kho vật tư bất cứ lúc nào.
-              </div>
-            `}
+            ` : ''}
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; gap: 6px;">
               <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
                 <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 36px 13px 14px; font-size:14px; width: 100%;">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
-              <button id="toggleSelectedBtn" class="btn btn-sm" onclick="toggleShowOnlySelected()" style="background:${showOnlySelectedItems?'var(--primary)':'#E2E8F0'}; color:${showOnlySelectedItems?'#fff':'#1E293B'}; font-weight:700; padding:13px 14px; font-size:12px; white-space:nowrap;">
-                <i class="fa-solid fa-filter"></i> Đã chọn
-              </button>
             </div>
-            <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;">
-              ${selectedCompanyCode || editingOrderId || showOnlySelectedItems ? 'Đang hiển thị sản phẩm phù hợp.' : 'Vui lòng chọn Mã Công Ty ở trên hoặc bấm "Đã chọn" để xem vật tư đã ghi.'}
-            </small>
+            <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;"></small>
 
             <div id="mobileProductListContainer">
-              <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Vui lòng chọn Mã Công Ty hoặc bấm "Đã chọn" để bắt đầu...</div>
+              <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Đang tải danh sách vật tư...</div>
             </div>
           </div>
 
@@ -3597,9 +3664,7 @@
       if (selectedRouteCode || customerSearchKeyword) {
         setTimeout(() => filterSalesCustomers(''), 50);
       }
-      if (selectedCompanyCode || editingOrderId || showOnlySelectedItems) {
-        setTimeout(() => filterSalesProducts(''), 50);
-      }
+      setTimeout(() => filterSalesProducts(''), 50);
     }
 
     else if (tab === 'customers') {
@@ -3992,7 +4057,7 @@
 
   function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
   window.switchTab = async function(tab) {
-    if (currentTab === 'sales' && tab !== 'sales' && activeVisitedStore) {
+    if (currentTab === 'sales' && tab !== 'sales' && activeVisitedStore && !editingOrderId) {
       let hasItems = false;
       Object.values(currentCart).forEach(c => {
         if (c && c.qty > 0) hasItems = true;
