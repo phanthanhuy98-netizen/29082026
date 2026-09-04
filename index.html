@@ -1569,8 +1569,6 @@
     }
   };
 
-  // ==================== CƠ CHẾ ĐỒNG BỘ JSON CACHE QUA FIREBASE STORAGE ====================
-
   async function uploadFullDataJsonToCloud() {
     if (!navigator.onLine) return;
     try {
@@ -1584,7 +1582,6 @@
       const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
       await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
 
-      // Cập nhật version lên metadata trên Firestore
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
       await setDoc(metaRef, { dataVersion: payload.version }, { merge: true });
     } catch (e) {
@@ -1703,7 +1700,6 @@
           routeGroupsList = cachedRoutes;
         }
 
-        // Tự động kiểm tra cập nhật ngầm qua file JSON cache trên Storage
         await window.forceCheckManualUpdate(false);
       } catch (e) {
         console.error("Lỗi tải cache ban đầu:", e);
@@ -2361,10 +2357,10 @@
     modalContainer.classList.add('hidden');
   };
 
-  window.filterModalProductList = function(keyword) {
+  window.filterModalProductList = function(keyword, selectedTopKey = null) {
     const container = document.getElementById('modalProductResultsContainer');
     if (!container) return;
-    const rawVal = keyword.trim();
+    const rawVal = keyword !== undefined && keyword !== null ? keyword.trim() : '';
     const q = removeAccents(rawVal);
     const isNumericPrefix = /^\d+$/.test(rawVal) && rawVal.length <= 2;
 
@@ -2398,6 +2394,16 @@
       });
     }
 
+    if (selectedTopKey) {
+      matched.sort((a, b) => {
+        const aKey = a.id || a.code;
+        const bKey = b.id || b.code;
+        if (aKey === selectedTopKey) return -1;
+        if (bKey === selectedTopKey) return 1;
+        return 0;
+      });
+    }
+
     const slicedMatched = matched.slice(0, 30);
 
     container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(p => {
@@ -2425,7 +2431,11 @@
       currentCart[prdId] = { kien: 0, le: 1, qty: 1 };
       updateCartDetail(prdId, 'le', 1);
     }
-    closeAddProductModal();
+    
+    const inp = document.getElementById('modalProductSearchInput');
+    const currentVal = inp ? inp.value : '';
+    filterModalProductList(currentVal, prdId);
+
     renderUI();
   };
 
@@ -3028,6 +3038,58 @@
     modalContainer.classList.add('hidden');
   };
 
+  window.openStoreOrdersModal = function() {
+    if (!activeVisitedStore) return;
+    const storeIdStr = String(activeVisitedStore.id);
+    const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+    const storeOrders = orders.filter(o => {
+      const matchId = String(o.storeId || '') === storeIdStr;
+      let inferredCode = o.maDTPNNo || '';
+      if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+        inferredCode = o.maKH.split(' - ')[0].trim();
+      }
+      const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+      return (matchId || matchCode) && o.status !== 'Đã hủy';
+    });
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeStoreOrdersModal()">
+        <div class="modal-content" style="max-width:560px; max-height:85vh; display:flex; flex-direction:column;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
+            <h3 style="font-size:15px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-list-check"></i> Đơn Hàng Của Khách: ${activeVisitedStore.name}</h3>
+            <button class="btn btn-red btn-sm" onclick="closeStoreOrdersModal()">Đóng</button>
+          </div>
+          <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+            ${storeOrders.length > 0 ? storeOrders.map(o => `
+              <div class="mobile-item-card" style="margin-bottom:0; display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="background:rgba(37,99,235,0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800;">CTu #${o.soCtu || 1}</span>
+                  <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+                </div>
+                <div style="font-size:12px; color:var(--text-muted);">NV: <b style="color:#2563EB;">[${o.salesCode || ''}] ${o.salesName || ''}</b></div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                  <span style="font-size:13px; font-weight:800; color:var(--rose);">Tổng tiền: ${Number(o.amount || 0).toLocaleString()}đ</span>
+                  <button class="btn btn-amber btn-sm" style="padding:6px 12px; font-weight:800;" onclick="closeStoreOrdersModal(); openOrderDetailsModal('${o.id}')">Xem chi tiết</button>
+                </div>
+              </div>
+            `).join('') : `
+              <div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700;">Chưa có đơn hàng nào ghi cho khách hàng này.</div>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+  };
+
+  window.closeStoreOrdersModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  };
+
   function updateCartTotalsUI() {
     let cartTotalAmount = 0;
     let selectedSkuCount = 0;
@@ -3308,8 +3370,6 @@
     XLSX.utils.book_append_sheet(workbook, worksheet, "CongTy");
     XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
-
-  // ==================== CẬP NHẬT DỮ LIỆU ĐỒNG BỘ QUA FIREBASE STORAGE JSON CACHE ====================
 
   window.importProductsExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file Excel!");
@@ -3842,11 +3902,12 @@
         ${activeVisitedStore ? `
           <div class="card" style="border:1px solid var(--primary); margin-bottom: 100px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; gap: 6px;">
-              <div class="autocomplete-wrapper" style="flex:1; position: relative; display: flex; align-items: center;">
+              <div class="autocomplete-wrapper" style="flex: 0 0 70%; position: relative; display: flex; align-items: center;">
                 <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 36px 13px 14px; width: 100%; font-size: var(--font-size-search-input);">
                 <button type="button" onclick="clearProductSearchBox()" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px;" title="Xóa trắng"><i class="fa-solid fa-circle-xmark"></i></button>
               </div>
-              <button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 12px 14px; flex-shrink: 0;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>
+              <button class="btn btn-blue btn-sm" style="font-weight: 800; padding: 12px 10px; flex: 0 0 calc(15% - 4px);" onclick="openStoreOrdersModal()"><i class="fa-solid fa-list-check"></i> Xem Đơn</button>
+              <button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 12px 10px; flex: 0 0 calc(15% - 4px);" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>
             </div>
             <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-bottom:6px;"></small>
 
