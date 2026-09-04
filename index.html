@@ -1133,7 +1133,7 @@
   async function cleanupExpiredOrdersOptimized() {
     const lastCleanup = localStorage.getItem('dms_last_cleanup_date');
     const todayStr = new Date().toISOString().slice(0, 10);
-    if (lastCleanup === todayStr) return; // Chỉ chạy 1 lần mỗi ngày cho mỗi client
+    if (lastCleanup === todayStr) return;
 
     try {
       const pastDate = new Date(Date.now() - (6 * 24 * 60 * 60 * 1000));
@@ -1399,15 +1399,24 @@
     });
   }
 
-  // Khắc phục 1: Dùng query có điều kiện email thay vì lấy toàn bộ bảng users
   window.handleLogin = async function(e) {
     e.preventDefault();
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
-    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
+    let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
+      // Trường hợp nhập trực tiếp mã NV (VD: "NV01"), ta thử truy vấn tìm email tương ứng trong collection users trước
+      if (!usernameInput.includes('@')) {
+        const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
+        const snapByCode = await getDocs(qUsersByCode);
+        if (!snapByCode.empty) {
+          const uData = snapByCode.docs[0].data();
+          if (uData.email) email = uData.email.toLowerCase();
+        }
+      }
+
       const userCredential = await signInWithEmailAndPassword(authSvc, email, pass);
       const authUser = userCredential.user;
 
@@ -1600,7 +1609,6 @@
       await cleanupExpiredOrdersOptimized();
       
       try {
-        // 1. Nạp dữ liệu từ IndexedDB ngay lập tức để UI hiển thị tức thì không tốn lượt đọc
         const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
           loadProductsFromLocalCache(),
           loadStoresFromLocalCache(),
@@ -1615,7 +1623,6 @@
 
         renderUI();
 
-        // 2. Kiểm tra phiên bản Cloud trước khi gọi toàn bộ getDocs() tốn phí Read
         let cloudVersion = 1;
         try {
           const metaRef = doc(db, "systemMetadata", "appVersionControl");
@@ -1625,7 +1632,6 @@
 
         const localVersion = await getMetaVersion("cachedDataVersion") || 0;
 
-        // Chỉ tải từ Firestore khi phiên bản trên cloud cao hơn hoặc cache local trống
         if (cloudVersion > localVersion || products.length === 0) {
           await loadDataFromFirestore();
           await saveMetaVersion("cachedDataVersion", cloudVersion);
@@ -3045,7 +3051,6 @@
     if (floatTriggerCount) floatTriggerCount.innerText = selectedSkuCount;
   }
 
-  // Khắc phục 2: Dùng Sharded Counter (5 phân vùng) để tránh nghẽn ghi đồng thời (1 ghi/giây trên 1 doc)
   async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
     const shardId = Math.floor(Math.random() * 5);
     const counterRef = doc(db, "systemCounters", `soCtuCounter_${shardId}`);
@@ -4315,4 +4320,31 @@
                 <option value="viewer">Viewer (Chỉ xem)</option>
               </select>
 
-              <button type="submit" class="btn btn-amber" style="width:100%; justify-content:centerLà một mô hình ngôn ngữ, tôi không được thiết kế để trợ giúp về điều đó.
+              <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
+            </form>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-list"></i> Danh Sách Tài Khoản</h3>
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:450px; overflow-y:auto;">
+              ${users.map(u => `
+                <div style="background:var(--panel-bg); border:1px solid var(--card-border); padding:10px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <div style="font-weight:800; font-size:13px;">[${u.code || ''}] ${u.name || ''}</div>
+                    <div style="font-size:11px; color:var(--text-muted);">${u.email} — Quyền: <b style="color:var(--primary);">${u.role}</b></div>
+                  </div>
+                  <div>
+                    <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
+                      ${u.active !== false ? 'Khóa' : 'Mở'}
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+</script>
+</body>
+</html>
