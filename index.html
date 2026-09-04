@@ -1188,13 +1188,17 @@
         for (const item of items) {
           try {
             const nextSoCtu = await getNextSoCtuWithRetry();
-            const { id, ...payload } = item;
+            const { id, orderUuid, ...payload } = item;
             payload.soCtu = nextSoCtu;
             payload.createdAt = serverTimestamp();
-            const docRef = await addDoc(collection(db, "orders"), payload);
+
+            const docId = orderUuid || ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+            const docRef = doc(db, "orders", docId);
+            
+            await setDoc(docRef, payload, { merge: true });
             
             const syncedLocalOrder = {
-              id: docRef.id,
+              id: docId,
               ...payload,
               createdAt: new Date()
             };
@@ -1202,7 +1206,9 @@
 
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
-          } catch (e) {}
+          } catch (e) {
+            console.warn("Lỗi đồng bộ đơn offline:", e);
+          }
         }
       }
     };
@@ -1407,7 +1413,6 @@
     let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
-      // Trường hợp nhập trực tiếp mã NV (VD: "NV01"), ta thử truy vấn tìm email tương ứng trong collection users trước
       if (!usernameInput.includes('@')) {
         const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
         const snapByCode = await getDocs(qUsersByCode);
@@ -3140,7 +3145,10 @@
       const dd = String(now.getDate()).padStart(2, '0');
       const todayStr = `${yyyy}-${mm}-${dd}`;
 
+      const orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+
       const orderData = {
+        orderUuid: orderUuid,
         ngayCtu: todayStr,
         maDTPNNo: activeVisitedStore.code || '',
         maNhanVien: currentUser.code || '',
@@ -3190,10 +3198,12 @@
             const nextSoCtu = await getNextSoCtuWithRetry();
             orderData.soCtu = nextSoCtu;
             orderData.createdAt = serverTimestamp();
-            const docRef = await addDoc(collection(db, "orders"), orderData);
+            
+            const docRef = doc(db, "orders", orderUuid);
+            await setDoc(docRef, orderData);
 
             const newLocalOrder = {
-              id: docRef.id,
+              id: orderUuid,
               ...orderData,
               createdAt: new Date()
             };
@@ -3202,11 +3212,11 @@
         } catch (err) {
           console.warn("Mất mạng khi đang gửi, lưu offline:", err);
           await saveOfflineOrder(orderData);
-          alert("⚠️ Đang mất mạng! Đã lưu đơn hàng cục bộ và sẽ tự động đẩy lên sổ gốc khi có kết nối mạng lại.");
+          alert("⚠️ Đang mất mạng! Đã lưu đơn hàng cục bộ với mã định danh an toàn và sẽ tự động đồng bộ khi có mạng.");
         }
       } else {
         await saveOfflineOrder(orderData);
-        alert("⚠️ Thiết bị đang offline! Đã lưu đơn hàng vào hàng đợi, sẽ tự động đồng bộ qua sổ gốc ngay khi có mạng.");
+        alert("⚠️ Thiết bị đang offline! Đã lưu đơn hàng vào hàng đợi với mã UUID chống trùng lặp.");
       }
       
       clearCartDraftFromLocal(savedStoreId);
