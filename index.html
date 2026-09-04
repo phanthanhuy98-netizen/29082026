@@ -1334,37 +1334,6 @@
     }
   };
 
-  window.copyCoordinatesGPS = function(lat, lng, storeName) {
-    const numericLat = Number(lat);
-    const numericLng = Number(lng);
-    if (!numericLat || !numericLng) {
-      return alert("Khách hàng này chưa có tọa độ GPS để sao chép!");
-    }
-    const textToCopy = `Tọa độ GPS ${storeName || 'KH'}: ${numericLat}, ${numericLng} (https://www.google.com/maps?q=${numericLat},${numericLng})`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy).catch(() => {
-        fallbackCopyText(textToCopy);
-      });
-    } else {
-      fallbackCopyText(textToCopy);
-    }
-  };
-
-  function fallbackCopyText(text) {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      document.execCommand('copy');
-    } catch (err) {
-      alert("Không thể sao chép tọa độ: " + err);
-    }
-    document.body.removeChild(textArea);
-  }
-
   function getDraftKeyForStore(storeId) {
     return `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${storeId}`;
   }
@@ -2184,7 +2153,6 @@
             <div style="display:flex; gap:6px; align-items:center;">
               ${hasLat ? `
                 <button class="btn btn-green btn-sm" style="padding:5px 10px; font-size:var(--font-size-sub-meta);" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
-                <button class="btn btn-purple btn-sm" style="padding:5px 10px; font-size:var(--font-size-sub-meta);" onclick="copyCoordinatesGPS(${Number(s.lat)}, ${Number(s.lng)}, '${s.name.replace(/'/g, "\\'")}')"><i class="fa-solid fa-copy"></i> GPS</button>
               ` : ''}
               <span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>
             </div>
@@ -2524,7 +2492,6 @@
           <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
             ${hasLat ? `
               <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
-              <button class="btn btn-purple btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="copyCoordinatesGPS(${Number(s.lat)}, ${Number(s.lng)}, '${s.name.replace(/'/g, "\\'")}')"><i class="fa-solid fa-copy"></i> Copy GPS</button>
             ` : ''}
             ${!isViewer ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
             ${isAdmin && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
@@ -3298,30 +3265,80 @@
 
           if (tenDtpn && tenDtpn !== 'Ten DTPN') {
             rawCustomers.push({
-              id: maDtpn || `KH_${i}`,
-              code: maDtpn || `KH${i}`, name: tenDtpn, address, phone, zalo,
-              routeDay: '', lat: 0, lng: 0, pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: []
+              code: maDtpn || `KH${i}`,
+              name: tenDtpn,
+              address, phone, zalo
             });
           }
         }
 
         if (rawCustomers.length > 0) {
-          for (let i = 0; i < rawCustomers.length; i += 250) {
-            const chunk = rawCustomers.slice(i, i + 250);
-            const batch = writeBatch(db);
-            chunk.forEach(cust => {
-              const ref = doc(db, "stores", cust.id);
-              batch.set(ref, cust);
-            });
-            await batch.commit();
-            await new Promise(r => setTimeout(r, 50));
+          const existingSnap = await getDocs(collection(db, "stores"));
+          const existingStoresMap = new Map();
+          existingSnap.forEach(d => {
+            const data = d.data();
+            if (data.code) existingStoresMap.set(String(data.code).trim(), { id: d.id, ...data });
+            existingStoresMap.set(String(d.id).trim(), { id: d.id, ...data });
+          });
+
+          const batch = writeBatch(db);
+          let batchCount = 0;
+
+          for (const cust of rawCustomers) {
+            const matchKey = cust.code;
+            const existing = existingStoresMap.get(matchKey) || existingStoresMap.get(cust.name);
+
+            let docRef;
+            let storeData;
+
+            if (existing) {
+              docRef = doc(db, "stores", existing.id);
+              storeData = {
+                ...existing,
+                code: cust.code,
+                name: cust.name,
+                address: cust.address || existing.address || '',
+                phone: cust.phone || existing.phone || '',
+                zalo: cust.zalo || existing.zalo || ''
+              };
+            } else {
+              const newId = cust.code || `KH_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+              docRef = doc(db, "stores", newId);
+              storeData = {
+                id: newId,
+                code: cust.code,
+                name: cust.name,
+                address: cust.address || '',
+                phone: cust.phone || '',
+                zalo: cust.zalo || '',
+                routeDay: '',
+                lat: 0,
+                lng: 0,
+                pinnedByCode: '',
+                pinnedByName: '',
+                pinnedAt: '',
+                pinnedHistory: []
+              };
+            }
+
+            batch.set(docRef, storeData, { merge: true });
+            batchCount++;
+            if (batchCount >= 400) {
+              await batch.commit();
+              batchCount = 0;
+            }
           }
+
+          if (batchCount > 0) {
+            await batch.commit();
+          }
+
           const storeSnap = await getDocs(collection(db, "stores"));
           stores = storeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           buildStoreIndex();
           await saveStoresToLocalCache(stores);
           renderUI();
-          alert("✅ Nhập danh sách khách hàng thành công!");
+          alert("✅ Nhập và đồng bộ danh sách khách hàng thành công (không trùng lặp, đã đè ghi chú cũ nếu trùng mã)!");
         } else { alert("Không tìm thấy dữ liệu khách hàng!"); }
       } catch (err) { alert("Lỗi: " + err.message); }
     };
@@ -3713,14 +3730,13 @@
         ` : ''}
 
         <div class="card" style="margin-bottom:10px; border:1px solid ${activeVisitedStore ? 'var(--card-border)' : 'var(--primary)'};">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: ${activeVisitedStore ? '0' : '8px'};">
-            <h3 style="font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
-              <i class="fa-solid fa-store" style="color:var(--primary);"></i> ${activeVisitedStore ? 'Khách Hàng Đang Chọn:' : 'Nhập Mã Khách Hàng (VD: 51Duyen1)'}
-            </h3>
-            ${activeVisitedStore && !editingOrderId ? `<button class="btn btn-amber btn-sm" style="padding:5px 10px; font-size:11px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách</button>` : ''}
-          </div>
+          ${!activeVisitedStore ? `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+              <h3 style="font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
+                <i class="fa-solid fa-store" style="color:var(--primary);"></i> Nhập Mã Khách Hàng (VD: 51Duyen1)
+              </h3>
+            </div>
 
-          <div style="${activeVisitedStore ? 'display:none;' : 'display:block; margin-top:6px;'}">
             <div style="margin-bottom: 6px;">
               <label style="font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">📌 Tuyến Khách Hàng:</label>
               <select id="routeSelectBox" onchange="onRouteSelected(this.value)" style="padding:12px 14px; font-weight:700; width:100%; margin:0;">
@@ -3738,33 +3754,32 @@
             <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
               Vui lòng nhập mã khách hàng tối đa 30 ký tự hoặc chọn tuyến...
             </small>
-          </div>
-
-          ${activeVisitedStore ? `
-            <div style="margin-top:8px; background: rgba(37, 99, 235, 0.08); padding: 12px 14px; border-radius: 12px; color: var(--text-main); min-height: 52px; display: flex; flex-direction: column; justify-content: center; border: 1px solid rgba(37, 99, 235, 0.25);">
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
-                <div style="font-size: var(--font-size-sub-meta); font-weight:800; color:var(--text-muted);" class="meta-info-item">
-                  [${activeVisitedStore.code||'KH'}] ${editingOrderId ? '<span style="color:var(--amber);">(Đang Sửa Đơn Hàng)</span>' : ''}
+          ` : `
+            <div style="background: rgba(37, 99, 235, 0.08); padding: 12px 14px; border-radius: 12px; color: var(--text-main); display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(37, 99, 235, 0.25);">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span style="font-size: var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px;">${activeVisitedStore.code||'KH'}</span>
+                  ${!editingOrderId ? `<button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:11px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách</button>` : ''}
+                  ${editingOrderId ? '<span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);">(Đang Sửa Đơn)</span>' : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
                   ${activeVisitedStore.lat ? `
                     <button class="btn btn-green btn-sm" onclick="openNativeNavigator(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)})" style="font-weight:700; padding:6px 10px; font-size:12px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
-                    <button class="btn btn-purple btn-sm" onclick="copyCoordinatesGPS(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)}, '${activeVisitedStore.name.replace(/'/g, "\\'")}')" style="font-weight:700; padding:6px 10px; font-size:12px;"><i class="fa-solid fa-copy"></i> GPS</button>
                   ` : ''}
                   <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:12px; white-space:nowrap;">
                     <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Đã ghim' : 'Lưu GPS'}
                   </button>
                 </div>
               </div>
-              <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal; margin-bottom: 4px;" title="${activeVisitedStore.name}">
+              <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${activeVisitedStore.name}">
                 ${activeVisitedStore.name}
               </div>
-              <div style="font-size: var(--font-size-sub-meta); color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;" class="meta-info-item">
-                <span style="word-break:break-word; max-width:280px;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
-                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? `Đã ghim` : 'Chưa'}</b></span>
+              <div style="font-size: var(--font-size-sub-meta); color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;">
+                <span style="word-break:break-word;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
+                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? 'Đã ghim' : 'Chưa'}</b></span>
               </div>
             </div>
-          ` : ''}
+          `}
         </div>
 
         ${activeVisitedStore ? `
@@ -4129,184 +4144,4 @@
                 <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">Mã: ${c.maCtu || ''}</span>
                 <div style="display:flex; gap:6px; align-items:center;">
                   ${isAdmin ? `
-                    <select onchange="updateCompanyField(${idx}, 'status', this.value)" style="margin:0; padding:6px 10px; font-size:12px; background:${c.status === 'Đóng' ? 'rgba(225, 29, 72, 0.15)' : 'rgba(5, 150, 105, 0.15)'}; color:${c.status === 'Đóng' ? '#E11D48' : '#059669'}; font-weight:700; width:auto;">
-                      <option value="Mở" ${c.status === 'Mở' ? 'selected' : ''}>Mở</option>
-                      <option value="Đóng" ${c.status === 'Đóng' ? 'selected' : ''}>Đóng</option>
-                    </select>
-                    <button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i></button>
-                  ` : `
-                    <span class="badge ${c.status === 'Đóng' ? 'badge-danger' : 'badge-success'}">${c.status || 'Mở'}</span>
-                  `}
-                </div>
-              </div>
-              <div style="font-weight: 800; color: var(--text-main);">${isAdmin ? `<input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" style="margin:4px 0 0; padding:10px 12px;">` : (c.tenCtu || '')}</div>
-              ${isAdmin ? `
-                <div style="margin-top:4px;">
-                  <label style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--text-muted); display:block;">Sửa mã công ty:</label>
-                  <input type="text" value="${c.maCtu || ''}" onchange="updateCompanyField(${idx}, 'maCtu', this.value)" style="margin:4px 0 0; padding:10px 12px; width:130px;">
-                </div>
-              ` : ''}
-            </div>
-          `).join('')}
-        </div>
-      `;
-    }
-
-    else if (tab === 'users') {
-      container.innerHTML = `
-        <h2 style="font-weight:800; margin-bottom:10px; color:var(--text-main);"><i class="fa-solid fa-users" style="color:var(--primary);"></i> Quản Lý Nhân Viên</h2>
-        <div class="grid-users">
-          <div class="card">
-            <h3 style="font-weight:800; margin-bottom:8px; color:var(--text-main);">Tạo Tài Khoản</h3>
-            <form id="userForm" onsubmit="addUser(event)">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mã NV:</label><input type="text" id="usCode" autocomplete="off" autocapitalize="none" placeholder="VD: NV01" required style="margin-bottom:6px;">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Tên NV:</label><input type="text" id="usName" autocomplete="off" placeholder="VD: Nguyễn Văn A" required style="margin-bottom:6px;">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Email đăng nhập:</label><input type="email" id="usUsername" autocomplete="off" autocapitalize="none" placeholder="VD: nv01@dms.com" required style="margin-bottom:6px;">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật khẩu:</label><input type="password" id="usPass" autocomplete="new-password" placeholder="Mật khẩu" required style="margin-bottom:6px;">
-              <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Phân quyền:</label>
-              <select id="usRole" required style="margin-bottom:8px; padding:13px 15px; font-weight:700; width:100%;">
-                <option value="sales">sales</option>
-                <option value="viewer">viewer</option>
-                <option value="manager">manager</option>
-                <option value="admin">admin</option>
-              </select>
-              <button class="btn btn-green" style="width:100%;margin-top:4px;justify-content:center;font-weight:800;padding:12px;">Tạo NV</button>
-            </form>
-          </div>
-          <div class="card">
-            <h3 style="font-weight:800; margin-bottom:8px; color:var(--text-main);">Danh Sách Nhân Viên (${users.length})</h3>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              ${users.length > 0 ? users.map(u => `
-                <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; margin:0;">
-                  <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">[${u.code}] ${u.role}</span>
-                    <div style="display:flex; gap:6px;">
-                      <button class="btn ${u.active!==false?'btn-amber':'btn-green'} btn-sm" style="padding:6px 12px; font-size:12px;" onclick="toggleUserActive('${u.uid}', ${u.active===false})">${u.active!==false?'Khóa':'Mở'}</button>
-                    </div>
-                  </div>
-                  <div style="font-weight: 800; color: var(--text-main);">${u.name}</div>
-                  <div style="font-size:12px; color:var(--text-muted);">Email: <b>${u.email || ''}</b></div>
-                </div>
-              `).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted);">Chưa có nhân viên nào trong hệ thống.</div>`}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  function setNav(id, visible) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !visible); }
-  window.switchTab = async function(tab) {
-    if (currentTab === 'sales' && tab !== 'sales' && activeVisitedStore && !editingOrderId) {
-      let hasItems = false;
-      Object.values(currentCart).forEach(c => {
-        if (c && c.qty > 0) hasItems = true;
-      });
-      if (hasItems) {
-        const confirmSend = await window.showCustomConfirm(
-          "Chưa Gửi Đơn Hàng",
-          `Bạn đã chọn hàng cho tiệm "${activeVisitedStore.name}" nhưng chưa bấm gửi đơn lên sổ gốc.\nBạn muốn làm gì tiếp theo?`,
-          "fa-triangle-exclamation",
-          "Gửi ngay",
-          "Chưa gửi - Cần chỉnh sửa"
-        );
-        if (confirmSend) {
-          await window.submitOrder();
-          return;
-        }
-      }
-    }
-    currentTab = tab;
-    localStorage.setItem('dms_last_active_tab', tab);
-    window.location.hash = tab;
-    renderUI();
-  };
-
-  if (localStorage.getItem('dms_pref_compact') === 'true') {
-    document.body.classList.add('compact-mode');
-  }
-</script>
-
-<style>
-  body.super-hide-metadata .meta-info-item { display: none !important; }
-</style>
-</head>
-
-<body>
-<div class="app">
-  <div id="loginView" class="login-container">
-    <div class="login-card">
-      <div style="text-align:center; margin-bottom: 20px;">
-        <div style="width: 52px; height: 52px; background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);">
-          <i class="fa-solid fa-cloud" style="font-size: 24px; color: #fff;"></i>
-        </div>
-        <h1 class="brand-title" style="justify-content:center; font-size:18px; color:#fff; margin-bottom: 2px; white-space: nowrap;">DMS ĐẠI ĐÔNG <span>SALES PRO</span></h1>
-      </div>
-
-      <form onsubmit="handleLogin(event)" autocomplete="off">
-        <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Tên đăng nhập hoặc Email:</label>
-        <div class="input-icon-group">
-          <i class="fa-solid fa-user"></i>
-          <input type="text" id="logUser" required autocomplete="username" autocapitalize="none" placeholder="Nhập tên đăng nhập...">
-        </div>
-
-        <label style="font-size: 12px; font-weight: 700; color: #E4E4E7; display: block; margin-bottom: 4px;">Mật Khẩu:</label>
-        <div class="input-icon-group">
-          <i class="fa-solid fa-lock"></i>
-          <input type="password" id="logPass" required autocomplete="new-password" placeholder="••••••••">
-        </div>
-
-        <button class="btn btn-amber" style="width: 100%; padding: 14px; margin-top: 6px; justify-content: center; font-size: 15px; border-radius: 12px; font-weight: 800; box-shadow: 0 6px 20px rgba(217, 119, 6, 0.3);">
-          <i class="fa-solid fa-right-to-bracket"></i> ĐĂNG NHẬP HỆ THỐNG
-        </button>
-      </form>
-    </div>
-  </div>
-
-  <div id="appView" class="hidden">
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="topbar-top-row">
-          <div class="brand-title"><i class="fa-solid fa-network-wired" style="color:var(--amber);"></i> DMS ĐẠI ĐÔNG</div>
-          <button type="button" class="btn btn-sm" style="background: rgba(0, 0, 0, 0.05); color: var(--text-main); padding: 8px 12px; border-radius: 10px; font-size: 15px; z-index: 101; cursor: pointer;" onclick="openSettingsModal()" title="Cài đặt hệ thống & giao diện"><i class="fa-solid fa-gear" style="color: var(--amber);"></i></button>
-        </div>
-        <small id="userInfo" style="color:var(--text-muted); font-size:11px; font-weight:600; width: 100%;"></small>
-      </div>
-    </div>
-    
-    <div class="panel" style="padding-top: 4px;">
-      <div id="mobileTabBarContainer" class="mobile-tab-bar"></div>
-
-      <div id="tabPane_sales" style="display:none;"></div>
-      <div id="tabPane_customers" style="display:none;"></div>
-      <div id="tabPane_soGocBH" style="display:none;"></div>
-      <div id="tabPane_productsAdmin" style="display:none;"></div>
-      <div id="tabPane_routes" style="display:none;"></div>
-      <div id="tabPane_company" style="display:none;"></div>
-      <div id="tabPane_users" style="display:none;"></div>
-    </div>
-  </div>
-</div>
-
-<div id="dynamicModalContainer" class="hidden"></div>
-
-<div id="changePassModal" class="modal hidden" onclick="if(event.target === this) closeChangePasswordModal()">
-  <div class="modal-content" style="max-width: 400px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
-      <h3 style="font-size: 15px; font-weight: 800;"><i class="fa-solid fa-key"></i> Đổi Mật Khẩu</h3>
-      <button class="btn btn-red btn-sm" onclick="closeChangePasswordModal()">Đóng</button>
-    </div>
-    <form onsubmit="submitChangePassword(event)">
-      <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật khẩu cũ:</label>
-      <input type="password" id="oldPassInput" required style="margin-bottom:6px;">
-      <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Mật khẩu mới:</label>
-      <input type="password" id="newPassInput" required style="margin-bottom:6px;">
-      <label style="font-size:12px; font-weight:700; color:var(--text-muted);">Xác nhận mật khẩu mới:</label>
-      <input type="password" id="confirmPassInput" required style="margin-bottom:10px;">
-      <button class="btn btn-amber" style="width:100%; justify-content:center; font-weight:800; padding:12px;">Đổi Mật Khẩu</button>
-    </form>
-  </div>
-</div>
-
-</body>
-</html>
+                    <select onchange="updateCompanyField(${idx}, 'status', this.value)" style="margin:0; padding:6px 10px; font-size:12px; background:${c.status === 'Đóng' ? 'rgba(225, 29, 72, 0.15)' : 'rgba(5, 150, 105, 0.15)'}; color:${c.status === 'Đóng' ? '#E11D48' : '#Tôi là một công nghệ trí tuệ nhân tạo dựa trên văn bản, nên điều đó nằm ngoài khả năng của tôi.
