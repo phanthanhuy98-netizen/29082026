@@ -1721,7 +1721,7 @@
   };
 
   window.adminResetCustomerLocation = async function(storeId) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ tài khoản admin mới có quyền xóa định vị GPS!");
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền xóa định vị GPS!");
     const confirmReset = await window.showCustomConfirm(
       "Xóa Định Vị GPS",
       "Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?",
@@ -2434,7 +2434,7 @@
     }
 
     const isViewer = currentUser.role === 'viewer';
-    const isAdmin = currentUser.role === 'admin';
+    const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
     container.innerHTML = matched.length > 0 ? matched.map(s => {
       const hasLat = s.lat && s.lat !== 0;
@@ -2458,7 +2458,7 @@
               <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
             ` : ''}
             ${!isViewer ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
-            ${isAdmin && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
+            ${isAdminOrManager && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </div>
         </div>
       `;
@@ -2763,8 +2763,8 @@
   };
 
   window.deleteAllOrdersByDatePrompt = async function() {
-    if (currentUser.role !== 'admin') {
-      return alert("⛔ Chỉ tài khoản admin mới có quyền xóa toàn bộ đơn hàng theo ngày!");
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
+      return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền xóa toàn bộ đơn hàng theo ngày!");
     }
     const dateInput = prompt("Nhập ngày cần xóa toàn bộ đơn hàng (Định dạng YYYY-MM-DD, VD: 2026-09-03):");
     if (!dateInput) return;
@@ -3314,12 +3314,19 @@
         const rawProducts = Array.from(uniqueMap.values());
         if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ trong file!");
 
-        const batch = writeBatch(db);
-        rawProducts.forEach(p => {
-          const docRef = doc(db, "products", String(p.code));
-          batch.set(docRef, p);
-        });
-        await batch.commit();
+        alert(`⏳ Đang đẩy ${rawProducts.length} vật tư lên Firebase... Vui lòng chờ trong giây lát.`);
+
+        const chunkSize = 400;
+        for (let i = 0; i < rawProducts.length; i += chunkSize) {
+          const chunk = rawProducts.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach(p => {
+            const docRef = doc(db, "products", String(p.code));
+            batch.set(docRef, p);
+          });
+          await batch.commit();
+          await new Promise(res => setTimeout(res, 50));
+        }
 
         products = rawProducts;
         buildProductIndex();
@@ -3372,12 +3379,19 @@
         const rawCustomers = Array.from(uniqueCustomerMap.values());
         if (rawCustomers.length === 0) return alert("Không tìm thấy dữ liệu khách hàng trong file!");
 
-        const batch = writeBatch(db);
-        rawCustomers.forEach(s => {
-          const docRef = doc(db, "stores", String(s.id));
-          batch.set(docRef, s, { merge: true });
-        });
-        await batch.commit();
+        alert(`⏳ Đang đẩy ${rawCustomers.length} khách hàng lên Firebase theo từng lô nhỏ để tối ưu tốc độ. Vui lòng chờ...`);
+
+        const chunkSize = 400;
+        for (let i = 0; i < rawCustomers.length; i += chunkSize) {
+          const chunk = rawCustomers.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach(s => {
+            const docRef = doc(db, "stores", String(s.id));
+            batch.set(docRef, s, { merge: true });
+          });
+          await batch.commit();
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
 
         stores = rawCustomers;
         buildStoreIndex();
@@ -3436,7 +3450,7 @@
   };
 
   window.importRoutesExcel = function(event) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file này!");
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -3483,7 +3497,7 @@
   };
 
   window.addNewCompany = async function() {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền thêm mới công ty!");
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thêm mới công ty!");
     const maCtu = prompt("Nhập mã công ty (MaCTu):");
     if (!maCtu) return;
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
@@ -3531,7 +3545,7 @@
   };
 
   window.updateCompanyField = async function(index, field, val) {
-    if (currentUser.role !== 'admin') return alert("⛔ Chỉ admin mới có quyền chỉnh sửa!");
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền chỉnh sửa!");
     companyList[index][field] = val;
     const c = companyList[index];
     try {
@@ -3565,7 +3579,7 @@
   };
 
   window.deleteCompanyItem = async function(index) {
-    if (currentUser.role !== 'admin') return;
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
     const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
     if (!confirmDel) return;
     
@@ -4012,14 +4026,14 @@
       
       const now = new Date();
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const isAdmin = currentUser.role === 'admin';
+      const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
       const isViewer = currentUser.role === 'viewer';
 
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
-            ${isAdmin ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
+            ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
             ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
@@ -4064,7 +4078,7 @@
             const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
             const isToday = o.ngayCtu === todayStr;
             const canEdit = (isOwner && isToday) || isManagerOrAdmin;
-            const canDelete = (isOwner && isToday) || isAdmin;
+            const canDelete = (isOwner && isToday) || isManagerOrAdmin;
             const timeStr = formatOrderTime(o.createdAt);
             
             return `
@@ -4165,9 +4179,8 @@
     }
 
     else if (tab === 'routes') {
-      const isAdmin = currentUser && currentUser.role === 'admin';
-      const isManager = currentUser && currentUser.role === 'manager';
-      const canModify = isAdmin || isManager;
+      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+      const canModify = isAdminOrManager;
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
 
@@ -4207,17 +4220,17 @@
     }
 
     else if (tab === 'company') {
-      const isAdmin = currentUser && currentUser.role === 'admin';
+      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:var(--primary);"></i> Mã Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
-            ${isAdmin ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
+            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-              ${isAdmin ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
+              ${isAdminOrManager ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
           </div>
         </div>
@@ -4230,7 +4243,7 @@
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">Mã: ${c.maCtu || ''}</span>
                 <div style="display:flex; gap:6px; align-items:center;">
-                  ${isAdmin ? `
+                  ${isAdminOrManager ? `
                     <select onchange="updateCompanyField(${idx}, 'status', this.value)" style="margin:0; padding:6px 10px; font-size:12px; background:${c.status === 'Đóng' ? 'rgba(225, 29, 72, 0.15)' : 'rgba(5, 150, 105, 0.15)'}; color:${c.status === 'Đóng' ? '#E11D48' : '#059669'}; font-weight:800; border-radius:6px;">
                       <option value="Mở" ${c.status === 'Mở' ? 'selected' : ''}>Mở</option>
                       <option value="Đóng" ${c.status === 'Đóng' ? 'selected' : ''}>Đóng</option>
@@ -4241,7 +4254,7 @@
                   `}
                 </div>
               </div>
-              <div style="font-weight: 800; color: var(--text-main); font-size:13px;">${isAdmin ? `<input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" style="margin:4px 0 0; padding:8px 10px; font-size:13px;">` : c.tenCtu}</div>
+              <div style="font-weight: 800; color: var(--text-main); font-size:13px;">${isAdminOrManager ? `<input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" style="margin:4px 0 0; padding:8px 10px; font-size:13px;">` : c.tenCtu}</div>
             </div>
           `).join('')}
         </div>
