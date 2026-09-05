@@ -937,7 +937,8 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 31);
+      // Đã tăng version lên 32 để làm mới và sửa lỗi keyPath của offlineCheckins
+      const request = indexedDB.open("DMS_OfflineDB", 32);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -945,7 +946,10 @@
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
-        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
+        if (dbInstance.objectStoreNames.contains("offlineCheckins")) {
+          dbInstance.deleteObjectStore("offlineCheckins");
+        }
+        dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
@@ -1052,7 +1056,7 @@
       const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
       const store = tx.objectStore("offlineCheckins");
       const payload = { id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), ...checkinData };
-      store.add(payload);
+      store.put(payload);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1062,7 +1066,7 @@
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineOrders"], "readwrite");
-      tx.objectStore("offlineOrders").add(orderData);
+      tx.objectStore("offlineOrders").put(orderData);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1740,10 +1744,15 @@
 
         const storeRef = doc(db, "stores", String(targetStore.id));
         await setDoc(storeRef, updatePayload, { merge: true });
-        await addDoc(collection(db, "checkins"), {
-          ...checkinPayload,
-          createdAt: serverTimestamp()
-        });
+        
+        try {
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
+        } catch (offlineErr) {
+          await saveOfflineCheckin(checkinPayload);
+        }
 
         const storeIndex = stores.findIndex(s => String(s.id) === String(targetStore.id));
         if (storeIndex > -1) {
@@ -1874,10 +1883,15 @@
 
       const storeRef = doc(db, "stores", String(activeVisitedStore.id));
       await setDoc(storeRef, updatePayload, { merge: true });
-      await addDoc(collection(db, "checkins"), {
-        ...checkinPayload,
-        createdAt: serverTimestamp()
-      });
+      
+      try {
+        await addDoc(collection(db, "checkins"), {
+          ...checkinPayload,
+          createdAt: serverTimestamp()
+        });
+      } catch (offlineErr) {
+        await saveOfflineCheckin(checkinPayload);
+      }
 
       const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
       if (storeIndex > -1) {
