@@ -1468,95 +1468,100 @@
   };
 
 async function loadMasterDataOptimized(forceCloud = false) {
+  // 1. SIÊU TỐC 0 GIÂY: Đọc trực tiếp từ localStorage (đồng bộ tuyệt đối, không chờ đợi)
   try {
-    await initIndexedDB();
+    const rawComps = localStorage.getItem("fast_companies");
+    const rawPrds = localStorage.getItem("fast_products");
+    const rawRoutes = localStorage.getItem("fast_routes");
+    const rawStores = localStorage.getItem("fast_stores");
 
-    // 1. Lấy dữ liệu ngay lập tức từ IndexedDB cục bộ của máy (siêu tốc, không cần chờ mạng)
-    let cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
-    let cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
-    let cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
-    let cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
-
-    // Đưa lên biến toàn cục và render ra màn hình NGAY LẬP TỨC
-    if (cachedComps && cachedComps.length > 0) { window.allCompanies = cachedComps; if (typeof companyList !== 'undefined') companyList = window.allCompanies; }
-    if (cachedPrds && cachedPrds.length > 0) { window.allProducts = cachedPrds; if (typeof products !== 'undefined') products = window.allProducts; if (typeof buildProductIndex === 'function') buildProductIndex(); }
-    if (cachedRoutes && cachedRoutes.length > 0) { window.allRoutes = cachedRoutes; if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes; }
-    if (cachedStores && cachedStores.length > 0) { window.allStores = cachedStores; if (typeof stores !== 'undefined') stores = window.allStores; if (typeof buildStoreIndex === 'function') buildStoreIndex(); }
-    if (typeof renderUI === 'function') renderUI();
-
-    // 2. Kiểm tra phiên bản ngầm phía sau để cập nhật nếu có thay đổi trên Cloud
-    (async () => {
-      try {
-        const metaRef = doc(db, "systemMeta", "version");
-        const metaSnap = await getDoc(metaRef);
-        const serverMeta = metaSnap.exists() ? metaSnap.data() : {};
-        
-        const serverCompsVersion = Number(serverMeta.companiesVersion || 1);
-        const serverProductsVersion = Number(serverMeta.productsVersion || 1);
-        const serverRoutesVersion = Number(serverMeta.routesVersion || 1);
-        const serverStoresVersion = Number(serverMeta.storesVersion || 1);
-
-        const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
-        const localProductsVersion = Number(localStorage.getItem("productsVersion") || 0);
-        const localRoutesVersion = Number(localStorage.getItem("routesVersion") || 0);
-        const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
-
-        let needReRender = false;
-
-        if (forceCloud || localCompsVersion !== serverCompsVersion || !cachedComps || cachedComps.length === 0) {
-          const cSnap = await getDocs(collection(db, "companies"));
-          cachedComps = cSnap.docs.map(d => d.data());
-          if (typeof saveCacheData === 'function') await saveCacheData("companies", cachedComps);
-          localStorage.setItem("companiesVersion", serverCompsVersion);
-          window.allCompanies = cachedComps;
-          if (typeof companyList !== 'undefined') companyList = window.allCompanies;
-          needReRender = true;
-        }
-
-        if (forceCloud || localProductsVersion !== serverProductsVersion || !cachedPrds || cachedPrds.length === 0) {
-          const pSnap = await getDocs(collection(db, "products"));
-          cachedPrds = pSnap.docs.map(d => d.data());
-          if (typeof saveCacheData === 'function') await saveCacheData("products", cachedPrds);
-          localStorage.setItem("productsVersion", serverProductsVersion);
-          window.allProducts = cachedPrds;
-          if (typeof products !== 'undefined') products = window.allProducts;
-          if (typeof buildProductIndex === 'function') buildProductIndex();
-          needReRender = true;
-        }
-
-        if (forceCloud || localRoutesVersion !== serverRoutesVersion || !cachedRoutes || cachedRoutes.length === 0) {
-          const rSnap = await getDocs(collection(db, "routes"));
-          cachedRoutes = rSnap.docs.map(d => d.data());
-          if (typeof saveCacheData === 'function') await saveCacheData("routes", cachedRoutes);
-          localStorage.setItem("routesVersion", serverRoutesVersion);
-          window.allRoutes = cachedRoutes;
-          if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes;
-          needReRender = true;
-        }
-
-        if (forceCloud || localStoresVersion !== serverStoresVersion || !cachedStores || cachedStores.length === 0) {
-          const sSnap = await getDocs(collection(db, "stores"));
-          cachedStores = sSnap.docs.map(d => d.data());
-          if (typeof saveCacheData === 'function') await saveCacheData("stores", cachedStores);
-          localStorage.setItem("storesVersion", serverStoresVersion);
-          window.allStores = cachedStores;
-          if (typeof stores !== 'undefined') stores = window.allStores;
-          if (typeof buildStoreIndex === 'function') buildStoreIndex();
-          needReRender = true;
-        }
-
-        if (needReRender && typeof renderUI === 'function') {
-          renderUI();
-          console.log("Đã cập nhật dữ liệu ngầm từ Cloud thành công.");
-        }
-      } catch (bgErr) {
-        console.warn("Lỗi kiểm tra phiên bản ngầm:", bgErr);
-      }
-    })();
-
-  } catch (error) {
-    console.error("Lỗi khi tải master data:", error);
+    if (rawComps) { window.allCompanies = JSON.parse(rawComps); if (typeof companyList !== 'undefined') companyList = window.allCompanies; }
+    if (rawPrds) { window.allProducts = JSON.parse(rawPrds); if (typeof products !== 'undefined') products = window.allProducts; if (typeof buildProductIndex === 'function') buildProductIndex(); }
+    if (rawRoutes) { window.allRoutes = JSON.parse(rawRoutes); if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes; }
+    if (rawStores) { window.allStores = JSON.parse(rawStores); if (typeof stores !== 'undefined') stores = window.allStores; if (typeof buildStoreIndex === 'function') buildStoreIndex(); }
+    
+    if (rawComps || rawPrds || rawRoutes || rawStores) {
+      if (typeof renderUI === 'function') renderUI();
+    }
+  } catch (e) {
+    console.warn("Lỗi đọc cache nhanh:", e);
   }
+
+  // 2. Chạy ngầm kiểm tra phiên bản và cập nhật dữ liệu phía sau
+  (async () => {
+    try {
+      await initIndexedDB();
+
+      const metaRef = doc(db, "systemMeta", "version");
+      const metaSnap = await getDoc(metaRef);
+      const serverMeta = metaSnap.exists() ? metaSnap.data() : {};
+      
+      const serverCompsVersion = Number(serverMeta.companiesVersion || 1);
+      const serverProductsVersion = Number(serverMeta.productsVersion || 1);
+      const serverRoutesVersion = Number(serverMeta.routesVersion || 1);
+      const serverStoresVersion = Number(serverMeta.storesVersion || 1);
+
+      const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
+      const localProductsVersion = Number(localStorage.getItem("productsVersion") || 0);
+      const localRoutesVersion = Number(localStorage.getItem("routesVersion") || 0);
+      const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
+
+      let needReRender = false;
+      let comps = window.allCompanies || [];
+      let prds = window.allProducts || [];
+      let routes = window.allRoutes || [];
+      let stores = window.allStores || [];
+
+      if (forceCloud || localCompsVersion !== serverCompsVersion || comps.length === 0) {
+        const cSnap = await getDocs(collection(db, "companies"));
+        comps = cSnap.docs.map(d => d.data());
+        localStorage.setItem("companiesVersion", serverCompsVersion);
+        localStorage.setItem("fast_companies", JSON.stringify(comps));
+        window.allCompanies = comps;
+        if (typeof companyList !== 'undefined') companyList = comps;
+        needReRender = true;
+      }
+
+      if (forceCloud || localProductsVersion !== serverProductsVersion || prds.length === 0) {
+        const pSnap = await getDocs(collection(db, "products"));
+        prds = pSnap.docs.map(d => d.data());
+        localStorage.setItem("productsVersion", serverProductsVersion);
+        localStorage.setItem("fast_products", JSON.stringify(prds));
+        window.allProducts = prds;
+        if (typeof products !== 'undefined') products = prds;
+        if (typeof buildProductIndex === 'function') buildProductIndex();
+        needReRender = true;
+      }
+
+      if (forceCloud || localRoutesVersion !== serverRoutesVersion || routes.length === 0) {
+        const rSnap = await getDocs(collection(db, "routes"));
+        routes = rSnap.docs.map(d => d.data());
+        localStorage.setItem("routesVersion", serverRoutesVersion);
+        localStorage.setItem("fast_routes", JSON.stringify(routes));
+        window.allRoutes = routes;
+        if (typeof routeGroupsList !== 'undefined') routeGroupsList = routes;
+        needReRender = true;
+      }
+
+      if (forceCloud || localStoresVersion !== serverStoresVersion || stores.length === 0) {
+        const sSnap = await getDocs(collection(db, "stores"));
+        stores = sSnap.docs.map(d => d.data());
+        localStorage.setItem("storesVersion", serverStoresVersion);
+        localStorage.setItem("fast_stores", JSON.stringify(stores));
+        window.allStores = stores;
+        if (typeof stores !== 'undefined') stores = stores;
+        if (typeof buildStoreIndex === 'function') buildStoreIndex();
+        needReRender = true;
+      }
+
+      if (needReRender && typeof renderUI === 'function') {
+        renderUI();
+        console.log("Đã cập nhật ngầm dữ liệu mới từ Cloud.");
+      }
+    } catch (bgErr) {
+      console.error("Lỗi đồng bộ ngầm:", bgErr);
+    }
+  })();
 }
 
   window.forceRefreshMasterDataFromCloud = async function() {
