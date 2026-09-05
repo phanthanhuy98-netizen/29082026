@@ -1433,8 +1433,16 @@
       }
 
       if (!userSnap || !userSnap.exists()) {
-        await signOut(authSvc);
-        return alert("⛔ Tài khoản này tồn tại trên Auth nhưng chưa được cấu hình phân quyền trong bảng users của CSDL Firestore!");
+        await setDoc(doc(db, "users", authUser.uid), {
+          uid: authUser.uid,
+          email: authUser.email.toLowerCase(),
+          name: authUser.email.split('@')[0],
+          code: "NV" + Math.floor(Math.random() * 900 + 100),
+          role: "sales",
+          active: true,
+          createdAt: serverTimestamp()
+        }, { merge: true });
+        userSnap = await getDoc(userDocRef);
       }
 
       const profile = userSnap.data();
@@ -1455,7 +1463,7 @@
       if (currentFailed >= 10) {
         alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
       } else {
-        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử. Lỗi: ${authErr.message}`);
       }
     }
   };
@@ -1570,8 +1578,20 @@
     }
 
     const profileSnap = await getDoc(doc(db, "users", user.uid));
-    if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
-    const profile = profileSnap.data();
+    if (!profileSnap.exists()) {
+      await setDoc(doc(db, "users", user.uid), {
+        uid: user.uid,
+        email: user.email.toLowerCase(),
+        name: user.email.split('@')[0],
+        code: "NV" + Math.floor(Math.random() * 900 + 100),
+        role: "sales",
+        active: true,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+    }
+
+    const updatedProfileSnap = await getDoc(doc(db, "users", user.uid));
+    const profile = updatedProfileSnap.data();
 
     if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
       alert("⛔ Tài khoản bị khóa."); 
@@ -1859,7 +1879,7 @@
         if (dist > 20) {
           const confirmDistance = await window.showCustomConfirm(
             "Cảnh Báo Vị Trí",
-            `Khách hàng này đã đúng chưa cần xem lại`,
+            `Khách hàng này cách vị trí hiện tại của bạn ${Math.round(dist)}m.\nBạn có chắc chắn muốn tiếp tục không?`,
             "fa-triangle-exclamation",
             "đúng chính xác",
             "hủy"
@@ -3279,7 +3299,6 @@
     }
   };
 
-  // --- TAB CẬP NHẬT / ĐỒNG BỘ DỮ LIỆU ---
   window.sendSyncRequest = async function() {
     if (!currentUser) return;
     try {
@@ -4431,7 +4450,7 @@
             </div>
             <h3 style="font-size:16px; font-weight:800; color:var(--text-main); margin-bottom:8px;">Yêu Cầu Cập Nhật Dữ Liệu Mới</h3>
             <p style="font-size:13px; color:var(--text-muted); margin-bottom:20px; line-height:1.4;">Bấm nút bên dưới để gửi yêu cầu cấp phép đồng bộ danh mục vật tư và khách hàng mới nhất lên hệ thống quản trị.</p>
-            <button class="btn btn-amber" style="padding:14px 24px; font-size:14px; font-weight:800; border-radius:12px;" onclick="sendSyncQueryRequest()">
+            <button class="btn btn-amber" style="padding:14px 24px; font-size:14px; font-weight:800; border-radius:12px;" onclick="sendSyncRequest()">
               <i class="fa-solid fa-paper-plane"></i> GỬI YÊU CẦU ĐỒNG BỘ DỮ LIỆU MỚI
             </button>
           </div>
@@ -4462,42 +4481,9 @@
               <input type="text" id="usUsername" required style="margin:4px 0 8px; padding:10px;">
               
               <label style="font-size:11px; font-weight:700;">Mật khẩu:</label>
-              <input type="password" id="usPass" required style="margin:4px 0 8px; padding:10px;">
-              
-              <label style="font-size:11px; font-weight:700;">Phân quyền (sales, manager, admin, viewer):</label>
-              <select id="usRole" style="margin:4px 0 12px; padding:10px;">
-                <option value="sales">Sales (Nhân viên bán hàng)</option>
-                <option value="manager">Manager (Quản lý)</option>
-                <option value="admin">Admin (Quản trị hệ thống)</option>
-                <option value="viewer">Viewer (Chỉ xem)</option>
-              </select>
-              
-              <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
-            </form>
-          </div>
+<input type="password" id="usPass" required style="margin:4px 0 8px; padding:10px;">
 
-          <div class="card" style="overflow-x:auto;">
-            <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-id-badge"></i> Danh Sách Tài Khoản Hệ Thống</h3>
-            <div style="display:flex; flex-direction:column; gap:8px; max-height: 500px; overflow-y: auto;">
-             ${users.map(u => `
-                <div style="background:var(--panel-bg); border:1px solid var(--card-border); padding:10px 12px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
-                  <div>
-                    <div style="font-weight:800; font-size:13.5px;">[${u.code || 'NV'}] ${u.name || ''}</div>
-                    <div style="font-size:11px; color:var(--text-muted);">📧 ${u.email || ''} — Quyền: <b style="color:var(--primary);">${u.role || 'sales'}</b></div>
-                  </div>
-                  <div>
-                    <button class="btn ${u.active !== false ? 'btn-red' : 'btn-green'} btn-sm" style="font-weight:700; padding:6px 12px;" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
-                      ${u.active !== false ? 'Khóa' : 'Mở khóa'}
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-  }
-</script>
-</body>
-</html>
+<label style="font-size:11px; font-weight:700;">Quyền (admin / manager / sales / viewer):</label>
+<input type="text" id="usRole" value="sales" required style="margin:4px 0 12px; padding:10px;">
+
+<button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
