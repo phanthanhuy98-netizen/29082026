@@ -1468,30 +1468,47 @@
   };
 
 async function loadMasterDataOptimized(forceCloud = false) {
-  // 1. SIÊU TỐC 0 GIÂY: Đọc trực tiếp từ localStorage (đồng bộ tuyệt đối, không chờ đợi)
+  // 1. SIÊU TỐC 0 GIÂY: Đọc từ localStorage trước
+  let hasData = false;
   try {
     const rawComps = localStorage.getItem("fast_companies");
     const rawPrds = localStorage.getItem("fast_products");
     const rawRoutes = localStorage.getItem("fast_routes");
     const rawStores = localStorage.getItem("fast_stores");
 
-    if (rawComps) { window.allCompanies = JSON.parse(rawComps); if (typeof companyList !== 'undefined') companyList = window.allCompanies; }
-    if (rawPrds) { window.allProducts = JSON.parse(rawPrds); if (typeof products !== 'undefined') products = window.allProducts; if (typeof buildProductIndex === 'function') buildProductIndex(); }
-    if (rawRoutes) { window.allRoutes = JSON.parse(rawRoutes); if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes; }
-    if (rawStores) { window.allStores = JSON.parse(rawStores); if (typeof stores !== 'undefined') stores = window.allStores; if (typeof buildStoreIndex === 'function') buildStoreIndex(); }
+    if (rawComps) { window.allCompanies = JSON.parse(rawComps); if (typeof companyList !== 'undefined') companyList = window.allCompanies; hasData = true; }
+    if (rawPrds) { window.allProducts = JSON.parse(rawPrds); if (typeof products !== 'undefined') products = window.allProducts; if (typeof buildProductIndex === 'function') buildProductIndex(); hasData = true; }
+    if (rawRoutes) { window.allRoutes = JSON.parse(rawRoutes); if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes; hasData = true; }
+    if (rawStores) { window.allStores = JSON.parse(rawStores); if (typeof stores !== 'undefined') stores = window.allStores; if (typeof buildStoreIndex === 'function') buildStoreIndex(); hasData = true; }
     
-    if (rawComps || rawPrds || rawRoutes || rawStores) {
-      if (typeof renderUI === 'function') renderUI();
+    if (hasData && typeof renderUI === 'function') {
+      renderUI();
     }
   } catch (e) {
     console.warn("Lỗi đọc cache nhanh:", e);
   }
 
-  // 2. Chạy ngầm kiểm tra phiên bản và cập nhật dữ liệu phía sau
+  // 2. Tiến trình nền: Nếu localStorage chưa có, khẩn cấp lấy từ IndexedDB cũ hoặc Cloud
   (async () => {
     try {
       await initIndexedDB();
 
+      // Nếu lần đầu chưa có localStorage, thử lấy từ cache IndexedDB cũ của dự án
+      if (!hasData) {
+        let cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
+        let cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
+        let cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
+        let cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
+
+        if (cachedComps && cachedComps.length > 0) { window.allCompanies = cachedComps; localStorage.setItem("fast_companies", JSON.stringify(cachedComps)); }
+        if (cachedPrds && cachedPrds.length > 0) { window.allProducts = cachedPrds; localStorage.setItem("fast_products", JSON.stringify(cachedPrds)); if (typeof buildProductIndex === 'function') buildProductIndex(); }
+        if (cachedRoutes && cachedRoutes.length > 0) { window.allRoutes = cachedRoutes; localStorage.setItem("fast_routes", JSON.stringify(cachedRoutes)); }
+        if (cachedStores && cachedStores.length > 0) { window.allStores = cachedStores; localStorage.setItem("fast_stores", JSON.stringify(cachedStores)); if (typeof buildStoreIndex === 'function') buildStoreIndex(); }
+        
+        if (typeof renderUI === 'function') renderUI();
+      }
+
+      // Kiểm tra phiên bản trên Cloud để cập nhật ngầm
       const metaRef = doc(db, "systemMeta", "version");
       const metaSnap = await getDoc(metaRef);
       const serverMeta = metaSnap.exists() ? metaSnap.data() : {};
@@ -1556,7 +1573,6 @@ async function loadMasterDataOptimized(forceCloud = false) {
 
       if (needReRender && typeof renderUI === 'function') {
         renderUI();
-        console.log("Đã cập nhật ngầm dữ liệu mới từ Cloud.");
       }
     } catch (bgErr) {
       console.error("Lỗi đồng bộ ngầm:", bgErr);
