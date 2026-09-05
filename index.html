@@ -1193,7 +1193,7 @@
   }
 
   window.syncOfflineCheckins = async function() {
-    if (!navigator.onLine || !idbDb) return;
+    if (!idbDb) return;
     const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
     const store = tx.objectStore("offlineCheckins");
     const request = store.getAll();
@@ -1216,7 +1216,7 @@
   };
 
   window.syncOfflineOrders = async function() {
-    if (!navigator.onLine || !idbDb) return;
+    if (!idbDb) return;
     const tx = idbDb.transaction(["offlineOrders"], "readwrite");
     const store = tx.objectStore("offlineOrders");
     const request = store.getAll();
@@ -1571,7 +1571,7 @@
   };
 
   async function uploadFullDataJsonToCloud() {
-    if (!navigator.onLine || !currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') return;
+    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') return;
     try {
       const newVersion = Date.now();
       const payload = {
@@ -1760,7 +1760,6 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  // ✅ HÀM GHIM GPS ĐÃ ĐƯỢC CHUẨN HÓA VÀ LƯU TRỮ ĐỒNG BỘ HOÀN CHỈNH
   window.handleCustomerLocationAction = async function(storeId) {
     if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu, không được ghim GPS!");
     const store = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
@@ -1790,19 +1789,14 @@
         pinnedHistory: [...existingHistory, newHistoryItem]
       };
 
-      // 1. Cập nhật lên Firestore với setDoc (merge: true)
-      if (navigator.onLine) {
-        const storeRef = doc(db, "stores", String(store.id));
-        await setDoc(storeRef, updatePayload, { merge: true });
-      }
+      const storeRef = doc(db, "stores", String(store.id));
+      await setDoc(storeRef, updatePayload, { merge: true });
 
-      // 2. Cập nhật trực tiếp vào mảng RAM `stores`
       const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(store.id));
       if (storeIndex > -1) {
         stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
       }
 
-      // 3. QUAN TRỌNG: Lưu lại vào IndexedDB Cache để không bị mất khi reload
       await saveStoresToLocalCache(stores);
       buildStoreIndex();
 
@@ -1831,9 +1825,7 @@
     try {
       const storeRef = doc(db, "stores", String(storeId));
       const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] };
-      if (navigator.onLine) {
-        await updateDoc(storeRef, resetPayload);
-      }
+      await updateDoc(storeRef, resetPayload);
       const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
       if (storeIndex > -1) {
         stores[storeIndex] = { ...stores[storeIndex], ...resetPayload };
@@ -1914,16 +1906,12 @@
             pinnedHistory: [...existingHistory, newHistoryItem]
           };
 
-          if (navigator.onLine) {
-            const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-            await setDoc(storeRef, updatePayload, { merge: true });
-            await addDoc(collection(db, "checkins"), {
-              ...checkinPayload,
-              createdAt: serverTimestamp()
-            });
-          } else {
-            await saveOfflineCheckin(checkinPayload);
-          }
+          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+          await setDoc(storeRef, updatePayload, { merge: true });
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
 
           const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
           if (storeIndex > -1) {
@@ -2021,16 +2009,12 @@
         pinnedHistory: [...existingHistory, newHistoryItem]
       };
 
-      if (navigator.onLine) {
-        const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-        await setDoc(storeRef, updatePayload, { merge: true });
-        await addDoc(collection(db, "checkins"), {
-          ...checkinPayload,
-          createdAt: serverTimestamp()
-        });
-      } else {
-        await saveOfflineCheckin(checkinPayload);
-      }
+      const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+      await setDoc(storeRef, updatePayload, { merge: true });
+      await addDoc(collection(db, "checkins"), {
+        ...checkinPayload,
+        createdAt: serverTimestamp()
+      });
 
       const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
       if (storeIndex > -1) {
@@ -3250,54 +3234,60 @@
 
       const savedStoreId = activeVisitedStore.id;
 
-      if (navigator.onLine) {
-        try {
-          if (editingOrderId) {
-            const orderRef = doc(db, "orders", editingOrderId);
-            await updateDoc(orderRef, {
-              ...orderData,
-              updatedAt: serverTimestamp()
-            });
+      await saveOfflineOrder({
+        id: orderUuid,
+        ...orderData,
+        createdAt: new Date().toISOString()
+      });
 
-            const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
-            const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
-            const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
+      try {
+        if (editingOrderId) {
+          const orderRef = doc(db, "orders", editingOrderId);
+          await updateDoc(orderRef, {
+            ...orderData,
+            updatedAt: serverTimestamp()
+          });
 
-            const updatedLocalOrder = {
-              id: editingOrderId,
-              ...orderData,
-              soCtu: originalSoCtu,
-              createdAt: originalCreatedAt
-            };
+          const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
+          const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
+          const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
 
-            if (existingOrderIndex > -1) {
-              orders[existingOrderIndex] = updatedLocalOrder;
-            } else {
-              orders.unshift(updatedLocalOrder);
-            }
+          const updatedLocalOrder = {
+            id: editingOrderId,
+            ...orderData,
+            soCtu: originalSoCtu,
+            createdAt: originalCreatedAt
+          };
+
+          if (existingOrderIndex > -1) {
+            orders[existingOrderIndex] = updatedLocalOrder;
           } else {
-            const nextSoCtu = await getNextSoCtuWithRetry();
-            orderData.soCtu = nextSoCtu;
-            orderData.createdAt = serverTimestamp();
-            
-            const docRef = doc(db, "orders", orderUuid);
-            await setDoc(docRef, orderData);
-
-            const newLocalOrder = {
-              id: orderUuid,
-              ...orderData,
-              createdAt: new Date()
-            };
-            orders.unshift(newLocalOrder);
+            orders.unshift(updatedLocalOrder);
           }
-        } catch (err) {
-          console.warn("Mất mạng khi đang gửi, lưu offline:", err);
-          await saveOfflineOrder(orderData);
-          alert("⚠️ Đang mất mạng! Đã lưu đơn hàng cục bộ với mã định danh an toàn và sẽ tự động đồng bộ khi có mạng.");
+        } else {
+          const nextSoCtu = await getNextSoCtuWithRetry();
+          orderData.soCtu = nextSoCtu;
+          orderData.createdAt = serverTimestamp();
+          
+          const docRef = doc(db, "orders", orderUuid);
+          await setDoc(docRef, orderData);
+
+          const newLocalOrder = {
+            id: orderUuid,
+            ...orderData,
+            createdAt: new Date()
+          };
+          orders.unshift(newLocalOrder);
         }
-      } else {
-        await saveOfflineOrder(orderData);
-        alert("⚠️ Thiết bị đang offline! Đã lưu đơn hàng vào hàng đợi với mã UUID chống trùng lặp.");
+      } catch (err) {
+        console.warn("Lỗi kết nối Firebase thực tế, đơn đã được lưu dự phòng:", err);
+        orders.unshift({
+          id: orderUuid,
+          ...orderData,
+          soCtu: 9999,
+          createdAt: new Date()
+        });
+        alert("⚠️ Không thể kết nối đến máy chủ Firebase. Đơn hàng đã được lưu tạm trên thiết bị.");
       }
       
       await clearCartDraftAsync(savedStoreId);
