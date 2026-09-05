@@ -508,21 +508,6 @@
     } catch (e) {}
   };
 
-  function showUpdateToast(msg) {
-    const existing = document.getElementById('globalUpdateToast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.id = 'globalUpdateToast';
-    toast.className = 'update-toast';
-    toast.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> <span>${msg}</span>`;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      if (toast && toast.parentNode) toast.remove();
-    }, 3500);
-  }
-
   let wakeLockSentinel = null;
   async function toggleScreenWakeLock(enable) {
     try {
@@ -735,15 +720,6 @@
       toggleScreenWakeLock(true);
     }
   }
-
-  window.toggleWakeLockPref = function() {
-    const wakeLockEnabled = localStorage.getItem('dms_pref_wakelock') === 'true';
-    const nextState = !wakeLockEnabled;
-    localStorage.setItem('dms_pref_wakelock', nextState);
-    toggleScreenWakeLock(nextState);
-    triggerHaptic(20);
-    openSettingsModal();
-  };
 
   window.openSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
@@ -1784,10 +1760,11 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
+  // ✅ HÀM GHIM GPS ĐÃ ĐƯỢC CHUẨN HÓA VÀ LƯU TRỮ ĐỒNG BỘ HOÀN CHỈNH
   window.handleCustomerLocationAction = async function(storeId) {
     if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu, không được ghim GPS!");
-    const store = stores.find(s => String(s.id) === String(storeId));
-    if (!store) return;
+    const store = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+    if (!store) return alert("Không tìm thấy thông tin khách hàng!");
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
     try {
@@ -1804,26 +1781,37 @@
         time: new Date().toISOString()
       };
 
-      await updateDoc(doc(db, "stores", String(storeId)), {
-        lat, lng,
+      const updatePayload = {
+        lat,
+        lng,
         pinnedByCode: currentUser.code || 'NV',
         pinnedByName: currentUser.name || 'Nhân viên',
         pinnedAt: new Date().toISOString(),
         pinnedHistory: [...existingHistory, newHistoryItem]
-      });
+      };
 
-      store.lat = lat;
-      store.lng = lng;
-      store.pinnedByCode = currentUser.code || 'NV';
-      store.pinnedByName = currentUser.name || 'Nhân viên';
-      store.pinnedAt = new Date().toISOString();
-      store.pinnedHistory = [...existingHistory, newHistoryItem];
-      
+      // 1. Cập nhật lên Firestore với setDoc (merge: true)
+      if (navigator.onLine) {
+        const storeRef = doc(db, "stores", String(store.id));
+        await setDoc(storeRef, updatePayload, { merge: true });
+      }
+
+      // 2. Cập nhật trực tiếp vào mảng RAM `stores`
+      const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(store.id));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+      }
+
+      // 3. QUAN TRỌNG: Lưu lại vào IndexedDB Cache để không bị mất khi reload
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
+
       filterTabCustomers(tabCustomerSearchKey);
-      if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
+      if (activeVisitedStore && String(activeVisitedStore.id) === String(store.id)) {
         renderUI();
       }
       triggerHaptic(30);
+      alert("✅ Đã ghim và lưu tọa độ GPS thành công!");
     } catch (err) { 
       alert("Lỗi cập nhật GPS: " + err.message); 
     }
@@ -1841,10 +1829,19 @@
     if (!confirmReset) return;
 
     try {
-      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
-      const store = stores.find(s => String(s.id) === String(storeId));
-      if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
+      const storeRef = doc(db, "stores", String(storeId));
+      const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] };
+      if (navigator.onLine) {
+        await updateDoc(storeRef, resetPayload);
+      }
+      const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...resetPayload };
+      }
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
       filterTabCustomers(tabCustomerSearchKey);
+      alert("✅ Đã xóa GPS thành công!");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
@@ -1872,7 +1869,7 @@
 
     await loadCartDraftFromLocal();
 
-    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
 
     if (!hasGPSAlready) {
       const updateGPSNow = await window.showCustomConfirm(
@@ -1909,16 +1906,17 @@
             status: "Check-in thành công"
           };
 
+          const updatePayload = {
+            lat, lng,
+            pinnedByCode: currentUser.code || 'NV',
+            pinnedByName: currentUser.name || 'Nhân viên',
+            pinnedAt: new Date().toISOString(),
+            pinnedHistory: [...existingHistory, newHistoryItem]
+          };
+
           if (navigator.onLine) {
             const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-            await updateDoc(storeRef, {
-              lat, lng,
-              pinnedByCode: currentUser.code || 'NV',
-              pinnedByName: currentUser.name || 'Nhân viên',
-              pinnedAt: new Date().toISOString(),
-              pinnedHistory: [...existingHistory, newHistoryItem]
-            });
-
+            await setDoc(storeRef, updatePayload, { merge: true });
             await addDoc(collection(db, "checkins"), {
               ...checkinPayload,
               createdAt: serverTimestamp()
@@ -1927,12 +1925,13 @@
             await saveOfflineCheckin(checkinPayload);
           }
 
-          activeVisitedStore.lat = lat;
-          activeVisitedStore.lng = lng;
-          activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
-          activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
-          activeVisitedStore.pinnedAt = new Date().toISOString();
-          activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+          const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+          if (storeIndex > -1) {
+            stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+            activeVisitedStore = stores[storeIndex];
+          }
+          await saveStoresToLocalCache(stores);
+          buildStoreIndex();
         } catch (err) {
           alert("Không thể lấy tọa độ GPS: " + err.message);
         }
@@ -1984,7 +1983,7 @@
   window.checkinActiveStoreGPS = async function() {
     if (!activeVisitedStore) return alert("Chưa chọn điểm bán!");
     
-    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
     if (hasGPSAlready) {
       return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
     }
@@ -2014,16 +2013,17 @@
         status: "Check-in thành công"
       };
 
+      const updatePayload = {
+        lat, lng,
+        pinnedByCode: currentUser.code || 'NV',
+        pinnedByName: currentUser.name || 'Nhân viên',
+        pinnedAt: new Date().toISOString(),
+        pinnedHistory: [...existingHistory, newHistoryItem]
+      };
+
       if (navigator.onLine) {
         const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-        await updateDoc(storeRef, {
-          lat, lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên',
-          pinnedAt: new Date().toISOString(),
-          pinnedHistory: [...existingHistory, newHistoryItem]
-        });
-
+        await setDoc(storeRef, updatePayload, { merge: true });
         await addDoc(collection(db, "checkins"), {
           ...checkinPayload,
           createdAt: serverTimestamp()
@@ -2032,15 +2032,17 @@
         await saveOfflineCheckin(checkinPayload);
       }
 
-      activeVisitedStore.lat = lat;
-      activeVisitedStore.lng = lng;
-      activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
-      activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
-      activeVisitedStore.pinnedAt = new Date().toISOString();
-      activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+      const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+        activeVisitedStore = stores[storeIndex];
+      }
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
       
       triggerHaptic(30);
       renderUI();
+      alert("✅ Check-in và lưu GPS thành công!");
     } catch (err) {
       console.error(err);
       alert("Không thể lấy tọa độ GPS: " + err.message);
@@ -2198,7 +2200,7 @@
 
       if (matchRoute && matchKey) {
         let dist = Infinity;
-        if (currentSalesGPS && s.lat && s.lng) {
+        if (currentSalesGPS && s.lat && Number(s.lat) !== 0 && s.lng && Number(s.lng) !== 0) {
           dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
         }
         matched.push({ store: s, distance: dist });
@@ -2214,7 +2216,7 @@
       const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
       const isClosest = item.distance !== Infinity && item.distance <= 100;
       const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
-      const hasLat = Boolean(s.lat && s.lat !== 0);
+      const hasLat = Boolean(s.lat && Number(s.lat) !== 0);
 
       return `
         <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosest ? 'rgba(5, 150, 105, 0.4)' : 'var(--card-border)'};">
@@ -2522,7 +2524,9 @@
     let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
       const s = entry.store;
-      const hasLat = s.lat && s.lat !== 0;
+      const latVal = Number(s.lat || 0);
+      const lngVal = Number(s.lng || 0);
+      const hasLat = !isNaN(latVal) && latVal !== 0 && !isNaN(lngVal) && lngVal !== 0;
 
       let matchPinned = true;
       if (showOnlyPinnedGPS) {
@@ -2535,8 +2539,8 @@
       }
 
       if (matchPinned && matchKey) {
-        matched.push(s);
-        if (matched.length >= 30) break;
+        matched.push({ ...s, lat: latVal, lng: lngVal });
+        if (matched.length >= 50) break;
       }
     }
 
@@ -2553,7 +2557,7 @@
             <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'}</span>
             <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">${hasLat ? `Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}</span>
           </div>
-          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
+          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
           <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
             <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
@@ -2621,7 +2625,7 @@
           <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
           <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${p.dvt || 'cây'}_Q/C: ${p.tyLeQuyDoi || 50}</span>
         </div>
-        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${p.name}">${p.name}</div>
+        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
         <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:8px 10px; border-radius:8px;">
           <span>Tồn đầu: <b>${p.stockDau || 0}</b></span>
           <span>Tồn cuối: <b>${p.stockCuoi || 0}</b></span>
@@ -3968,11 +3972,11 @@
                   ${editingOrderId ? '<span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);">(Đang Sửa Đơn)</span>' : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
-                  ${activeVisitedStore.lat ? `
+                  ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? `
                     <button class="btn btn-green btn-sm" onclick="openNativeNavigator(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)})" style="font-weight:700; padding:6px 10px; font-size:12px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
                   ` : ''}
                   <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:12px; white-space:nowrap;">
-                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Đã ghim' : 'Lưu GPS'}
+                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Lưu GPS'}
                   </button>
                 </div>
               </div>
@@ -3981,7 +3985,7 @@
               </div>
               <div style="font-size: calc(var(--font-size-sub-meta) * 1.5); color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;">
                 <span style="word-break:break-word;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
-                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? 'Đã ghim' : 'Chưa'}</b></span>
+                <span>• GPS: <b style="color:${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Chưa'}</b></span>
               </div>
             </div>
           `}
@@ -4195,7 +4199,7 @@
                   <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
                 </div>
-                <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${o.maKH}</div>
+                <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;">${o.maKH}</div>
                 <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:6px 10px; border-radius:6px;">
                   <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
                   <span>SL: <b style="color:#2563EB;">${o.totalQty}</b></span>
