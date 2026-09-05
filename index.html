@@ -937,15 +937,20 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      // Đã tăng version lên 32 để làm mới và sửa lỗi keyPath của offlineCheckins
-      const request = indexedDB.open("DMS_OfflineDB", 32);
+      // Tăng version lên 33 để cập nhật cấu trúc và sửa lỗi keyPath của localStores
+      const request = indexedDB.open("DMS_OfflineDB", 33);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
-        if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
+        
+        if (dbInstance.objectStoreNames.contains("localStores")) {
+          dbInstance.deleteObjectStore("localStores");
+        }
+        dbInstance.createObjectStore("localStores", { keyPath: "id" });
+
         if (dbInstance.objectStoreNames.contains("offlineCheckins")) {
           dbInstance.deleteObjectStore("offlineCheckins");
         }
@@ -987,7 +992,13 @@
       const transaction = idbDb.transaction(["localStores"], "readwrite");
       const store = transaction.objectStore("localStores");
       store.clear();
-      list.forEach(s => store.put(s));
+      list.forEach(s => {
+        const storeItem = {
+          id: String(s.id || s.code || ('kh_' + Math.random().toString(36).slice(2, 7))),
+          ...s
+        };
+        store.put(storeItem);
+      });
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
