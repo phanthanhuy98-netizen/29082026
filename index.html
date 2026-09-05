@@ -437,7 +437,6 @@
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
 
-  // Quản lý unsubscribe listeners để chống rò rỉ bộ nhớ (Memory Leak)
   let activeUnsubscribers = [];
 
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
@@ -874,21 +873,16 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      // Đã nâng version lên 33 để tự động làm mới, xóa các store lỗi keyPath
-      const request = indexedDB.open("DMS_OfflineDB", 33);
+      // Đổi tên DB thành DMS_OfflineDB_v3 để ép buộc mọi thiết bị khách hàng tạo mới hoàn toàn, triệt tiêu cache lỗi
+      const request = indexedDB.open("DMS_OfflineDB_v3", 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
-        
-        // Tự động xóa các store cũ bị lỗi keyPath để tạo mới sạch sẽ
-        if (dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.deleteObjectStore("offlineOrders");
-        if (dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.deleteObjectStore("offlineCheckins");
-        if (dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.deleteObjectStore("cartDrafts");
 
-        dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
-        dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
-        dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
+        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
 
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
@@ -991,13 +985,18 @@
     });
   }
 
+  // --- SỬA LỖI TRIỆT ĐỂ: LUÔN TỰ ĐỘNG TẠO ID CHO OFFLINE CHECKIN ĐỂ KHÔNG BAO GIỜ LỖI KEYPATH ---
   async function saveOfflineCheckin(checkinData) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
       const store = tx.objectStore("offlineCheckins");
-      // Bổ sung tự tạo ID nếu thiếu để chống triệt để lỗi keyPath
-      const payload = { id: checkinData.id || ('chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), ...checkinData };
+      
+      const payload = { 
+        id: checkinData.id || ('chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), 
+        ...checkinData 
+      };
+      
       store.put(payload);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -1008,7 +1007,11 @@
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineOrders"], "readwrite");
-      tx.objectStore("offlineOrders").put(orderData);
+      const payload = {
+        id: orderData.id || ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)),
+        ...orderData
+      };
+      tx.objectStore("offlineOrders").put(payload);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1368,7 +1371,6 @@
     }
   };
 
-  // --- TẢI DỮ LIỆU TĨNH MỘT LẦN KẾT HỢP CACHE ĐỊA PHƯƠNG ĐỂ TIẾT KIỆM FIREBASE READS ---
   async function fetchStaticAppData() {
     try {
       const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
@@ -1384,7 +1386,6 @@
       if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
       renderUI();
 
-      // Chỉ gọi getDocs thay vì onSnapshot toàn cục để tiết kiệm lượt đọc (Reads)
       const [prdsSnap, storesSnap, routesSnap, compsSnap] = await Promise.all([
         getDocs(collection(db, "products")),
         getDocs(collection(db, "stores")),
@@ -1414,13 +1415,10 @@
     } catch (e) {}
   }
 
-  // --- HỆ THỐNG LẮNG NGHE REAL-TIME CÓ CHỌN LỌC (CHỈ DÙNG CHO DỮ LIỆU BIẾN ĐỘNG) ---
   function initRealtimeDataSync() {
-    // Xóa bỏ các listener cũ nếu có để tránh rò rỉ bộ nhớ
     activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
     activeUnsubscribers = [];
 
-    // Chỉ real-time cho syncRequests và orders mới thay đổi liên tục
     const unsubSync = onSnapshot(collection(db, "syncRequests"), (snapshot) => {
       syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       if (currentTab === 'update') {
@@ -1667,6 +1665,7 @@
         };
 
         const checkinPayload = {
+          id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
           salesUid: currentUser.uid,
           salesName: currentUser.name,
           salesCode: currentUser.code,
@@ -1806,6 +1805,7 @@
       };
 
       const checkinPayload = {
+        id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         salesUid: currentUser.uid,
         salesName: currentUser.name,
         salesCode: currentUser.code,
@@ -3768,7 +3768,7 @@
         ` : ''}
 
         <div class="card" style="margin-bottom:10px; border:1px solid ${activeVisitedStore ? 'var(--card-border)' : 'var(--primary)'};">
-          ${!activeVisitedStore ? `
+          {!activeVisitedStore ? `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
               <h3 style="font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
                 <i class="fa-solid fa-store" style="color:var(--primary);"></i> Nhập Mã Khách Hàng (VD: 51Duyen1)
