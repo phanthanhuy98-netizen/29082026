@@ -437,8 +437,6 @@
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
 
-  let activeUnsubscribers = [];
-
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
   const themePresets = {
@@ -454,6 +452,7 @@
 
   let searchDebounceTimer = null;
   let productSearchDebounceTimer = null;
+  let globalIdleUpdateHandle = null;
 
   window.triggerHaptic = function(duration = 35) {
     const isEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
@@ -511,6 +510,33 @@
     }
   });
 
+  window.syncAllTabColors = function(colorVal) {
+    const defaultTabs = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'update', 'users'];
+    defaultTabs.forEach(tKey => {
+      document.documentElement.style.setProperty(`--tab-${tKey}-color`, colorVal);
+      if (currentUser) {
+        localStorage.setItem(`dms_tabcolor_${currentUser.uid}_${tKey}`, colorVal);
+      }
+    });
+    renderTabBarOrder();
+    openSettingsModal();
+  };
+
+  window.resetDefaultTabColors = function() {
+    const tabDefaultColors = {
+      sales: "#F59E0B", soGocBH: "#10B981", customers: "#0D9488",
+      productsAdmin: "#3B82F6", routes: "#8B5CF6", company: "#DB2777", update: "#4F46E5", users: "#D97706"
+    };
+    Object.keys(tabDefaultColors).forEach(tKey => {
+      document.documentElement.style.setProperty(`--tab-${tKey}-color`, tabDefaultColors[tKey]);
+      if (currentUser) {
+        localStorage.removeItem(`dms_tabcolor_${currentUser.uid}_${tKey}`);
+      }
+    });
+    renderTabBarOrder();
+    openSettingsModal();
+  };
+
   window.applyTheme = function(themeKey) {
     const t = themePresets[themeKey] || themePresets.softWhite;
     const root = document.documentElement;
@@ -531,7 +557,8 @@
   window.applyAdvancedCustomSettings = function(fontSizeVal, fontFamilyVal, boxBgVal, boxTextVal) {
     const root = document.documentElement;
     if (fontSizeVal) {
-      root.style.setProperty('--app-font-size', fontSizeVal + 'px');
+      const fSize = fontSizeVal + 'px';
+      root.style.setProperty('--app-font-size', fSize);
       localStorage.setItem('dms_custom_font_size', fontSizeVal);
     }
     if (fontFamilyVal) {
@@ -571,12 +598,21 @@
 
   window.applyProductItemColors = function(propName, colorVal) {
     const root = document.documentElement;
-    if (propName === 'dvtColor') {
+    if (propName === 'dvtBg') {
+      root.style.setProperty('--prod-dvt-bg', colorVal);
+      localStorage.setItem('dms_color_dvt_bg', colorVal);
+    } else if (propName === 'dvtColor') {
       root.style.setProperty('--prod-dvt-color', colorVal);
       localStorage.setItem('dms_color_dvt_color', colorVal);
+    } else if (propName === 'codeBg') {
+      root.style.setProperty('--prod-code-bg', colorVal);
+      localStorage.setItem('dms_color_code_bg', colorVal);
     } else if (propName === 'codeColor') {
       root.style.setProperty('--prod-code-color', colorVal);
       localStorage.setItem('dms_color_code_color', colorVal);
+    } else if (propName === 'qcBg') {
+      root.style.setProperty('--prod-qc-bg', colorVal);
+      localStorage.setItem('dms_color_qc_bg', colorVal);
     } else if (propName === 'qcColor') {
       root.style.setProperty('--prod-qc-color', colorVal);
       localStorage.setItem('dms_color_qc_color', colorVal);
@@ -625,13 +661,22 @@
     const subMetaFont = localStorage.getItem('dms_font_sub_meta') || '11';
     applyDetailedFontSizes(custFont, prodFont, searchFont, subMetaFont);
 
+    const dvtBg = localStorage.getItem('dms_color_dvt_bg') || 'rgba(37, 99, 235, 0.12)';
     const dvtColor = localStorage.getItem('dms_color_dvt_color') || '#2563EB';
+    const codeBg = localStorage.getItem('dms_color_code_bg') || 'rgba(37, 99, 235, 0.12)';
     const codeColor = localStorage.getItem('dms_color_code_color') || '#2563EB';
+    const qcBg = localStorage.getItem('dms_color_qc_bg') || 'rgba(37, 99, 235, 0.12)';
     const qcColor = localStorage.getItem('dms_color_qc_color') || '#2563EB';
     
+    applyProductItemColors('dvtBg', dvtBg);
     applyProductItemColors('dvtColor', dvtColor);
+    applyProductItemColors('codeBg', codeBg);
     applyProductItemColors('codeColor', codeColor);
+    applyProductItemColors('qcBg', qcBg);
     applyProductItemColors('qcColor', qcColor);
+
+    const savedHideMeta = localStorage.getItem('dms_super_hide_metadata') === 'true';
+    if (savedHideMeta) document.body.classList.add('super-hide-metadata');
 
     const savedOrder = localStorage.getItem(`dms_taborder_${uid}`);
     if (savedOrder) {
@@ -707,6 +752,15 @@
             <h3 style="font-size: 15px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-gear" style="color:var(--amber);"></i> Cài Đặt Hệ Thống & Tùy Biến Giao Diện</h3>
             <button class="btn btn-red btn-sm" onclick="closeSettingsModal()">Đóng</button>
           </div>
+
+          ${currentUser && currentUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com' ? `
+            <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i> Đẩy dữ liệu lên Cloud</div>
+                <button class="btn btn-green btn-sm" onclick="pushMasterDataToCloud()"><i class="fa-solid fa-upload"></i> Đẩy dữ liệu lên Cloud</button>
+              </div>
+            </div>
+          ` : ''}
 
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-font"></i> 1. Cỡ Chữ Chung & Kiểu Chữ (Font Family)</div>
@@ -813,6 +867,12 @@
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
               <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-palette"></i> 5. Màu Sắc & Vị Trí Tab</div>
+              <button class="btn btn-sm" style="font-size: 10px; padding: 3px 6px;" onclick="resetDefaultTabColors()">Mặc định</button>
+            </div>
+
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: rgba(59,130,246,0.06); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--card-border);">
+              <span style="font-size: 11.5px; font-weight:700; flex: 1;">Áp dụng 1 màu cho tất cả tab:</span>
+              <input type="color" value="#3B82F6" onchange="syncAllTabColors(this.value)" style="width: 36px; height: 28px; border: none; cursor: pointer; background:none; padding:0;">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; padding-right: 2px;">
@@ -826,6 +886,7 @@
                       <span style="font-weight: 700; font-size: 11.5px; color: var(--text-main);">${tabLabels[tKey]}</span>
                     </div>
                     <div style="display: flex; gap: 4px; align-items:center;">
+                      <button type="button" class="btn btn-sm" style="background:${isHidden ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding: 3px 8px; font-size: 10.5px;" onclick="toggleTabVisibility('${tKey}', ${isHidden})">${isHidden ? 'Ẩn' : 'Hiện'}</button>
                       <button class="btn btn-sm" style="padding: 3px 6px;" ${idx === 0 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, -1)"><i class="fa-solid fa-arrow-up"></i></button>
                       <button class="btn btn-sm" style="padding: 3px 6px;" ${idx === currentTabOrder.length - 1 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, 1)"><i class="fa-solid fa-arrow-down"></i></button>
                     </div>
@@ -844,6 +905,18 @@
     const modalContainer = document.getElementById('dynamicModalContainer');
     modalContainer.innerHTML = '';
     modalContainer.classList.add('hidden');
+  };
+
+  window.toggleTabVisibility = function(tabName, isVisible) {
+    let hidden = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
+    if (isVisible) {
+      hidden = hidden.filter(t => t !== tabName);
+    } else {
+      if (!hidden.includes(tabName)) hidden.push(tabName);
+    }
+    localStorage.setItem('dms_hidden_tabs', JSON.stringify(hidden));
+    renderTabBarOrder();
+    openSettingsModal();
   };
 
   let companyList = [];
@@ -873,22 +946,19 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      // Đổi tên DB thành DMS_OfflineDB_v3 để ép buộc mọi thiết bị khách hàng tạo mới hoàn toàn, triệt tiêu cache lỗi
-      const request = indexedDB.open("DMS_OfflineDB_v3", 1);
+      const request = indexedDB.open("DMS_OfflineDB", 29);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
-
-        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
-        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
-        if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
-
+        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
+        if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
       };
     });
   }
@@ -985,19 +1055,31 @@
     });
   }
 
-  // --- SỬA LỖI TRIỆT ĐỂ: LUÔN TỰ ĐỘNG TẠO ID CHO OFFLINE CHECKIN ĐỂ KHÔNG BAO GIỜ LỖI KEYPATH ---
+  async function saveMetaVersion(versionKey, val) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["metaInfo"], "readwrite");
+      tx.objectStore("metaInfo").put({ key: versionKey, value: val });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function getMetaVersion(versionKey) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["metaInfo"], "readonly");
+      const req = tx.objectStore("metaInfo").get(versionKey);
+      req.onsuccess = () => resolve(req.result ? req.result.value : null);
+      req.onerror = () => reject(tx.error);
+    });
+  }
+
   async function saveOfflineCheckin(checkinData) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
-      const store = tx.objectStore("offlineCheckins");
-      
-      const payload = { 
-        id: checkinData.id || ('chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), 
-        ...checkinData 
-      };
-      
-      store.put(payload);
+      tx.objectStore("offlineCheckins").add(checkinData);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1007,11 +1089,7 @@
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineOrders"], "readwrite");
-      const payload = {
-        id: orderData.id || ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)),
-        ...orderData
-      };
-      tx.objectStore("offlineOrders").put(payload);
+      tx.objectStore("offlineOrders").add(orderData);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1153,6 +1231,17 @@
     window.syncOfflineCheckins();
     window.syncOfflineOrders();
   });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      const keyboardHeight = window.innerHeight - window.visualViewport.height;
+      if (keyboardHeight > 100) {
+        document.body.classList.add('keyboard-open');
+      } else {
+        document.body.classList.remove('keyboard-open');
+      }
+    });
+  }
 
   window.scrollToCartFooter = function() {
     const footer = document.getElementById('dynamicCartFooter');
@@ -1371,69 +1460,110 @@
     }
   };
 
-  async function fetchStaticAppData() {
+  window.pushMasterDataToCloud = async function() {
+    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+      return alert("⛔ Chỉ tài khoản Admin gốc mới có quyền đẩy dữ liệu tổng lên Cloud!");
+    }
+    
+    const confirmPush = await window.showCustomConfirm(
+      "Đẩy Dữ Liệu Lên Cloud",
+      "Hệ thống sẽ tổng hợp toàn bộ Vật Tư, Khách Hàng, Tuyến và Công Ty hiện tại để tạo bản cập nhật mới cho toàn hệ thống.\nBạn có muốn tiếp tục không?",
+      "fa-cloud-arrow-up",
+      "Đẩy dữ liệu",
+      "Hủy"
+    );
+    if (!confirmPush) return;
+
     try {
-      const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
-        loadProductsFromLocalCache(),
-        loadStoresFromLocalCache(),
-        loadRoutesFromLocalCache(),
-        loadCompaniesFromLocalCache()
-      ]);
+      alert("⏳ Đang tổng hợp và đẩy dữ liệu lên Cloud Storage... Vui lòng chờ trong giây lát.");
+      
+      const newVersion = Date.now();
+      const payload = {
+        version: newVersion,
+        versionString: "2.0." + Math.floor(newVersion / 1000),
+        products: products,
+        stores: stores,
+        routes: routeGroupsList,
+        companies: companyList
+      };
 
-      if (cachedPrds && cachedPrds.length > 0) { products = cachedPrds; buildProductIndex(); }
-      if (cachedStores && cachedStores.length > 0) { stores = cachedStores; buildStoreIndex(); }
-      if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
-      if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
-      renderUI();
+      const jsonStr = JSON.stringify(payload);
+      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
+      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
 
-      const [prdsSnap, storesSnap, routesSnap, compsSnap] = await Promise.all([
-        getDocs(collection(db, "products")),
-        getDocs(collection(db, "stores")),
-        getDocs(collection(db, "routes")),
-        getDocs(collection(db, "companies"))
-      ]);
+      const metaRef = doc(db, "systemMetadata", "appVersionControl");
+      await setDoc(metaRef, { 
+        dataVersion: newVersion,
+        versionString: payload.versionString,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
 
-      if (!prdsSnap.empty) {
-        products = prdsSnap.docs.map(d => d.data());
-        buildProductIndex();
-        saveProductsToLocalCache(products).catch(() => {});
-      }
-      if (!storesSnap.empty) {
-        stores = storesSnap.docs.map(d => d.data());
-        buildStoreIndex();
-        saveStoresToLocalCache(stores).catch(() => {});
-      }
-      if (!routesSnap.empty) {
-        routeGroupsList = routesSnap.docs.map(d => d.data());
-        saveRoutesToLocalCache(routeGroupsList).catch(() => {});
-      }
-      if (!compsSnap.empty) {
-        companyList = compsSnap.docs.map(d => d.data());
-        saveCompaniesToLocalCache(companyList).catch(() => {});
-      }
-      renderUI();
+      await saveMetaVersion("cachedDataVersion", newVersion);
+
+      alert(`✅ Đã cập nhật thành công phiên bản mới lên Cloud (${payload.versionString})!`);
+    } catch (e) {
+      alert("⛔ Lỗi khi đẩy dữ liệu lên Cloud: " + e.message);
+    }
+  };
+
+  async function uploadFullDataJsonToCloud() {
+    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') return;
+    try {
+      const newVersion = Date.now();
+      const payload = {
+        version: newVersion,
+        versionString: "2.0." + Math.floor(newVersion / 1000),
+        products: products,
+        stores: stores,
+        routes: routeGroupsList,
+        companies: companyList
+      };
+      const jsonStr = JSON.stringify(payload);
+      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
+      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
+
+      const metaRef = doc(db, "systemMetadata", "appVersionControl");
+      await setDoc(metaRef, { 
+        dataVersion: newVersion,
+        versionString: payload.versionString,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
     } catch (e) {}
   }
 
-  function initRealtimeDataSync() {
-    activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
-    activeUnsubscribers = [];
-
-    const unsubSync = onSnapshot(collection(db, "syncRequests"), (snapshot) => {
-      syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (currentTab === 'update') {
-        const activePane = document.getElementById('tabPane_update');
-        if (activePane) renderTabContent('update', activePane);
+  async function loadDataFromFirestore() {
+    try {
+      const prdSnap = await getDocs(collection(db, "products"));
+      if (!prdSnap.empty) {
+        products = prdSnap.docs.map(d => d.data());
+        buildProductIndex();
+        await saveProductsToLocalCache(products);
       }
-    });
-    activeUnsubscribers.push(unsubSync);
+
+      const storeSnap = await getDocs(collection(db, "stores"));
+      if (!storeSnap.empty) {
+        stores = storeSnap.docs.map(d => d.data());
+        buildStoreIndex();
+        await saveStoresToLocalCache(stores);
+      }
+
+      const routeSnap = await getDocs(collection(db, "routes"));
+      if (!routeSnap.empty) {
+        routeGroupsList = routeSnap.docs.map(d => d.data());
+        await saveRoutesToLocalCache(routeGroupsList);
+      }
+
+      const compSnap = await getDocs(collection(db, "companies"));
+      if (!compSnap.empty) {
+        companyList = compSnap.docs.map(d => d.data());
+        await saveCompaniesToLocalCache(companyList);
+      }
+    } catch (e) {}
   }
 
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
-      activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
-      activeUnsubscribers = [];
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
       return;
@@ -1477,8 +1607,26 @@
       await initIndexedDB();
       await cleanupExpiredOrdersOptimized();
       
-      await fetchStaticAppData();
-      initRealtimeDataSync();
+      try {
+        const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
+          loadProductsFromLocalCache(),
+          loadStoresFromLocalCache(),
+          loadRoutesFromLocalCache(),
+          loadCompaniesFromLocalCache()
+        ]);
+
+        if (cachedPrds && cachedPrds.length > 0) { products = cachedPrds; buildProductIndex(); }
+        if (cachedStores && cachedStores.length > 0) { stores = cachedStores; buildStoreIndex(); }
+        if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
+        if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
+
+        renderUI();
+
+        if (products.length === 0) {
+          await loadDataFromFirestore();
+          renderUI();
+        }
+      } catch (e) {}
 
       try {
         const pos = await getHighAccuracyPosition();
@@ -1494,8 +1642,10 @@
   });
 
   window.handleLogout = async function() {
-    activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
-    activeUnsubscribers = [];
+    if (globalIdleUpdateHandle && 'cancelIdleCallback' in window) {
+      cancelIdleCallback(globalIdleUpdateHandle);
+      globalIdleUpdateHandle = null;
+    }
 
     const loginView = document.getElementById('loginView');
     const appView = document.getElementById('appView');
@@ -1637,100 +1787,6 @@
       return;
     }
 
-    const hasGPSAlready = Boolean(targetStore.lat && Number(targetStore.lat) !== 0 && targetStore.lng && Number(targetStore.lng) !== 0);
-
-    if (!hasGPSAlready) {
-      const confirmPin = await window.showCustomConfirm(
-        "Bắt Buộc Ghim GPS",
-        `Khách hàng "${targetStore.name}" chưa có vị trí GPS.\nBạn có chắc chắn đây là vị trí đúng của khách hàng chứ?`,
-        "fa-location-crosshairs",
-        "Đúng chính xác",
-        "Hủy"
-      );
-
-      if (!confirmPin) return;
-
-      try {
-        const pos = await getHighAccuracyPosition();
-        const lat = Number(pos.lat);
-        const lng = Number(pos.lng);
-        currentSalesGPS = { lat, lng };
-
-        const existingHistory = targetStore.pinnedHistory || [];
-        const newHistoryItem = {
-          lat, lng,
-          code: currentUser.code || 'NV',
-          name: currentUser.name || 'Nhân viên',
-          time: new Date().toISOString()
-        };
-
-        const checkinPayload = {
-          id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-          salesUid: currentUser.uid,
-          salesName: currentUser.name,
-          salesCode: currentUser.code,
-          storeId: String(targetStore.id),
-          storeName: targetStore.name,
-          lat, lng,
-          accuracy: pos.accuracy,
-          status: "Ghim GPS bắt buộc"
-        };
-
-        const updatePayload = {
-          lat, lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên',
-          pinnedAt: new Date().toISOString(),
-          pinnedHistory: [...existingHistory, newHistoryItem]
-        };
-
-        const storeRef = doc(db, "stores", String(targetStore.id));
-        await setDoc(storeRef, updatePayload, { merge: true });
-        
-        try {
-          await addDoc(collection(db, "checkins"), {
-            ...checkinPayload,
-            createdAt: serverTimestamp()
-          });
-        } catch (offlineErr) {
-          await saveOfflineCheckin(checkinPayload);
-        }
-
-        const storeIndex = stores.findIndex(s => String(s.id) === String(targetStore.id));
-        if (storeIndex > -1) {
-          stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
-          targetStore = stores[storeIndex];
-        }
-        await saveStoresToLocalCache(stores);
-        buildStoreIndex();
-        triggerHaptic(30);
-      } catch (err) {
-        alert("Không thể lấy tọa độ GPS: " + err.message);
-        return;
-      }
-    } else {
-      try {
-        const pos = await getHighAccuracyPosition();
-        const salesLat = Number(pos.lat);
-        const salesLng = Number(pos.lng);
-        currentSalesGPS = { lat: salesLat, lng: salesLng };
-
-        const distanceMeters = calculateDistanceMeters(salesLat, salesLng, Number(targetStore.lat), Number(targetStore.lng));
-
-        if (distanceMeters > 20) {
-          const confirmDistance = await window.showCustomConfirm(
-            "Cảnh Báo Lệch Khoảng Cách GPS",
-            `Bạn đang đứng cách vị trí ghim của khách hàng ${Math.round(distanceMeters)} mét (lệch trên 20 mét).\nKhách hàng này đã đúng chưa cần xem lại?`,
-            "fa-triangle-exclamation",
-            "Đúng chính xác",
-            "Hủy"
-          );
-
-          if (!confirmDistance) return;
-        }
-      } catch (err) {}
-    }
-
     activeVisitedStore = targetStore;
     productSearchKeyword = '';
     customerSearchKeyword = '';
@@ -1740,6 +1796,72 @@
     editingOrderId = null;
 
     await loadCartDraftFromLocal();
+
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
+
+    if (!hasGPSAlready) {
+      const updateGPSNow = await window.showCustomConfirm(
+        "Cập Nhật Vị Trí GPS",
+        `Khách hàng "${activeVisitedStore.name}" chưa có định vị GPS.\nBạn có muốn cập nhật vị trí GPS ngay tại đây không?\n\n• [Cập nhật ngay]: Lấy tọa độ thực tế hiện tại.\n• [Để sau]: Giữ nguyên vị trí.`,
+        "fa-location-crosshairs",
+        "Cập nhật ngay",
+        "Để sau"
+      );
+
+      if (updateGPSNow) {
+        try {
+          const pos = await getHighAccuracyPosition();
+          const lat = Number(pos.lat);
+          const lng = Number(pos.lng);
+          currentSalesGPS = { lat, lng };
+
+          const existingHistory = activeVisitedStore.pinnedHistory || [];
+          const newHistoryItem = {
+            lat, lng,
+            code: currentUser.code || 'NV',
+            name: currentUser.name || 'Nhân viên',
+            time: new Date().toISOString()
+          };
+
+          const checkinPayload = {
+            salesUid: currentUser.uid,
+            salesName: currentUser.name,
+            salesCode: currentUser.code,
+            storeId: String(activeVisitedStore.id),
+            storeName: activeVisitedStore.name,
+            lat, lng,
+            accuracy: pos.accuracy,
+            status: "Check-in thành công"
+          };
+
+          const updatePayload = {
+            lat, lng,
+            pinnedByCode: currentUser.code || 'NV',
+            pinnedByName: currentUser.name || 'Nhân viên',
+            pinnedAt: new Date().toISOString(),
+            pinnedHistory: [...existingHistory, newHistoryItem]
+          };
+
+          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+          await setDoc(storeRef, updatePayload, { merge: true });
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
+
+          const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+          if (storeIndex > -1) {
+            stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+            activeVisitedStore = stores[storeIndex];
+          }
+          await saveStoresToLocalCache(stores);
+          buildStoreIndex();
+        } catch (err) {
+          alert("Không thể lấy tọa độ GPS: " + err.message);
+        }
+      }
+    }
+
     triggerHaptic(25);
     renderUI();
   };
@@ -1805,7 +1927,6 @@
       };
 
       const checkinPayload = {
-        id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         salesUid: currentUser.uid,
         salesName: currentUser.name,
         salesCode: currentUser.code,
@@ -1826,15 +1947,10 @@
 
       const storeRef = doc(db, "stores", String(activeVisitedStore.id));
       await setDoc(storeRef, updatePayload, { merge: true });
-      
-      try {
-        await addDoc(collection(db, "checkins"), {
-          ...checkinPayload,
-          createdAt: serverTimestamp()
-        });
-      } catch (offlineErr) {
-        await saveOfflineCheckin(checkinPayload);
-      }
+      await addDoc(collection(db, "checkins"), {
+        ...checkinPayload,
+        createdAt: serverTimestamp()
+      });
 
       const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
       if (storeIndex > -1) {
@@ -3040,8 +3156,6 @@
         salesName: currentUser.name, 
         salesCode: currentUser.code,
         storeId: activeVisitedStore.id, 
-        lat: currentSalesGPS?.lat || 0,
-        lng: currentSalesGPS?.lng || 0,
         items, 
         amount: finalAmount, 
         rawSubtotal,
@@ -3129,6 +3243,7 @@
     }
   };
 
+  // --- TAB CẬP NHẬT / ĐỒNG BỘ DỮ LIỆU ---
   window.sendSyncRequest = async function() {
     if (!currentUser) return;
     try {
@@ -3296,6 +3411,8 @@
         products = rawProducts;
         buildProductIndex();
         await saveProductsToLocalCache(products);
+        await uploadFullDataJsonToCloud();
+
         renderUI();
         alert(`✅ Đã đẩy thành công ${products.length} vật tư lên Firebase Firestore!`);
       } catch (err) { 
@@ -3359,6 +3476,8 @@
         stores = rawCustomers;
         buildStoreIndex();
         await saveStoresToLocalCache(stores);
+        await uploadFullDataJsonToCloud();
+
         renderUI();
         alert(`✅ Đã đẩy thành công ${stores.length} khách hàng lên Firebase Firestore!`);
       } catch (err) { 
@@ -3399,6 +3518,7 @@
 
           companyList = newList;
           await saveCompaniesToLocalCache(companyList);
+          await uploadFullDataJsonToCloud();
           renderUI();
           alert("✅ Đã đẩy danh sách công ty lên Firebase Firestore thành công!");
         } else {
@@ -3445,6 +3565,7 @@
 
           routeGroupsList = newList;
           await saveRoutesToLocalCache(newList);
+          await uploadFullDataJsonToCloud();
           renderUI();
           alert("✅ Đã đẩy danh sách tuyến lên Firebase Firestore thành công!");
         } else {
@@ -3467,6 +3588,7 @@
       await setDoc(doc(db, "companies", maCtu.trim()), newC);
       companyList.push(newC);
       await saveCompaniesToLocalCache(companyList);
+      await uploadFullDataJsonToCloud();
       renderUI();
       alert("✅ Thêm công ty thành công!");
     } catch (err) {
@@ -3491,7 +3613,10 @@
     try {
       await setDoc(doc(db, "routes", newRouteId), newRouteObj);
       routeGroupsList.push(newRouteObj);
-      await saveRoutesToLocalCache(routeGroupsList);
+      await Promise.all([
+        saveRoutesToLocalCache(routeGroupsList),
+        uploadFullDataJsonToCloud()
+      ]);
       renderUI();
       alert("✅ Đã thêm tuyến mới thành công!");
     } catch (err) {
@@ -3506,6 +3631,7 @@
     try {
       await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
       await saveCompaniesToLocalCache(companyList);
+      await uploadFullDataJsonToCloud();
     } catch (err) {}
     renderUI();
   };
@@ -3523,6 +3649,7 @@
     try {
       await updateDoc(doc(db, "routes", String(r.id)), { [field]: routeGroupsList[index][field] });
       await saveRoutesToLocalCache(routeGroupsList);
+      await uploadFullDataJsonToCloud();
     } catch (err) {}
     renderUI();
   };
@@ -3537,6 +3664,7 @@
       await deleteDoc(doc(db, "companies", String(c.maCtu)));
       companyList.splice(index, 1);
       await saveCompaniesToLocalCache(companyList);
+      await uploadFullDataJsonToCloud();
       renderUI();
     } catch (err) {
       alert("Lỗi khi xóa: " + err.message);
@@ -3552,7 +3680,10 @@
     try {
       await deleteDoc(doc(db, "routes", String(r.id)));
       routeGroupsList.splice(index, 1);
-      await saveRoutesToLocalCache(routeGroupsList);
+      await Promise.all([
+        saveRoutesToLocalCache(routeGroupsList),
+        uploadFullDataJsonToCloud()
+      ]);
       renderUI();
       alert("✅ Đã xóa tuyến thành công!");
     } catch (err) {
@@ -3631,6 +3762,15 @@
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => {});
+
+    // Lắng nghe real-time bảng syncRequests cho Admin/Manager và Sales
+    onSnapshot(collection(db, "syncRequests"), (snapshot) => {
+      syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (currentTab === 'update') {
+        const activePane = document.getElementById('tabPane_update');
+        if (activePane) renderTabContent('update', activePane);
+      }
+    });
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
@@ -3768,7 +3908,7 @@
         ` : ''}
 
         <div class="card" style="margin-bottom:10px; border:1px solid ${activeVisitedStore ? 'var(--card-border)' : 'var(--primary)'};">
-          {!activeVisitedStore ? `
+          ${!activeVisitedStore ? `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
               <h3 style="font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
                 <i class="fa-solid fa-store" style="color:var(--primary);"></i> Nhập Mã Khách Hàng (VD: 51Duyen1)
@@ -3957,10 +4097,7 @@
             salesCode: o.salesCode || '',
             salesUid: o.salesUid || '',
             totalQty: orderTotalQty,
-            amount: o.amount || 0,
-            lat: o.lat || 0,
-            lng: o.lng || 0,
-            storeId: o.storeId || ''
+            amount: o.amount || 0
           });
         }
       });
@@ -4025,25 +4162,11 @@
             const canDelete = (isOwner && isToday) || isManagerOrAdmin;
             const timeStr = formatOrderTime(o.createdAt);
             
-            let distanceBadgeHtml = '';
-            if (o.lat && o.lng && o.storeId) {
-              const targetStore = stores.find(s => String(s.id) === String(o.storeId));
-              if (targetStore && targetStore.lat && Number(targetStore.lat) !== 0) {
-                const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(targetStore.lat), Number(targetStore.lng));
-                if (dist > 20) {
-                  distanceBadgeHtml = `<div style="font-size:11px; font-weight:700; color:#FFFFFF; background:rgba(217,119,6,0.85); padding:2px 6px; border-radius:4px; display:inline-block; margin-top:2px;">Lệch maps ${Math.round(dist)}m</div>`;
-                }
-              }
-            }
-
             return `
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}" style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
-                  <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted); display:flex; flex-direction:column; align-items:flex-end;">
-                    <span><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
-                    ${distanceBadgeHtml}
-                  </span>
+                  <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
                 </div>
                 <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;">${o.maKH}</div>
                 <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:6px 10px; border-radius:6px;">
@@ -4228,6 +4351,7 @@
         </div>
 
         ${isAdminOrManager ? `
+          <!-- GIAO DIỆN DÀNH CHO ADMIN / MANAGER -->
           <div class="card">
             <h3 style="font-size:15px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-shield"></i> Danh Sách Yêu Cầu Cấp Phép Đồng Bộ (Thời Gian Thực)</h3>
             <div style="display:flex; flex-direction:column; gap:8px;">
@@ -4258,6 +4382,7 @@
             </div>
           </div>
         ` : `
+          <!-- GIAO DIỆN DÀNH CHO NHÂN VIÊN (SALES) -->
           <div class="card" style="text-align:center; padding:24px;">
             <div style="width:64px; height:64px; background:rgba(37,99,235,0.1); color:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:24px;">
               <i class="fa-solid fa-cloud-arrow-down"></i>
