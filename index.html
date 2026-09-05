@@ -937,19 +937,15 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      // Đã tăng version lên 32 để làm mới và sửa lỗi keyPath của offlineCheckins
-      const request = indexedDB.open("DMS_OfflineDB", 32);
+      const request = indexedDB.open("DMS_OfflineDB", 30);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
-        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
-        if (dbInstance.objectStoreNames.contains("offlineCheckins")) {
-          dbInstance.deleteObjectStore("offlineCheckins");
-        }
-        dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
+        if (!dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.createObjectStore("offlineCheckins", { keyPath: "id", autoIncrement: true });
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
@@ -1054,9 +1050,7 @@
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
-      const store = tx.objectStore("offlineCheckins");
-      const payload = { id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), ...checkinData };
-      store.put(payload);
+      tx.objectStore("offlineCheckins").add(checkinData);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1066,7 +1060,7 @@
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineOrders"], "readwrite");
-      tx.objectStore("offlineOrders").put(orderData);
+      tx.objectStore("offlineOrders").add(orderData);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1437,8 +1431,9 @@
     }
   };
 
-  // --- HỆ THỐNG ĐỒNG BỘ REAL-TIME TRỰC TIẾP TỪ FIRESTORE ---
+  // --- HỆ THỐNG ĐỒNG BỘ REAL-TIME TRỰC TIẾP TỪ FIRESTORE (KHÔNG DÙNG CLOUD STORAGE) ---
   function initRealtimeDataSync() {
+    // 1. Lắng nghe danh sách Vật tư (Products) thời gian thực
     onSnapshot(collection(db, "products"), (snapshot) => {
       products = snapshot.docs.map(d => d.data());
       buildProductIndex();
@@ -1448,6 +1443,7 @@
       }
     });
 
+    // 2. Lắng nghe danh sách Khách hàng (Stores) thời gian thực
     onSnapshot(collection(db, "stores"), (snapshot) => {
       stores = snapshot.docs.map(d => d.data());
       buildStoreIndex();
@@ -1457,6 +1453,7 @@
       }
     });
 
+    // 3. Lắng nghe danh sách Tuyến (Routes) thời gian thực
     onSnapshot(collection(db, "routes"), (snapshot) => {
       routeGroupsList = snapshot.docs.map(d => d.data());
       saveRoutesToLocalCache(routeGroupsList).catch(() => {});
@@ -1465,6 +1462,7 @@
       }
     });
 
+    // 4. Lắng nghe danh sách Công ty (Companies) thời gian thực
     onSnapshot(collection(db, "companies"), (snapshot) => {
       companyList = snapshot.docs.map(d => d.data());
       saveCompaniesToLocalCache(companyList).catch(() => {});
@@ -1520,6 +1518,7 @@
       await initIndexedDB();
       await cleanupExpiredOrdersOptimized();
       
+      // Khởi động bộ nạp dữ liệu cache trước để app phản hồi siêu tốc ngay lập tức
       try {
         const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
           loadProductsFromLocalCache(),
@@ -1535,6 +1534,7 @@
         renderUI();
       } catch (e) {}
 
+      // Kích hoạt lắng nghe Real-time trực tiếp từ Firestore cho tất cả các máy
       initRealtimeDataSync();
 
       try {
@@ -1696,99 +1696,6 @@
       return;
     }
 
-    const hasGPSAlready = Boolean(targetStore.lat && Number(targetStore.lat) !== 0 && targetStore.lng && Number(targetStore.lng) !== 0);
-
-    if (!hasGPSAlready) {
-      const confirmPin = await window.showCustomConfirm(
-        "Bắt Buộc Ghim GPS",
-        `Khách hàng "${targetStore.name}" chưa có vị trí GPS.\nBạn có chắc chắn đây là vị trí đúng của khách hàng chứ?`,
-        "fa-location-crosshairs",
-        "Đúng chính xác",
-        "Hủy"
-      );
-
-      if (!confirmPin) return;
-
-      try {
-        const pos = await getHighAccuracyPosition();
-        const lat = Number(pos.lat);
-        const lng = Number(pos.lng);
-        currentSalesGPS = { lat, lng };
-
-        const existingHistory = targetStore.pinnedHistory || [];
-        const newHistoryItem = {
-          lat, lng,
-          code: currentUser.code || 'NV',
-          name: currentUser.name || 'Nhân viên',
-          time: new Date().toISOString()
-        };
-
-        const checkinPayload = {
-          salesUid: currentUser.uid,
-          salesName: currentUser.name,
-          salesCode: currentUser.code,
-          storeId: String(targetStore.id),
-          storeName: targetStore.name,
-          lat, lng,
-          accuracy: pos.accuracy,
-          status: "Ghim GPS bắt buộc"
-        };
-
-        const updatePayload = {
-          lat, lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên',
-          pinnedAt: new Date().toISOString(),
-          pinnedHistory: [...existingHistory, newHistoryItem]
-        };
-
-        const storeRef = doc(db, "stores", String(targetStore.id));
-        await setDoc(storeRef, updatePayload, { merge: true });
-        
-        try {
-          await addDoc(collection(db, "checkins"), {
-            ...checkinPayload,
-            createdAt: serverTimestamp()
-          });
-        } catch (offlineErr) {
-          await saveOfflineCheckin(checkinPayload);
-        }
-
-        const storeIndex = stores.findIndex(s => String(s.id) === String(targetStore.id));
-        if (storeIndex > -1) {
-          stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
-          targetStore = stores[storeIndex];
-        }
-        await saveStoresToLocalCache(stores);
-        buildStoreIndex();
-        triggerHaptic(30);
-      } catch (err) {
-        alert("Không thể lấy tọa độ GPS: " + err.message);
-        return;
-      }
-    } else {
-      try {
-        const pos = await getHighAccuracyPosition();
-        const salesLat = Number(pos.lat);
-        const salesLng = Number(pos.lng);
-        currentSalesGPS = { lat: salesLat, lng: salesLng };
-
-        const distanceMeters = calculateDistanceMeters(salesLat, salesLng, Number(targetStore.lat), Number(targetStore.lng));
-
-        if (distanceMeters > 20) {
-          const confirmDistance = await window.showCustomConfirm(
-            "Cảnh Báo Lệch Khoảng Cách GPS",
-            `Bạn đang đứng cách vị trí ghim của khách hàng ${Math.round(distanceMeters)} mét (lệch trên 20 mét).\nKhách hàng này đã đúng chưa cần xem lại?`,
-            "fa-triangle-exclamation",
-            "Đúng chính xác",
-            "Hủy"
-          );
-
-          if (!confirmDistance) return;
-        }
-      } catch (err) {}
-    }
-
     activeVisitedStore = targetStore;
     productSearchKeyword = '';
     customerSearchKeyword = '';
@@ -1798,6 +1705,72 @@
     editingOrderId = null;
 
     await loadCartDraftFromLocal();
+
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
+
+    if (!hasGPSAlready) {
+      const updateGPSNow = await window.showCustomConfirm(
+        "Cập Nhật Vị Trí GPS",
+        `Khách hàng "${activeVisitedStore.name}" chưa có định vị GPS.\nBạn có muốn cập nhật vị trí GPS ngay tại đây không?\n\n• [Cập nhật ngay]: Lấy tọa độ thực tế hiện tại.\n• [Để sau]: Giữ nguyên vị trí.`,
+        "fa-location-crosshairs",
+        "Cập nhật ngay",
+        "Để sau"
+      );
+
+      if (updateGPSNow) {
+        try {
+          const pos = await getHighAccuracyPosition();
+          const lat = Number(pos.lat);
+          const lng = Number(pos.lng);
+          currentSalesGPS = { lat, lng };
+
+          const existingHistory = activeVisitedStore.pinnedHistory || [];
+          const newHistoryItem = {
+            lat, lng,
+            code: currentUser.code || 'NV',
+            name: currentUser.name || 'Nhân viên',
+            time: new Date().toISOString()
+          };
+
+          const checkinPayload = {
+            salesUid: currentUser.uid,
+            salesName: currentUser.name,
+            salesCode: currentUser.code,
+            storeId: String(activeVisitedStore.id),
+            storeName: activeVisitedStore.name,
+            lat, lng,
+            accuracy: pos.accuracy,
+            status: "Check-in thành công"
+          };
+
+          const updatePayload = {
+            lat, lng,
+            pinnedByCode: currentUser.code || 'NV',
+            pinnedByName: currentUser.name || 'Nhân viên',
+            pinnedAt: new Date().toISOString(),
+            pinnedHistory: [...existingHistory, newHistoryItem]
+          };
+
+          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+          await setDoc(storeRef, updatePayload, { merge: true });
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
+
+          const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+          if (storeIndex > -1) {
+            stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+            activeVisitedStore = stores[storeIndex];
+          }
+          await saveStoresToLocalCache(stores);
+          buildStoreIndex();
+        } catch (err) {
+          alert("Không thể lấy tọa độ GPS: " + err.message);
+        }
+      }
+    }
+
     triggerHaptic(25);
     renderUI();
   };
@@ -1883,15 +1856,10 @@
 
       const storeRef = doc(db, "stores", String(activeVisitedStore.id));
       await setDoc(storeRef, updatePayload, { merge: true });
-      
-      try {
-        await addDoc(collection(db, "checkins"), {
-          ...checkinPayload,
-          createdAt: serverTimestamp()
-        });
-      } catch (offlineErr) {
-        await saveOfflineCheckin(checkinPayload);
-      }
+      await addDoc(collection(db, "checkins"), {
+        ...checkinPayload,
+        createdAt: serverTimestamp()
+      });
 
       const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
       if (storeIndex > -1) {
@@ -3097,8 +3065,6 @@
         salesName: currentUser.name, 
         salesCode: currentUser.code,
         storeId: activeVisitedStore.id, 
-        lat: currentSalesGPS?.lat || 0,
-        lng: currentSalesGPS?.lng || 0,
         items, 
         amount: finalAmount, 
         rawSubtotal,
@@ -3186,6 +3152,7 @@
     }
   };
 
+  // --- TAB CẬP NHẬT / ĐỒNG BỘ DỮ LIỆU ---
   window.sendSyncRequest = async function() {
     if (!currentUser) return;
     try {
@@ -4022,10 +3989,7 @@
             salesCode: o.salesCode || '',
             salesUid: o.salesUid || '',
             totalQty: orderTotalQty,
-            amount: o.amount || 0,
-            lat: o.lat || 0,
-            lng: o.lng || 0,
-            storeId: o.storeId || ''
+            amount: o.amount || 0
           });
         }
       });
@@ -4090,25 +4054,11 @@
             const canDelete = (isOwner && isToday) || isManagerOrAdmin;
             const timeStr = formatOrderTime(o.createdAt);
             
-            let distanceBadgeHtml = '';
-            if (o.lat && o.lng && o.storeId) {
-              const targetStore = stores.find(s => String(s.id) === String(o.storeId));
-              if (targetStore && targetStore.lat && Number(targetStore.lat) !== 0) {
-                const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(targetStore.lat), Number(targetStore.lng));
-                if (dist > 20) {
-                  distanceBadgeHtml = `<div style="font-size:11px; font-weight:700; color:#FFFFFF; background:rgba(217,119,6,0.85); padding:2px 6px; border-radius:4px; display:inline-block; margin-top:2px;">Lệch maps ${Math.round(dist)}m</div>`;
-                }
-              }
-            }
-
             return `
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" data-order-amount="${o.amount}" style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
-                  <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted); display:flex; flex-direction:column; align-items:flex-end;">
-                    <span><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
-                    ${distanceBadgeHtml}
-                  </span>
+                  <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
                 </div>
                 <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;">${o.maKH}</div>
                 <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:6px 10px; border-radius:6px;">
