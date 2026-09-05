@@ -437,6 +437,9 @@
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
 
+  // Quản lý unsubscribe listeners để chống rò rỉ bộ nhớ (Memory Leak)
+  let activeUnsubscribers = [];
+
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
   const themePresets = {
@@ -452,7 +455,6 @@
 
   let searchDebounceTimer = null;
   let productSearchDebounceTimer = null;
-  let globalIdleUpdateHandle = null;
 
   window.triggerHaptic = function(duration = 35) {
     const isEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
@@ -510,33 +512,6 @@
     }
   });
 
-  window.syncAllTabColors = function(colorVal) {
-    const defaultTabs = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'update', 'users'];
-    defaultTabs.forEach(tKey => {
-      document.documentElement.style.setProperty(`--tab-${tKey}-color`, colorVal);
-      if (currentUser) {
-        localStorage.setItem(`dms_tabcolor_${currentUser.uid}_${tKey}`, colorVal);
-      }
-    });
-    renderTabBarOrder();
-    openSettingsModal();
-  };
-
-  window.resetDefaultTabColors = function() {
-    const tabDefaultColors = {
-      sales: "#F59E0B", soGocBH: "#10B981", customers: "#0D9488",
-      productsAdmin: "#3B82F6", routes: "#8B5CF6", company: "#DB2777", update: "#4F46E5", users: "#D97706"
-    };
-    Object.keys(tabDefaultColors).forEach(tKey => {
-      document.documentElement.style.setProperty(`--tab-${tKey}-color`, tabDefaultColors[tKey]);
-      if (currentUser) {
-        localStorage.removeItem(`dms_tabcolor_${currentUser.uid}_${tKey}`);
-      }
-    });
-    renderTabBarOrder();
-    openSettingsModal();
-  };
-
   window.applyTheme = function(themeKey) {
     const t = themePresets[themeKey] || themePresets.softWhite;
     const root = document.documentElement;
@@ -557,8 +532,7 @@
   window.applyAdvancedCustomSettings = function(fontSizeVal, fontFamilyVal, boxBgVal, boxTextVal) {
     const root = document.documentElement;
     if (fontSizeVal) {
-      const fSize = fontSizeVal + 'px';
-      root.style.setProperty('--app-font-size', fSize);
+      root.style.setProperty('--app-font-size', fontSizeVal + 'px');
       localStorage.setItem('dms_custom_font_size', fontSizeVal);
     }
     if (fontFamilyVal) {
@@ -598,21 +572,12 @@
 
   window.applyProductItemColors = function(propName, colorVal) {
     const root = document.documentElement;
-    if (propName === 'dvtBg') {
-      root.style.setProperty('--prod-dvt-bg', colorVal);
-      localStorage.setItem('dms_color_dvt_bg', colorVal);
-    } else if (propName === 'dvtColor') {
+    if (propName === 'dvtColor') {
       root.style.setProperty('--prod-dvt-color', colorVal);
       localStorage.setItem('dms_color_dvt_color', colorVal);
-    } else if (propName === 'codeBg') {
-      root.style.setProperty('--prod-code-bg', colorVal);
-      localStorage.setItem('dms_color_code_bg', colorVal);
     } else if (propName === 'codeColor') {
       root.style.setProperty('--prod-code-color', colorVal);
       localStorage.setItem('dms_color_code_color', colorVal);
-    } else if (propName === 'qcBg') {
-      root.style.setProperty('--prod-qc-bg', colorVal);
-      localStorage.setItem('dms_color_qc_bg', colorVal);
     } else if (propName === 'qcColor') {
       root.style.setProperty('--prod-qc-color', colorVal);
       localStorage.setItem('dms_color_qc_color', colorVal);
@@ -661,22 +626,13 @@
     const subMetaFont = localStorage.getItem('dms_font_sub_meta') || '11';
     applyDetailedFontSizes(custFont, prodFont, searchFont, subMetaFont);
 
-    const dvtBg = localStorage.getItem('dms_color_dvt_bg') || 'rgba(37, 99, 235, 0.12)';
     const dvtColor = localStorage.getItem('dms_color_dvt_color') || '#2563EB';
-    const codeBg = localStorage.getItem('dms_color_code_bg') || 'rgba(37, 99, 235, 0.12)';
     const codeColor = localStorage.getItem('dms_color_code_color') || '#2563EB';
-    const qcBg = localStorage.getItem('dms_color_qc_bg') || 'rgba(37, 99, 235, 0.12)';
     const qcColor = localStorage.getItem('dms_color_qc_color') || '#2563EB';
     
-    applyProductItemColors('dvtBg', dvtBg);
     applyProductItemColors('dvtColor', dvtColor);
-    applyProductItemColors('codeBg', codeBg);
     applyProductItemColors('codeColor', codeColor);
-    applyProductItemColors('qcBg', qcBg);
     applyProductItemColors('qcColor', qcColor);
-
-    const savedHideMeta = localStorage.getItem('dms_super_hide_metadata') === 'true';
-    if (savedHideMeta) document.body.classList.add('super-hide-metadata');
 
     const savedOrder = localStorage.getItem(`dms_taborder_${uid}`);
     if (savedOrder) {
@@ -858,12 +814,6 @@
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
               <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-palette"></i> 5. Màu Sắc & Vị Trí Tab</div>
-              <button class="btn btn-sm" style="font-size: 10px; padding: 3px 6px;" onclick="resetDefaultTabColors()">Mặc định</button>
-            </div>
-
-            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: rgba(59,130,246,0.06); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--card-border);">
-              <span style="font-size: 11.5px; font-weight:700; flex: 1;">Áp dụng 1 màu cho tất cả tab:</span>
-              <input type="color" value="#3B82F6" onchange="syncAllTabColors(this.value)" style="width: 36px; height: 28px; border: none; cursor: pointer; background:none; padding:0;">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; padding-right: 2px;">
@@ -877,7 +827,6 @@
                       <span style="font-weight: 700; font-size: 11.5px; color: var(--text-main);">${tabLabels[tKey]}</span>
                     </div>
                     <div style="display: flex; gap: 4px; align-items:center;">
-                      <button type="button" class="btn btn-sm" style="background:${isHidden ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding: 3px 8px; font-size: 10.5px;" onclick="toggleTabVisibility('${tKey}', ${isHidden})">${isHidden ? 'Ẩn' : 'Hiện'}</button>
                       <button class="btn btn-sm" style="padding: 3px 6px;" ${idx === 0 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, -1)"><i class="fa-solid fa-arrow-up"></i></button>
                       <button class="btn btn-sm" style="padding: 3px 6px;" ${idx === currentTabOrder.length - 1 ? 'disabled' : ''} onclick="moveTabPosition(${idx}, 1)"><i class="fa-solid fa-arrow-down"></i></button>
                     </div>
@@ -896,18 +845,6 @@
     const modalContainer = document.getElementById('dynamicModalContainer');
     modalContainer.innerHTML = '';
     modalContainer.classList.add('hidden');
-  };
-
-  window.toggleTabVisibility = function(tabName, isVisible) {
-    let hidden = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
-    if (isVisible) {
-      hidden = hidden.filter(t => t !== tabName);
-    } else {
-      if (!hidden.includes(tabName)) hidden.push(tabName);
-    }
-    localStorage.setItem('dms_hidden_tabs', JSON.stringify(hidden));
-    renderTabBarOrder();
-    openSettingsModal();
   };
 
   let companyList = [];
@@ -937,23 +874,27 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      // Đã tăng version lên 32 để làm mới và sửa lỗi keyPath của offlineCheckins
-      const request = indexedDB.open("DMS_OfflineDB", 32);
+      // Đã nâng version lên 33 để tự động làm mới, xóa các store lỗi keyPath
+      const request = indexedDB.open("DMS_OfflineDB", 33);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
-        if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
+        
+        // Tự động xóa các store cũ bị lỗi keyPath để tạo mới sạch sẽ
+        if (dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.deleteObjectStore("offlineOrders");
+        if (dbInstance.objectStoreNames.contains("offlineCheckins")) dbInstance.deleteObjectStore("offlineCheckins");
+        if (dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.deleteObjectStore("cartDrafts");
+
+        dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
+        dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
+        dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
+
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
         if (!dbInstance.objectStoreNames.contains("localStores")) dbInstance.createObjectStore("localStores", { keyPath: "id" });
-        if (dbInstance.objectStoreNames.contains("offlineCheckins")) {
-          dbInstance.deleteObjectStore("offlineCheckins");
-        }
-        dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
-        if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
       };
     });
   }
@@ -1055,7 +996,8 @@
     return new Promise((resolve, reject) => {
       const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
       const store = tx.objectStore("offlineCheckins");
-      const payload = { id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), ...checkinData };
+      // Bổ sung tự tạo ID nếu thiếu để chống triệt để lỗi keyPath
+      const payload = { id: checkinData.id || ('chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), ...checkinData };
       store.put(payload);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -1208,17 +1150,6 @@
     window.syncOfflineCheckins();
     window.syncOfflineOrders();
   });
-
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-      const keyboardHeight = window.innerHeight - window.visualViewport.height;
-      if (keyboardHeight > 100) {
-        document.body.classList.add('keyboard-open');
-      } else {
-        document.body.classList.remove('keyboard-open');
-      }
-    });
-  }
 
   window.scrollToCartFooter = function() {
     const footer = document.getElementById('dynamicCartFooter');
@@ -1437,46 +1368,74 @@
     }
   };
 
-  // --- HỆ THỐNG ĐỒNG BỘ REAL-TIME TRỰC TIẾP TỪ FIRESTORE ---
+  // --- TẢI DỮ LIỆU TĨNH MỘT LẦN KẾT HỢP CACHE ĐỊA PHƯƠNG ĐỂ TIẾT KIỆM FIREBASE READS ---
+  async function fetchStaticAppData() {
+    try {
+      const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
+        loadProductsFromLocalCache(),
+        loadStoresFromLocalCache(),
+        loadRoutesFromLocalCache(),
+        loadCompaniesFromLocalCache()
+      ]);
+
+      if (cachedPrds && cachedPrds.length > 0) { products = cachedPrds; buildProductIndex(); }
+      if (cachedStores && cachedStores.length > 0) { stores = cachedStores; buildStoreIndex(); }
+      if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
+      if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
+      renderUI();
+
+      // Chỉ gọi getDocs thay vì onSnapshot toàn cục để tiết kiệm lượt đọc (Reads)
+      const [prdsSnap, storesSnap, routesSnap, compsSnap] = await Promise.all([
+        getDocs(collection(db, "products")),
+        getDocs(collection(db, "stores")),
+        getDocs(collection(db, "routes")),
+        getDocs(collection(db, "companies"))
+      ]);
+
+      if (!prdsSnap.empty) {
+        products = prdsSnap.docs.map(d => d.data());
+        buildProductIndex();
+        saveProductsToLocalCache(products).catch(() => {});
+      }
+      if (!storesSnap.empty) {
+        stores = storesSnap.docs.map(d => d.data());
+        buildStoreIndex();
+        saveStoresToLocalCache(stores).catch(() => {});
+      }
+      if (!routesSnap.empty) {
+        routeGroupsList = routesSnap.docs.map(d => d.data());
+        saveRoutesToLocalCache(routeGroupsList).catch(() => {});
+      }
+      if (!compsSnap.empty) {
+        companyList = compsSnap.docs.map(d => d.data());
+        saveCompaniesToLocalCache(companyList).catch(() => {});
+      }
+      renderUI();
+    } catch (e) {}
+  }
+
+  // --- HỆ THỐNG LẮNG NGHE REAL-TIME CÓ CHỌN LỌC (CHỈ DÙNG CHO DỮ LIỆU BIẾN ĐỘNG) ---
   function initRealtimeDataSync() {
-    onSnapshot(collection(db, "products"), (snapshot) => {
-      products = snapshot.docs.map(d => d.data());
-      buildProductIndex();
-      saveProductsToLocalCache(products).catch(() => {});
-      if (currentTab === 'productsAdmin' || currentTab === 'sales') {
-        renderUI();
-      }
-    });
+    // Xóa bỏ các listener cũ nếu có để tránh rò rỉ bộ nhớ
+    activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
+    activeUnsubscribers = [];
 
-    onSnapshot(collection(db, "stores"), (snapshot) => {
-      stores = snapshot.docs.map(d => d.data());
-      buildStoreIndex();
-      saveStoresToLocalCache(stores).catch(() => {});
-      if (currentTab === 'customers' || currentTab === 'sales') {
-        renderUI();
+    // Chỉ real-time cho syncRequests và orders mới thay đổi liên tục
+    const unsubSync = onSnapshot(collection(db, "syncRequests"), (snapshot) => {
+      syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (currentTab === 'update') {
+        const activePane = document.getElementById('tabPane_update');
+        if (activePane) renderTabContent('update', activePane);
       }
     });
-
-    onSnapshot(collection(db, "routes"), (snapshot) => {
-      routeGroupsList = snapshot.docs.map(d => d.data());
-      saveRoutesToLocalCache(routeGroupsList).catch(() => {});
-      if (currentTab === 'routes' || currentTab === 'sales') {
-        renderUI();
-      }
-    });
-
-    onSnapshot(collection(db, "companies"), (snapshot) => {
-      companyList = snapshot.docs.map(d => d.data());
-      saveCompaniesToLocalCache(companyList).catch(() => {});
-      if (currentTab === 'company') {
-        renderUI();
-      }
-    });
+    activeUnsubscribers.push(unsubSync);
   }
 
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
+      activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
+      activeUnsubscribers = [];
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
       return;
@@ -1520,21 +1479,7 @@
       await initIndexedDB();
       await cleanupExpiredOrdersOptimized();
       
-      try {
-        const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
-          loadProductsFromLocalCache(),
-          loadStoresFromLocalCache(),
-          loadRoutesFromLocalCache(),
-          loadCompaniesFromLocalCache()
-        ]);
-
-        if (cachedPrds && cachedPrds.length > 0) { products = cachedPrds; buildProductIndex(); }
-        if (cachedStores && cachedStores.length > 0) { stores = cachedStores; buildStoreIndex(); }
-        if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
-        if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
-        renderUI();
-      } catch (e) {}
-
+      await fetchStaticAppData();
       initRealtimeDataSync();
 
       try {
@@ -1551,10 +1496,8 @@
   });
 
   window.handleLogout = async function() {
-    if (globalIdleUpdateHandle && 'cancelIdleCallback' in window) {
-      cancelIdleCallback(globalIdleUpdateHandle);
-      globalIdleUpdateHandle = null;
-    }
+    activeUnsubscribers.forEach(unsub => { if (typeof unsub === 'function') unsub(); });
+    activeUnsubscribers = [];
 
     const loginView = document.getElementById('loginView');
     const appView = document.getElementById('appView');
@@ -3688,14 +3631,6 @@
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => {});
-
-    onSnapshot(collection(db, "syncRequests"), (snapshot) => {
-      syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (currentTab === 'update') {
-        const activePane = document.getElementById('tabPane_update');
-        if (activePane) renderTabContent('update', activePane);
-      }
-    });
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
