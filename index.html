@@ -265,28 +265,6 @@
 
   .hidden{display:none !important;}
 
-  .update-toast {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    background: var(--emerald-gradient);
-    color: #fff;
-    padding: 12px 18px;
-    border-radius: 12px;
-    font-weight: 700;
-    font-size: 13px;
-    box-shadow: 0 10px 25px rgba(5, 150, 105, 0.3);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    animation: slideInDown 0.3s ease-out;
-  }
-  @keyframes slideInDown {
-    from { transform: translateY(-20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-
   .tab-header-actions {
     display: flex;
     justify-content: space-between;
@@ -1760,10 +1738,19 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
+  // 1. GHIÊM GPS 1 LẦN: Sales chỉ được ghim khi chưa có GPS trước đó. Sau khi ghim, chỉ Admin/Manager mới được xóa.
   window.handleCustomerLocationAction = async function(storeId) {
-    if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu, không được ghim GPS!");
+    if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu!");
     const store = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
     if (!store) return alert("Không tìm thấy thông tin khách hàng!");
+
+    const hasGPSAlready = Boolean(store.lat && Number(store.lat) !== 0 && store.lng && Number(store.lng) !== 0);
+    const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+
+    if (hasGPSAlready && !isAdminOrManager) {
+      return alert("⛔ Khách hàng này đã được ghim GPS. Chỉ tài khoản Admin hoặc Manager mới có quyền thay đổi hoặc xóa ghim!");
+    }
+
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
     try {
@@ -1805,7 +1792,7 @@
         renderUI();
       }
       triggerHaptic(30);
-      alert("✅ Đã ghim và lưu tọa độ GPS thành công!");
+      alert("✅ Đã cập nhật và lưu tọa độ GPS thành công!");
     } catch (err) { 
       alert("Lỗi cập nhật GPS: " + err.message); 
     }
@@ -1815,7 +1802,7 @@
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền xóa định vị GPS!");
     const confirmReset = await window.showCustomConfirm(
       "Xóa Định Vị GPS",
-      "Bạn có chắc chắn muốn xóa định vị GPS cũ của khách hàng này không?",
+      "Bạn có chắc chắn muốn xóa định vị GPS của khách hàng này để trả về trạng thái trống không?",
       "fa-location-crosshairs",
       "Xóa GPS",
       "Hủy"
@@ -1833,7 +1820,7 @@
       await saveStoresToLocalCache(stores);
       buildStoreIndex();
       filterTabCustomers(tabCustomerSearchKey);
-      alert("✅ Đã xóa GPS thành công!");
+      alert("✅ Đã xóa GPS thành công! Khách hàng đã ở trạng thái trống, có thể ghim lại.");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
@@ -1973,7 +1960,7 @@
     
     const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
     if (hasGPSAlready) {
-      return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
+      return alert(`⛔ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS từ trước. Nhân viên không được phép tự ý thay đổi ghim!\nVui lòng liên hệ Admin hoặc Manager nếu cần xóa ghim cũ.`);
     }
 
     try {
@@ -2026,9 +2013,8 @@
       
       triggerHaptic(30);
       renderUI();
-      alert("✅ Check-in và lưu GPS thành công!");
+      alert("✅ Check-in và lưu vị trí GPS thành công!");
     } catch (err) {
-      console.error(err);
       alert("Không thể lấy tọa độ GPS: " + err.message);
     }
   };
@@ -2552,7 +2538,7 @@
             ${hasLat ? `
               <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
             ` : ''}
-            ${!isViewer ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
+            ${!isViewer && !hasLat ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
             ${isAdminOrManager && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
           </div>
         </div>
@@ -3121,21 +3107,20 @@
     if (floatTriggerCount) floatTriggerCount.innerText = selectedSkuCount;
   }
 
+  // 2. BỘ ĐẾM TUẦN TỰ CHUẨN XÁC: Đảm bảo số chứng từ tăng đều đặn tuyến tính (VD: 63 -> 64)
   async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
-    const shardId = Math.floor(Math.random() * 5);
-    const counterRef = doc(db, "systemCounters", `soCtuCounter_${shardId}`);
+    const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         const newSeq = await runTransaction(db, async (transaction) => {
           const counterSnap = await transaction.get(counterRef);
-          let currentVal = 0;
+          let currentVal = 63; 
           if (counterSnap.exists()) {
-            currentVal = Number(counterSnap.data().currentVal) || 0;
+            currentVal = Number(counterSnap.data().currentVal) || 63;
           }
           currentVal++;
-          if (currentVal > 900000) currentVal = 1;
           transaction.set(counterRef, { currentVal });
-          return (shardId * 200000) + currentVal;
+          return currentVal;
         });
         return newSeq;
       } catch (err) {
