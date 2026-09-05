@@ -470,6 +470,10 @@
   let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
+  let searchDebounceTimer = null;
+  let productSearchDebounceTimer = null;
+  let globalIdleUpdateHandle = null;
+
   window.triggerHaptic = function(duration = 35) {
     const isEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
     if (isEnabled && navigator.vibrate) {
@@ -503,21 +507,6 @@
       }
     } catch (e) {}
   };
-
-  function showUpdateToast(msg) {
-    const existing = document.getElementById('globalUpdateToast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.id = 'globalUpdateToast';
-    toast.className = 'update-toast';
-    toast.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> <span>${msg}</span>`;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      if (toast && toast.parentNode) toast.remove();
-    }, 3500);
-  }
 
   let wakeLockSentinel = null;
   async function toggleScreenWakeLock(enable) {
@@ -732,15 +721,6 @@
     }
   }
 
-  window.toggleWakeLockPref = function() {
-    const wakeLockEnabled = localStorage.getItem('dms_pref_wakelock') === 'true';
-    const nextState = !wakeLockEnabled;
-    localStorage.setItem('dms_pref_wakelock', nextState);
-    toggleScreenWakeLock(nextState);
-    triggerHaptic(20);
-    openSettingsModal();
-  };
-
   window.openSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     const wakeLockEnabled = localStorage.getItem('dms_pref_wakelock') === 'true';
@@ -792,10 +772,16 @@
           </div>
 
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-sync"></i> Đồng bộ dữ liệu thủ công</div>
-              <button class="btn btn-amber btn-sm" onclick="window.forceCheckManualUpdate(true)"><i class="fa-solid fa-download"></i> Kiểm tra cập nhật mới</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+              <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-file-arrow-down"></i> Nạp file JSON trực tiếp từ máy</div>
+              <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-folder-open"></i> Chọn file JSON <input type="file" accept=".json" onchange="importMasterJsonDirectly(event)" style="display:none;"></label>
             </div>
+            ${currentUser && currentUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com' ? `
+              <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid var(--card-border); padding-top: 8px; margin-top: 8px;">
+                <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i> Đẩy dữ liệu lên Cloud</div>
+                <button class="btn btn-green btn-sm" onclick="pushMasterDataToCloud()"><i class="fa-solid fa-upload"></i> Đẩy dữ liệu lên Cloud</button>
+              </div>
+            ` : ''}
           </div>
 
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
@@ -934,7 +920,6 @@
         </div>
       </div>
     `;
-    modalContainer.classList.add('hidden');
     modalContainer.classList.remove('hidden');
   };
 
@@ -983,7 +968,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 27);
+      const request = indexedDB.open("DMS_OfflineDB", 28);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -995,6 +980,7 @@
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
+        if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
       };
     });
   }
@@ -1131,13 +1117,68 @@
     });
   }
 
+  async function saveCartDraftAsync(storeId, cartData) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["cartDrafts"], "readwrite");
+      tx.objectStore("cartDrafts").put({ storeId: String(storeId), cart: cartData, updatedAt: Date.now() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function loadCartDraftAsync(storeId) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["cartDrafts"], "readonly");
+      const req = tx.objectStore("cartDrafts").get(String(storeId));
+      req.onsuccess = () => resolve(req.result ? req.result.cart : null);
+      req.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function clearCartDraftAsync(storeId) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["cartDrafts"], "readwrite");
+      tx.objectStore("cartDrafts").delete(String(storeId));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function getAllUnsubmittedDraftsAsync() {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = idbDb.transaction(["cartDrafts"], "readonly");
+      const store = tx.objectStore("cartDrafts");
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const list = req.result || [];
+        const validList = list.filter(item => {
+          if (!item || !item.cart) return false;
+          let hasItems = false;
+          Object.values(item.cart).forEach(ci => {
+            if (ci && ci.qty > 0) hasItems = true;
+          });
+          return hasItems;
+        });
+        resolve(validList);
+      };
+      req.onerror = () => reject(tx.error);
+    });
+  }
+
   async function cleanupExpiredOrdersOptimized() {
+    const lastCleanup = localStorage.getItem('dms_last_cleanup_date');
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (lastCleanup === todayStr) return;
+
     try {
-      const now = new Date();
-      const pastDate = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+      const pastDate = new Date(Date.now() - (6 * 24 * 60 * 60 * 1000));
       const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
-      const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(100));
+      const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(50));
       const snap = await getDocs(q);
       
       if (!snap.empty) {
@@ -1145,13 +1186,14 @@
         snap.forEach(d => batch.delete(d.ref));
         await batch.commit();
       }
+      localStorage.setItem('dms_last_cleanup_date', todayStr);
     } catch (e) {
       console.error("Lỗi dọn dẹp đơn cũ:", e);
     }
   }
 
   window.syncOfflineCheckins = async function() {
-    if (!navigator.onLine || !idbDb) return;
+    if (!idbDb) return;
     const tx = idbDb.transaction(["offlineCheckins"], "readwrite");
     const store = tx.objectStore("offlineCheckins");
     const request = store.getAll();
@@ -1174,7 +1216,7 @@
   };
 
   window.syncOfflineOrders = async function() {
-    if (!navigator.onLine || !idbDb) return;
+    if (!idbDb) return;
     const tx = idbDb.transaction(["offlineOrders"], "readwrite");
     const store = tx.objectStore("offlineOrders");
     const request = store.getAll();
@@ -1185,13 +1227,17 @@
         for (const item of items) {
           try {
             const nextSoCtu = await getNextSoCtuWithRetry();
-            const { id, ...payload } = item;
+            const { id, orderUuid, ...payload } = item;
             payload.soCtu = nextSoCtu;
             payload.createdAt = serverTimestamp();
-            const docRef = await addDoc(collection(db, "orders"), payload);
+
+            const docId = orderUuid || ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+            const docRef = doc(db, "orders", docId);
+            
+            await setDoc(docRef, payload, { merge: true });
             
             const syncedLocalOrder = {
-              id: docRef.id,
+              id: docId,
               ...payload,
               createdAt: new Date()
             };
@@ -1199,7 +1245,9 @@
 
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
-          } catch (e) {}
+          } catch (e) {
+            console.warn("Lỗi đồng bộ đơn offline:", e);
+          }
         }
       }
     };
@@ -1348,36 +1396,19 @@
     }
   };
 
-  function getDraftKeyForStore(storeId) {
-    return `cart_draft_${currentUser ? currentUser.uid : 'guest'}_${storeId}`;
-  }
-
   function saveCartDraftToLocal() {
     if (!activeVisitedStore || editingOrderId) return;
-    const draftKey = getDraftKeyForStore(activeVisitedStore.id);
-    localStorage.setItem(draftKey, JSON.stringify(currentCart));
+    saveCartDraftAsync(activeVisitedStore.id, currentCart).catch(() => {});
   }
 
-  function loadCartDraftFromLocal() {
+  async function loadCartDraftFromLocal() {
     if (!activeVisitedStore) return;
-    const draftKey = getDraftKeyForStore(activeVisitedStore.id);
-    const saved = localStorage.getItem(draftKey);
-    if (saved) {
-      try {
-        currentCart = JSON.parse(saved);
-      } catch (e) {
-        currentCart = {};
-      }
-    } else {
+    try {
+      const saved = await loadCartDraftAsync(activeVisitedStore.id);
+      currentCart = saved || {};
+    } catch (e) {
       currentCart = {};
     }
-  }
-
-  function clearCartDraftFromLocal(storeId) {
-    const targetId = storeId || (activeVisitedStore ? activeVisitedStore.id : null);
-    if (!targetId) return;
-    const draftKey = getDraftKeyForStore(targetId);
-    localStorage.removeItem(draftKey);
   }
 
   function buildStoreIndex() {
@@ -1401,9 +1432,18 @@
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
-    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
+    let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
+      if (!usernameInput.includes('@')) {
+        const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
+        const snapByCode = await getDocs(qUsersByCode);
+        if (!snapByCode.empty) {
+          const uData = snapByCode.docs[0].data();
+          if (uData.email) email = uData.email.toLowerCase();
+        }
+      }
+
       const userCredential = await signInWithEmailAndPassword(authSvc, email, pass);
       const authUser = userCredential.user;
 
@@ -1411,13 +1451,11 @@
       let userSnap = await getDoc(userDocRef);
 
       if (!userSnap.exists()) {
-        const usersQuerySnap = await getDocs(collection(db, "users"));
-        usersQuerySnap.forEach(d => {
-          const data = d.data();
-          if (data.email && data.email.toLowerCase() === email.toLowerCase()) {
-            userSnap = d;
-          }
-        });
+        const qUsers = query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1));
+        const usersQuerySnap = await getDocs(qUsers);
+        if (!usersQuerySnap.empty) {
+          userSnap = usersQuerySnap.docs[0];
+        }
       }
 
       if (!userSnap || !userSnap.exists()) {
@@ -1450,11 +1488,95 @@
     }
   };
 
-  async function uploadFullDataJsonToCloud() {
-    if (!navigator.onLine) return;
+  window.pushMasterDataToCloud = async function() {
+    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+      return alert("⛔ Chỉ tài khoản Admin gốc mới có quyền đẩy dữ liệu tổng lên Cloud!");
+    }
+    
+    const confirmPush = await window.showCustomConfirm(
+      "Đẩy Dữ Liệu Lên Cloud",
+      "Hệ thống sẽ tổng hợp toàn bộ Vật Tư, Khách Hàng, Tuyến và Công Ty hiện tại để tạo bản cập nhật mới cho toàn hệ thống.\nBạn có muốn tiếp tục không?",
+      "fa-cloud-arrow-up",
+      "Đẩy dữ liệu",
+      "Hủy"
+    );
+    if (!confirmPush) return;
+
     try {
+      alert("⏳ Đang tổng hợp và đẩy dữ liệu lên Cloud Storage... Vui lòng chờ trong giây lát.");
+      
+      const newVersion = Date.now();
       const payload = {
-        version: Date.now(),
+        version: newVersion,
+        versionString: "2.0." + Math.floor(newVersion / 1000),
+        products: products,
+        stores: stores,
+        routes: routeGroupsList,
+        companies: companyList
+      };
+
+      const jsonStr = JSON.stringify(payload);
+      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
+      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
+
+      const metaRef = doc(db, "systemMetadata", "appVersionControl");
+      await setDoc(metaRef, { 
+        dataVersion: newVersion,
+        versionString: payload.versionString,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await saveMetaVersion("cachedDataVersion", newVersion);
+
+      alert(`✅ Đã cập nhật thành công phiên bản mới lên Cloud (${payload.versionString})!`);
+    } catch (e) {
+      alert("⛔ Lỗi khi đẩy dữ liệu lên Cloud: " + e.message);
+    }
+  };
+
+  window.importMasterJsonDirectly = async function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (data) {
+          if (data.products) products = data.products;
+          if (data.stores) stores = data.stores;
+          if (data.routes) routeGroupsList = data.routes;
+          if (data.companies) companyList = data.companies;
+
+          buildProductIndex();
+          buildStoreIndex();
+
+          await Promise.all([
+            saveProductsToLocalCache(products),
+            saveStoresToLocalCache(stores),
+            saveRoutesToLocalCache(routeGroupsList),
+            saveCompaniesToLocalCache(companyList),
+            saveMetaVersion("cachedDataVersion", data.version || Date.now())
+          ]);
+
+          renderUI();
+          closeSettingsModal();
+          alert(`✨ Đã nạp thành công ${products.length} vật tư và ${stores.length} khách hàng trực tiếp vào máy!`);
+        }
+      } catch (err) {
+        alert("⛔ File JSON không hợp lệ: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  async function uploadFullDataJsonToCloud() {
+    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') return;
+    try {
+      const newVersion = Date.now();
+      const payload = {
+        version: newVersion,
+        versionString: "2.0." + Math.floor(newVersion / 1000),
         products: products,
         stores: stores,
         routes: routeGroupsList,
@@ -1465,7 +1587,11 @@
       await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
 
       const metaRef = doc(db, "systemMetadata", "appVersionControl");
-      await setDoc(metaRef, { dataVersion: payload.version }, { merge: true });
+      await setDoc(metaRef, { 
+        dataVersion: newVersion,
+        versionString: payload.versionString,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
     } catch (e) {
       console.warn("Lỗi upload JSON cache lên Cloud Storage:", e);
     }
@@ -1502,54 +1628,6 @@
       console.warn("Lỗi tải dữ liệu từ Firestore:", e);
     }
   }
-
-  window.forceCheckManualUpdate = async function(isManual = false) {
-    if (!navigator.onLine) {
-      if (isManual) alert("⛔ Không có kết nối mạng để kiểm tra cập nhật!");
-      return;
-    }
-    try {
-      const metaRef = doc(db, "systemMetadata", "appVersionControl");
-      const metaSnap = await getDoc(metaRef);
-      if (!metaSnap.exists()) return;
-
-      const cloudVersion = metaSnap.data().dataVersion || 1;
-      const localVersion = await getMetaVersion("cachedDataVersion") || 0;
-
-      if (cloudVersion > localVersion) {
-        const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
-        const downloadUrl = await getDownloadURL(fileRef);
-        const response = await fetch(downloadUrl);
-        const data = await response.json();
-
-        if (data) {
-          if (data.products) products = data.products;
-          if (data.stores) stores = data.stores;
-          if (data.routes) routeGroupsList = data.routes;
-          if (data.companies) companyList = data.companies;
-
-          buildProductIndex();
-          buildStoreIndex();
-
-          await Promise.all([
-            saveProductsToLocalCache(products),
-            saveStoresToLocalCache(stores),
-            saveRoutesToLocalCache(routeGroupsList),
-            saveCompaniesToLocalCache(companyList),
-            saveMetaVersion("cachedDataVersion", cloudVersion)
-          ]);
-
-          renderUI();
-          showUpdateToast(`✨ Đã cập nhật thành công dữ liệu mới nhất!`);
-        }
-      } else {
-        if (isManual) alert("ℹ️ Dữ liệu của bạn đã là phiên bản mới nhất.");
-      }
-    } catch (e) {
-      console.warn("Lỗi kiểm tra cập nhật ngầm:", e);
-      if (isManual) alert("Lỗi khi tải cập nhật: " + e.message);
-    }
-  };
 
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
@@ -1610,10 +1688,12 @@
         if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
         if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
 
-        await loadDataFromFirestore();
         renderUI();
 
-        await window.forceCheckManualUpdate(false);
+        if (products.length === 0) {
+          await loadDataFromFirestore();
+          renderUI();
+        }
       } catch (e) {
         console.error("Lỗi tải cache ban đầu:", e);
       }
@@ -1632,6 +1712,11 @@
   });
 
   window.handleLogout = async function() {
+    if (globalIdleUpdateHandle && 'cancelIdleCallback' in window) {
+      cancelIdleCallback(globalIdleUpdateHandle);
+      globalIdleUpdateHandle = null;
+    }
+
     const loginView = document.getElementById('loginView');
     const appView = document.getElementById('appView');
     if (loginView) loginView.classList.remove('hidden');
@@ -1677,8 +1762,8 @@
 
   window.handleCustomerLocationAction = async function(storeId) {
     if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu, không được ghim GPS!");
-    const store = stores.find(s => String(s.id) === String(storeId));
-    if (!store) return;
+    const store = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+    if (!store) return alert("Không tìm thấy thông tin khách hàng!");
     if (!navigator.geolocation) return alert("Trình duyệt không hỗ trợ định vị GPS.");
     
     try {
@@ -1695,26 +1780,32 @@
         time: new Date().toISOString()
       };
 
-      await updateDoc(doc(db, "stores", String(storeId)), {
-        lat, lng,
+      const updatePayload = {
+        lat,
+        lng,
         pinnedByCode: currentUser.code || 'NV',
         pinnedByName: currentUser.name || 'Nhân viên',
         pinnedAt: new Date().toISOString(),
         pinnedHistory: [...existingHistory, newHistoryItem]
-      });
+      };
 
-      store.lat = lat;
-      store.lng = lng;
-      store.pinnedByCode = currentUser.code || 'NV';
-      store.pinnedByName = currentUser.name || 'Nhân viên';
-      store.pinnedAt = new Date().toISOString();
-      store.pinnedHistory = [...existingHistory, newHistoryItem];
-      
+      const storeRef = doc(db, "stores", String(store.id));
+      await setDoc(storeRef, updatePayload, { merge: true });
+
+      const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(store.id));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+      }
+
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
+
       filterTabCustomers(tabCustomerSearchKey);
-      if (activeVisitedStore && String(activeVisitedStore.id) === String(storeId)) {
+      if (activeVisitedStore && String(activeVisitedStore.id) === String(store.id)) {
         renderUI();
       }
       triggerHaptic(30);
+      alert("✅ Đã ghim và lưu tọa độ GPS thành công!");
     } catch (err) { 
       alert("Lỗi cập nhật GPS: " + err.message); 
     }
@@ -1732,10 +1823,17 @@
     if (!confirmReset) return;
 
     try {
-      await updateDoc(doc(db, "stores", String(storeId)), { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] });
-      const store = stores.find(s => String(s.id) === String(storeId));
-      if (store) { store.lat = 0; store.lng = 0; store.pinnedByCode = ""; store.pinnedByName = ""; store.pinnedAt = ""; store.pinnedHistory = []; }
+      const storeRef = doc(db, "stores", String(storeId));
+      const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] };
+      await updateDoc(storeRef, resetPayload);
+      const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...resetPayload };
+      }
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
       filterTabCustomers(tabCustomerSearchKey);
+      alert("✅ Đã xóa GPS thành công!");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
@@ -1761,9 +1859,9 @@
     currentCart = {};
     editingOrderId = null;
 
-    loadCartDraftFromLocal();
+    await loadCartDraftFromLocal();
 
-    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
 
     if (!hasGPSAlready) {
       const updateGPSNow = await window.showCustomConfirm(
@@ -1800,30 +1898,28 @@
             status: "Check-in thành công"
           };
 
-          if (navigator.onLine) {
-            const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-            await updateDoc(storeRef, {
-              lat, lng,
-              pinnedByCode: currentUser.code || 'NV',
-              pinnedByName: currentUser.name || 'Nhân viên',
-              pinnedAt: new Date().toISOString(),
-              pinnedHistory: [...existingHistory, newHistoryItem]
-            });
+          const updatePayload = {
+            lat, lng,
+            pinnedByCode: currentUser.code || 'NV',
+            pinnedByName: currentUser.name || 'Nhân viên',
+            pinnedAt: new Date().toISOString(),
+            pinnedHistory: [...existingHistory, newHistoryItem]
+          };
 
-            await addDoc(collection(db, "checkins"), {
-              ...checkinPayload,
-              createdAt: serverTimestamp()
-            });
-          } else {
-            await saveOfflineCheckin(checkinPayload);
+          const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+          await setDoc(storeRef, updatePayload, { merge: true });
+          await addDoc(collection(db, "checkins"), {
+            ...checkinPayload,
+            createdAt: serverTimestamp()
+          });
+
+          const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+          if (storeIndex > -1) {
+            stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+            activeVisitedStore = stores[storeIndex];
           }
-
-          activeVisitedStore.lat = lat;
-          activeVisitedStore.lng = lng;
-          activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
-          activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
-          activeVisitedStore.pinnedAt = new Date().toISOString();
-          activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+          await saveStoresToLocalCache(stores);
+          buildStoreIndex();
         } catch (err) {
           alert("Không thể lấy tọa độ GPS: " + err.message);
         }
@@ -1852,7 +1948,7 @@
         await window.submitOrder();
         return;
       } else {
-        clearCartDraftFromLocal(activeVisitedStore.id);
+        await clearCartDraftAsync(activeVisitedStore.id);
       }
     }
 
@@ -1875,7 +1971,7 @@
   window.checkinActiveStoreGPS = async function() {
     if (!activeVisitedStore) return alert("Chưa chọn điểm bán!");
     
-    const hasGPSAlready = Boolean(activeVisitedStore.lat && activeVisitedStore.lat !== 0 && activeVisitedStore.lng && activeVisitedStore.lng !== 0);
+    const hasGPSAlready = Boolean(activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 && activeVisitedStore.lng && Number(activeVisitedStore.lng) !== 0);
     if (hasGPSAlready) {
       return alert(`ℹ️ Khách hàng "${activeVisitedStore.name}" đã có định vị GPS (${Number(activeVisitedStore.lat).toFixed(4)}, ${Number(activeVisitedStore.lng).toFixed(4)}) từ trước. Theo quy định, không cho phép cập nhật lại GPS mới!`);
     }
@@ -1905,33 +2001,32 @@
         status: "Check-in thành công"
       };
 
-      if (navigator.onLine) {
-        const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-        await updateDoc(storeRef, {
-          lat, lng,
-          pinnedByCode: currentUser.code || 'NV',
-          pinnedByName: currentUser.name || 'Nhân viên',
-          pinnedAt: new Date().toISOString(),
-          pinnedHistory: [...existingHistory, newHistoryItem]
-        });
+      const updatePayload = {
+        lat, lng,
+        pinnedByCode: currentUser.code || 'NV',
+        pinnedByName: currentUser.name || 'Nhân viên',
+        pinnedAt: new Date().toISOString(),
+        pinnedHistory: [...existingHistory, newHistoryItem]
+      };
 
-        await addDoc(collection(db, "checkins"), {
-          ...checkinPayload,
-          createdAt: serverTimestamp()
-        });
-      } else {
-        await saveOfflineCheckin(checkinPayload);
+      const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+      await setDoc(storeRef, updatePayload, { merge: true });
+      await addDoc(collection(db, "checkins"), {
+        ...checkinPayload,
+        createdAt: serverTimestamp()
+      });
+
+      const storeIndex = stores.findIndex(s => String(s.id) === String(activeVisitedStore.id));
+      if (storeIndex > -1) {
+        stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+        activeVisitedStore = stores[storeIndex];
       }
-
-      activeVisitedStore.lat = lat;
-      activeVisitedStore.lng = lng;
-      activeVisitedStore.pinnedByCode = currentUser.code || 'NV';
-      activeVisitedStore.pinnedByName = currentUser.name || 'Nhân viên';
-      activeVisitedStore.pinnedAt = new Date().toISOString();
-      activeVisitedStore.pinnedHistory = [...existingHistory, newHistoryItem];
+      await saveStoresToLocalCache(stores);
+      buildStoreIndex();
       
       triggerHaptic(30);
       renderUI();
+      alert("✅ Check-in và lưu GPS thành công!");
     } catch (err) {
       console.error(err);
       alert("Không thể lấy tọa độ GPS: " + err.message);
@@ -2040,7 +2135,6 @@
     window.updateCartDetail(prdId, field, newVal);
   };
 
-  let searchDebounceTimer = null;
   window.debounceFilterSalesCustomers = function(val) {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
@@ -2090,7 +2184,7 @@
 
       if (matchRoute && matchKey) {
         let dist = Infinity;
-        if (currentSalesGPS && s.lat && s.lng) {
+        if (currentSalesGPS && s.lat && Number(s.lat) !== 0 && s.lng && Number(s.lng) !== 0) {
           dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
         }
         matched.push({ store: s, distance: dist });
@@ -2106,7 +2200,7 @@
       const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
       const isClosest = item.distance !== Infinity && item.distance <= 100;
       const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
-      const hasLat = Boolean(s.lat && s.lat !== 0);
+      const hasLat = Boolean(s.lat && Number(s.lat) !== 0);
 
       return `
         <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosest ? 'rgba(5, 150, 105, 0.4)' : 'var(--card-border)'};">
@@ -2142,7 +2236,6 @@
     }
   };
 
-  let productSearchDebounceTimer = null;
   window.debounceFilterSalesProducts = function(val) {
     clearTimeout(productSearchDebounceTimer);
     productSearchDebounceTimer = setTimeout(() => {
@@ -2415,7 +2508,9 @@
     let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
       const s = entry.store;
-      const hasLat = s.lat && s.lat !== 0;
+      const latVal = Number(s.lat || 0);
+      const lngVal = Number(s.lng || 0);
+      const hasLat = !isNaN(latVal) && latVal !== 0 && !isNaN(lngVal) && lngVal !== 0;
 
       let matchPinned = true;
       if (showOnlyPinnedGPS) {
@@ -2428,8 +2523,8 @@
       }
 
       if (matchPinned && matchKey) {
-        matched.push(s);
-        if (matched.length >= 30) break;
+        matched.push({ ...s, lat: latVal, lng: lngVal });
+        if (matched.length >= 50) break;
       }
     }
 
@@ -2446,7 +2541,7 @@
             <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'}</span>
             <span class="badge ${hasLat ? 'badge-success' : 'badge-danger'}">${hasLat ? `Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}</span>
           </div>
-          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
+          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
           <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
             <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
@@ -2514,7 +2609,7 @@
           <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
           <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${p.dvt || 'cây'}_Q/C: ${p.tyLeQuyDoi || 50}</span>
         </div>
-        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${p.name}">${p.name}</div>
+        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
         <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:8px 10px; border-radius:8px;">
           <span>Tồn đầu: <b>${p.stockDau || 0}</b></span>
           <span>Tồn cuối: <b>${p.stockCuoi || 0}</b></span>
@@ -3027,7 +3122,8 @@
   }
 
   async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
-    const counterRef = doc(db, "systemCounters", "soCtuCounter");
+    const shardId = Math.floor(Math.random() * 5);
+    const counterRef = doc(db, "systemCounters", `soCtuCounter_${shardId}`);
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         const newSeq = await runTransaction(db, async (transaction) => {
@@ -3039,7 +3135,7 @@
           currentVal++;
           if (currentVal > 900000) currentVal = 1;
           transaction.set(counterRef, { currentVal });
-          return currentVal;
+          return (shardId * 200000) + currentVal;
         });
         return newSeq;
       } catch (err) {
@@ -3114,7 +3210,10 @@
       const dd = String(now.getDate()).padStart(2, '0');
       const todayStr = `${yyyy}-${mm}-${dd}`;
 
+      const orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+
       const orderData = {
+        orderUuid: orderUuid,
         ngayCtu: todayStr,
         maDTPNNo: activeVisitedStore.code || '',
         maNhanVien: currentUser.code || '',
@@ -3135,55 +3234,63 @@
 
       const savedStoreId = activeVisitedStore.id;
 
-      if (navigator.onLine) {
-        try {
-          if (editingOrderId) {
-            const orderRef = doc(db, "orders", editingOrderId);
-            await updateDoc(orderRef, {
-              ...orderData,
-              updatedAt: serverTimestamp()
-            });
+      await saveOfflineOrder({
+        id: orderUuid,
+        ...orderData,
+        createdAt: new Date().toISOString()
+      });
 
-            const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
-            const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
-            const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
+      try {
+        if (editingOrderId) {
+          const orderRef = doc(db, "orders", editingOrderId);
+          await updateDoc(orderRef, {
+            ...orderData,
+            updatedAt: serverTimestamp()
+          });
 
-            const updatedLocalOrder = {
-              id: editingOrderId,
-              ...orderData,
-              soCtu: originalSoCtu,
-              createdAt: originalCreatedAt
-            };
+          const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
+          const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
+          const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
 
-            if (existingOrderIndex > -1) {
-              orders[existingOrderIndex] = updatedLocalOrder;
-            } else {
-              orders.unshift(updatedLocalOrder);
-            }
+          const updatedLocalOrder = {
+            id: editingOrderId,
+            ...orderData,
+            soCtu: originalSoCtu,
+            createdAt: originalCreatedAt
+          };
+
+          if (existingOrderIndex > -1) {
+            orders[existingOrderIndex] = updatedLocalOrder;
           } else {
-            const nextSoCtu = await getNextSoCtuWithRetry();
-            orderData.soCtu = nextSoCtu;
-            orderData.createdAt = serverTimestamp();
-            const docRef = await addDoc(collection(db, "orders"), orderData);
-
-            const newLocalOrder = {
-              id: docRef.id,
-              ...orderData,
-              createdAt: new Date()
-            };
-            orders.unshift(newLocalOrder);
+            orders.unshift(updatedLocalOrder);
           }
-        } catch (err) {
-          console.warn("Mất mạng khi đang gửi, lưu offline:", err);
-          await saveOfflineOrder(orderData);
-          alert("⚠️ Đang mất mạng! Đã lưu đơn hàng cục bộ và sẽ tự động đẩy lên sổ gốc khi có kết nối mạng lại.");
+        } else {
+          const nextSoCtu = await getNextSoCtuWithRetry();
+          orderData.soCtu = nextSoCtu;
+          orderData.createdAt = serverTimestamp();
+          
+          const docRef = doc(db, "orders", orderUuid);
+          await setDoc(docRef, orderData);
+
+          const newLocalOrder = {
+            id: orderUuid,
+            ...orderData,
+            createdAt: new Date()
+          };
+          orders.unshift(newLocalOrder);
         }
-      } else {
-        await saveOfflineOrder(orderData);
-        alert("⚠️ Thiết bị đang offline! Đã lưu đơn hàng vào hàng đợi, sẽ tự động đồng bộ qua sổ gốc ngay khi có mạng.");
+      } catch (err) {
+        console.warn("Lỗi kết nối Firebase thực tế, đơn đã được lưu dự phòng:", err);
+        orders.unshift({
+          id: orderUuid,
+          ...orderData,
+          soCtu: 9999,
+          createdAt: new Date()
+        });
+        alert("⚠️ Không thể kết nối đến máy chủ Firebase. Đơn hàng đã được lưu tạm trên thiết bị.");
       }
       
-      clearCartDraftFromLocal(savedStoreId);
+      await clearCartDraftAsync(savedStoreId);
       currentCart = {}; 
       activeVisitedStore = null; 
       editingOrderId = null;
@@ -3268,7 +3375,7 @@
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
     if (companyList.length === 0) return alert("Không có danh sách công ty để xuất!");
     const dataToExport = companyList.map(c => ({
-      "Mã Công Ty (MaCTu)": c.maCtu || '',
+      "Mã Công Ty (MaCtu)": c.maCtu || '',
       "Tên Công Ty (TenCTu)": c.tenCtu || '',
       "Trạng Thái": c.status || 'Mở'
     }));
@@ -3768,7 +3875,7 @@
     `;
   }
 
-  function renderTabContent(tab, container) {
+  async function renderTabContent(tab, container) {
     const oldFooter = document.getElementById('dynamicCartFooter');
     if (oldFooter) oldFooter.remove();
     const oldFloat = document.getElementById('floatingCartTrigger');
@@ -3794,24 +3901,19 @@
 
       let unsubmittedStoresList = [];
       if (currentUser.role === 'sales' && !editingOrderId) {
-        stores.forEach(s => {
-          if (!activeVisitedStore || String(activeVisitedStore.id) !== String(s.id)) {
-            const draftKey = getDraftKeyForStore(s.id);
-            const savedDraft = localStorage.getItem(draftKey);
-            if (savedDraft) {
-              try {
-                const parsedCart = JSON.parse(savedDraft);
-                let hasItems = false;
-                Object.values(parsedCart).forEach(item => {
-                  if (item && item.qty > 0) hasItems = true;
-                });
-                if (hasItems) {
+        try {
+          const allDrafts = await getAllUnsubmittedDraftsAsync();
+          if (allDrafts && allDrafts.length > 0) {
+            const draftMap = new Map(allDrafts.map(d => [d.storeId, d.cart]));
+            stores.forEach(s => {
+              if (!activeVisitedStore || String(activeVisitedStore.id) !== String(s.id)) {
+                if (draftMap.has(String(s.id))) {
                   unsubmittedStoresList.push(s);
                 }
-              } catch (err) {}
-            }
+              }
+            });
           }
-        });
+        } catch (e) {}
       }
 
       container.innerHTML = `
@@ -3860,11 +3962,11 @@
                   ${editingOrderId ? '<span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);">(Đang Sửa Đơn)</span>' : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
-                  ${activeVisitedStore.lat ? `
+                  ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? `
                     <button class="btn btn-green btn-sm" onclick="openNativeNavigator(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)})" style="font-weight:700; padding:6px 10px; font-size:12px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
                   ` : ''}
                   <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:12px; white-space:nowrap;">
-                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat ? 'Đã ghim' : 'Lưu GPS'}
+                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Lưu GPS'}
                   </button>
                 </div>
               </div>
@@ -3873,7 +3975,7 @@
               </div>
               <div style="font-size: calc(var(--font-size-sub-meta) * 1.5); color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;">
                 <span style="word-break:break-word;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
-                <span>• GPS: <b style="color:${activeVisitedStore.lat ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat ? 'Đã ghim' : 'Chưa'}</b></span>
+                <span>• GPS: <b style="color:${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Chưa'}</b></span>
               </div>
             </div>
           `}
@@ -4087,7 +4189,7 @@
                   <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr ? `- <b style="color:var(--amber);">${timeStr}</b>` : ''}</span>
                 </div>
-                <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${o.maKH}</div>
+                <div style="font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;">${o.maKH}</div>
                 <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:6px 10px; border-radius:6px;">
                   <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
                   <span>SL: <b style="color:#2563EB;">${o.totalQty}</b></span>
@@ -4297,19 +4399,18 @@
               <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
             </form>
           </div>
-
           <div class="card">
-            <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-list"></i> Danh Sách Tài Khoản Hệ Thống</h3>
-            <div style="display:flex; flex-direction:column; gap:8px; max-height: 500px; overflow-y: auto;">
+            <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-list"></i> Danh Sách Tài Khoản</h3>
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:450px; overflow-y:auto;">
               ${users.map(u => `
-                <div style="background:var(--panel-bg); border:1px solid var(--card-border); padding:10px; border-radius:10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <div style="background:var(--panel-bg); border:1px solid var(--card-border); padding:10px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
                   <div>
-                    <div style="font-weight:800; font-size:13px; color:var(--text-main);">[${u.code || ''}] ${u.name || ''}</div>
-                    <div style="font-size:11px; color:var(--text-muted);">${u.email || ''} - <b style="color:var(--amber);">${u.role || 'sales'}</b></div>
+                    <div style="font-weight:800; font-size:13px;">[${u.code || ''}] ${u.name || ''}</div>
+                    <div style="font-size:11px; color:var(--text-muted);">${u.email} — Quyền: <b style="color:var(--primary);">${u.role}</b></div>
                   </div>
                   <div>
                     <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
-                      ${u.active !== false ? 'Khóa' : 'Mở khóa'}
+                      ${u.active !== false ? 'Khóa' : 'Mở'}
                     </button>
                   </div>
                 </div>
