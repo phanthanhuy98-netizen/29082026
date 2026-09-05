@@ -369,10 +369,10 @@
       <div id="tabPane_routes" style="display:none;"></div>
       <!-- TAB COMPANY -->
       <div id="tabPane_company" style="display:none;"></div>
+      <!-- TAB UPDATES -->
+      <div id="tabPane_updates" style="display:none;"></div>
       <!-- TAB USERS -->
       <div id="tabPane_users" style="display:none;"></div>
-      <!-- TAB SYNC / CAP NHAT -->
-      <div id="tabPane_sync" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -433,7 +433,7 @@
 
   let currentUser = null;
   let currentTab = localStorage.getItem('dms_last_active_tab') || 'sales';
-  let stores = [], orders = [], users = [], syncRequestsList = [];
+  let stores = [], orders = [], users = [];
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
 
@@ -447,13 +447,12 @@
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users', 'sync'];
+  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'updates', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
   let productSearchDebounceTimer = null;
   let globalIdleUpdateHandle = null;
-  let syncRequestsUnsubscribe = null;
 
   window.triggerHaptic = function(duration = 35) {
     const isEnabled = localStorage.getItem('dms_pref_haptic') !== 'false';
@@ -512,7 +511,7 @@
   });
 
   window.syncAllTabColors = function(colorVal) {
-    const defaultTabs = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users', 'sync'];
+    const defaultTabs = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'updates', 'users'];
     defaultTabs.forEach(tKey => {
       document.documentElement.style.setProperty(`--tab-${tKey}-color`, colorVal);
       if (currentUser) {
@@ -526,7 +525,7 @@
   window.resetDefaultTabColors = function() {
     const tabDefaultColors = {
       sales: "#F59E0B", soGocBH: "#10B981", customers: "#0D9488",
-      productsAdmin: "#3B82F6", routes: "#8B5CF6", company: "#DB2777", users: "#D97706", sync: "#06B6D4"
+      productsAdmin: "#3B82F6", routes: "#8B5CF6", company: "#DB2777", updates: "#0284C7", users: "#D97706"
     };
     Object.keys(tabDefaultColors).forEach(tKey => {
       document.documentElement.style.setProperty(`--tab-${tKey}-color`, tabDefaultColors[tKey]);
@@ -690,7 +689,7 @@
       currentTabOrder = [...defaultTabOrder];
     }
 
-    ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users', 'sync'].forEach(tabName => {
+    ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'updates', 'users'].forEach(tabName => {
       const savedColor = localStorage.getItem(`dms_tabcolor_${uid}_${tabName}`);
       if (savedColor) {
         document.documentElement.style.setProperty(`--tab-${tabName}-color`, savedColor);
@@ -729,8 +728,8 @@
       productsAdmin: "Vật Tư",
       routes: "Tuyến",
       company: "Công Ty",
-      users: "Nhân Viên",
-      sync: "Cập Nhật"
+      updates: "Cập Nhật",
+      users: "Nhân Viên"
     };
 
     const tabDefaultColors = {
@@ -740,8 +739,8 @@
       productsAdmin: "#3B82F6",
       routes: "#8B5CF6",
       company: "#DB2777",
-      users: "#D97706",
-      sync: "#06B6D4"
+      updates: "#0284C7",
+      users: "#D97706"
     };
 
     const fontSizesList = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24];
@@ -757,8 +756,8 @@
           ${currentUser && currentUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com' ? `
             <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i> Đẩy dữ liệu tổng lên Cloud</div>
-                <button class="btn btn-green btn-sm" onclick="pushMasterDataToCloud()"><i class="fa-solid fa-upload"></i> Đẩy dữ liệu lên Cloud</button>
+                <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i> Đẩy dữ liệu lên Cloud (Master)</div>
+                <button class="btn btn-green btn-sm" onclick="pushMasterDataToCloud()"><i class="fa-solid fa-upload"></i> Đẩy dữ liệu</button>
               </div>
             </div>
           ` : ''}
@@ -947,7 +946,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 28);
+      const request = indexedDB.open("DMS_OfflineDB", 29);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1411,10 +1410,6 @@
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
-    if (!usernameInput || !pass) {
-      return alert("Vui lòng nhập đầy đủ tài khoản và mật khẩu!");
-    }
-
     let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
@@ -1439,20 +1434,6 @@
         if (!usersQuerySnap.empty) {
           userSnap = usersQuerySnap.docs[0];
         }
-      }
-
-      if ((!userSnap || !userSnap.exists()) && email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
-        const defaultAdminProfile = {
-          uid: authUser.uid,
-          email: email.toLowerCase(),
-          name: 'Phan Thành Uy',
-          code: 'ADMIN01',
-          role: 'admin',
-          active: true,
-          createdAt: serverTimestamp()
-        };
-        await setDoc(doc(db, "users", authUser.uid), defaultAdminProfile);
-        userSnap = { exists: () => true, data: () => defaultAdminProfile };
       }
 
       if (!userSnap || !userSnap.exists()) {
@@ -1480,7 +1461,7 @@
       if (currentFailed >= 10) {
         alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
       } else {
-        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản chưa được tạo trên Firebase Auth).\nChi tiết lỗi: ${authErr.message}`);
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
       }
     }
   };
@@ -1593,7 +1574,6 @@
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
-      if (syncRequestsUnsubscribe) { syncRequestsUnsubscribe(); syncRequestsUnsubscribe = null; }
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
       return;
@@ -1632,7 +1612,6 @@
     }
 
     renderUI();
-    setupSyncRequestsListener();
 
     setTimeout(async () => {
       await initIndexedDB();
@@ -1679,10 +1658,6 @@
       cancelIdleCallback(globalIdleUpdateHandle);
       globalIdleUpdateHandle = null;
     }
-    if (syncRequestsUnsubscribe) {
-      syncRequestsUnsubscribe();
-      syncRequestsUnsubscribe = null;
-    }
 
     const loginView = document.getElementById('loginView');
     const appView = document.getElementById('appView');
@@ -1727,6 +1702,7 @@
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
+  // 1. GHIÊM GPS 1 LẦN: Sales chỉ được ghim khi chưa có GPS trước đó. Sau khi ghim, chỉ Admin/Manager mới được xóa.
   window.handleCustomerLocationAction = async function(storeId) {
     if (currentUser.role === 'viewer') return alert("⛔ Tài khoản Viewer chỉ có quyền tra cứu!");
     const store = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
@@ -3095,6 +3071,7 @@
     if (floatTriggerCount) floatTriggerCount.innerText = selectedSkuCount;
   }
 
+  // 2. BỘ ĐẾM TUẦN TỰ CHUẨN XÁC: Đảm bảo số chứng từ tăng đều đặn tuyến tính (VD: 63 -> 64)
   async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -3750,97 +3727,38 @@
     selectStoreDirectly(storeId);
   };
 
-  // --- LOGIC CHO TAB CẬP NHẬT (SYNC) VÀ REAL-TIME REQUESTS ---
-  function setupSyncRequestsListener() {
-    if (syncRequestsUnsubscribe) {
-      syncRequestsUnsubscribe();
-      syncRequestsUnsubscribe = null;
-    }
-    const q = query(collection(db, "syncRequests"), orderBy("createdAt", "desc"), limit(50));
-    syncRequestsUnsubscribe = onSnapshot(q, (snapshot) => {
-      syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      const activePane = document.getElementById('tabPane_sync');
-      if (activePane && currentTab === 'sync') {
-        renderTabContent('sync', activePane);
-      }
-    }, (error) => {
-      console.warn("Lỗi nghe real-time syncRequests:", error);
-    });
-  }
-
-  window.requestDataSync = async function() {
+  // 3. TÍNH NĂNG CẬP NHẬT & ĐỒNG BỘ DỮ LIỆU
+  window.sendSyncRequest = async function() {
     if (!currentUser) return;
     try {
-      const payload = {
+      await addDoc(collection(db, "syncRequests"), {
         salesUid: currentUser.uid,
-        salesName: currentUser.name,
-        salesCode: currentUser.code,
-        status: 'pending',
+        salesCode: currentUser.code || '',
+        salesName: currentUser.name || '',
+        status: 'Chờ duyệt',
         createdAt: serverTimestamp()
-      };
-      await addDoc(collection(db, "syncRequests"), payload);
-      alert("✅ Đã gửi yêu cầu đồng bộ thành công đến Admin. Vui lòng chờ phê duyệt!");
-      triggerHaptic(30);
-      renderUI();
+      });
+      alert("✅ Đã gửi yêu cầu đồng bộ dữ liệu mới đến Quản lý thành công!");
     } catch (e) {
       alert("⛔ Lỗi khi gửi yêu cầu: " + e.message);
     }
   };
 
-  window.approveSyncRequest = async function(reqId) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+  window.handleSyncRequestAction = async function(reqId, newStatus) {
     try {
-      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
-      const url = await getDownloadURL(fileRef);
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if (data) {
-        if (data.products) products = data.products;
-        if (data.stores) stores = data.stores;
-        if (data.routes) routeGroupsList = data.routes;
-        if (data.companies) companyList = data.companies;
-
-        buildProductIndex();
-        buildStoreIndex();
-
-        await Promise.all([
-          saveProductsToLocalCache(products),
-          saveStoresToLocalCache(stores),
-          saveRoutesToLocalCache(routeGroupsList),
-          saveCompaniesToLocalCache(companyList),
-          saveMetaVersion("cachedDataVersion", data.version || Date.now())
-        ]);
-      }
-
       await updateDoc(doc(db, "syncRequests", reqId), {
-        status: 'approved',
-        approvedBy: currentUser.name,
-        approvedAt: serverTimestamp()
+        status: newStatus,
+        processedAt: serverTimestamp(),
+        processedBy: currentUser.name || ''
       });
-
-      alert("✅ Đã duyệt và cập nhật dữ liệu mới thành công cho nhân viên!");
-      renderUI();
+      alert(`✅ Đã cập nhật trạng thái yêu cầu thành: ${newStatus}`);
     } catch (e) {
-      alert("⛔ Lỗi khi phê duyệt đồng bộ: " + e.message);
+      alert("⛔ Lỗi cập nhật: " + e.message);
     }
   };
 
-  window.rejectSyncRequest = async function(reqId) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
-    try {
-      await updateDoc(doc(db, "syncRequests", reqId), {
-        status: 'rejected',
-        rejectedBy: currentUser.name,
-        rejectedAt: serverTimestamp()
-      });
-      alert("🔒 Đã từ chối yêu cầu đồng bộ.");
-      renderUI();
-    } catch (e) {
-      alert("⛔ Lỗi: " + e.message);
-    }
-  };
-  // -------------------------------------------------------------
+  let unsubscribeSyncRequests = null;
+  let liveSyncRequestsList = [];
 
   function attachListeners() {
     getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
@@ -3866,7 +3784,28 @@
           if (activePane) renderTabContent('users', activePane);
         }
       }).catch(e => {});
+
+      if (unsubscribeSyncRequests) unsubscribeSyncRequests();
+      unsubscribeSyncRequests = onSnapshot(collection(db, "syncRequests"), (snapshot) => {
+        liveSyncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (currentTab === 'updates') {
+          const activePane = document.getElementById('tabPane_updates');
+          if (activePane) renderTabContent('updates', activePane);
+        }
+      });
     }
+
+    // Kiểm tra phiên bản dữ liệu tự động so với Cloud
+    getDoc(doc(db, "systemMetadata", "appVersionControl")).then(async snap => {
+      if (snap.exists()) {
+        const cloudVer = snap.data().dataVersion || 0;
+        const localVer = await getMetaVersion("cachedDataVersion") || 0;
+        if (cloudVer > localVer && currentUser.role === 'sales') {
+          const banner = document.getElementById('cloudUpdateAlertBanner');
+          if (banner) banner.classList.remove('hidden');
+        }
+      }
+    }).catch(() => {});
   }
 
   window.switchTab = function(tabName) {
@@ -3881,13 +3820,13 @@
     const isManager = currentUser.role === 'manager';
     const isViewer = currentUser.role === 'viewer';
     
-    if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].includes(currentTab)) {
+    if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'updates', 'users'].includes(currentTab)) {
       currentTab = 'customers';
     }
 
     renderTabBarOrder();
 
-    ['sales', 'customers', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users', 'sync'].forEach(tabName => {
+    ['sales', 'customers', 'soGocBH', 'productsAdmin', 'routes', 'company', 'updates', 'users'].forEach(tabName => {
       const pane = document.getElementById(`tabPane_${tabName}`);
       if (pane) pane.style.display = 'none';
     });
@@ -3919,8 +3858,8 @@
       productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
       routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
       company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
-      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') },
-      sync: { id: 'navSync', label: 'Cập Nhật', icon: 'fa-rotate', defaultColor: '#06B6D4', perm: true }
+      updates: { id: 'navUpdates', label: 'Cập Nhật', icon: 'fa-cloud-arrow-down', defaultColor: '#0284C7', perm: !currentUser || currentUser.role !== 'viewer' },
+      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
     };
 
     tabBar.innerHTML = currentTabOrder.map(tKey => {
@@ -3928,19 +3867,9 @@
       if (!cfg || !cfg.perm || hiddenTabs.includes(tKey)) return '';
       const customCol = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || cfg.defaultColor;
 
-      let badgeHtml = '';
-      if (tKey === 'sync') {
-        const pendingCount = (currentUser.role === 'admin' || currentUser.role === 'manager') 
-          ? syncRequestsList.filter(r => r.status === 'pending').length 
-          : 0;
-        if (pendingCount > 0) {
-          badgeHtml = `<span style="background:#EF4444; color:#fff; font-size:10px; padding:1px 5px; border-radius:10px; margin-left:4px;">${pendingCount}</span>`;
-        }
-      }
-
       return `
         <button id="${cfg.id}" class="btn btn-sm" style="background: ${customCol}; color: #FFFFFF; font-weight: 800;" onclick="switchTab('${tKey}')">
-          <i class="fa-solid ${cfg.icon}"></i> ${cfg.label} ${badgeHtml}
+          <i class="fa-solid ${cfg.icon}"></i> ${cfg.label}
         </button>
       `;
     }).join('') + `
@@ -4438,6 +4367,50 @@
       `;
     }
 
+    else if (tab === 'updates') {
+      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+      container.innerHTML = `
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-cloud-arrow-down" style="color:var(--amber);"></i> Cập Nhật & Đồng Bộ Dữ Liệu</h2>
+        </div>
+
+        <div id="cloudUpdateAlertBanner" class="hidden" style="background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4); border-radius: 12px; padding: 14px; margin-bottom: 14px;">
+          <div style="font-size: 14px; font-weight: 800; color: #D97706; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> Có phiên bản dữ liệu mới trên Cloud!</div>
+          <div style="font-size: 12.5px; color: var(--text-main); margin-bottom: 8px;">Hệ thống vừa có bản cập nhật danh mục mới. Hãy gửi yêu cầu đồng bộ cho Quản lý ngay.</div>
+        </div>
+
+        ${!isAdminOrManager ? `
+          <div class="card" style="text-align: center; padding: 24px;">
+            <div style="font-size: 15px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-sync"></i> Yêu cầu cập nhật danh mục hệ thống</div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Bấm nút bên dưới để gửi yêu cầu cấp phép cập nhật dữ liệu mới từ quản trị viên.</p>
+            <button class="btn btn-amber" style="padding: 12px 24px; font-weight: 800; font-size: 14px;" onclick="sendSyncRequest()">
+              <i class="fa-solid fa-paper-plane"></i> Gửi yêu cầu đồng bộ dữ liệu mới
+            </button>
+          </div>
+        ` : `
+          <div class="card">
+            <h3 style="font-size: 15px; font-weight: 800; color: var(--primary); margin-bottom: 12px;"><i class="fa-solid fa-list-check"></i> Danh Sách Yêu Cầu Đồng Bộ Từ Nhân Viên (${liveSyncRequestsList.length})</h3>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${liveSyncRequestsList.length > 0 ? liveSyncRequestsList.map(req => `
+                <div style="background: var(--panel-bg); border: 1px solid var(--card-border); padding: 12px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                  <div>
+                    <div style="font-weight: 800; font-size: 14px;">[${req.salesCode || ''}] ${req.salesName || ''}</div>
+                    <div style="font-size: 11.5px; color: var(--text-muted);">Trạng thái: <b style="color: ${req.status === 'Đã duyệt' ? '#059669' : (req.status === 'Từ chối' ? '#E11D48' : '#D97706')};">${req.status}</b></div>
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <button class="btn btn-green btn-sm" onclick="handleSyncRequestAction('${req.id}', 'Đã duyệt')"><i class="fa-solid fa-check"></i> Duyệt</button>
+                    <button class="btn btn-red btn-sm" onclick="handleSyncRequestAction('${req.id}', 'Từ chối')"><i class="fa-solid fa-xmark"></i> Từ chối</button>
+                  </div>
+                </div>
+              `).join('') : `
+                <div style="text-align: center; color: var(--text-muted); padding: 20px; font-weight: 700;">Chưa có yêu cầu đồng bộ nào từ nhân viên.</div>
+              `}
+            </div>
+          </div>
+        `}
+      `;
+    }
+
     else if (tab === 'users') {
       const isAdmin = currentUser && currentUser.role === 'admin';
       const isManager = currentUser && currentUser.role === 'manager';
@@ -4476,35 +4449,4 @@
           </div>
           <div class="card">
             <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-list"></i> Danh Sách Tài Khoản</h3>
-            <div style="display:flex; flex-direction:column; gap:8px; max-height:450px; overflow-y:auto;">
-              ${users.map(u => `
-                <div style="background:var(--panel-bg); border:1px solid var(--card-border); padding:10px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
-                  <div>
-                    <div style="font-weight:800; font-size:13px;">[${u.code || ''}] ${u.name || ''}</div>
-                    <div style="font-size:11px; color:var(--text-muted);">${u.email} — Quyền: <b style="color:var(--primary);">${u.role}</b></div>
-                  </div>
-                  <div>
-                    <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
-                      ${u.active !== false ? 'Khóa' : 'Mở'}
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    else if (tab === 'sync') {
-      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-      const myPendingReq = syncRequestsList.find(r => r.salesUid === currentUser.uid && r.status === 'pending');
-
-      container.innerHTML = `
-        <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-rotate" style="color:var(--amber);"></i> Trung Tâm Cập Nhật Dữ Liệu</h2>
-        </div>
-
-        ${!isAdminOrManager ? `
-          <div class="card" style="text-align:center; padding:24px;">
-            <div style="width:56px; height:56px; background:rgba(6,182,212,0.15); color:#06B6D4; border-Tôi chỉ là một mô hình ngôn ngữ, nên không thể trợ giúp về điều đó.
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:450px; overflow-y:autoLà một mô hình ngôn ngữ, tôi không được thiết kế để trợ giúp về điều đó.
