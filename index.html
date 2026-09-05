@@ -753,15 +753,6 @@
             <button class="btn btn-red btn-sm" onclick="closeSettingsModal()">Đóng</button>
           </div>
 
-          ${currentUser && currentUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com' ? `
-            <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="font-size: 13px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i> Đẩy dữ liệu lên Cloud</div>
-                <button class="btn btn-green btn-sm" onclick="pushMasterDataToCloud()"><i class="fa-solid fa-upload"></i> Đẩy dữ liệu lên Cloud</button>
-              </div>
-            </div>
-          ` : ''}
-
           <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
             <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-font"></i> 1. Cỡ Chữ Chung & Kiểu Chữ (Font Family)</div>
             
@@ -946,7 +937,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 29);
+      const request = indexedDB.open("DMS_OfflineDB", 30);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1052,26 +1043,6 @@
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(transaction.error);
-    });
-  }
-
-  async function saveMetaVersion(versionKey, val) {
-    if (!idbDb) await initIndexedDB();
-    return new Promise((resolve, reject) => {
-      const tx = idbDb.transaction(["metaInfo"], "readwrite");
-      tx.objectStore("metaInfo").put({ key: versionKey, value: val });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async function getMetaVersion(versionKey) {
-    if (!idbDb) await initIndexedDB();
-    return new Promise((resolve, reject) => {
-      const tx = idbDb.transaction(["metaInfo"], "readonly");
-      const req = tx.objectStore("metaInfo").get(versionKey);
-      req.onsuccess = () => resolve(req.result ? req.result.value : null);
-      req.onerror = () => reject(tx.error);
     });
   }
 
@@ -1460,105 +1431,45 @@
     }
   };
 
-  window.pushMasterDataToCloud = async function() {
-    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-      return alert("⛔ Chỉ tài khoản Admin gốc mới có quyền đẩy dữ liệu tổng lên Cloud!");
-    }
-    
-    const confirmPush = await window.showCustomConfirm(
-      "Đẩy Dữ Liệu Lên Cloud",
-      "Hệ thống sẽ tổng hợp toàn bộ Vật Tư, Khách Hàng, Tuyến và Công Ty hiện tại để tạo bản cập nhật mới cho toàn hệ thống.\nBạn có muốn tiếp tục không?",
-      "fa-cloud-arrow-up",
-      "Đẩy dữ liệu",
-      "Hủy"
-    );
-    if (!confirmPush) return;
-
-    try {
-      alert("⏳ Đang tổng hợp và đẩy dữ liệu lên Cloud Storage... Vui lòng chờ trong giây lát.");
-      
-      const newVersion = Date.now();
-      const payload = {
-        version: newVersion,
-        versionString: "2.0." + Math.floor(newVersion / 1000),
-        products: products,
-        stores: stores,
-        routes: routeGroupsList,
-        companies: companyList
-      };
-
-      const jsonStr = JSON.stringify(payload);
-      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
-      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
-
-      const metaRef = doc(db, "systemMetadata", "appVersionControl");
-      await setDoc(metaRef, { 
-        dataVersion: newVersion,
-        versionString: payload.versionString,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-
-      await saveMetaVersion("cachedDataVersion", newVersion);
-
-      alert(`✅ Đã cập nhật thành công phiên bản mới lên Cloud (${payload.versionString})!`);
-    } catch (e) {
-      alert("⛔ Lỗi khi đẩy dữ liệu lên Cloud: " + e.message);
-    }
-  };
-
-  async function uploadFullDataJsonToCloud() {
-    if (!currentUser || currentUser.email.toLowerCase() !== 'phanthanhhuy98@gmail.com') return;
-    try {
-      const newVersion = Date.now();
-      const payload = {
-        version: newVersion,
-        versionString: "2.0." + Math.floor(newVersion / 1000),
-        products: products,
-        stores: stores,
-        routes: routeGroupsList,
-        companies: companyList
-      };
-      const jsonStr = JSON.stringify(payload);
-      const fileRef = ref(storageSvc, "systemCache/dms_master_data.json");
-      await uploadString(fileRef, jsonStr, 'raw', { contentType: 'application/json' });
-
-      const metaRef = doc(db, "systemMetadata", "appVersionControl");
-      await setDoc(metaRef, { 
-        dataVersion: newVersion,
-        versionString: payload.versionString,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {}
-  }
-
-  async function loadDataFromFirestore() {
-    try {
-      const prdSnap = await getDocs(collection(db, "products"));
-      if (!prdSnap.empty) {
-        products = prdSnap.docs.map(d => d.data());
-        buildProductIndex();
-        await saveProductsToLocalCache(products);
+  // --- HỆ THỐNG ĐỒNG BỘ REAL-TIME TRỰC TIẾP TỪ FIRESTORE (KHÔNG DÙNG CLOUD STORAGE) ---
+  function initRealtimeDataSync() {
+    // 1. Lắng nghe danh sách Vật tư (Products) thời gian thực
+    onSnapshot(collection(db, "products"), (snapshot) => {
+      products = snapshot.docs.map(d => d.data());
+      buildProductIndex();
+      saveProductsToLocalCache(products).catch(() => {});
+      if (currentTab === 'productsAdmin' || currentTab === 'sales') {
+        renderUI();
       }
+    });
 
-      const storeSnap = await getDocs(collection(db, "stores"));
-      if (!storeSnap.empty) {
-        stores = storeSnap.docs.map(d => d.data());
-        buildStoreIndex();
-        await saveStoresToLocalCache(stores);
+    // 2. Lắng nghe danh sách Khách hàng (Stores) thời gian thực
+    onSnapshot(collection(db, "stores"), (snapshot) => {
+      stores = snapshot.docs.map(d => d.data());
+      buildStoreIndex();
+      saveStoresToLocalCache(stores).catch(() => {});
+      if (currentTab === 'customers' || currentTab === 'sales') {
+        renderUI();
       }
+    });
 
-      const routeSnap = await getDocs(collection(db, "routes"));
-      if (!routeSnap.empty) {
-        routeGroupsList = routeSnap.docs.map(d => d.data());
-        await saveRoutesToLocalCache(routeGroupsList);
+    // 3. Lắng nghe danh sách Tuyến (Routes) thời gian thực
+    onSnapshot(collection(db, "routes"), (snapshot) => {
+      routeGroupsList = snapshot.docs.map(d => d.data());
+      saveRoutesToLocalCache(routeGroupsList).catch(() => {});
+      if (currentTab === 'routes' || currentTab === 'sales') {
+        renderUI();
       }
+    });
 
-      const compSnap = await getDocs(collection(db, "companies"));
-      if (!compSnap.empty) {
-        companyList = compSnap.docs.map(d => d.data());
-        await saveCompaniesToLocalCache(companyList);
+    // 4. Lắng nghe danh sách Công ty (Companies) thời gian thực
+    onSnapshot(collection(db, "companies"), (snapshot) => {
+      companyList = snapshot.docs.map(d => d.data());
+      saveCompaniesToLocalCache(companyList).catch(() => {});
+      if (currentTab === 'company') {
+        renderUI();
       }
-    } catch (e) {}
+    });
   }
 
   onAuthStateChanged(authSvc, async (user) => {
@@ -1607,6 +1518,7 @@
       await initIndexedDB();
       await cleanupExpiredOrdersOptimized();
       
+      // Khởi động bộ nạp dữ liệu cache trước để app phản hồi siêu tốc ngay lập tức
       try {
         const [cachedPrds, cachedStores, cachedRoutes, cachedComps] = await Promise.all([
           loadProductsFromLocalCache(),
@@ -1619,14 +1531,11 @@
         if (cachedStores && cachedStores.length > 0) { stores = cachedStores; buildStoreIndex(); }
         if (cachedRoutes && cachedRoutes.length > 0) { routeGroupsList = cachedRoutes; }
         if (cachedComps && cachedComps.length > 0) { companyList = cachedComps; }
-
         renderUI();
-
-        if (products.length === 0) {
-          await loadDataFromFirestore();
-          renderUI();
-        }
       } catch (e) {}
+
+      // Kích hoạt lắng nghe Real-time trực tiếp từ Firestore cho tất cả các máy
+      initRealtimeDataSync();
 
       try {
         const pos = await getHighAccuracyPosition();
@@ -3411,8 +3320,6 @@
         products = rawProducts;
         buildProductIndex();
         await saveProductsToLocalCache(products);
-        await uploadFullDataJsonToCloud();
-
         renderUI();
         alert(`✅ Đã đẩy thành công ${products.length} vật tư lên Firebase Firestore!`);
       } catch (err) { 
@@ -3476,8 +3383,6 @@
         stores = rawCustomers;
         buildStoreIndex();
         await saveStoresToLocalCache(stores);
-        await uploadFullDataJsonToCloud();
-
         renderUI();
         alert(`✅ Đã đẩy thành công ${stores.length} khách hàng lên Firebase Firestore!`);
       } catch (err) { 
@@ -3518,7 +3423,6 @@
 
           companyList = newList;
           await saveCompaniesToLocalCache(companyList);
-          await uploadFullDataJsonToCloud();
           renderUI();
           alert("✅ Đã đẩy danh sách công ty lên Firebase Firestore thành công!");
         } else {
@@ -3565,7 +3469,6 @@
 
           routeGroupsList = newList;
           await saveRoutesToLocalCache(newList);
-          await uploadFullDataJsonToCloud();
           renderUI();
           alert("✅ Đã đẩy danh sách tuyến lên Firebase Firestore thành công!");
         } else {
@@ -3588,7 +3491,6 @@
       await setDoc(doc(db, "companies", maCtu.trim()), newC);
       companyList.push(newC);
       await saveCompaniesToLocalCache(companyList);
-      await uploadFullDataJsonToCloud();
       renderUI();
       alert("✅ Thêm công ty thành công!");
     } catch (err) {
@@ -3613,10 +3515,7 @@
     try {
       await setDoc(doc(db, "routes", newRouteId), newRouteObj);
       routeGroupsList.push(newRouteObj);
-      await Promise.all([
-        saveRoutesToLocalCache(routeGroupsList),
-        uploadFullDataJsonToCloud()
-      ]);
+      await saveRoutesToLocalCache(routeGroupsList);
       renderUI();
       alert("✅ Đã thêm tuyến mới thành công!");
     } catch (err) {
@@ -3631,7 +3530,6 @@
     try {
       await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
       await saveCompaniesToLocalCache(companyList);
-      await uploadFullDataJsonToCloud();
     } catch (err) {}
     renderUI();
   };
@@ -3649,7 +3547,6 @@
     try {
       await updateDoc(doc(db, "routes", String(r.id)), { [field]: routeGroupsList[index][field] });
       await saveRoutesToLocalCache(routeGroupsList);
-      await uploadFullDataJsonToCloud();
     } catch (err) {}
     renderUI();
   };
@@ -3664,7 +3561,6 @@
       await deleteDoc(doc(db, "companies", String(c.maCtu)));
       companyList.splice(index, 1);
       await saveCompaniesToLocalCache(companyList);
-      await uploadFullDataJsonToCloud();
       renderUI();
     } catch (err) {
       alert("Lỗi khi xóa: " + err.message);
@@ -3680,10 +3576,7 @@
     try {
       await deleteDoc(doc(db, "routes", String(r.id)));
       routeGroupsList.splice(index, 1);
-      await Promise.all([
-        saveRoutesToLocalCache(routeGroupsList),
-        uploadFullDataJsonToCloud()
-      ]);
+      await saveRoutesToLocalCache(routeGroupsList);
       renderUI();
       alert("✅ Đã xóa tuyến thành công!");
     } catch (err) {
@@ -3763,7 +3656,6 @@
       }
     }).catch(e => {});
 
-    // Lắng nghe real-time bảng syncRequests cho Admin/Manager và Sales
     onSnapshot(collection(db, "syncRequests"), (snapshot) => {
       syncRequestsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       if (currentTab === 'update') {
@@ -4351,7 +4243,6 @@
         </div>
 
         ${isAdminOrManager ? `
-          <!-- GIAO DIỆN DÀNH CHO ADMIN / MANAGER -->
           <div class="card">
             <h3 style="font-size:15px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-shield"></i> Danh Sách Yêu Cầu Cấp Phép Đồng Bộ (Thời Gian Thực)</h3>
             <div style="display:flex; flex-direction:column; gap:8px;">
@@ -4382,7 +4273,6 @@
             </div>
           </div>
         ` : `
-          <!-- GIAO DIỆN DÀNH CHO NHÂN VIÊN (SALES) -->
           <div class="card" style="text-align:center; padding:24px;">
             <div style="width:64px; height:64px; background:rgba(37,99,235,0.1); color:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:24px;">
               <i class="fa-solid fa-cloud-arrow-down"></i>
