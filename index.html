@@ -1467,7 +1467,7 @@
     }
   };
 
-  async function loadMasterDataOptimized(forceCloud = false) {
+ async function loadMasterDataOptimized(forceCloud = false) {
   try {
     await initIndexedDB();
 
@@ -1481,57 +1481,52 @@
     const serverRoutesVersion = Number(serverMeta.routesVersion || 1);
     const serverStoresVersion = Number(serverMeta.storesVersion || 1);
 
-    // 2. Lấy version local an toàn (tránh trả về 0 nếu dưới máy đã từng có dữ liệu)
-    let localCompsVersion = Number(await getLocalMeta("companiesVersion") || 0);
-    let localProductsVersion = Number(await getLocalMeta("productsVersion") || 0);
-    let localRoutesVersion = Number(await getLocalMeta("routesVersion") || 0);
-    let localStoresVersion = Number(await getLocalMeta("storesVersion") || 0);
+    // 2. Lấy version cục bộ hiện tại (nếu chưa có thì coi như 0 để ép tải mới)
+    const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
+    const localProductsVersion = Number(localStorage.getItem("productsVersion") || 0);
+    const localRoutesVersion = Number(localStorage.getItem("routesVersion") || 0);
+    const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
 
-    let cachedComps = await getCachedData("companies");
-    let cachedPrds = await getCachedData("products");
-    let cachedRoutes = await getCachedData("routes");
-    let cachedStores = await getCachedData("stores");
+    let cachedComps, cachedPrds, cachedRoutes, cachedStores;
 
-    // Nếu dưới máy chưa có dữ liệu cache (mới update code), ép buộc tải mới từ cloud lần đầu
-    if (!cachedComps || cachedComps.length === 0) forceCloud = true;
-
-    // --- Xử lý Companies ---
-    if (!forceCloud && localCompsVersion === serverCompsVersion && cachedComps) {
-      // Dùng cache cũ
-    } else {
-      cachedComps = await fetchCollectionFromCloud("companies");
-      await saveCacheData("companies", cachedComps);
-      await setLocalMeta("companiesVersion", serverCompsVersion);
+    // Kiểm tra và lấy từ cache nếu version khớp, ngược lại tải từ Cloud
+    if (!forceCloud && localCompsVersion === serverCompsVersion) {
+      cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
+    }
+    if (!cachedComps || cachedComps.length === 0) {
+      const cSnap = await getDocs(collection(db, "companies"));
+      cachedComps = cSnap.docs.map(d => d.data());
+      localStorage.setItem("companiesVersion", serverCompsVersion);
     }
 
-    // --- Xử lý Products ---
-    if (!forceCloud && localProductsVersion === serverProductsVersion && cachedPrds) {
-      // Dùng cache cũ
-    } else {
-      cachedPrds = await fetchCollectionFromCloud("products");
-      await saveCacheData("products", cachedPrds);
-      await setLocalMeta("productsVersion", serverProductsVersion);
+    if (!forceCloud && localProductsVersion === serverProductsVersion) {
+      cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
+    }
+    if (!cachedPrds || cachedPrds.length === 0) {
+      const pSnap = await getDocs(collection(db, "products"));
+      cachedPrds = pSnap.docs.map(d => d.data());
+      localStorage.setItem("productsVersion", serverProductsVersion);
     }
 
-    // --- Xử lý Routes ---
-    if (!forceCloud && localRoutesVersion === serverRoutesVersion && cachedRoutes) {
-      // Dùng cache cũ
-    } else {
-      cachedRoutes = await fetchCollectionFromCloud("routes");
-      await saveCacheData("routes", cachedRoutes);
-      await setLocalMeta("routesVersion", serverRoutesVersion);
+    if (!forceCloud && localRoutesVersion === serverRoutesVersion) {
+      cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
+    }
+    if (!cachedRoutes || cachedRoutes.length === 0) {
+      const rSnap = await getDocs(collection(db, "routes"));
+      cachedRoutes = rSnap.docs.map(d => d.data());
+      localStorage.setItem("routesVersion", serverRoutesVersion);
     }
 
-    // --- Xử lý Stores ---
-    if (!forceCloud && localStoresVersion === serverStoresVersion && cachedStores) {
-      // Dùng cache cũ
-    } else {
-      cachedStores = await fetchCollectionFromCloud("stores");
-      await saveCacheData("stores", cachedStores);
-      await setLocalMeta("storesVersion", serverStoresVersion);
+    if (!forceCloud && localStoresVersion === serverStoresVersion) {
+      cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
+    }
+    if (!cachedStores || cachedStores.length === 0) {
+      const sSnap = await getDocs(collection(db, "stores"));
+      cachedStores = sSnap.docs.map(d => d.data());
+      localStorage.setItem("storesVersion", serverStoresVersion);
     }
 
-    // Gán dữ liệu vào biến toàn cục và render giao diện
+    // 3. Gán vào biến toàn cục của ứng dụng
     window.allCompanies = cachedComps || [];
     window.allProducts = cachedPrds || [];
     window.allRoutes = cachedRoutes || [];
@@ -1546,9 +1541,9 @@
     if (typeof buildStoreIndex === 'function') buildStoreIndex();
     if (typeof renderUI === 'function') renderUI();
 
-    console.log("Đã đồng bộ master data thành công.");
+    console.log("Đã tải dữ liệu thành công!");
   } catch (error) {
-    console.error("Lỗi khi tải master data:", error);
+    console.error("Lỗi tải dữ liệu:", error);
   }
 }
 
