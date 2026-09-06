@@ -1475,64 +1475,39 @@
     }
   };
 
-  async function loadMasterDataOptimized(forceCloud = false) {
+ async function loadMasterDataOptimized(forceCloud = false) {
     try {
       await initIndexedDB();
 
-      const metaRef = doc(db, "systemMeta", "version");
-      const metaSnap = await getDoc(metaRef);
-      const serverMeta = metaSnap.exists() ? metaSnap.data() : {};
-      
-      const serverCompsVersion = Number(serverMeta.companiesVersion || 1);
-      const serverProductsVersion = Number(serverMeta.productsVersion || 1);
-      const serverRoutesVersion = Number(serverMeta.routesVersion || 1);
-      const serverStoresVersion = Number(serverMeta.storesVersion || 1);
+      // 1. Luôn ưu tiên load từ Cache cục bộ trước để triệt tiêu hoàn toàn số lượt đọc (Reads) phát sinh
+      let cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : [];
+      let cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : [];
+      let cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : [];
+      let cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
 
-      const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
-      const localProductsVersion = Number(localStorage.getItem("productsVersion") || 0);
-      const localRoutesVersion = Number(localStorage.getItem("routesVersion") || 0);
-      const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
-
-      let cachedComps, cachedPrds, cachedRoutes, cachedStores;
-
-      if (!forceCloud && localCompsVersion === serverCompsVersion) {
-        cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
-      }
-      if (!cachedComps || cachedComps.length === 0) {
+      // 2. Chỉ gọi Firebase tải dữ liệu mới nếu cache thực sự trống hoặc có lệnh forceCloud (bấm nút làm mới)
+      if (!cachedComps || cachedComps.length === 0 || forceCloud) {
         const cSnap = await getDocs(collection(db, "companies"));
         cachedComps = cSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("companies", cachedComps);
-        localStorage.setItem("companiesVersion", serverCompsVersion);
+        await saveCompaniesToLocalCache(cachedComps);
       }
 
-      if (!forceCloud && localProductsVersion === serverProductsVersion) {
-        cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
-      }
-      if (!cachedPrds || cachedPrds.length === 0) {
+      if (!cachedPrds || cachedPrds.length === 0 || forceCloud) {
         const pSnap = await getDocs(collection(db, "products"));
         cachedPrds = pSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("products", cachedPrds);
-        localStorage.setItem("productsVersion", serverProductsVersion);
+        await saveProductsToLocalCache(cachedPrds);
       }
 
-      if (!forceCloud && localRoutesVersion === serverRoutesVersion) {
-        cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
-      }
-      if (!cachedRoutes || cachedRoutes.length === 0) {
+      if (!cachedRoutes || cachedRoutes.length === 0 || forceCloud) {
         const rSnap = await getDocs(collection(db, "routes"));
         cachedRoutes = rSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("routes", cachedRoutes);
-        localStorage.setItem("routesVersion", serverRoutesVersion);
+        await saveRoutesToLocalCache(cachedRoutes);
       }
 
-      if (!forceCloud && localStoresVersion === serverStoresVersion) {
-        cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
-      }
-      if (!cachedStores || cachedStores.length === 0) {
+      if (!cachedStores || cachedStores.length === 0 || forceCloud) {
         const sSnap = await getDocs(collection(db, "stores"));
         cachedStores = sSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("stores", cachedStores);
-        localStorage.setItem("storesVersion", serverStoresVersion);
+        await saveStoresToLocalCache(cachedStores);
       }
 
       window.allCompanies = cachedComps || [];
