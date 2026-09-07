@@ -944,7 +944,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 33);
+      const request = indexedDB.open("DMS_OfflineDB", 34);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1337,7 +1337,7 @@
     if (!dateStr) return '';
     const parts = dateStr.split('-');
     if (parts.length === 3) {
-      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return dateStr;
   }
@@ -2707,6 +2707,27 @@
     });
 
     filterSoGocCards();
+  };
+
+  window.reloadSoGocDataManually = async function() {
+    try {
+      const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30)));
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
+      
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) {
+        renderTabContent('soGocBH', activePane);
+      }
+      triggerHaptic(20);
+    } catch (e) {
+      alert("Lỗi tải lại dữ liệu: " + e.message);
+    }
   };
 
   window.loadMoreSoGoc = async function() {
@@ -4085,6 +4106,7 @@
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
+            <button class="btn btn-amber btn-sm" onclick="reloadSoGocDataManually()" title="Làm mới danh sách đơn hàng"><i class="fa-solid fa-rotate"></i> Làm mới</button>
             ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
             ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
@@ -4182,6 +4204,7 @@
                 <th>Ma DTPNNo</th>
                 <th>Ma Nhan Vien</th>
                 <th>TenNhanVien</th>
+                <th>Ma Tuyến</th>
                 <th>Ma VTHHCo</th>
                 <th>Ten Hang Hoa</th>
                 <th>Don Vi Tinh</th>
@@ -4191,21 +4214,27 @@
               </tr>
             </thead>
             <tbody>
-              ${flatExcelRows.map(r => `
-                <tr>
-                  <td><b>${r.soCtu}</b></td>
-                  <td>${r.ngayCtuFormatted}</td>
-                  <td><b>${r.maDTPNNo}</b></td>
-                  <td><b>${r.maNhanVien}</b></td>
-                  <td>${r.tenNhanVien}</td>
-                  <td>${r.maVTHHCo}</td>
-                  <td>${r.tenHangHoa}</td>
-                  <td>${r.donViTinh}</td>
-                  <td><b>${r.soLuong}</b></td>
-                  <td>${r.vndDonGia}</td>
-                  <td><b>${r.vndThanhTien}</b></td>
-                </tr>
-              `).join('')}
+              ${flatExcelRows.map(r => {
+                let rawTuyen = r.maDTPNNo || '';
+                let maTuyenVal = rawTuyen.replace(/-/g, '').trim();
+
+                return `
+                  <tr>
+                    <td><b>${r.soCtu}</b></td>
+                    <td>${r.ngayCtuFormatted}</td>
+                    <td><b>${r.maDTPNNo}</b></td>
+                    <td><b>${r.maNhanVien}</b></td>
+                    <td>${r.tenNhanVien}</td>
+                    <td><b>${maTuyenVal}</b></td>
+                    <td>${r.maVTHHCo}</td>
+                    <td>${r.tenHangHoa}</td>
+                    <td>${r.donViTinh}</td>
+                    <td><b>${Number(r.soLuong || 0).toLocaleString('en-US')}</b></td>
+                    <td>${Number(r.vndDonGia || 0).toLocaleString('en-US')}</td>
+                    <td><b>${Number(r.vndThanhTien || 0).toLocaleString('en-US')}</b></td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
