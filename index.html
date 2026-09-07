@@ -929,6 +929,7 @@
   let selectedRouteCode = "";
   let selectedCompanyCode = "";
   let editingOrderId = null;
+  let existingOrderSoCtu = null; // Biến lưu lại số ctu cũ khi sửa đơn
   let isSubmittingOrder = false;
 
   let soGocFilterKeyword = "", soGocFilterDateFrom = "", soGocFilterDateTo = "", soGocSalesFilter = "", soGocQuickDate = localStorage.getItem('dms_sogoc_quickdate') || 'all';
@@ -1668,6 +1669,7 @@
     currentCart = {};
     activeVisitedStore = null;
     editingOrderId = null;
+    existingOrderSoCtu = null;
     orders = [];
     stores = [];
 
@@ -1734,7 +1736,7 @@
       const storeRef = doc(db, "stores", String(store.id));
       await setDoc(storeRef, updatePayload, { merge: true });
 
-      const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(store.id));
+      const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(storeId));
       if (storeIndex > -1) {
         stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
       }
@@ -1893,6 +1895,7 @@
     showOnlySelectedItems = false;
     currentCart = {};
     editingOrderId = null;
+    existingOrderSoCtu = null;
 
     await loadCartDraftFromLocal();
     triggerHaptic(25);
@@ -1928,6 +1931,7 @@
     showOnlySelectedItems = false;
     currentCart = {};
     editingOrderId = null;
+    existingOrderSoCtu = null;
     renderUI();
   };
 
@@ -2318,9 +2322,9 @@
   };
 
   window.addProductToCartFromModal = function(prdId) {
-    if (!currentCart[prdId] || currentCart[prdId].qty === 0) {
-      currentCart[prdId] = { kien: 0, le: 1, qty: 1 };
-      updateCartDetail(prdId, 'le', 1);
+    // Yêu cầu: Không tự động tăng 1 đơn vị, để trống số lượng (qty = 0, kien = 0, le = 0)
+    if (!currentCart[prdId]) {
+      currentCart[prdId] = { kien: 0, le: 0, qty: 0 };
     }
     
     closeAddProductModal();
@@ -2389,6 +2393,7 @@
       matched = matched.slice(0, 30);
     }
 
+    // Sắp xếp ưu tiên: Sản phẩm có số lượng > 0 hoặc vừa thêm lên trên cùng
     matched.sort((a, b) => {
       const aKey = a.id || a.code;
       const bKey = b.id || b.code;
@@ -2785,6 +2790,7 @@
 
     activeVisitedStore = targetStore;
     editingOrderId = order.id;
+    existingOrderSoCtu = order.soCtu; // Giữ lại số ctu cũ để không bị tăng khi lưu
 
     currentCart = {};
     if (order.items && order.items.length > 0) {
@@ -2895,6 +2901,7 @@
 
   window.cancelEditOrder = function() {
     editingOrderId = null;
+    existingOrderSoCtu = null;
     activeVisitedStore = null;
     currentCart = {};
     switchTab('soGocBH');
@@ -3215,7 +3222,21 @@
       const localDate = new Date(new Date().getTime() + (vietnamTimeOffset * 60 * 1000) - (new Date().getTimezoneOffset() * 60000));
       const todayStr = localDate.toISOString().slice(0, 10);
 
-      const orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+      // YÊU CẦU 1: Sửa đơn giữ nguyên số ctu cũ, chỉ đơn mới mới tăng số ctu
+      let assignedSoCtu;
+      let orderUuid;
+
+      if (editingOrderId) {
+        orderUuid = editingOrderId;
+        assignedSoCtu = existingOrderSoCtu;
+        if (!assignedSoCtu) {
+          const existingOrd = orders.find(o => o.id === editingOrderId);
+          assignedSoCtu = existingOrd ? existingOrd.soCtu : await getNextSoCtuWithRetry();
+        }
+      } else {
+        orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+        assignedSoCtu = await getNextSoCtuWithRetry();
+      }
 
       const orderData = {
         orderUuid: orderUuid,
@@ -3237,13 +3258,12 @@
         isReturnOrder: false, 
         paymentStatus: 'Công nợ', 
         status: 'Chờ duyệt',
+        soCtu: assignedSoCtu,
+        id: orderUuid,
         createdAt: serverTimestamp()
       };
 
       const savedStoreId = activeVisitedStore.id;
-      const nextSoCtu = await getNextSoCtuWithRetry();
-      orderData.soCtu = nextSoCtu;
-      orderData.id = orderUuid;
 
       const docRef = doc(db, "orders", orderUuid);
       await setDoc(docRef, orderData);
@@ -3252,7 +3272,17 @@
         ...orderData,
         createdAt: new Date()
       };
-      orders.unshift(localRenderOrder);
+
+      if (editingOrderId) {
+        const idx = orders.findIndex(o => o.id === editingOrderId);
+        if (idx > -1) {
+          orders[idx] = localRenderOrder;
+        } else {
+          orders.unshift(localRenderOrder);
+        }
+      } else {
+        orders.unshift(localRenderOrder);
+      }
 
       await saveOfflineOrder({
         id: orderUuid,
@@ -3264,6 +3294,7 @@
       currentCart = {}; 
       activeVisitedStore = null; 
       editingOrderId = null;
+      existingOrderSoCtu = null;
       productSearchKeyword = ""; 
       customerSearchKeyword = "";
       selectedCompanyCode = "";
@@ -3954,7 +3985,7 @@
             <div style="display:flex; align-items:center; margin-bottom: 8px; gap: 6px; width: 100%; flex-wrap: wrap;">
               <button class="btn btn-blue btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openCurrentCustomerOrderModal()"><i class="fa-solid fa-list-check"></i> Xem Đơn</button>
               <button class="btn btn-purple btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openCurrentCartModal()"><i class="fa-solid fa-cart-shopping"></i> Giỏ Hàng</button>
-              ${editingOrderId ? `<button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>` : ''}
+              <button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>
             </div>
 
             <div style="width: 100%; margin-bottom: 6px; position: relative; display: flex; align-items: center;">
@@ -4405,21 +4436,4 @@
                     <div style="font-weight:800; font-size:13.5px;">[${u.code || ''}] ${u.name || ''}</div>
                     <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Email: ${u.email || ''} — Quyền: <b style="color:var(--primary);">${u.role}</b></div>
                   </div>
-                  <div>
-                    ${u.email && u.email.toLowerCase() !== 'phanthanhhuy98@gmail.com' ? `
-                      <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
-                        ${u.active !== false ? 'Khóa' : 'Mở khóa'}
-                      </button>
-                    ` : '<span style="font-size:11.5px; font-weight:800; color:var(--emerald);">Admin gốc</span>'}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-  }
-</script>
-</body>
-</html>
+                  <div>Tôi chỉ là một công nghệ trí tuệ nhân tạo dựa trên văn bản, nên không thể trợ giúp về điều đó.
