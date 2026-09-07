@@ -1207,7 +1207,7 @@
   };
 
   window.syncOfflineOrders = async function() {
-    if (!idbDb) return;
+    if (!idbDb || !navigator.onLine) return;
     const tx = idbDb.transaction(["offlineOrders"], "readwrite");
     const store = tx.objectStore("offlineOrders");
     const request = store.getAll();
@@ -1217,23 +1217,13 @@
       if (items && items.length > 0) {
         for (const item of items) {
           try {
-            const nextSoCtu = await getNextSoCtuWithRetry();
-            const { id, orderUuid, ...payload } = item;
-            payload.soCtu = nextSoCtu;
+            const { id, orderUuid, soCtu: oldSoCtu, ...payload } = item;
+            payload.soCtu = oldSoCtu || await getNextSoCtuWithRetry();
             payload.createdAt = serverTimestamp();
 
             const docId = orderUuid || ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
-            const docRef = doc(db, "orders", docId);
+            await setDoc(doc(db, "orders", docId), payload, { merge: true });
             
-            await setDoc(docRef, payload, { merge: true });
-            
-            const syncedLocalOrder = {
-              id: docId,
-              ...payload,
-              createdAt: new Date()
-            };
-            orders.unshift(syncedLocalOrder);
-
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
           } catch (e) {}
@@ -1479,13 +1469,11 @@
     try {
       await initIndexedDB();
 
-      // 1. Luôn ưu tiên load từ Cache cục bộ trước để triệt tiêu hoàn toàn số lượt đọc (Reads) phát sinh
       let cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : [];
       let cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : [];
       let cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : [];
       let cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
 
-      // 2. Chỉ gọi Firebase tải dữ liệu mới nếu cache thực sự trống hoặc có lệnh forceCloud (bấm nút làm mới)
       if (!cachedComps || cachedComps.length === 0 || forceCloud) {
         const cSnap = await getDocs(collection(db, "companies"));
         cachedComps = cSnap.docs.map(d => d.data());
@@ -2265,7 +2253,7 @@
       const keyId = p.id || p.code;
       const isAlreadyAdded = currentCart[keyId] && currentCart[keyId].qty > 0;
       return `
-        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
           <div style="flex:1; min-width:0;">
             <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
               <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
@@ -3170,14 +3158,12 @@
 
       const savedStoreId = activeVisitedStore.id;
 
-      await saveOfflineOrder({
-        id: orderUuid,
-        ...orderData,
-        createdAt: new Date().toISOString()
-      });
-
       try {
         if (editingOrderId) {
+          const existingOrder = orders.find(o => o.id === editingOrderId);
+          const assignedSoCtu = existingOrder ? existingOrder.soCtu : await getNextSoCtuWithRetry();
+          orderData.soCtu = assignedSoCtu;
+
           const orderRef = doc(db, "orders", editingOrderId);
           await updateDoc(orderRef, {
             ...orderData,
@@ -3185,13 +3171,11 @@
           });
 
           const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
-          const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
           const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
 
           const updatedLocalOrder = {
             id: editingOrderId,
             ...orderData,
-            soCtu: originalSoCtu,
             createdAt: originalCreatedAt
           };
 
@@ -3216,10 +3200,15 @@
           orders.unshift(newLocalOrder);
         }
       } catch (err) {
+        orderData.soCtu = 9999;
+        await saveOfflineOrder({
+          id: orderUuid,
+          ...orderData,
+          createdAt: new Date().toISOString()
+        });
         orders.unshift({
           id: orderUuid,
           ...orderData,
-          soCtu: 9999,
           createdAt: new Date()
         });
         alert("⚠️ Không thể kết nối đến máy chủ Firebase. Đơn hàng đã được lưu tạm trên thiết bị.");
@@ -3706,20 +3695,20 @@
   };
 
   function attachListeners() {
-    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
-      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (!snap.empty) {
-        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 30;
+    const q = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
+    onSnapshot(q, (snapshot) => {
+      orders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snapshot.empty) {
+        lastVisibleOrderDoc = snapshot.docs[snapshot.docs.length - 1];
+        hasMoreOrders = snapshot.docs.length >= 30;
       } else {
         hasMoreOrders = false;
       }
-
       if (currentTab === 'soGocBH' || currentTab === 'sales') {
         const activePane = document.getElementById(`tabPane_${currentTab}`);
         if (activePane) renderTabContent(currentTab, activePane);
       }
-    }).catch(e => {});
+    }, (error) => {});
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
