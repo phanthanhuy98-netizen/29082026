@@ -698,8 +698,6 @@
 
   window.openSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
-    if (!modalContainer) return;
-    
     const wakeLockEnabled = localStorage.getItem('dms_pref_wakelock') === 'true';
     const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
     const currentThemeKey = localStorage.getItem('dms_theme_pref_' + (currentUser ? currentUser.uid : '')) || localStorage.getItem('dms_theme_pref') || 'softWhite';
@@ -739,6 +737,7 @@
     };
 
     const fontSizesList = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24];
+
     const isAdmin = currentUser && currentUser.role === 'admin';
 
     modalContainer.innerHTML = `
@@ -894,15 +893,13 @@
         </div>
       </div>
     `;
-    modalContainer.classList.remove('hidden');
+    modalContainer.classList.add('hidden');
   };
 
   window.closeSettingsModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-      modalContainer.innerHTML = '';
-      modalContainer.classList.add('hidden');
-    }
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
   };
 
   window.toggleTabVisibility = function(tabName, isVisible) {
@@ -1433,10 +1430,6 @@
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
-    if (!usernameInput || !pass) {
-      return alert("Vui lòng nhập đầy đủ mã nhân viên/email và mật khẩu!");
-    }
-
     let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
@@ -1479,7 +1472,6 @@
       triggerHaptic(40);
 
     } catch (authErr) {
-      console.error("Login error:", authErr);
       const failedAttemptsKey = `failed_attempts_${email}`;
       let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
       localStorage.setItem(failedAttemptsKey, currentFailed);
@@ -1487,7 +1479,7 @@
       if (currentFailed >= 10) {
         alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
       } else {
-        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại trên hệ thống). Lỗi: ${authErr.message}`);
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
       }
     }
   };
@@ -2268,6 +2260,8 @@
 
         resultsContainer.innerHTML = selectedItemsList.length > 0 ? selectedItemsList.map(({ p, c, keyId }) => {
           const safeK = getSafeKey(keyId);
+          const rawPrice = Number(p.price || 0);
+          const itemTotal = rawPrice * c.qty;
           const displayLe = (c.le === 0 ? '' : c.le);
           const displayKien = (c.kien === 0 ? '' : c.kien);
 
@@ -2276,7 +2270,9 @@
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
                 <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                   <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
+                  <span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);"><i class="fa-solid fa-tag"></i> ${rawPrice.toLocaleString()}đ</span>
                 </div>
+                <span style="font-size:12px; font-weight:800; color:var(--rose);">T.Tiền: <span id="modal_row_total_${safeK}">${itemTotal.toLocaleString()}đ</span></span>
               </div>
               <div style="font-size:var(--font-size-product-name); font-weight:700; color:var(--text-main); word-break:break-word; line-height:1.35;">${p.name}</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--panel-bg); padding: 6px; border-radius: 10px; border: 1px solid var(--card-border);">
@@ -2326,13 +2322,10 @@
           </div>
           
           <div style="display:flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+            <input type="text" id="modalProductSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư cần tìm..." oninput="filterModalProductList(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input); border-radius:12px; flex: 1;">
             <button type="button" id="modalToggleViewBtn" class="btn btn-sm btn-amber" style="padding: 12px 14px; font-weight: 800; white-space: nowrap;" onclick="_toggleModalViewMode()">
               <i class="fa-solid fa-box-archive"></i> Xem sản phẩm đã chọn (0)
             </button>
-          </div>
-
-          <div style="display:flex; gap: 8px; margin-bottom: 8px; align-items: center;">
-            <input type="text" id="modalProductSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư cần tìm..." oninput="filterModalProductList(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input); border-radius:12px; flex: 1;">
           </div>
 
           <div id="modalProductResultsContainer" style="overflow-y: auto; max-height: calc(85vh - 160px); display: flex; flex-direction: column; gap: 8px; padding-right: 4px;">
@@ -2407,13 +2400,17 @@
       const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
       const displayLe = (c.le === 0 ? '' : c.le);
       const displayKien = (c.kien === 0 ? '' : c.kien);
+      const rawPrice = Number(p.price || 0);
+      const itemTotal = rawPrice * (c.qty || 0);
 
       return `
         <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
               <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
+              <span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);"><i class="fa-solid fa-tag"></i> ${rawPrice.toLocaleString()}đ</span>
             </div>
+            <span style="font-size:12px; font-weight:800; color:var(--rose);">T.Tiền: <span id="modal_row_total_${safeK}">${itemTotal.toLocaleString()}đ</span></span>
           </div>
           
           <div style="font-size:var(--font-size-product-name); font-weight:700; color:var(--text-main); word-break:break-word; line-height:1.35;">${p.name}</div>
@@ -2449,6 +2446,11 @@
     if (!p) return;
     const safeK = getSafeKey(prdId);
     const c = currentCart[prdId] || { qty: 0 };
+    const rawPrice = Number(p.price || 0);
+    const itemTotal = rawPrice * c.qty;
+
+    const rowTotalEl = document.getElementById(`modal_row_total_${safeK}`);
+    if (rowTotalEl) rowTotalEl.innerText = itemTotal.toLocaleString() + 'đ';
 
     const modalInpLe = document.querySelector(`.modal-input-le-${safeK}`);
     const modalInpKien = document.querySelector(`.modal-input-kien-${safeK}`);
@@ -2530,10 +2532,13 @@
       const keyId = p.id || p.code;
       const safeK = getSafeKey(keyId);
       const c = currentCart[keyId] || { kien: 0, le: 0, qty: 0 };
+      const rawPrice = Number(p.price || 0);
+      const itemTotal = rawPrice * (c.qty || 0);
       const hasQty = c.qty > 0;
 
       const displayLe = (c.le === 0 ? '' : c.le);
       const displayKien = (c.kien === 0 ? '' : c.kien);
+      const formattedPrice = rawPrice.toLocaleString() + 'đ';
 
       return `
         <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 6px;">
@@ -2542,8 +2547,11 @@
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span class="item-code" style="font-size: var(--font-size-sub-meta); padding: 2px 6px; background: var(--prod-code-bg); color: var(--prod-code-color); font-weight: 800; border-radius: 4px;">${p.code}</span>
               <span style="font-size: var(--font-size-sub-meta); background: var(--prod-qc-bg); color: var(--prod-qc-color); padding: 2px 6px; border-radius: 4px; font-weight: 800;">ĐVT: ${p.dvt || 'cây'} (Q/C ${p.tyLeQuyDoi || 50})</span>
+              <span style="font-size: var(--font-size-sub-meta); font-weight: 700; color: var(--amber);"><i class="fa-solid fa-tag"></i> ĐG: ${formattedPrice}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+              <span style="font-size: var(--font-size-sub-meta); font-weight: 700; color: var(--text-muted);">T.Tiền:</span>
+              <span style="font-size: 14px; font-weight: 800; color: var(--rose);" id="mobile_row_total_${safeK}">${itemTotal.toLocaleString()}đ</span>
               <button type="button" class="btn btn-red btn-sm" style="padding: 4px 8px; font-size: 11px; font-weight: 800; border-radius: 6px;" onclick="removeCartItemCompletely('${keyId}')" title="Xóa vật tư này"><i class="fa-solid fa-trash"></i> Xóa</button>
             </div>
           </div>
@@ -2707,6 +2715,11 @@
           <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${p.dvt || 'cây'}_Q/C: ${p.tyLeQuyDoi || 50}</span>
         </div>
         <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
+        <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted); background:var(--panel-bg); padding:8px 10px; border-radius:8px;">
+          <span>Tồn đầu: <b>${p.stockDau || 0}</b></span>
+          <span>Tồn cuối: <b>${p.stockCuoi || 0}</b></span>
+        </div>
+        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Đơn giá: <b style="color:var(--rose);">${(p.price||0).toLocaleString()}đ</b> | Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
       </div>
     `).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy vật tư phù hợp.</div>`;
 
@@ -3473,6 +3486,9 @@
       "Mã Vật Tư": p.code || '',
       "Tên Vật Tư": p.name || '',
       "Đơn Vị Tính": p.dvt || 'hộp',
+      "Tồn Đầu": p.stockDau || 0,
+      "Tồn Cuối": p.stockCuoi || 0,
+      "Đơn Giá": p.price || 0,
       "Quy Cách Thùng": p.tyLeQuyDoi || 50
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -3534,10 +3550,10 @@
               code: code, 
               name: name, 
               dvt: dvt,
-              stockDau: 0, 
-              stockCuoi: 0,
-              price: Number(r[3]) || 0, 
-              tyLeQuyDoi: Number(r[4]) || 50
+              stockDau: Number(r[3]) || 0, 
+              stockCuoi: Number(r[4]) || 0,
+              price: Number(r[5]) || 0, 
+              tyLeQuyDoi: Number(r[6]) || 50
             });
           }
         }
@@ -4218,7 +4234,9 @@
                 maVTHHCo: finalMaVTHHCo,
                 tenHangHoa: finalTenHangHoa,
                 donViTinh: item.dvt || 'hộp',
-                soLuong: itemQty
+                soLuong: itemQty,
+                vndDonGia: item.price || 0,
+                vndThanhTien: (item.price || 0) * itemQty
               });
             }
           });
@@ -4361,6 +4379,8 @@
                 <th>Ten Hang Hoa</th>
                 <th>Don Vi Tinh</th>
                 <th>So Luong</th>
+                <th>VND Don Gia</th>
+                <th>VND Thanh Tien</th>
               </tr>
             </thead>
             <tbody>
@@ -4383,6 +4403,8 @@
                     <td>${r.tenHangHoa}</td>
                     <td>${r.donViTinh}</td>
                     <td><b>${Number(r.soLuong || 0).toLocaleString('en-US')}</b></td>
+                    <td>${Number(r.vndDonGia || 0).toLocaleString('en-US')}</td>
+                    <td><b>${Number(r.vndThanhTien || 0).toLocaleString('en-US')}</b></td>
                   </tr>
                 `;
               }).join('')}
@@ -4430,7 +4452,7 @@
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
 
-      container.innerHTML = `
+   container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
@@ -4449,6 +4471,33 @@
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:6px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">Nhóm: ${r.nhomDoiTuong}</span>
+                ${canModify ? `
+                  <div style="display:flex; gap:6px;">
+                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
+                  </div>
+                ` : ''}
+              </div>
+              <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${r.noiDung || '—'}</div>
+              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Ghi chú: ${r.ghiChu || '—'}</div>
+            </div>
+          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không có dữ liệu tuyến.</div>`}
+        </div>
+      `;
+    }
+
+    else if (tab === 'company') {
+      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+      const canModify = isAdminOrManager;
+      const isSales = currentUser.role === 'sales';
+      const isViewer = currentUser.role === 'viewer';
+
+      container.innerHTML = `
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:var(--amber);"></i> DS Công Ty (${companyList.length})</h2>
+          <div class="excel-group-btns">
+            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
+            ${!isSales && !isViewer ? `
+              <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               ${canModify ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
           </div>
@@ -4462,13 +4511,10 @@
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${c.maCtu}</span>
                 ${canModify ? `
-                  <div style="display:flex; gap:6px;">
-                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
-                  </div>
+                  <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
                 ` : ''}
               </div>
               <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${c.tenCtu || '—'}</div>
-              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Trạng thái: <b>${c.status || 'Mở'}</b></div>
             </div>
           `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không có dữ liệu công ty.</div>`}
         </div>
@@ -4478,7 +4524,7 @@
     else if (tab === 'users') {
       const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
       if (!isAdminOrManager) {
-        container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose); font-weight:800;">⛔ Bạn không có quyền truy cập quản lý nhân viên!</div>`;
+        container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-muted);">Bạn không có quyền truy cập mục quản lý nhân viên.</div>`;
         return;
       }
 
@@ -4486,59 +4532,54 @@
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
         </div>
-        <div class="card" style="margin-bottom:12px;">
-          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Nhân Viên Mới</h3>
-          <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <div>
-                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Mã NV:</label>
-                <input type="text" id="usCode" placeholder="VD: NV01" required style="margin:2px 0 0 0; padding:10px;">
-              </div>
-              <div>
-                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Họ và tên:</label>
-                <input type="text" id="usName" placeholder="VD: Nguyễn Văn A" required style="margin:2px 0 0 0; padding:10px;">
-              </div>
+        
+        <div class="card" style="margin-bottom:12px; padding:14px;">
+          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-plus"></i> Thêm Tài Khoản Nhân Viên Mới</h3>
+          <form id="userForm" onsubmit="addUser(event)">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)" required style="margin:0;">
+              <input type="text" id="usName" placeholder="Tên Nhân Viên" required style="margin:0;">
             </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <div>
-                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Tên đăng nhập / Email:</label>
-                <input type="text" id="usUsername" placeholder="vd: nhanvien" required style="margin:2px 0 0 0; padding:10px;">
-              </div>
-              <div>
-                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Mật khẩu:</label>
-                <input type="password" id="usPass" placeholder="Ít nhất 6 ký tự" required style="margin:2px 0 0 0; padding:10px;">
-              </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+              <input type="text" id="usUsername" placeholder="Email / Tên đăng nhập" required style="margin:0;">
+              <input type="password" id="usPass" placeholder="Mật khẩu khởi tạo" required style="margin:0;">
             </div>
-            <div>
-              <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Phân quyền (Role):</label>
-              <select id="usRole" style="margin:2px 0 0 0; padding:10px;">
+            <div style="margin-bottom:10px;">
+              <select id="usRole" style="margin:0; padding:10px;">
                 <option value="sales">Sales (Nhân viên bán hàng)</option>
                 <option value="manager">Manager (Quản lý)</option>
                 <option value="admin">Admin (Quản trị hệ thống)</option>
                 <option value="viewer">Viewer (Chỉ xem)</option>
               </select>
             </div>
-            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800; margin-top:4px;">TẠO TÀI KHOẢN</button>
+            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:10px; font-weight:800;">TẠO TÀI KHOẢN MỚI</button>
           </form>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${users.map(u => `
-            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">[${u.code || 'NV'}] ${u.name}</span>
-                <span class="badge ${u.active !== false ? 'badge-success' : 'badge-danger'}">${u.active !== false ? 'Hoạt động' : 'Đã khóa'}</span>
+          ${users.length > 0 ? users.map(u => {
+            const isSelf = u.uid === currentUser.uid;
+            const isProtected = u.email && u.email.toLowerCase() === 'phanthanhhuy98@gmail.com';
+            const isActive = u.active !== false;
+
+            return `
+              <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">[${u.code || 'NV'}] - ${u.role || 'sales'}</span>
+                  <span class="badge ${isActive ? 'badge-success' : 'badge-danger'}">${isActive ? 'Đang hoạt động' : 'Đã khóa'}</span>
+                </div>
+                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${u.name}</div>
+                <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted); word-break:break-all;">📧 ${u.email}</div>
+                ${!isSelf && !isProtected ? `
+                  <div style="display:flex; gap:6px; margin-top:4px;">
+                    <button class="btn ${isActive ? 'btn-red' : 'btn-green'} btn-sm" style="flex:1; justify-content:center; padding:8px; font-weight:800;" onclick="toggleUserActive('${u.uid}', ${!isActive})">
+                      ${isActive ? '🔒 Khóa Tài Khoản' : '🔓 Mở Khóa'}
+                    </button>
+                  </div>
+                ` : ''}
               </div>
-              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Email/User: <b>${u.email}</b> • Quyền: <b style="color:var(--primary);">${u.role}</b></div>
-              <div style="display:flex; gap:6px; margin-top:4px;">
-                ${u.active !== false ? `
-                  <button class="btn btn-red btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', false)"><i class="fa-solid fa-lock"></i> Khóa tài khoản</button>
-                ` : `
-                  <button class="btn btn-green btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', true)"><i class="fa-solid fa-unlock"></i> Mở khóa</button>
-                `}
-              </div>
-            </div>
-          `).join('')}
+            `;
+          }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Chưa có nhân viên nào trong hệ thống.</div>`}
         </div>
       `;
     }
