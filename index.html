@@ -221,11 +221,6 @@
   }
   .mobile-item-card.has-selected { background: rgba(5, 150, 105, 0.1); border-color: rgba(5, 150, 105, 0.3); }
 
-  .badge{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:10px;font-size: 11px;font-weight:700;white-space:nowrap;touch-action:manipulation;cursor:pointer;}
-  .badge-success{background:rgba(5, 150, 105, 0.15);color:#059669;border:1px solid rgba(5, 150, 105, 0.3);text-decoration:none;}
-  .badge-pending{background:rgba(217, 119, 6, 0.15);color:#D97706;border:1px solid rgba(217, 119, 6, 0.3);}
-  .badge-danger{background:rgba(225, 29, 72, 0.15);color:#E11D48;border:1px solid rgba(225, 29, 72, 0.3);}
-  
   input, select, textarea { 
     width:100%; 
     max-width: 100%; 
@@ -925,6 +920,7 @@
   let activeVisitedStore = null;
   let selectedRouteCode = "";
   let selectedCompanyCode = "";
+  let pinnedCompanyPrefix = ""; // Biến lưu mã công ty được ghim (2 ký tự đầu)
   let editingOrderId = null;
   let existingOrderSoCtu = null; 
   let isSubmittingOrder = false;
@@ -1889,6 +1885,7 @@
     productSearchKeyword = '';
     customerSearchKeyword = '';
     selectedCompanyCode = '';
+    pinnedCompanyPrefix = ''; // Reset ghim công ty khi đổi tiệm
     showOnlySelectedItems = false;
     currentCart = {};
     editingOrderId = null;
@@ -1925,6 +1922,7 @@
     productSearchKeyword = '';
     customerSearchKeyword = '';
     selectedCompanyCode = '';
+    pinnedCompanyPrefix = '';
     showOnlySelectedItems = false;
     currentCart = {};
     editingOrderId = null;
@@ -2189,6 +2187,20 @@
     }, 300);
   };
 
+  // HÀM XỬ LÝ GHIM MÃ CÔNG TY (2 KÝ TỰ ĐẦU)
+  window.onPinnedCompanyChanged = function(val) {
+    pinnedCompanyPrefix = val ? val.trim().slice(0, 2).toLowerCase() : "";
+    const badgeEl = document.getElementById('pinnedCompanyBadge');
+    if (badgeEl) {
+      if (pinnedCompanyPrefix) {
+        badgeEl.innerHTML = `<span style="background:var(--emerald); color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:800;">Đang ghim công ty: ${pinnedCompanyPrefix.toUpperCase()}</span>`;
+      } else {
+        badgeEl.innerHTML = `<span style="background:var(--text-muted); color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700;">Chưa ghim Cty (Tìm toàn bộ)</span>`;
+      }
+    }
+    filterSalesProducts('');
+  };
+
   window.openAddProductModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
@@ -2320,21 +2332,30 @@
     let matched = [];
     for (const [id, entry] of productIndexMap.entries()) {
       const p = entry.product;
-      let matchCompany = true;
-      if (selectedCompanyCode) {
-        matchCompany = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+      const pCode = (p.code || '').trim().toLowerCase();
+
+      // RÀNG BUỘC CÔNG TY ĐÃ GHIM TRONG MODAL NẾU CẦN HOẶC TÌM KIẾM THÔNG MINH
+      let matchCompanyPrefix = true;
+      if (pinnedCompanyPrefix) {
+        matchCompanyPrefix = pCode.startsWith(pinnedCompanyPrefix);
       }
 
+      let matchCompanySelect = true;
+      if (selectedCompanyCode) {
+        matchCompanySelect = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+      }
+
+      if (!matchCompanyPrefix || !matchCompanySelect) continue;
+
       if (q === "") {
-        if (matchCompany) matched.push(p);
+        matched.push(p);
       } else if (isNumericPrefix) {
-        const pCode = (p.code || '').trim();
         const firstTwo = pCode.slice(0, 2);
-        if (matchCompany && (firstTwo === rawVal || entry.searchableText.includes(q))) {
+        if (firstTwo === rawVal || entry.searchableText.includes(q)) {
           matched.push(p);
         }
       } else {
-        if (matchCompany && entry.searchableText.includes(q)) {
+        if (entry.searchableText.includes(q)) {
           matched.push(p);
         }
       }
@@ -2432,7 +2453,7 @@
   };
 
   // ==========================================
-  // HÀM LỌC SẢN PHẨM CHÍNH (ĐÃ CẬP NHẬT GỌN GÀNG)
+  // HÀM LỌC SẢN PHẨM CHÍNH (TÍCH HỢP GHIM MÃ CÔNG TY & ẨN SẢN PHẨM KHÁC KHI ĐANG NHẬP)
   // ==========================================
   window.filterSalesProducts = function(val) {
     if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
@@ -2447,17 +2468,25 @@
       const keyId = p.id || p.code;
       const c = currentCart[keyId];
       const hasQty = c && c.qty > 0;
+      const pCode = (p.code || '').trim().toLowerCase();
 
-      let matchCompany = true;
-      if (selectedCompanyCode) {
-        matchCompany = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
+      // 1. KIỂM TRA ĐIỀU KIỆN GHIM MÃ CÔNG TY (2 KÝ TỰ ĐẦU)
+      let matchPinnedCompany = true;
+      if (pinnedCompanyPrefix) {
+        matchPinnedCompany = pCode.startsWith(pinnedCompanyPrefix);
       }
+      if (!matchPinnedCompany) continue; // Nếu đã ghim công ty mà mã VT không khớp 2 ký tự đầu thì bỏ qua hoàn toàn
+
+      let matchCompanySelect = true;
+      if (selectedCompanyCode) {
+        matchCompanySelect = pCode.startsWith(selectedCompanyCode.toLowerCase()) || (p.companyCode && p.companyCode.toLowerCase() === selectedCompanyCode.toLowerCase());
+      }
+      if (!matchCompanySelect) continue;
 
       const matchKey = productSearchKeyword === "" || entry.searchableText.includes(productSearchKeyword);
 
-      // CƠ CHẾ MỚI: Chỉ hiển thị sản phẩm nếu ĐANG ĐƯỢC TÌM KIẾM HOẶC ĐANG NHẬP SỐ LƯỢNG (>0).
-      // Các sản phẩm còn lại sẽ tự động ẩn đi để màn hình chỉ còn duy nhất món đang thao tác.
-      if (productSearchKeyword !== "" && matchCompany && matchKey) {
+      // 2. CƠ CHẾ ẨN CÁC SẢN PHẨM KHÁC KHI ĐANG THAO TÁC / GÕ TÌM KIẾM
+      if (productSearchKeyword !== "" && matchKey) {
         matched.push(p);
       } else if (hasQty && productSearchKeyword === "") {
         matched.push(p);
@@ -3337,6 +3366,7 @@
       productSearchKeyword = ""; 
       customerSearchKeyword = "";
       selectedCompanyCode = "";
+      pinnedCompanyPrefix = "";
       showOnlySelectedItems = false; 
 
       playSystemSound('success');
@@ -4015,6 +4045,20 @@
               ${editingOrderId ? `<button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>` : ''}
             </div>
 
+            <!-- BOX GHIM MÃ CÔNG TY (2 KÝ TỰ ĐẦU) ĐẶT TRÊN BOX TÌM VẬT TƯ -->
+            <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px; padding: 10px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 12px; font-weight: 800; color: var(--primary);"><i class="fa-solid fa-thumbtack"></i> Ghim Mã Công Ty (2 ký tự đầu, VD: 11):</label>
+                <div id="pinnedCompanyBadge">
+                  <span style="background:var(--text-muted); color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700;">Chưa ghim Cty (Tìm toàn bộ)</span>
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="text" id="pinnedCompanyInput" maxlength="2" placeholder="Ghim 2 ký tự đầu công ty (VD: 11)..." oninput="onPinnedCompanyChanged(this.value)" value="${pinnedCompanyPrefix}" autocomplete="off" style="margin:0; padding:10px 12px; font-size: 13px; font-weight: 800; width: 100%;">
+                ${pinnedCompanyPrefix ? `<button class="btn btn-red btn-sm" style="font-weight:800;" onclick="document.getElementById('pinnedCompanyInput').value=''; onPinnedCompanyChanged('');">Bỏ ghim</button>` : ''}
+              </div>
+            </div>
+
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;">
               ${editingOrderId ? `
                 <button type="button" class="btn btn-sm btn-amber" style="padding: 12px 14px; font-weight: 800; width: 100%; justify-content: center;" onclick="openAddProductModal()">
@@ -4431,19 +4475,19 @@
               <input type="password" id="usPass" placeholder="Mật khẩu khởi tạo" required style="margin:0;">
             </div>
             <div style="margin-bottom:10px;">
-              <select id="usRole" style="margin:0; padding:10px;">
+             <select id="usRole" style="margin:0; padding:10px;">
                 <option value="sales">Sales (Nhân viên bán hàng)</option>
                 <option value="manager">Manager (Quản lý)</option>
-                <option value="admin">Admin (Quản trị hệ thống)</option>
+                <option value="admin">Admin (Quản trị viên)</option>
                 <option value="viewer">Viewer (Chỉ xem)</option>
               </select>
             </div>
-            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:10px; font-weight:800;">TẠO TÀI KHOẢN MỚI</button>
+            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
           </form>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-        ${users.length > 0 ? users.map(u => {
+          ${users.length > 0 ? users.map(u => {
             const isSelf = u.uid === currentUser.uid;
             const isProtected = u.email && u.email.toLowerCase() === 'phanthanhhuy98@gmail.com';
             const isActive = u.active !== false;
