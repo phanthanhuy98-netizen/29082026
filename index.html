@@ -3106,18 +3106,19 @@
             currentVal = Number(counterSnap.data().currentVal) || 0;
           }
 
-          if (currentVal === 0 && orders.length > 0) {
-            const maxSoCtu = Math.max(...orders.map(o => Number(o.soCtu) || 0));
-            currentVal = maxSoCtu;
+          let maxSoCtu = currentVal;
+          if (orders.length > 0) {
+            const localMax = Math.max(...orders.map(o => Number(o.soCtu) || 0));
+            if (localMax > maxSoCtu) maxSoCtu = localMax;
           }
 
-          if (currentVal === 0) {
-            currentVal = 63;
+          if (maxSoCtu === 0) {
+            maxSoCtu = 63;
           }
 
-          currentVal++;
-          transaction.set(counterRef, { currentVal });
-          return currentVal;
+          maxSoCtu++;
+          transaction.set(counterRef, { currentVal: maxSoCtu });
+          return maxSoCtu;
         });
         return newSeq;
       } catch (err) {
@@ -3189,11 +3190,9 @@
       const currentSalesString = `${currentUser.name}`;
       const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
 
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const dd = String(now.getDate()).padStart(2, '0');
-      const todayStr = `${yyyy}-${mm}-${dd}`;
+      const vietnamTimeOffset = 7 * 60;
+      const localDate = new Date(new Date().getTime() + (vietnamTimeOffset * 60 * 1000) - (new Date().getTimezoneOffset() * 60000));
+      const todayStr = localDate.toISOString().slice(0, 10);
 
       const orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
 
@@ -3216,56 +3215,29 @@
         rawSubtotal,
         isReturnOrder: false, 
         paymentStatus: 'Công nợ', 
-        status: 'Chờ duyệt'
+        status: 'Chờ duyệt',
+        createdAt: serverTimestamp()
       };
 
       const savedStoreId = activeVisitedStore.id;
+      const nextSoCtu = await getNextSoCtuWithRetry();
+      orderData.soCtu = nextSoCtu;
+      orderData.id = orderUuid;
+
+      const docRef = doc(db, "orders", orderUuid);
+      await setDoc(docRef, orderData);
+
+      const localRenderOrder = {
+        ...orderData,
+        createdAt: new Date()
+      };
+      orders.unshift(localRenderOrder);
 
       await saveOfflineOrder({
         id: orderUuid,
         ...orderData,
         createdAt: new Date().toISOString()
       });
-
-      try {
-        if (editingOrderId) {
-          const orderRef = doc(db, "orders", editingOrderId);
-          await updateDoc(orderRef, {
-            ...orderData,
-            updatedAt: serverTimestamp()
-          });
-
-          const existingOrderIndex = orders.findIndex(o => o.id === editingOrderId);
-          const originalSoCtu = existingOrderIndex > -1 ? orders[existingOrderIndex].soCtu : 1;
-          const originalCreatedAt = existingOrderIndex > -1 ? orders[existingOrderIndex].createdAt : new Date();
-
-          orderData.soCtu = originalSoCtu;
-          orderData.createdAt = originalCreatedAt;
-          orderData.id = editingOrderId;
-
-          if (existingOrderIndex > -1) {
-            orders[existingOrderIndex] = orderData;
-          } else {
-            orders.unshift(orderData);
-          }
-        } else {
-          const nextSoCtu = await getNextSoCtuWithRetry();
-          orderData.soCtu = nextSoCtu;
-          orderData.createdAt = new Date();
-          orderData.id = orderUuid;
-          
-          const docRef = doc(db, "orders", orderUuid);
-          await setDoc(docRef, orderData);
-
-          orders.unshift(orderData);
-        }
-      } catch (err) {
-        orderData.soCtu = 9999;
-        orderData.createdAt = new Date();
-        orderData.id = orderUuid;
-        orders.unshift(orderData);
-        alert("⚠️ Không thể kết nối đến máy chủ Firebase. Đơn hàng đã được lưu tạm trên thiết bị.");
-      }
       
       await clearCartDraftAsync(savedStoreId);
       currentCart = {}; 
