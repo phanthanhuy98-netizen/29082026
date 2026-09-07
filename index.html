@@ -1433,6 +1433,10 @@
     const usernameInput = document.getElementById('logUser').value.trim();
     const pass = document.getElementById('logPass').value.trim();
     
+    if (!usernameInput || !pass) {
+      return alert("Vui lòng nhập đầy đủ mã nhân viên/email và mật khẩu!");
+    }
+
     let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
@@ -1475,6 +1479,7 @@
       triggerHaptic(40);
 
     } catch (authErr) {
+      console.error("Login error:", authErr);
       const failedAttemptsKey = `failed_attempts_${email}`;
       let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
       localStorage.setItem(failedAttemptsKey, currentFailed);
@@ -1482,7 +1487,7 @@
       if (currentFailed >= 10) {
         alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
       } else {
-        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại trên hệ thống). Lỗi: ${authErr.message}`);
       }
     }
   };
@@ -4213,9 +4218,7 @@
                 maVTHHCo: finalMaVTHHCo,
                 tenHangHoa: finalTenHangHoa,
                 donViTinh: item.dvt || 'hộp',
-                soLuong: itemQty,
-                vndDonGia: item.price || 0,
-                vndThanhTien: (item.price || 0) * itemQty
+                soLuong: itemQty
               });
             }
           });
@@ -4358,8 +4361,6 @@
                 <th>Ten Hang Hoa</th>
                 <th>Don Vi Tinh</th>
                 <th>So Luong</th>
-                <th>VND Don Gia</th>
-                <th>VND Thanh Tien</th>
               </tr>
             </thead>
             <tbody>
@@ -4382,8 +4383,6 @@
                     <td>${r.tenHangHoa}</td>
                     <td>${r.donViTinh}</td>
                     <td><b>${Number(r.soLuong || 0).toLocaleString('en-US')}</b></td>
-                    <td>${Number(r.vndDonGia || 0).toLocaleString('en-US')}</td>
-                    <td><b>${Number(r.vndThanhTien || 0).toLocaleString('en-US')}</b></td>
                   </tr>
                 `;
               }).join('')}
@@ -4450,55 +4449,100 @@
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:6px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">Nhóm: ${r.nhomDoiTuong}</span>
-                ${canModify ? `
-                  <div style="display:flex; gap:6px;">
-                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
-                  </div>
-                ` : ''}
-              </div>
-              <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${r.noiDung || '—'}</div>
-              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Ghi chú: ${r.ghiChu || '—'}</div>
-            </div>
-          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không có dữ liệu tuyến.</div>`}
-        </div>
-      `;
-    }
-
-  else if (tab === 'routes') {
-      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-      const canModify = isAdminOrManager;
-      const isSales = currentUser.role === 'sales';
-      const isViewer = currentUser.role === 'viewer';
-
-      container.innerHTML = `
-        <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
-          <div class="excel-group-btns">
-            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
-            ${!isSales && !isViewer ? `
-              <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-              ${canModify ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
+              ${canModify ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
           </div>
         </div>
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm tuyến, nhóm, nội dung..." oninput="filterRouteTable(this.value)" value="" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterCompanyTable(this.value)" value="" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${routeGroupsList.length > 0 ? routeGroupsList.map((r, idx) => `
-            <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:6px;">
+          ${companyList.length > 0 ? companyList.map((c, idx) => `
+            <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:6px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">Nhóm: ${r.nhomDoiTuong}</span>
+                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${c.maCtu}</span>
                 ${canModify ? `
                   <div style="display:flex; gap:6px;">
-                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
                   </div>
                 ` : ''}
               </div>
-              <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${r.noiDung || '—'}</div>
-              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Ghi chú: ${r.ghiChu || '—'}</div>
+              <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main);">${c.tenCtu || '—'}</div>
+              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Trạng thái: <b>${c.status || 'Mở'}</b></div>
             </div>
-          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không có dữ liệu tuyến.</div>`}
+          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không có dữ liệu công ty.</div>`}
         </div>
       `;
     }
+
+    else if (tab === 'users') {
+      const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+      if (!isAdminOrManager) {
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose); font-weight:800;">⛔ Bạn không có quyền truy cập quản lý nhân viên!</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
+        </div>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Nhân Viên Mới</h3>
+          <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Mã NV:</label>
+                <input type="text" id="usCode" placeholder="VD: NV01" required style="margin:2px 0 0 0; padding:10px;">
+              </div>
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Họ và tên:</label>
+                <input type="text" id="usName" placeholder="VD: Nguyễn Văn A" required style="margin:2px 0 0 0; padding:10px;">
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Tên đăng nhập / Email:</label>
+                <input type="text" id="usUsername" placeholder="vd: nhanvien" required style="margin:2px 0 0 0; padding:10px;">
+              </div>
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Mật khẩu:</label>
+                <input type="password" id="usPass" placeholder="Ít nhất 6 ký tự" required style="margin:2px 0 0 0; padding:10px;">
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">Phân quyền (Role):</label>
+              <select id="usRole" style="margin:2px 0 0 0; padding:10px;">
+                <option value="sales">Sales (Nhân viên bán hàng)</option>
+                <option value="manager">Manager (Quản lý)</option>
+                <option value="admin">Admin (Quản trị hệ thống)</option>
+                <option value="viewer">Viewer (Chỉ xem)</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800; margin-top:4px;">TẠO TÀI KHOẢN</button>
+          </form>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${users.map(u => `
+            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">[${u.code || 'NV'}] ${u.name}</span>
+                <span class="badge ${u.active !== false ? 'badge-success' : 'badge-danger'}">${u.active !== false ? 'Hoạt động' : 'Đã khóa'}</span>
+              </div>
+              <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Email/User: <b>${u.email}</b> • Quyền: <b style="color:var(--primary);">${u.role}</b></div>
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                ${u.active !== false ? `
+                  <button class="btn btn-red btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', false)"><i class="fa-solid fa-lock"></i> Khóa tài khoản</button>
+                ` : `
+                  <button class="btn btn-green btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', true)"><i class="fa-solid fa-unlock"></i> Mở khóa</button>
+                `}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  }
+</script>
+</body>
+</html>
