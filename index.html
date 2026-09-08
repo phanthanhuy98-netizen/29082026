@@ -3514,12 +3514,11 @@
 
       const currentSalesString = `${currentUser.name}`;
       const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
-      
-      const nowLocal = new Date();
-      const yyyy = nowLocal.getFullYear();
-      const mm = String(nowLocal.getMonth() + 1).padStart(2, '0');
-      const dd = String(nowLocal.getDate()).padStart(2, '0');
-      const todayStr = `${yyyy}-${mm}-${dd}`;
+const nowLocal = new Date();
+    const yyyy = nowLocal.getFullYear();
+    const mm = String(nowLocal.getMonth() + 1).padStart(2, '0');
+    const dd = String(nowLocal.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
 
       let assignedSoCtu;
       let orderUuid;
@@ -3562,6 +3561,7 @@
       };
 
       const savedStoreId = activeVisitedStore.id;
+
       const docRef = doc(db, "orders", orderUuid);
       await setDoc(docRef, orderData);
 
@@ -4444,7 +4444,7 @@
       const isSales = currentUser.role === 'sales';
       const sortedOrders = [...orders].sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
-      sortedOrders.forEach(o => {
+    sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
           if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
             return;
@@ -4455,15 +4455,19 @@
             inferredMaDTPN = o.maKH.split(' - ')[0].trim();
           }
 
+          // --- TỰ ĐỘNG TRA CỨU MÃ VÀ TÊN TUYẾN ---
           let maTuyenVal = '';
           let cleanCode = inferredMaDTPN.trim().toUpperCase();
           
+          // Tìm xem mã KH bắt đầu bằng nhóm tuyến nào (VD: "20A.MAO" bắt đầu bằng "20")
           let matchRouteObj = routeGroupsList.find(r => cleanCode.startsWith(String(r.nhomDoiTuong).trim().toUpperCase()));
           if (matchRouteObj) {
-            maTuyenVal = `${matchRouteObj.nhomDoiTuong} ${matchRouteObj.noiDung ? matchRouteObj.noiDung : ''}`.trim();
+         maTuyenVal = `${matchRouteObj.nhomDoiTuong} ${matchRouteObj.noiDung ? matchRouteObj.noiDung : ''}`.trim();
           } else {
+            // Fallback nếu không tìm thấy trong bảng tuyến thì lấy 2 ký tự đầu của mã KH
             maTuyenVal = inferredMaDTPN.slice(0, 2);
           }
+          // ----------------------------------------
 
           let orderTotalQty = 0;
           o.items.forEach(item => {
@@ -4487,7 +4491,7 @@
                 ngayCtu: o.ngayCtu || '2026-09-01',
                 ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
                 maDTPNNo: inferredMaDTPN,
-                maTuyen: maTuyenVal,
+                maTuyen: maTuyenVal, // <-- Cột Mã Tuyến sẽ mang giá trị như "20 Đồng Xoài"
                 maNhanVien: o.salesCode || '',
                 tenNhanVien: o.salesName || '',
                 maVTHHCo: finalMaVTHHCo,
@@ -4572,85 +4576,94 @@
             const canModify = isOwner || isAdminOrManager;
 
            return `
-           <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
                       let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
-                      let hasLat = matchedStore && matchedStore.lat && Number(matchedStore.lat) !== 0;
-                      if (hasLat) {
-                        return `<button class="btn btn-green btn-sm" style="padding:4px 8px; font-size:11px;" onclick="openNativeNavigator(${Number(matchedStore.lat)}, ${Number(matchedStore.lng)})"><i class="fa-solid fa-map-location-dot"></i> GPS</button>`;
+                      if (matchedStore && matchedStore.lat && Number(matchedStore.lat) !== 0 && o.lat && Number(o.lat) !== 0) {
+                        let distance = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                        if (distance > 20) {
+                          let distText = distance > 1000 ? (distance/1000).toFixed(1) + 'km' : Math.round(distance) + 'm';
+                          return `<span style="background:rgba(225,29,72,0.15); color:var(--rose); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:800;"><i class="fa-solid fa-triangle-exclamation"></i> Lệch GPS: ${distText}</span>`;
+                        }
                       }
                       return '';
                     })()}
+                    <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted); font-weight:700;"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
                   </div>
                 </div>
-                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); line-height:1.35;">${o.maKH || ''}</div>
-                <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV: <b style="color:#2563EB;">[${o.salesCode || ''}] ${o.salesName || ''}</b> • Ngày: <b>${o.ngayCtuFormatted}</b></div>
-                <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">📦 Tổng lượng: <b style="color:var(--emerald); font-size:13px;">${o.totalQty} sản phẩm</b></div>
-                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
-                  <button class="btn btn-blue btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Chi tiết</button>
-                  ${canModify ? `<button class="btn btn-amber btn-sm" style="padding:8px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                  ${canModify ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;" title="${o.maKH}">${o.maKH}</div>
+                <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
+                  <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
+                  <span>📦 Tổng SL: <b style="color:var(--emerald);">${o.totalQty}</b></span>
+                </div>
+                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap; align-items:center;">
+                  <button class="btn btn-blue btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem CTu</button>
+                  <div style="display:flex; gap:6px; margin-left:auto;">
+                    ${canModify ? `
+                      <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                      <button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    ` : ''}
+                  </div>
                 </div>
               </div>
             `;
-          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Không có chứng từ bán hàng phù hợp.</div>`}
+          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Không có chứng từ nào được ghi nhận.</div>`}
         </div>
 
         ${hasMoreOrders ? `
-          <div style="text-align:center; margin-top:12px;">
-            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;" onclick="loadMoreSoGoc()">TẢI THÊM ĐƠN HÀNG CŨ HƠN</button>
+          <div style="text-align:center; margin-top:14px;">
+            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="padding:10px 20px; font-weight:800;" onclick="loadMoreSoGoc()">Tải thêm lịch sử đơn hàng cũ hơn...</button>
           </div>
         ` : ''}
 
-        <div style="display:none;">
-          <table id="soGocExportTable">
-            <thead>
+        <!-- ẨN BẢNG EXPORT ĐỂ DÙNG XUẤT FILE -->
+       <!-- BẢNG ẨN ĐỂ XUẤT EXCEL -->
+        <table id="soGocExportTable" class="hidden">
+          <thead>
+            <tr>
+              <th>Số CTu</th>
+              <th>Ngày CTu</th>
+              <th>Mã ĐTPN</th>
+              <th>Mã Tuyến</th> <!-- Thêm tiêu đề cột Mã Tuyến ở đây -->
+              <th>Mã Nhân Viên</th>
+              <th>Tên Nhân Viên</th>
+              <th>Mã VTHH Co</th>
+              <th>Tên Hàng Hóa</th>
+              <th>Đơn Vị Tính</th>
+              <th>Số Lượng</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${flatExcelRows.map(r => `
               <tr>
-                <th>STT</th>
-                <th>Số CTu</th>
-                <th>Ngày CTu</th>
-                <th>Mã DTPN No</th>
-                <th>Mã Tuyến</th>
-                <th>Mã Nhân Viên</th>
-                <th>Tên Nhân Viên</th>
-                <th>Mã VTHH Co</th>
-                <th>Tên Hàng Hóa</th>
-                <th>Đơn Vị Tính</th>
-                <th>Số Lượng</th>
+                <td>${r.soCtu}</td>
+                <td>${r.ngayCtuFormatted}</td>
+                <td>${r.maDTPNNo}</td>
+                <td>${r.maTuyen || ''}</td> <!-- Thêm giá trị Mã Tuyến (VD: 20 Đồng Xoài) vào đây -->
+                <td>${r.maNhanVien}</td>
+                <td>${r.tenNhanVien}</td>
+                <td>${r.maVTHHCo}</td>
+                <td>${r.tenHangHoa}</td>
+                <td>${r.donViTinh}</td>
+                <td>${r.soLuong}</td>
               </tr>
-            </thead>
-            <tbody>
-              ${flatExcelRows.map((r, i) => `
-                <tr>
-                  <td>${i + 1}</td>
-                  <td>${r.soCtu}</td>
-                  <td>${r.ngayCtuFormatted}</td>
-                  <td>${r.maDTPNNo}</td>
-                  <td>${r.maTuyen}</td>
-                  <td>${r.maNhanVien}</td>
-                  <td>${r.tenNhanVien}</td>
-                  <td>${r.maVTHHCo}</td>
-                  <td>${r.tenHangHoa}</td>
-                  <td>${r.donViTinh}</td>
-                  <td>${r.soLuong}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
+            `).join('')}
+          </tbody>
+        </table>
       `;
-      setTimeout(() => filterSoGocCards(''), 50);
+      setTimeout(() => {
+        filterSoGocCards();
+      }, 50);
     }
-
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Quản Lý Vật Tư (${products.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Danh Mục Vật Tư (${products.length})</h2>
           <div class="excel-group-btns">
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
@@ -4658,9 +4671,11 @@
             ` : ''}
           </div>
         </div>
+        
         <div class="card" style="margin-bottom:10px; padding:10px;">
           <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm kiếm nhanh..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
+
         <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
         </div>
@@ -4673,27 +4688,29 @@
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Quản Lý Tuyến Bán Hàng (${routeGroupsList.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Tuyến Bán Hàng (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
-            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm Tuyến</button>` : ''}
+            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm tuyến</button>` : ''}
             ${!isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               ${isAdminOrManager ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
             ` : ''}
           </div>
         </div>
-        <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm nhóm tuyến, tên tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
+
+        <div style="margin-bottom:10px;">
+          <input type="text" placeholder="🔍 Tìm kiếm tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:12px 14px; font-size: 14px;">
         </div>
+
         <div style="display:flex; flex-direction:column; gap:8px;">
           ${routeGroupsList.map((r, i) => `
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:var(--purple-gradient); color:#fff; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Nhóm: ${r.nhomDoiTuong}</span>
-                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteRouteItem(${i})" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${i})"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
               </div>
-              <div style="font-size:14px; font-weight:800; color:var(--text-main);">${r.noiDung || '—'}</div>
-              <div style="font-size:12px; color:var(--text-muted);">Ghi chú: ${r.ghiChu || '—'}</div>
+              <input type="text" value="${r.noiDung || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${i}, 'noiDung', this.value)"` : 'readonly'} placeholder="Nội dung tuyến..." style="margin:0; padding:8px 10px; font-size:13px; font-weight:700;">
+              <input type="text" value="${r.ghiChu || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${i}, 'ghiChu', this.value)"` : 'readonly'} placeholder="Ghi chú..." style="margin:0; padding:8px 10px; font-size:12px;">
             </div>
           `).join('')}
         </div>
@@ -4705,7 +4722,7 @@
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Cấu Hình Đơn Vị Tính Công Ty (${companyList.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:var(--rose);"></i> Danh Mục Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
             ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>` : ''}
             ${!isViewer ? `
@@ -4714,85 +4731,109 @@
             ` : ''}
           </div>
         </div>
-        <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm mã cty, tên công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
+
+        <div style="margin-bottom:10px;">
+          <input type="text" placeholder="🔍 Tìm kiếm công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px 14px; font-size:14px;">
         </div>
-        <div style="display:flex; flex-direction:column; gap:10px;">
-          ${companyList.map((c, i) => `
-            <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:rgba(219,39,119,0.12); color:#DB2777; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Mã Cty: ${c.maCtu}</span>
-                <div style="display:flex; gap:6px; align-items:center;">
-                  ${isAdminOrManager ? `
-                    <button class="btn btn-sm ${c.status === 'Đóng' ? 'btn-red' : 'btn-green'}" onclick="toggleCompanyStatus(${i})" style="padding:4px 10px; font-weight:800; font-size:11px;">${c.status === 'Đóng' ? 'Đóng Cty' : 'Mở Cty'}</button>
-                    <button class="btn btn-red btn-sm" onclick="deleteCompanyItem(${i})" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-trash"></i></button>
-                  ` : ''}
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${companyList.map((c, i) => {
+            const isClosed = c.status === 'Đóng';
+            const dvtList = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
+
+            return `
+              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border: 1px solid ${isClosed ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'};">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Mã: ${c.maCtu}</span>
+                  <div style="display:flex; gap:6px; align-items:center;">
+                    ${isAdminOrManager ? `
+                      <button class="btn btn-sm ${isClosed ? 'btn-red' : 'btn-green'}" style="padding:4px 10px; font-size:11.5px; font-weight:800;" onclick="toggleCompanyStatus(${i})">
+                        ${isClosed ? '🔒 Đã Đóng Cty' : '🟢 Đang Mở'}
+                      </button>
+                      <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${i})"><i class="fa-solid fa-trash"></i></button>
+                    ` : `
+                      <span class="badge ${isClosed ? 'badge-danger' : 'badge-success'}">${isClosed ? 'Đóng' : 'Mở'}</span>
+                    `}
+                  </div>
                 </div>
+
+                <input type="text" value="${c.tenCtu || ''}" ${isAdminOrManager ? `onchange="updateCompanyField(${i}, 'tenCtu', this.value)"` : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px 10px; font-size:13.5px; font-weight:700;">
+
+                <!-- PHẦN QUẢN LÝ ĐƠN VỊ TÍNH CHI TIẾT CHO CÔNG TY NÀY -->
+                <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; margin-top: 4px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 11.5px; font-weight: 800; color: var(--text-muted);">Trạng thái các Đơn Vị Tính (ĐVT):</span>
+                    ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding: 3px 8px; font-size: 10.5px; font-weight: 800;" onclick="addCompanyDvtPrompt(${i})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
+                  </div>
+
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    ${dvtList.length > 0 ? dvtList.map((dItem, dIdx) => {
+                      const isDvtClosed = dItem.status === 'Đóng';
+                      return `
+                        <div style="display: flex; align-items: center; gap: 4px; background: var(--card-bg); border: 1px solid ${isDvtClosed ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'}; border-radius: 6px; padding: 4px 8px;">
+                          <span style="font-size: 11.5px; font-weight: 700; color: ${isDvtClosed ? 'var(--text-muted)' : 'var(--text-main)'}; text-decoration: ${isDvtClosed ? 'line-through' : 'none'};">${dItem.name}</span>
+                          ${isAdminOrManager ? `
+                            <button type="button" class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding: 2px 6px; font-size: 10px; font-weight: 800;" onclick="toggleCompanyDvtStatus(${i}, ${dIdx})" title="Bấm để đổi trạng thái Mở/Đóng">${isDvtClosed ? 'Đóng' : 'Mở'}</button>
+                            <button type="button" class="btn btn-sm" style="background:transparent; color:var(--rose); padding: 2px 4px; font-size: 10px;" onclick="removeCompanyDvt(${i}, ${dIdx})"><i class="fa-solid fa-xmark"></i></button>
+                          ` : ''}
+                        </div>
+                      `;
+                    }).join('') : `<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">Chưa cấu hình ĐVT riêng (mặc định mở).</span>`}
+                  </div>
+                </div>
+
               </div>
-              <div style="font-size:14px; font-weight:800; color:var(--text-main);">${c.tenCtu || ''}</div>
-              <div style="background:var(--panel-bg); padding:8px; border-radius:8px; border:1px solid var(--card-border);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <span style="font-size:12px; font-weight:800; color:var(--primary);">Cấu hình ĐVT:</span>
-                  ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding:2px 8px; font-size:10px;" onclick="addCompanyDvtPrompt(${i})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
-                </div>
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                  ${Array.isArray(c.dvtDetails) && c.dvtDetails.length > 0 ? c.dvtDetails.map((d, dIdx) => `
-                    <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
-                      <span style="font-size:12px; font-weight:700;">${d.name} (${d.status || 'Mở'})</span>
-                      ${isAdminOrManager ? `
-                        <button class="btn btn-sm" style="padding:1px 4px; font-size:9px; background:${d.status === 'Đóng' ? 'var(--emerald)' : 'var(--rose)'}; color:#fff;" onclick="toggleCompanyDvtStatus(${i}, ${dIdx})">${d.status === 'Đóng' ? 'Mở' : 'Khóa'}</button>
-                        <button class="btn btn-sm btn-red" style="padding:1px 4px; font-size:9px;" onclick="removeCompanyDvt(${i}, ${dIdx})">×</button>
-                      ` : ''}
-                    </div>
-                  `).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa có ĐVT chi tiết. Mặc định mở tất cả.</span>'}
-                </div>
-              </div>
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       `;
     }
 
     else if (tab === 'users') {
-      const isAdmin = currentUser.role === 'admin';
-      const isManager = currentUser.role === 'manager';
-      if (!isAdmin && !isManager) {
-        container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--rose);">⛔ Bạn không có quyền truy cập trang quản lý nhân viên!</div>`;
-        return;
-      }
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Tài Khoản Nhân Viên (${users.length})</h2>
         </div>
-        <div class="card" style="margin-bottom:12px;">
-          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Thêm Tài Khoản Mới</h3>
-          <form id="userForm" onsubmit="addUser(event)">
-            <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)..." required style="margin-bottom:6px;">
-            <input type="text" id="usName" placeholder="Họ và tên..." required style="margin-bottom:6px;">
-            <input type="text" id="usUsername" placeholder="Tài khoản (Email hoặc mã đăng nhập)..." required style="margin-bottom:6px;">
-            <input type="password" id="usPass" placeholder="Mật khẩu khởi tạo..." required style="margin-bottom:6px;">
-            <select id="usRole" style="margin-bottom:8px; padding:10px;">
+
+        <div class="card" style="margin-bottom:14px;">
+          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Nhân Viên Mới</h3>
+          <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)..." required style="margin:0;">
+              <input type="text" id="usName" placeholder="Tên nhân viên..." required style="margin:0;">
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <input type="text" id="usUsername" placeholder="Tài khoản / Email..." required style="margin:0;">
+              <input type="password" id="usPass" placeholder="Mật khẩu..." required style="margin:0;">
+            </div>
+            <select id="usRole" style="margin:0;">
               <option value="sales">Sales (Nhân viên bán hàng)</option>
               <option value="manager">Manager (Quản lý)</option>
+              <option value="admin">Admin (Quản trị viên)</option>
               <option value="viewer">Viewer (Chỉ xem)</option>
-              ${isAdmin ? '<option value="admin">Admin (Quản trị viên tối cao)</option>' : ''}
             </select>
             <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
           </form>
         </div>
+
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${users.map(u => `
-            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--amber-gradient); color:#fff; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">[${u.code || ''}] ${u.role || 'sales'}</span>
-                <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})" style="padding:4px 10px; font-weight:800; font-size:11px;">
-                  ${u.active !== false ? 'Khóa TK' : 'Mở Khóa'}
-                </button>
+          ${users.map(u => {
+            const isActive = u.active !== false;
+            return `
+              <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">[${u.code || 'NV'}] ${u.name}</span>
+                  <span class="badge ${isActive ? 'badge-success' : 'badge-danger'}">${isActive ? 'Hoạt động' : 'Đã khóa'}</span>
+                </div>
+                <div style="font-size:12px; color:var(--text-muted);">📧 Email: <b>${u.email}</b> | Quyền: <b style="color:var(--primary);">${u.role}</b></div>
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
+                  <button class="btn ${isActive ? 'btn-red' : 'btn-green'} btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', ${!isActive})">
+                    ${isActive ? 'Khóa tài khoản' : 'Mở khóa'}
+                  </button>
+                </div>
               </div>
-              <div style="font-size:14px; font-weight:800; color:var(--text-main);">${u.name}</div>
-              <div style="font-size:12px; color:var(--text-muted);">${u.email}</div>
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       `;
     }
