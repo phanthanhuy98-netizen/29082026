@@ -2457,7 +2457,6 @@
         matchCompanySelect = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
       }
 
-      // KẾT HỢP ĐIỀU KIỆN ẨN VẬT TƯ THEO GHI CHÚ ĐVT CỦA CÔNG TY ĐỐI VỚI SALES
       let matchCompanyDvtConfig = isProductAllowedByCompanyDvt(p);
 
       if (!matchCompanyPrefix || !matchCompanySelect || !matchCompanyDvtConfig) continue;
@@ -2618,7 +2617,6 @@
       }
       if (!matchCompanySelect) continue;
 
-      // KIỂM TRA ĐIỀU KIỆN ĐVT ĐỂ ẨN ĐỐI VỚI SALES
       let matchCompanyDvtConfig = isProductAllowedByCompanyDvt(p);
       if (!matchCompanyDvtConfig) continue;
 
@@ -3812,10 +3810,9 @@
           const r = jsonRows[i];
           const maCtu = r[0] ? String(r[0]).trim() : '';
           const tenCtu = r[1] ? String(r[1]).trim() : '';
-          const customDvtStr = r[2] ? String(r[2]).trim() : 'cây, thùng, gói, bịch';
           if (maCtu && maCtu !== 'MaCTu') {
-            let dvtDetails = customDvtStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
-            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails, status: "Mở" });
+            // MẶC ĐỊNH ĐỂ TRỐNG HOÀN TOÀN (dvtDetails: [])
+            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở" });
           }
         }
         let newList = Array.from(uniqueMap.values());
@@ -3833,7 +3830,7 @@
           companyList = newList;
           await saveCompaniesToLocalCache(companyList);
           renderUI();
-          alert("✅ Đã đẩy danh sách công ty lên Firebase Firestore thành công!");
+          alert("✅ Đã nhập danh sách công ty thành công với danh sách ĐVT trống!");
         } else {
           alert("Không tìm thấy dữ liệu hợp lệ trong file!");
         }
@@ -3898,14 +3895,14 @@
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
     if (!tenCtu) return;
     
-    let defaultDvt = [{ name: 'cây', status: 'Mở' }, { name: 'thùng', status: 'Mở' }, { name: 'gói', status: 'Mở' }, { name: 'bịch', status: 'Mở' }];
-    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: defaultDvt, status: "Mở" };
+    // MẶC ĐỊNH ĐỂ TRỐNG HOÀN TOÀN (dvtDetails: [])
+    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: [], status: "Mở" };
     try {
       await setDoc(doc(db, "companies", maCtu.trim()), newC);
       companyList.push(newC);
       await saveCompaniesToLocalCache(companyList);
       renderUI();
-      alert("✅ Thêm công ty thành công!");
+      alert("✅ Thêm công ty thành công với danh sách ĐVT trống!");
     } catch (err) {
       alert("Lỗi: " + err.message);
     }
@@ -3966,8 +3963,7 @@
     
     let c = companyList[companyIndex];
     if (!c.dvtDetails) {
-      let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
-      c.dvtDetails = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+      c.dvtDetails = [];
     }
 
     let currentStatus = c.dvtDetails[dvtIndex].status || 'Mở';
@@ -3990,8 +3986,7 @@
 
     let c = companyList[companyIndex];
     if (!c.dvtDetails) {
-      let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
-      c.dvtDetails = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+      c.dvtDetails = [];
     }
 
     c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
@@ -4546,18 +4541,18 @@
             const canDelete = (isOwner && isToday) || isManagerOrAdmin;
             const timeStr = formatOrderTime(o.createdAt);
             
-           let distanceBadgeHtml = '';
+            let distanceBadgeHtml = '';
             if (o.lat && o.lng && o.storeId) {
               const targetStore = stores.find(s => String(s.id) === String(o.storeId));
               if (targetStore && targetStore.lat && Number(targetStore.lat) !== 0) {
                 const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(targetStore.lat), Number(targetStore.lng));
-                if (dist > 20) {
-                  distanceBadgeHtml = `<div style="font-size:11px; font-weight:700; color:#FFFFFF; background:rgba(217,119,6,0.85); padding:2px 6px; border-radius:4px;">⚠️ Lệch ${Math.round(dist)}m</div>`;
+                if (dist > 50) {
+                  distanceBadgeHtml = `<div style="font-size:11px; font-weight:700; color:#FFFFFF; background:rgba(225,29,72,0.85); padding:2px 6px; border-radius:4px;">⚠️ Lệch ${Math.round(dist)}m</div>`;
                 }
               }
             }
 
-            return `
+           return `
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu || 1}" data-ma-dtpn="${removeAccents(o.maDTPNNo || '')}" data-ma-nv="${(o.salesCode || '').toLowerCase()}" data-ten-nv="${removeAccents(o.salesName || '')}" data-ngay-ctu="${o.ngayCtu || ''}" style="display:flex; flex-direction:column; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <span style="background:rgba(16,185,129,0.12); color:#10B981; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">CTu #${o.soCtu || 1}</span>
@@ -4710,8 +4705,7 @@
         <div style="display:flex; flex-direction:column; gap:10px;">
           ${companyList.length > 0 ? companyList.map((c, index) => {
             if (!c.dvtDetails) {
-              let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
-              c.dvtDetails = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+              c.dvtDetails = [];
             }
 
             return `
@@ -4730,17 +4724,17 @@
                 
                 <div style="background:var(--panel-bg); padding:10px; border-radius:10px; border:1px solid var(--card-border); margin-top:4px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:12px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-boxes-packing"></i> Danh sách Đơn vị tính & Trạng thái:</span>
+                    <span style="font-size:12px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-boxes-packing"></i> Đơn vị tính vật tư bị ẩn:</span>
                     ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding:3px 8px; font-size:11px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
                   </div>
                   <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                    ${c.dvtDetails.map((d, dIdx) => `
+                    ${c.dvtDetails.length > 0 ? c.dvtDetails.map((d, dIdx) => `
                       <div style="display:inline-flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
                         <span style="font-size:12px; font-weight:700; color:var(--text-main);">${d.name}</span>
                         <button class="btn btn-sm" style="background:${d.status==='Đóng'?'var(--rose)':'var(--emerald)'}; color:#fff; padding:2px 6px; font-size:10px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${d.status||'Mở'}</button>
                         ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:1px 4px; font-size:9px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>` : ''}
                       </div>
-                    `).join('')}
+                    `).join('') : `<span style="font-size:12px; color:var(--text-muted); font-style:italic;">Chưa có ĐVT nào bị ẩn.</span>`}
                   </div>
                 </div>
               </div>
