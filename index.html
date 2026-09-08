@@ -938,7 +938,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 35);
+      const request = indexedDB.open("DMS_OfflineDB", 36);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1506,7 +1506,7 @@
       if (!cachedComps || cachedComps.length === 0) {
         const cSnap = await getDocs(collection(db, "companies"));
         cachedComps = cSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("companies", cachedComps);
+        if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(cachedComps);
         localStorage.setItem("companiesVersion", serverCompsVersion);
       }
 
@@ -1516,7 +1516,7 @@
       if (!cachedPrds || cachedPrds.length === 0) {
         const pSnap = await getDocs(collection(db, "products"));
         cachedPrds = pSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("products", cachedPrds);
+        if (typeof saveProductsToLocalCache === 'function') await saveProductsToLocalCache(cachedPrds);
         localStorage.setItem("productsVersion", serverProductsVersion);
       }
 
@@ -1526,7 +1526,7 @@
       if (!cachedRoutes || cachedRoutes.length === 0) {
         const rSnap = await getDocs(collection(db, "routes"));
         cachedRoutes = rSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("routes", cachedRoutes);
+        if (typeof saveRoutesToLocalCache === 'function') await saveRoutesToLocalCache(cachedRoutes);
         localStorage.setItem("routesVersion", serverRoutesVersion);
       }
 
@@ -1536,7 +1536,7 @@
       if (!cachedStores || cachedStores.length === 0) {
         const sSnap = await getDocs(collection(db, "stores"));
         cachedStores = sSnap.docs.map(d => d.data());
-        if (typeof saveCacheData === 'function') await saveCacheData("stores", cachedStores);
+        if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(cachedStores);
         localStorage.setItem("storesVersion", serverStoresVersion);
       }
 
@@ -2050,7 +2050,6 @@
 
     saveCartDraftToLocal();
     updateCartTotalsUI();
-    // Bỏ gọi filterSalesProducts() tự động ở đây để tránh làm mất tiêu điểm (blur) bàn phím khi đang gõ
     triggerHaptic(10);
   };
 
@@ -2295,17 +2294,28 @@
           const displayLe = (c.le === 0 ? '' : c.le);
           const displayKien = (c.kien === 0 ? '' : c.kien);
 
-          // Kiểm tra cấu hình ĐVT riêng của công ty quản lý sản phẩm này (nếu có)
           let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
           let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-          let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'cây');
+          
+          let activeDvtList = [];
+          if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+            activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+          }
+          if (activeDvtList.length === 0) {
+            if (matchedComp && matchedComp.customDvt) {
+              activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+            } else {
+              activeDvtList = [p.dvt || 'cây'];
+            }
+          }
+          let activeDvtStr = activeDvtList.join(', ');
 
           return `
             <div style="background:var(--card-bg); border:1px solid var(--emerald); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
                 <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                   <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
-                  <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvt} (Q/C ${p.tyLeQuyDoi || 50})</span>
+                  <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvtStr} (Q/C ${p.tyLeQuyDoi || 50})</span>
                 </div>
               </div>
               <div style="font-size:var(--font-size-product-name); font-weight:700; color:var(--text-main); word-break:break-word; line-height:1.35;">${p.name}</div>
@@ -2454,14 +2464,26 @@
 
       let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
       let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-      let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'cây');
+      
+      let activeDvtList = [];
+      if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+        activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+      }
+      if (activeDvtList.length === 0) {
+        if (matchedComp && matchedComp.customDvt) {
+          activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+        } else {
+          activeDvtList = [p.dvt || 'cây'];
+        }
+      }
+      let activeDvtStr = activeDvtList.join(', ');
 
       return `
         <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
               <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
-              <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvt} (Q/C ${p.tyLeQuyDoi || 50})</span>
+              <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvtStr} (Q/C ${p.tyLeQuyDoi || 50})</span>
             </div>
           </div>
           
@@ -2602,7 +2624,19 @@
 
       let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
       let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-      let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'cây');
+      
+      let activeDvtList = [];
+      if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+        activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+      }
+      if (activeDvtList.length === 0) {
+        if (matchedComp && matchedComp.customDvt) {
+          activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+        } else {
+          activeDvtList = [p.dvt || 'cây'];
+        }
+      }
+      let activeDvtStr = activeDvtList.join(', ');
 
       return `
         <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 6px;">
@@ -2610,7 +2644,7 @@
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 6px; flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span class="item-code" style="font-size: var(--font-size-sub-meta); padding: 2px 6px; background: var(--prod-code-bg); color: var(--prod-code-color); font-weight: 800; border-radius: 4px;">${p.code}</span>
-              <span style="font-size: var(--font-size-sub-meta); background: var(--prod-qc-bg); color: var(--prod-qc-color); padding: 2px 6px; border-radius: 4px; font-weight: 800;">ĐVT: ${activeDvt} (Q/C ${p.tyLeQuyDoi || 50})</span>
+              <span style="font-size: var(--font-size-sub-meta); background: var(--prod-qc-bg); color: var(--prod-qc-color); padding: 2px 6px; border-radius: 4px; font-weight: 800;">ĐVT: ${activeDvtStr} (Q/C ${p.tyLeQuyDoi || 50})</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
               ${editingOrderId ? `<button type="button" class="btn btn-red btn-sm" style="padding: 4px 8px; font-size: 11px; font-weight: 800; border-radius: 6px;" onclick="removeCartItemCompletely('${keyId}')" title="Xóa vật tư này"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
@@ -2772,13 +2806,25 @@
     container.innerHTML = matched.length > 0 ? matched.map(p => {
       let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
       let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-      let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'cây');
+      
+      let activeDvtList = [];
+      if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+        activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+      }
+      if (activeDvtList.length === 0) {
+        if (matchedComp && matchedComp.customDvt) {
+          activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+        } else {
+          activeDvtList = [p.dvt || 'cây'];
+        }
+      }
+      let activeDvtStr = activeDvtList.join(', ');
 
       return `
         <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
-            <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvt}_Q/C: ${p.tyLeQuyDoi || 50}</span>
+            <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvtStr}_Q/C: ${p.tyLeQuyDoi || 50}</span>
           </div>
           <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
@@ -3217,13 +3263,25 @@
       if (c && c.qty > 0) { 
         let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
         let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-        let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'hộp');
+        
+        let activeDvtList = [];
+        if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+          activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+        }
+        if (activeDvtList.length === 0) {
+          if (matchedComp && matchedComp.customDvt) {
+            activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+          } else {
+            activeDvtList = [p.dvt || 'hộp'];
+          }
+        }
+        let activeDvtStr = activeDvtList.join(', ');
 
         itemsList.push({
           id: keyId,
           code: p.code,
           name: p.name,
-          dvt: activeDvt,
+          dvt: activeDvtStr,
           qty: c.qty,
           kien: c.kien || 0,
           le: c.le || 0
@@ -3366,13 +3424,25 @@
         if (c && Number(c.qty) > 0) {
           let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
           let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-          let activeDvt = matchedComp && matchedComp.customDvt ? matchedComp.customDvt : (p.dvt || 'hộp');
+          
+          let activeDvtList = [];
+          if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+            activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+          }
+          if (activeDvtList.length === 0) {
+            if (matchedComp && matchedComp.customDvt) {
+              activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+            } else {
+              activeDvtList = [p.dvt || 'hộp'];
+            }
+          }
+          let activeDvtStr = activeDvtList.join(', ');
 
           items.push({ 
             id: p.id || p.code, 
             code: p.code, 
             name: p.name, 
-            dvt: activeDvt, 
+            dvt: activeDvtStr, 
             qty: c.qty, 
             kien: c.kien || 0, 
             le: c.le || 0 
@@ -3552,7 +3622,6 @@
     const dataToExport = companyList.map(c => ({
       "Mã Công Ty (MaCtu)": c.maCtu || '',
       "Tên Công Ty (TenCTu)": c.tenCtu || '',
-      "ĐVT Tùy Chỉnh": c.customDvt || 'cây',
       "Trạng Thái": c.status || 'Mở'
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -3708,9 +3777,10 @@
           const r = jsonRows[i];
           const maCtu = r[0] ? String(r[0]).trim() : '';
           const tenCtu = r[1] ? String(r[1]).trim() : '';
-          const customDvt = r[2] ? String(r[2]).trim() : 'cây';
+          const customDvtStr = r[2] ? String(r[2]).trim() : 'cây, thùng, gói, bịch';
           if (maCtu && maCtu !== 'MaCTu') {
-            uniqueMap.set(maCtu, { maCtu, tenCtu, customDvt, status: "Mở" });
+            let dvtDetails = customDvtStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails, status: "Mở" });
           }
         }
         let newList = Array.from(uniqueMap.values());
@@ -3792,9 +3862,9 @@
     if (!maCtu) return;
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
     if (!tenCtu) return;
-    const customDvt = prompt("Nhập đơn vị tính hiển thị (VD: cây, gói, thùng, hộp...):") || "cây";
     
-    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), customDvt: customDvt.trim(), status: "Mở" };
+    let defaultDvt = [{ name: 'cây', status: 'Mở' }, { name: 'thùng', status: 'Mở' }, { name: 'gói', status: 'Mở' }, { name: 'bịch', status: 'Mở' }];
+    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: defaultDvt, status: "Mở" };
     try {
       await setDoc(doc(db, "companies", maCtu.trim()), newC);
       companyList.push(newC);
@@ -3852,6 +3922,70 @@
       await saveCompaniesToLocalCache(companyList);
     } catch (err) {}
     renderUI();
+  };
+
+  window.toggleCompanyDvtStatus = async function(companyIndex, dvtIndex) {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+      return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái ĐVT!");
+    }
+    
+    let c = companyList[companyIndex];
+    if (!c.dvtDetails) {
+      let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
+      c.dvtDetails = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+    }
+
+    let currentStatus = c.dvtDetails[dvtIndex].status || 'Mở';
+    c.dvtDetails[dvtIndex].status = currentStatus === 'Đóng' ? 'Mở' : 'Đóng';
+
+    try {
+      await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+      await saveCompaniesToLocalCache(companyList);
+      renderUI();
+      triggerHaptic(20);
+    } catch (err) {
+      alert("Lỗi cập nhật trạng thái ĐVT: " + err.message);
+    }
+  };
+
+  window.addCompanyDvtPrompt = async function(companyIndex) {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+    let newName = prompt("Nhập tên Đơn vị tính mới (VD: lốc, hộp, thùng...):");
+    if (!newName || !newName.trim()) return;
+
+    let c = companyList[companyIndex];
+    if (!c.dvtDetails) {
+      let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
+      c.dvtDetails = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+    }
+
+    c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
+
+    try {
+      await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+      await saveCompaniesToLocalCache(companyList);
+      renderUI();
+    } catch (err) {
+      alert("Lỗi: " + err.message);
+    }
+  };
+
+  window.removeCompanyDvt = async function(companyIndex, dvtIndex) {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+    let confirmDel = await window.showCustomConfirm("Xóa ĐVT", "Bạn có chắc muốn xóa đơn vị tính này không?", "fa-trash", "Xóa", "Hủy");
+    if (!confirmDel) return;
+
+    let c = companyList[companyIndex];
+    if (c.dvtDetails) {
+      c.dvtDetails.splice(dvtIndex, 1);
+      try {
+        await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+        await saveCompaniesToLocalCache(companyList);
+        renderUI();
+      } catch (err) {
+        alert("Lỗi: " + err.message);
+      }
+    }
   };
 
   window.updateRouteField = async function(index, field, val) {
@@ -4403,69 +4537,62 @@
                   <span>SL: <b style="color:#2563EB;">${o.totalQty}</b></span>
                 </div>
                 <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:2px;">
-                  <div style="display:flex; gap:6px;">
-                    <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
-                    ${canEdit ? `<button class="btn btn-green btn-sm" style="padding:6px 10px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
-                    ${canDelete ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                 <div style="display:flex; gap:6px;">
+                    <button class="btn btn-green btn-sm" style="padding:6px 12px; font-weight:800; font-size:12px;" onclick="openOrderDetailsModal('${o.id}')"><i class="fa-solid fa-eye"></i> Xem</button>
+                    ${canEdit ? `<button class="btn btn-amber btn-sm" style="padding:6px 12px; font-weight:800; font-size:12px;" onclick="editOrder('${o.id}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>` : ''}
+                    ${canDelete ? `<button class="btn btn-red btn-sm" style="padding:6px 10px; font-weight:800; font-size:12px;" onclick="deleteSingleOrder('${o.id}')"><i class="fa-solid fa-trash"></i></button>` : ''}
                   </div>
                 </div>
               </div>
             `;
-          }).join('') : `
-            <div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Chưa có dữ liệu giao dịch trong sổ gốc.</div>
-          `}
+          }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:var(--card-bg); border-radius:12px; font-weight:700;">Không có dữ liệu đơn hàng phù hợp.</div>`}
         </div>
 
+        ${hasMoreOrders ? `
+          <div style="text-align:center; margin-top:12px;">
+            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="padding:10px 20px; font-weight:800; font-size:13px;" onclick="loadMoreSoGoc()">
+              <i class="fa-solid fa-angles-down"></i> Tải Thêm Đơn Hàng Cũ Hơn
+            </button>
+          </div>
+        ` : ''}
+
+        <!-- Bảng ẩn chuyên dụng phục vụ việc Xuất File Excel -->
         <div style="display:none;">
           <table id="soGocExportTable">
             <thead>
               <tr>
-                <th>So CTu</th>
-                <th>Ngay CTu</th>
-                <th>Ma DTPNNo</th>
-                <th>Ma Nhan Vien</th>
-                <th>TenNhanVien</th>
-                <th>Ma Tuyến</th>
-                <th>Ma VTHHCo</th>
-                <th>Ten Hang Hoa</th>
-                <th>Don Vi Tinh</th>
-                <th>So Luong</th>
+                <th>Số CTu</th>
+                <th>Ngày CTu</th>
+                <th>Mã DTPN</th>
+                <th>Mã NV</th>
+                <th>Tên NV</th>
+                <th>Mã VTHH</th>
+                <th>Tên Hàng Hóa</th>
+                <th>Đơn Vị Tính</th>
+                <th>Số Lượng</th>
               </tr>
             </thead>
             <tbody>
-              ${flatExcelRows.map(r => {
-                let prefixMatch = (r.maDTPNNo || '').match(/^(\d+)/);
-                let prefixNum = prefixMatch ? prefixMatch[1] : '';
-
-                let matchedRoute = routeGroupsList.find(rt => String(rt.nhomDoiTuong) === String(prefixNum));
-                let maTuyenVal = matchedRoute ? `${matchedRoute.nhomDoiTuong} ${matchedRoute.noiDung || ''}`.trim() : prefixNum;
-
-                return `
-                  <tr>
-                    <td><b>${r.soCtu}</b></td>
-                    <td>${r.ngayCtuFormatted}</td>
-                    <td><b>${r.maDTPNNo}</b></td>
-                    <td><b>${r.maNhanVien}</b></td>
-                    <td>${r.tenNhanVien}</td>
-                    <td><b>${maTuyenVal}</b></td>
-                    <td>${r.maVTHHCo}</td>
-                    <td>${r.tenHangHoa}</td>
-                    <td>${r.donViTinh}</td>
-                    <td><b>${Number(r.soLuong || 0).toLocaleString('en-US')}</b></td>
-                  </tr>
-                `;
-              }).join('')}
+              ${flatExcelRows.map(row => `
+                <tr>
+                  <td>${row.soCtu}</td>
+                  <td>${row.ngayCtuFormatted}</td>
+                  <td>${row.maDTPNNo}</td>
+                  <td>${row.maNhanVien}</td>
+                  <td>${row.tenNhanVien}</td>
+                  <td>${row.maVTHHCo}</td>
+                  <td>${row.tenHangHoa}</td>
+                  <td>${row.donViTinh}</td>
+                  <td>${row.soLuong}</td>
+                </tr>
+              `).join('')}
             </tbody>
           </table>
         </div>
-
-        ${hasMoreOrders ? `
-          <div style="text-align:center; margin-top:10px;">
-            <button id="loadMoreSoGocBtn" class="btn btn-amber" onclick="loadMoreSoGoc()"><i class="fa-solid fa-angles-down"></i> Tải thêm 30 đơn hàng cũ hơn...</button>
-          </div>
-        ` : ''}
       `;
-      setTimeout(() => filterSoGocCards(), 0);
+      if (soGocFilterKeyword || soGocFilterDateFrom || soGocSalesFilter) {
+        setTimeout(() => filterSoGocCards(''), 50);
+      }
     }
 
     else if (tab === 'productsAdmin') {
@@ -4473,7 +4600,7 @@
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> Vật Tư (${products.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-boxes-stacked" style="color:var(--amber);"></i> DS Vật Tư (${products.length})</h2>
           <div class="excel-group-btns">
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
@@ -4481,15 +4608,15 @@
             ` : ''}
           </div>
         </div>
+
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm kiếm nhanh..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
-        <div id="productCardsContainer">
+
+        <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
         </div>
-        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
-          Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...
-        </small>
+        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;"></small>
       `;
     }
 
@@ -4503,28 +4630,34 @@
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--amber);"></i> DS Tuyến (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
-            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
+            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm Tuyến</button>` : ''}
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            ${canModify ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm nhóm tuyến hoặc nội dung tuyến..." oninput="filterRouteTable(this.value)" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Tìm kiếm nhóm đối tượng hoặc tên tuyến..." oninput="filterRouteTable(this.value)" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; flex-direction:column; gap:10px;">
           ${routeGroupsList.length > 0 ? routeGroupsList.map((r, idx) => `
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="background:rgba(139, 92, 246, 0.12); color:#8B5CF6; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">Nhóm: ${r.nhomDoiTuong || ''}</span>
                 ${canModify ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
               </div>
-              <div>
-                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Nội dung / Tên tuyến:</label>
-                <input type="text" value="${r.noiDung || ''}" onchange="updateRouteField(${idx}, 'noiDung', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:700;">
+              <div style="display:grid; grid-template-columns: 1fr 2fr; gap:8px;">
+                <div>
+                  <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Nhóm đối tượng:</label>
+                  <input type="number" value="${r.nhomDoiTuong || ''}" onchange="updateRouteField(${idx}, 'nhomDoiTuong', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:700;">
+                </div>
+                <div>
+                  <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Nội dung / Tên tuyến:</label>
+                  <input type="text" value="${r.noiDung || ''}" onchange="updateRouteField(${idx}, 'noiDung', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:700;">
+                </div>
               </div>
               <div>
                 <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Ghi chú:</label>
@@ -4546,10 +4679,10 @@
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:var(--amber);"></i> DS Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
-            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm</button>` : ''}
+            ${canModify ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>` : ''}
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-              ${canModify ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
         </div>
@@ -4558,28 +4691,54 @@
           <input type="text" placeholder="🔍 Tìm kiếm mã công ty hoặc tên công ty..." oninput="filterCompanyTable(this.value)" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          ${companyList.length > 0 ? companyList.map((c, idx) => `
-            <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:rgba(219, 39, 119, 0.12); color:#DB2777; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">${c.maCtu || ''}</span>
-                <div style="display:flex; gap:6px; align-items:center;">
-                  ${canModify ? `
-                    <button class="btn btn-sm" style="background:${c.status==='Đóng'?'var(--rose)':'var(--emerald)'}; color:#fff; padding:4px 10px; font-size:11px;" onclick="toggleCompanyStatus(${idx})">${c.status || 'Mở'}</button>
-                    <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
-                  ` : ''}
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          ${companyList.length > 0 ? companyList.map((c, idx) => {
+            let dvtList = [];
+            if (Array.isArray(c.dvtDetails)) {
+              dvtList = c.dvtDetails;
+            } else {
+              let rawStr = c.customDvt || 'cây, thùng, gói, bịch';
+              dvtList = rawStr.split(',').map(item => ({ name: item.trim(), status: 'Mở' }));
+            }
+
+            return `
+              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="background:rgba(219, 39, 119, 0.12); color:#DB2777; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">${c.maCtu || ''}</span>
+                  <div style="display:flex; gap:6px; align-items:center;">
+                    ${canModify ? `
+                      <button class="btn btn-sm" style="background:${c.status==='Đóng'?'var(--rose)':'var(--emerald)'}; color:#fff; padding:4px 10px; font-size:11px;" onclick="toggleCompanyStatus(${idx})">${c.status || 'Mở'}</button>
+                      <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${idx})"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    ` : ''}
+                  </div>
+                </div>
+
+                <div>
+                  <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Tên Công Ty:</label>
+                  <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:700;">
+                </div>
+
+                <!-- Bảng quản lý chi tiết các Đơn Vị Tính -->
+                <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:10px; padding:8px; margin-top:4px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:11.5px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-boxes-stacked"></i> Danh sách Đơn vị tính & Trạng thái:</span>
+                    ${canModify ? `<button class="btn btn-amber btn-sm" style="font-size:10px; padding:3px 8px;" onclick="addCompanyDvtPrompt(${idx})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
+                  </div>
+                  <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                    ${dvtList.map((dvtObj, dIdx) => `
+                      <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); border:1px solid var(--card-border); padding:4px 8px; border-radius:8px; font-size:12px;">
+                        <span style="font-weight:700; color:var(--text-main);">${dvtObj.name}</span>
+                        <button type="button" class="btn btn-sm" style="padding:2px 6px; font-size:10px; background:${dvtObj.status === 'Đóng' ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-weight:800;" ${!canModify ? 'disabled' : ''} onclick="toggleCompanyDvtStatus(${idx}, ${dIdx})" title="Bấm để đổi trạng thái Mở/Khóa">
+                          ${dvtObj.status || 'Mở'}
+                        </button>
+                        ${canModify ? `<span style="cursor:pointer; color:var(--rose); font-size:11px; margin-left:2px;" onclick="removeCompanyDvt(${idx}, ${dIdx})" title="Xóa ĐVT này">✖</span>` : ''}
+                      </div>
+                    `).join('')}
+                  </div>
                 </div>
               </div>
-              <div>
-                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Tên Công Ty:</label>
-                <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${idx}, 'tenCtu', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:700;">
-              </div>
-              <div>
-                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Đơn Vị Tính Tùy Chỉnh (gói, thùng, cây...):</label>
-                <input type="text" value="${c.customDvt || 'cây'}" onchange="updateCompanyField(${idx}, 'customDvt', this.value)" ${!canModify ? 'readonly' : ''} style="margin:0; padding:10px; font-size:13px; font-weight:800; color:var(--primary);">
-              </div>
-            </div>
-          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Chưa có dữ liệu công ty.</div>`}
+            `;
+          }).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Chưa có dữ liệu công ty.</div>`}
         </div>
       `;
     }
@@ -4587,67 +4746,50 @@
     else if (tab === 'users') {
       const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
       if (!isAdminOrManager) {
-        container.innerHTML = `<div style="text-align:center; padding:30px; font-weight:700; color:var(--rose);">⛔ Bạn không có quyền truy cập trang quản lý nhân viên.</div>`;
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose);">⛔ Bạn không có quyền truy cập trang quản lý nhân viên!</div>`;
         return;
       }
 
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Tài Khoản Nhân Viên (${users.length})</h2>
         </div>
 
-        <div class="card" style="margin-bottom:14px; padding:14px;">
-          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-plus"></i> Thêm Tài Khoản Nhân Viên Mới</h3>
+        <div class="card" style="margin-bottom:14px;">
+          <h3 style="font-size:13px; font-weight:800; color:var(--primary); margin-bottom:8px;"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Mới</h3>
           <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <div>
-                <label style="font-size:11px; font-weight:700;">Mã NV:</label>
-                <input type="text" id="usCode" placeholder="VD: NV01" required style="margin:0; padding:10px; font-size:13px;">
-              </div>
-              <div>
-                <label style="font-size:11px; font-weight:700;">Họ Tên:</label>
-                <input type="text" id="usName" placeholder="Tên nhân viên" required style="margin:0; padding:10px; font-size:13px;">
-              </div>
+              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)" required style="margin:0; padding:10px; font-size:13px;">
+              <input type="text" id="usName" placeholder="Tên nhân viên" required style="margin:0; padding:10px; font-size:13px;">
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <div>
-                <label style="font-size:11px; font-weight:700;">Tài khoản / Email:</label>
-                <input type="text" id="usUsername" placeholder="Mã hoặc email" required style="margin:0; padding:10px; font-size:13px;">
-              </div>
-              <div>
-                <label style="font-size:11px; font-weight:700;">Mật khẩu:</label>
-                <input type="password" id="usPass" placeholder="Mật khẩu" required style="margin:0; padding:10px; font-size:13px;">
-              </div>
+              <input type="text" id="usUsername" placeholder="Tài khoản / Email" required style="margin:0; padding:10px; font-size:13px;" autocomplete="off">
+              <input type="password" id="usPass" placeholder="Mật khẩu" required style="margin:0; padding:10px; font-size:13px;" autocomplete="new-password">
             </div>
-            <div>
-              <label style="font-size:11px; font-weight:700;">Phân Quyền (Role):</label>
-              <select id="usRole" style="margin:0; padding:10px; font-size:13px;">
-                <option value="sales">Sales (Nhân viên bán hàng)</option>
-                <option value="manager">Manager (Quản lý)</option>
-                <option value="admin">Admin (Quản trị hệ thống)</option>
-                <option value="viewer">Viewer (Chỉ xem)</option>
-              </select>
-            </div>
-            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800; margin-top:4px;">TẠO TÀI KHOẢN MỚI</button>
+            <select id="usRole" style="margin:0; padding:10px; font-size:13px;">
+              <option value="sales">Sales (Nhân viên bán hàng)</option>
+              <option value="manager">Manager (Quản lý)</option>
+              <option value="admin">Admin (Quản trị viên hệ thống)</option>
+              <option value="viewer">Viewer (Chỉ xem)</option>
+            </select>
+            <button type="submit" class="btn btn-amber" style="justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
           </form>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${users.length > 0 ? users.map(u => `
-            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:rgba(217, 119, 6, 0.12); color:#D97706; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:800;">[${u.code || 'NV'}]</span>
-                <span class="badge ${u.active !== false ? 'badge-success' : 'badge-danger'}">${u.active !== false ? 'Hoạt động' : 'Đã khóa'}</span>
+          ${users.map(u => `
+            <div class="mobile-item-card" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <div style="font-weight:800; color:var(--text-main); font-size:14px;">[${u.code || ''}] ${u.name || ''}</div>
+                <div style="font-size:11.5px; color:var(--text-muted);">${u.email || ''} • Quyền: <b style="color:var(--primary);">${u.role || 'sales'}</b></div>
               </div>
-              <div style="font-size:14px; font-weight:800; color:var(--text-main);">${u.name || ''}</div>
-              <div style="font-size:12px; color:var(--text-muted);">📧 Email: <b>${u.email || ''}</b> | Phân quyền: <b style="color:var(--primary);">${u.role || 'sales'}</b></div>
-              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
-                <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', ${u.active === false})">
-                  ${u.active !== false ? '🔒 Khóa tài khoản' : '🔓 Mở khóa'}
+              <div>
+                <button class="btn btn-sm" style="background:${u.active !== false ? 'var(--emerald)' : 'var(--rose)'}; color:#fff; font-weight:800; padding:6px 12px;" onclick="toggleUserActive('${u.uid}', ${u.active === false})">
+                  ${u.active !== false ? 'Đang Mở' : 'Đã Khóa'}
                 </button>
               </div>
             </div>
-          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Chưa có tài khoản nhân viên nào.</div>`}
+          `).join('')}
         </div>
       `;
     }
