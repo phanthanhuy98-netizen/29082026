@@ -1345,7 +1345,7 @@
   }
 
   function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined || lat1 === null || lon1 === null || lat2 === null || lon2 === null) return Infinity;
     const R = 6371e3;
     const φ1 = lat1 * Math.PI/180;
     const φ2 = lat2 * Math.PI/180;
@@ -2306,106 +2306,108 @@
     }
   });
 
+  window._modalCurrentTabMode = 'search';
+
+  window._renderModalContent = function() {
+    const resultsContainer = document.getElementById('modalProductResultsContainer');
+    const searchInp = document.getElementById('modalProductSearchInput');
+    const viewSelectedBtn = document.getElementById('modalToggleViewBtn');
+    if (!resultsContainer) return;
+
+    let selectedCount = 0;
+    Object.values(currentCart).forEach(c => {
+      if (c && c.qty > 0) selectedCount++;
+    });
+    if (viewSelectedBtn) {
+      viewSelectedBtn.innerHTML = `<i class="fa-solid fa-box-archive"></i> Xem sản phẩm đã chọn (${selectedCount})`;
+    }
+
+    if (window._modalCurrentTabMode === 'selected') {
+      if (searchInp) searchInp.style.display = 'none';
+      
+      let selectedItemsList = [];
+      products.forEach(p => {
+        const keyId = p.id || p.code;
+        const c = currentCart[keyId];
+        if (c && c.qty > 0) {
+          if (isProductAllowedByCompanyDvt(p)) {
+            selectedItemsList.push({ p, c, keyId });
+          }
+        }
+      });
+
+      resultsContainer.innerHTML = selectedItemsList.length > 0 ? selectedItemsList.map(({ p, c, keyId }) => {
+        const safeK = getSafeKey(keyId);
+        const displayLe = (c.le === 0 ? '' : c.le);
+        const displayKien = (c.kien === 0 ? '' : c.kien);
+
+        let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+        let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+        
+        let activeDvtList = [];
+        if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+          activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+        }
+        if (activeDvtList.length === 0) {
+          if (matchedComp && matchedComp.customDvt) {
+            activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+          } else {
+            activeDvtList = [p.dvt || 'cây'];
+          }
+        }
+        let activeDvtStr = activeDvtList.join(', ');
+
+        return `
+          <div style="background:var(--card-bg); border:1px solid var(--emerald); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
+                <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvtStr} (Q/C ${p.tyLeQuyDoi || 50})</span>
+              </div>
+            </div>
+            <div style="font-size:var(--font-size-product-name); font-weight:700; color:var(--text-main); word-break:break-word; line-height:1.35;">${p.name}</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: var(--panel-bg); padding: 8px; border-radius: 10px; border: 1px solid var(--card-border);">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-size: 11px; font-weight: 800; color: var(--text-muted);">Số lượng Lẻ</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'le', -1)">-</button>
+                  <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="modal-input-le-${safeK}" value="${displayLe}" oninput="updateModalCartDetail('${keyId}', 'le', this.value)" style="margin: 0; text-align: center; padding: 2px; font-size: 15px; width: 100%; height: 38px; font-weight: 800; border-radius: 6px;">
+                  <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'le', 1)">+</button>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-size: 11px; font-weight: 800; color: var(--text-muted);">Số lượng Thùng:</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'kien', -1)">-</button>
+                  <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="modal-input-kien-${safeK}" value="${displayKien}" oninput="updateModalCartDetail('${keyId}', 'kien', this.value)" style="margin: 0; text-align: center; padding: 2px; font-size: 15px; width: 100%; height: 38px; font-weight: 800; border-radius: 6px;">
+                  <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'kien', 1)">+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('') : `<div style="text-align: center; color: var(--text-muted); padding: 30px; font-weight:700;">Chưa có sản phẩm nào được chọn trong đơn hàng.</div>`;
+      
+    } else {
+      if (searchInp) searchInp.style.display = 'block';
+      const currentVal = searchInp ? searchInp.value : '';
+      filterModalProductList(currentVal);
+    }
+  };
+
+  window._toggleModalViewMode = function() {
+    if (window._modalCurrentTabMode === 'search') {
+      window._modalCurrentTabMode = 'selected';
+    } else {
+      window._modalCurrentTabMode = 'search';
+    }
+    window._renderModalContent();
+  };
+
   window.openAddProductModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
     window._modalCurrentTabMode = 'search';
-
-    window._renderModalContent = function() {
-      const resultsContainer = document.getElementById('modalProductResultsContainer');
-      const searchInp = document.getElementById('modalProductSearchInput');
-      const viewSelectedBtn = document.getElementById('modalToggleViewBtn');
-      if (!resultsContainer) return;
-
-      let selectedCount = 0;
-      Object.values(currentCart).forEach(c => {
-        if (c && c.qty > 0) selectedCount++;
-      });
-      if (viewSelectedBtn) {
-        viewSelectedBtn.innerHTML = `<i class="fa-solid fa-box-archive"></i> Xem sản phẩm đã chọn (${selectedCount})`;
-      }
-
-      if (window._modalCurrentTabMode === 'selected') {
-        if (searchInp) searchInp.style.display = 'none';
-        
-        let selectedItemsList = [];
-        products.forEach(p => {
-          const keyId = p.id || p.code;
-          const c = currentCart[keyId];
-          if (c && c.qty > 0) {
-            if (isProductAllowedByCompanyDvt(p)) {
-              selectedItemsList.push({ p, c, keyId });
-            }
-          }
-        });
-
-        resultsContainer.innerHTML = selectedItemsList.length > 0 ? selectedItemsList.map(({ p, c, keyId }) => {
-          const safeK = getSafeKey(keyId);
-          const displayLe = (c.le === 0 ? '' : c.le);
-          const displayKien = (c.kien === 0 ? '' : c.kien);
-
-          let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
-          let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
-          
-          let activeDvtList = [];
-          if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
-            activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
-          }
-          if (activeDvtList.length === 0) {
-            if (matchedComp && matchedComp.customDvt) {
-              activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
-            } else {
-              activeDvtList = [p.dvt || 'cây'];
-            }
-          }
-          let activeDvtStr = activeDvtList.join(', ');
-
-          return `
-            <div style="background:var(--card-bg); border:1px solid var(--emerald); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                  <span style="font-size:var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px;">${p.code}</span>
-                  <span style="font-size:var(--font-size-sub-meta); background:var(--prod-qc-bg); color:var(--prod-qc-color); padding:2px 6px; border-radius:4px; font-weight:800;">ĐVT: ${activeDvtStr} (Q/C ${p.tyLeQuyDoi || 50})</span>
-                </div>
-              </div>
-              <div style="font-size:var(--font-size-product-name); font-weight:700; color:var(--text-main); word-break:break-word; line-height:1.35;">${p.name}</div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: var(--panel-bg); padding: 8px; border-radius: 10px; border: 1px solid var(--card-border);">
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-size: 11px; font-weight: 800; color: var(--text-muted);">Số lượng Lẻ</span>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'le', -1)">-</button>
-                    <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="modal-input-le-${safeK}" value="${displayLe}" oninput="updateModalCartDetail('${keyId}', 'le', this.value)" style="margin: 0; text-align: center; padding: 2px; font-size: 15px; width: 100%; height: 38px; font-weight: 800; border-radius: 6px;">
-                    <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'le', 1)">+</button>
-                  </div>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-size: 11px; font-weight: 800; color: var(--text-muted);">Số lượng Thùng:</span>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'kien', -1)">-</button>
-                    <input type="text" inputmode="numeric" pattern="[0-9]*" onkeydown="blockInvalidNumericKeys(event)" class="modal-input-kien-${safeK}" value="${displayKien}" oninput="updateModalCartDetail('${keyId}', 'kien', this.value)" style="margin: 0; text-align: center; padding: 2px; font-size: 15px; width: 100%; height: 38px; font-weight: 800; border-radius: 6px;">
-                    <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 14px; height: 38px; font-weight: 800;" onclick="adjustModalCartQty('${keyId}', 'kien', 1)">+</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('') : `<div style="text-align: center; color: var(--text-muted); padding: 30px; font-weight:700;">Chưa có sản phẩm nào được chọn trong đơn hàng.</div>`;
-        
-      } else {
-        if (searchInp) searchInp.style.display = 'block';
-        const currentVal = searchInp ? searchInp.value : '';
-        filterModalProductList(currentVal);
-      }
-    };
-
-    window._toggleModalViewMode = function() {
-      if (window._modalCurrentTabMode === 'search') {
-        window._modalCurrentTabMode = 'selected';
-      } else {
-        window._modalCurrentTabMode = 'search';
-      }
-      window._renderModalContent();
-    };
 
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex;" onclick="if(event.target === this) closeAddProductModal()">
@@ -3514,11 +3516,11 @@
 
       const currentSalesString = `${currentUser.name}`;
       const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
-const nowLocal = new Date();
-    const yyyy = nowLocal.getFullYear();
-    const mm = String(nowLocal.getMonth() + 1).padStart(2, '0');
-    const dd = String(nowLocal.getDate()).padStart(2, '0');
-    const todayStr = `${yyyy}-${mm}-${dd}`;
+      const nowLocal = new Date();
+      const yyyy = nowLocal.getFullYear();
+      const mm = String(nowLocal.getMonth() + 1).padStart(2, '0');
+      const dd = String(nowLocal.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
 
       let assignedSoCtu;
       let orderUuid;
@@ -4302,7 +4304,7 @@ const nowLocal = new Date();
               <label style="font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">📌 Tuyến Khách Hàng:</label>
               <select id="routeSelectBox" onchange="onRouteSelected(this.value)" style="padding:12px 14px; font-weight:700; width:100%; margin:0;">
                 <option value="">-- Tất cả tuyến --</option>
-                ${routeGroupsList.map(r => `<option value="${r.nhomDoiTuong}" ${selectedRouteCode===r.nhomDoiTuong?'selected':''}>${r.nhomDoiTuong} ${r.noiDung?'- '+r.noiDung:''}</option>`).join('')}
+                ${Array.isArray(routeGroupsList) ? routeGroupsList.map(r => `<option value="${r.nhomDoiTuong}" ${selectedRouteCode===r.nhomDoiTuong?'selected':''}>${r.nhomDoiTuong} ${r.noiDung?'- '+r.noiDung:''}</option>`).join('') : ''}
               </select>
             </div>
 
@@ -4444,7 +4446,7 @@ const nowLocal = new Date();
       const isSales = currentUser.role === 'sales';
       const sortedOrders = [...orders].sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
-    sortedOrders.forEach(o => {
+      sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
           if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
             return;
@@ -4455,19 +4457,15 @@ const nowLocal = new Date();
             inferredMaDTPN = o.maKH.split(' - ')[0].trim();
           }
 
-          // --- TỰ ĐỘNG TRA CỨU MÃ VÀ TÊN TUYẾN ---
           let maTuyenVal = '';
           let cleanCode = inferredMaDTPN.trim().toUpperCase();
           
-          // Tìm xem mã KH bắt đầu bằng nhóm tuyến nào (VD: "20A.MAO" bắt đầu bằng "20")
-          let matchRouteObj = routeGroupsList.find(r => cleanCode.startsWith(String(r.nhomDoiTuong).trim().toUpperCase()));
+          let matchRouteObj = Array.isArray(routeGroupsList) ? routeGroupsList.find(r => cleanCode.startsWith(String(r.nhomDoiTuong || '').trim().toUpperCase())) : null;
           if (matchRouteObj) {
-         maTuyenVal = `${matchRouteObj.nhomDoiTuong} ${matchRouteObj.noiDung ? matchRouteObj.noiDung : ''}`.trim();
+            maTuyenVal = `${matchRouteObj.nhomDoiTuong || ''} ${matchRouteObj.noiDung || ''}`.trim();
           } else {
-            // Fallback nếu không tìm thấy trong bảng tuyến thì lấy 2 ký tự đầu của mã KH
             maTuyenVal = inferredMaDTPN.slice(0, 2);
           }
-          // ----------------------------------------
 
           let orderTotalQty = 0;
           o.items.forEach(item => {
@@ -4491,7 +4489,7 @@ const nowLocal = new Date();
                 ngayCtu: o.ngayCtu || '2026-09-01',
                 ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
                 maDTPNNo: inferredMaDTPN,
-                maTuyen: maTuyenVal, // <-- Cột Mã Tuyến sẽ mang giá trị như "20 Đồng Xoài"
+                maTuyen: maTuyenVal,
                 maNhanVien: o.salesCode || '',
                 tenNhanVien: o.salesName || '',
                 maVTHHCo: finalMaVTHHCo,
@@ -4581,83 +4579,83 @@ const nowLocal = new Date();
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
-                      let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
+                     let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
                       if (matchedStore && matchedStore.lat && Number(matchedStore.lat) !== 0 && o.lat && Number(o.lat) !== 0) {
                         let distance = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
-                        if (distance > 20) {
-                          let distText = distance > 1000 ? (distance/1000).toFixed(1) + 'km' : Math.round(distance) + 'm';
-                          return `<span style="background:rgba(225,29,72,0.15); color:var(--rose); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:800;"><i class="fa-solid fa-triangle-exclamation"></i> Lệch GPS: ${distText}</span>`;
-                        }
+                        let distStr = distance > 1000 ? (distance / 1000).toFixed(1) + ' km' : Math.round(distance) + ' m';
+                        let isClose = distance <= 50;
+                        return `<span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClose ? 'var(--emerald)' : 'var(--amber)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>`;
                       }
                       return '';
                     })()}
-                    <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted); font-weight:700;"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+                    <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${o.ngayCtuFormatted} ${formatOrderTime(o.createdAt)}</span>
                   </div>
                 </div>
-                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;" title="${o.maKH}">${o.maKH}</div>
-                <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
+
+                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;">
+                  ${o.maKH || o.maDTPNNo}
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
                   <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
                   <span>📦 Tổng SL: <b style="color:var(--emerald);">${o.totalQty}</b></span>
                 </div>
-                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap; align-items:center;">
-                  <button class="btn btn-blue btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem CTu</button>
-                  <div style="display:flex; gap:6px; margin-left:auto;">
-                    ${canModify ? `
-                      <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
-                      <button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:12px; font-weight:700;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
-                    ` : ''}
-                  </div>
+
+                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
+                  <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
+                  ${canModify ? `
+                    <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                    <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                  ` : ''}
                 </div>
               </div>
             `;
-          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Không có chứng từ nào được ghi nhận.</div>`}
+          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào được lập.</div>`}
         </div>
 
         ${hasMoreOrders ? `
-          <div style="text-align:center; margin-top:14px;">
-            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="padding:10px 20px; font-weight:800;" onclick="loadMoreSoGoc()">Tải thêm lịch sử đơn hàng cũ hơn...</button>
+          <div style="text-align:center; margin-top:12px;">
+            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="padding:10px 20px; font-weight:800;" onclick="loadMoreSoGoc()">Tải Thêm Đơn Hàng Cũ Hơn</button>
           </div>
         ` : ''}
 
-        <!-- ẨN BẢNG EXPORT ĐỂ DÙNG XUẤT FILE -->
-       <!-- BẢNG ẨN ĐỂ XUẤT EXCEL -->
-        <table id="soGocExportTable" class="hidden">
-          <thead>
-            <tr>
-              <th>Số CTu</th>
-              <th>Ngày CTu</th>
-              <th>Mã ĐTPN</th>
-              <th>Mã Tuyến</th> <!-- Thêm tiêu đề cột Mã Tuyến ở đây -->
-              <th>Mã Nhân Viên</th>
-              <th>Tên Nhân Viên</th>
-              <th>Mã VTHH Co</th>
-              <th>Tên Hàng Hóa</th>
-              <th>Đơn Vị Tính</th>
-              <th>Số Lượng</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${flatExcelRows.map(r => `
+        <div style="display:none;">
+          <table id="soGocExportTable">
+            <thead>
               <tr>
-                <td>${r.soCtu}</td>
-                <td>${r.ngayCtuFormatted}</td>
-                <td>${r.maDTPNNo}</td>
-                <td>${r.maTuyen || ''}</td> <!-- Thêm giá trị Mã Tuyến (VD: 20 Đồng Xoài) vào đây -->
-                <td>${r.maNhanVien}</td>
-                <td>${r.tenNhanVien}</td>
-                <td>${r.maVTHHCo}</td>
-                <td>${r.tenHangHoa}</td>
-                <td>${r.donViTinh}</td>
-                <td>${r.soLuong}</td>
+                <th>Số CTu</th>
+                <th>Ngày CTu</th>
+                <th>Mã DTPN</th>
+                <th>Mã Tuyến</th>
+                <th>Mã NV</th>
+                <th>Tên NV</th>
+                <th>Mã VTHH</th>
+                <th>Tên Hàng Hóa</th>
+                <th>Đơn Vị Tính</th>
+                <th>Số Lượng</th>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              ${flatExcelRows.map(r => `
+                <tr>
+                  <td>${r.soCtu}</td>
+                  <td>${r.ngayCtuFormatted}</td>
+                  <td>${r.maDTPNNo}</td>
+                  <td>${r.maTuyen}</td>
+                  <td>${r.maNhanVien}</td>
+                  <td>${r.tenNhanVien}</td>
+                  <td>${r.maVTHHCo}</td>
+                  <td>${r.tenHangHoa}</td>
+                  <td>${r.donViTinh}</td>
+                  <td>${r.soLuong}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       `;
-      setTimeout(() => {
-        filterSoGocCards();
-      }, 50);
     }
+
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
@@ -4671,46 +4669,47 @@ const nowLocal = new Date();
             ` : ''}
           </div>
         </div>
-        
+
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm kiếm nhanh..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
 
         <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
         </div>
-        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;"></small>
+        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
+          Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...
+        </small>
       `;
     }
 
     else if (tab === 'routes') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Tuyến Bán Hàng (${routeGroupsList.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Danh Mục Tuyến (${routeGroupsList.length})</h2>
           <div class="excel-group-btns">
-            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm tuyến</button>` : ''}
-            ${!isViewer ? `
+            ${isAdminOrManager ? `
+              <button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm Tuyến</button>
               <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-              ${isAdminOrManager ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>` : ''}
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importRoutesExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
         </div>
 
-        <div style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:12px 14px; font-size: 14px;">
+        <div class="card" style="margin-bottom:10px; padding:10px;">
+          <input type="text" placeholder="🔍 Tìm kiếm tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:12px; font-size: 14px;">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          ${routeGroupsList.map((r, i) => `
+        <div id="routeCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
+          ${routeGroupsList.map((r, index) => `
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--purple-gradient); color:#fff; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Nhóm: ${r.nhomDoiTuong}</span>
-                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${i})"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                <input type="text" value="${r.nhomDoiTuong || ''}" onchange="updateRouteField(${index}, 'nhomDoiTuong', this.value)" ${isAdminOrManager ? '' : 'readonly'} style="width:90px; margin:0; padding:6px; font-weight:800; font-size:14px; text-align:center;">
+                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteRouteItem(${index})"><i class="fa-solid fa-trash"></i></button>` : ''}
               </div>
-              <input type="text" value="${r.noiDung || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${i}, 'noiDung', this.value)"` : 'readonly'} placeholder="Nội dung tuyến..." style="margin:0; padding:8px 10px; font-size:13px; font-weight:700;">
-              <input type="text" value="${r.ghiChu || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${i}, 'ghiChu', this.value)"` : 'readonly'} placeholder="Ghi chú..." style="margin:0; padding:8px 10px; font-size:12px;">
+              <input type="text" value="${r.noiDung || ''}" onchange="updateRouteField(${index}, 'noiDung', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên tuyến / Nội dung..." style="margin:0; padding:8px; font-size:14px; font-weight:700;">
+              <input type="text" value="${r.ghiChu || ''}" onchange="updateRouteField(${index}, 'ghiChu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Ghi chú..." style="margin:0; padding:8px; font-size:12px;">
             </div>
           `).join('')}
         </div>
@@ -4719,69 +4718,57 @@ const nowLocal = new Date();
 
     else if (tab === 'company') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:var(--rose);"></i> Danh Mục Công Ty (${companyList.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Cấu Hình Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
-            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>` : ''}
-            ${!isViewer ? `
+            ${isAdminOrManager ? `
+              <button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-              ${isAdminOrManager ? `<label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>` : ''}
+              <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>
             ` : ''}
           </div>
         </div>
 
-        <div style="margin-bottom:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px 14px; font-size:14px;">
+        <div class="card" style="margin-bottom:10px; padding:10px;">
+          <input type="text" placeholder="🔍 Tìm kiếm công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px; font-size: 14px;">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          ${companyList.map((c, i) => {
+        <div id="companyCardsContainer" style="display:flex; flex-direction:column; gap:10px;">
+          ${companyList.map((c, index) => {
             const isClosed = c.status === 'Đóng';
-            const dvtList = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
+            const dvtDetails = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
 
             return `
-              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border: 1px solid ${isClosed ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'};">
+              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosed ? 'var(--rose)' : 'var(--card-border)'};">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Mã: ${c.maCtu}</span>
+                  <input type="text" value="${c.maCtu || ''}" readonly style="width:100px; margin:0; padding:6px; font-weight:800; font-size:14px; background:var(--panel-bg);">
                   <div style="display:flex; gap:6px; align-items:center;">
-                    ${isAdminOrManager ? `
-                      <button class="btn btn-sm ${isClosed ? 'btn-red' : 'btn-green'}" style="padding:4px 10px; font-size:11.5px; font-weight:800;" onclick="toggleCompanyStatus(${i})">
-                        ${isClosed ? '🔒 Đã Đóng Cty' : '🟢 Đang Mở'}
-                      </button>
-                      <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${i})"><i class="fa-solid fa-trash"></i></button>
-                    ` : `
-                      <span class="badge ${isClosed ? 'badge-danger' : 'badge-success'}">${isClosed ? 'Đóng' : 'Mở'}</span>
-                    `}
+                    <button class="btn btn-sm" style="background:${isClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-weight:800;" onclick="toggleCompanyStatus(${index})">${c.status || 'Mở'}</button>
+                    ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteCompanyItem(${index})"><i class="fa-solid fa-trash"></i></button>` : ''}
                   </div>
                 </div>
 
-                <input type="text" value="${c.tenCtu || ''}" ${isAdminOrManager ? `onchange="updateCompanyField(${i}, 'tenCtu', this.value)"` : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px 10px; font-size:13.5px; font-weight:700;">
+                <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${index}, 'tenCtu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px; font-weight:700; font-size:14px;">
 
-                <!-- PHẦN QUẢN LÝ ĐƠN VỊ TÍNH CHI TIẾT CHO CÔNG TY NÀY -->
-                <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; margin-top: 4px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-size: 11.5px; font-weight: 800; color: var(--text-muted);">Trạng thái các Đơn Vị Tính (ĐVT):</span>
-                    ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding: 3px 8px; font-size: 10.5px; font-weight: 800;" onclick="addCompanyDvtPrompt(${i})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
+                <div style="background:var(--panel-bg); padding:8px; border-radius:8px; border:1px solid var(--card-border);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:12px; font-weight:800; color:var(--primary);">Trạng thái ĐVT theo Công Ty:</span>
+                    ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="font-size:10px; padding:3px 8px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
                   </div>
-
-                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                    ${dvtList.length > 0 ? dvtList.map((dItem, dIdx) => {
-                      const isDvtClosed = dItem.status === 'Đóng';
+                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    ${dvtDetails.length > 0 ? dvtDetails.map((d, dIdx) => {
+                      const isDvtClosed = d.status === 'Đóng';
                       return `
-                        <div style="display: flex; align-items: center; gap: 4px; background: var(--card-bg); border: 1px solid ${isDvtClosed ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'}; border-radius: 6px; padding: 4px 8px;">
-                          <span style="font-size: 11.5px; font-weight: 700; color: ${isDvtClosed ? 'var(--text-muted)' : 'var(--text-main)'}; text-decoration: ${isDvtClosed ? 'line-through' : 'none'};">${dItem.name}</span>
-                          ${isAdminOrManager ? `
-                            <button type="button" class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding: 2px 6px; font-size: 10px; font-weight: 800;" onclick="toggleCompanyDvtStatus(${i}, ${dIdx})" title="Bấm để đổi trạng thái Mở/Đóng">${isDvtClosed ? 'Đóng' : 'Mở'}</button>
-                            <button type="button" class="btn btn-sm" style="background:transparent; color:var(--rose); padding: 2px 4px; font-size: 10px;" onclick="removeCompanyDvt(${i}, ${dIdx})"><i class="fa-solid fa-xmark"></i></button>
-                          ` : ''}
+                        <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
+                          <span style="font-size:12px; font-weight:700;">${d.name}</span>
+                          <button class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-size:10px; padding:2px 6px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${d.status || 'Mở'}</button>
+                          ${isAdminOrManager ? `<button class="btn btn-sm btn-red" style="font-size:9px; padding:1px 4px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>` : ''}
                         </div>
                       `;
-                    }).join('') : `<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">Chưa cấu hình ĐVT riêng (mặc định mở).</span>`}
+                    }).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa cấu hình ĐVT riêng.</span>'}
                   </div>
                 </div>
-
               </div>
             `;
           }).join('')}
@@ -4792,21 +4779,21 @@ const nowLocal = new Date();
     else if (tab === 'users') {
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Tài Khoản Nhân Viên (${users.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
         </div>
 
-        <div class="card" style="margin-bottom:14px;">
-          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Nhân Viên Mới</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Thêm Nhân Viên Mới</h3>
           <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)..." required style="margin:0;">
-              <input type="text" id="usName" placeholder="Tên nhân viên..." required style="margin:0;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)" required style="margin:0; padding:10px;">
+              <input type="text" id="usName" placeholder="Họ và tên..." required style="margin:0; padding:10px;">
             </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <input type="text" id="usUsername" placeholder="Tài khoản / Email..." required style="margin:0;">
-              <input type="password" id="usPass" placeholder="Mật khẩu..." required style="margin:0;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <input type="text" id="usUsername" placeholder="Tên đăng nhập hoặc email..." required style="margin:0; padding:10px;">
+              <input type="password" id="usPass" placeholder="Mật khẩu..." required style="margin:0; padding:10px;">
             </div>
-            <select id="usRole" style="margin:0;">
+            <select id="usRole" style="margin:0; padding:10px;">
               <option value="sales">Sales (Nhân viên bán hàng)</option>
               <option value="manager">Manager (Quản lý)</option>
               <option value="admin">Admin (Quản trị viên)</option>
@@ -4817,23 +4804,23 @@ const nowLocal = new Date();
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${users.map(u => {
-            const isActive = u.active !== false;
-            return `
-              <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">[${u.code || 'NV'}] ${u.name}</span>
-                  <span class="badge ${isActive ? 'badge-success' : 'badge-danger'}">${isActive ? 'Hoạt động' : 'Đã khóa'}</span>
-                </div>
-                <div style="font-size:12px; color:var(--text-muted);">📧 Email: <b>${u.email}</b> | Quyền: <b style="color:var(--primary);">${u.role}</b></div>
-                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
-                  <button class="btn ${isActive ? 'btn-red' : 'btn-green'} btn-sm" style="padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', ${!isActive})">
-                    ${isActive ? 'Khóa tài khoản' : 'Mở khóa'}
-                  </button>
-                </div>
+          ${users.map(u => `
+            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px; font-size:12px; font-weight:800;">[${u.code || 'NV'}]</span>
+                <span class="badge ${u.active !== false ? 'badge-success' : 'badge-danger'}">${u.active !== false ? 'Đang hoạt động' : 'Đã khóa'}</span>
               </div>
-            `;
-          }).join('')}
+              <div style="font-size:15px; font-weight:800; color:var(--text-main);">${u.name}</div>
+              <div style="font-size:12px; color:var(--text-muted);">📧 ${u.email} • Phân quyền: <b style="color:var(--primary); text-transform:uppercase;">${u.role || 'sales'}</b></div>
+              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
+                ${u.active !== false ? `
+                  <button class="btn btn-red btn-sm" onclick="toggleUserActive('${u.uid}', false)">Khóa tài khoản</button>
+                ` : `
+                  <button class="btn btn-green btn-sm" onclick="toggleUserActive('${u.uid}', true)">Mở khóa</button>
+                `}
+              </div>
+            </div>
+          `).join('')}
         </div>
       `;
     }
