@@ -3625,13 +3625,49 @@
     }
   };
 
-  window.exportSoGocExcel = function() {
-    const tableEl = document.getElementById('soGocExportTable');
-    if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
-    const wb = XLSX.utils.table_to_book(tableEl, { raw: true });
-    const dateStr = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `SoGocBanHang_${dateStr}.xlsx`);
-  };
+ window.exportSoGocExcel = function() {
+  const tableEl = document.getElementById('soGocExportTable');
+  if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
+
+  // Lọc các dòng theo trạng thái đang hiển thị trên giao diện (tuân theo bộ lọc ngày/nhân viên)
+  const visibleCards = document.querySelectorAll('.so-goc-card-item');
+  const visibleSoCtuSet = new Set();
+  
+  visibleCards.forEach(card => {
+    if (card.style.display !== 'none') {
+      const soCtu = card.getAttribute('data-so-ctu');
+      if (soCtu) visibleSoCtuSet.add(String(soCtu));
+    }
+  });
+
+  // Tạo bảng tạm thời chứa các dòng thuộc các chứng từ đang hiển thị
+  const rows = tableEl.querySelectorAll('tbody tr');
+  let filteredRowsHtml = '';
+  let count = 0;
+
+  rows.forEach(row => {
+    const soCtuCell = row.cells[0];
+    if (soCtuCell && visibleSoCtuSet.has(String(soCtuCell.innerText.trim()))) {
+      filteredRowsHtml += row.outerHTML;
+      count++;
+    }
+  });
+
+  if (count === 0) {
+    return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc ngày hiện tại để xuất Excel!");
+  }
+
+  // Tạo bảng ảo để xuất file Excel đúng phần đang lọc
+  const tempTable = document.createElement('table');
+  tempTable.innerHTML = `<thead>${tableEl.querySelector('thead').innerHTML}</thead><tbody>${filteredRowsHtml}</tbody>`;
+
+  const wb = XLSX.utils.table_to_book(tempTable, { raw: true });
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fromStr = soGocFilterDateFrom || 'tat_ca';
+  const toStr = soGocFilterDateTo || dateStr;
+  
+  XLSX.writeFile(wb, `SoGocBanHang_${fromStr}_den_${toStr}.xlsx`);
+};
 
   window.exportCustomersExcel = function() {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
