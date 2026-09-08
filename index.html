@@ -3417,43 +3417,48 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     if (topBadge) topBadge.innerText = selectedSkuCount;
   }
 
-  async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
-    const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
-    
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        const newSeq = await runTransaction(db, async (transaction) => {
-          const counterSnap = await transaction.get(counterRef);
-          let currentVal = 0;
+ async function getNextSoCtuWithRetry(retries = 3, delay = 100) {
+  const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const newSeq = await runTransaction(db, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        let currentVal = 0;
 
-          if (counterSnap.exists()) {
-            currentVal = Number(counterSnap.data().currentVal) || 0;
-          }
-
-          let maxSoCtu = currentVal;
-          if (orders.length > 0) {
-            const localMax = Math.max(...orders.map(o => Number(o.soCtu) || 0));
-            if (localMax > maxSoCtu) maxSoCtu = localMax;
-          }
-
-          if (maxSoCtu === 0) {
-            maxSoCtu = 63;
-          }
-
-          maxSoCtu++;
-          transaction.set(counterRef, { currentVal: maxSoCtu });
-          return maxSoCtu;
-        });
-        return newSeq;
-      } catch (err) {
-        if (attempt === retries - 1) {
-          const maxLocal = orders.length > 0 ? Math.max(...orders.map(o => Number(o.soCtu) || 0)) : 63;
-          return maxLocal + 1;
+        if (counterSnap.exists()) {
+          currentVal = Number(counterSnap.data().currentVal) || 0;
         }
-        await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
+
+        let maxSoCtu = currentVal;
+        if (orders.length > 0) {
+          const localMax = Math.max(...orders.map(o => Number(o.soCtu) || 0));
+          if (localMax > maxSoCtu && localMax <= 900000) maxSoCtu = localMax;
+        }
+
+        // Tăng số chứng từ lên 1 đơn vị
+        maxSoCtu++;
+
+        // Nếu vượt quá 900.000 thì quay lại từ 1
+        if (maxSoCtu > 900000) {
+          maxSoCtu = 1;
+        }
+
+        transaction.set(counterRef, { currentVal: maxSoCtu });
+        return maxSoCtu;
+      });
+      return newSeq;
+    } catch (err) {
+      if (attempt === retries - 1) {
+        const maxLocal = orders.length > 0 ? Math.max(...orders.map(o => Number(o.soCtu) || 0)) : 0;
+        let fallbackVal = maxLocal + 1;
+        if (fallbackVal > 900000) fallbackVal = 1;
+        return fallbackVal;
       }
+      await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
     }
   }
+}
 
   window.submitOrder = async function() {
     if (isSubmittingOrder) return;
