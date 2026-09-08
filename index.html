@@ -886,6 +886,7 @@
         </div>
       </div>
     `;
+    modalContainer.classList.add('hidden');
     modalContainer.classList.remove('hidden');
   };
 
@@ -1421,10 +1422,10 @@
     });
   }
 
-  // HÀM KIỂM TRA THÔNG MINH isDvtHiddenForCurrentCompany (Chuẩn hóa lowercase, trim, loại bỏ dấu)
-  window.isDvtHiddenForCurrentCompany = function(dvt, productCode) {
+  // HÀM KIỂM TRA ĐVT ẨN THEO CÔNG TY (CHUẨN HÓA TRIỆT ĐỂ LOWERCASE, TRIM, LOẠI BỎ DẤU)
+  window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-      return false; // Admin hoặc Manager luôn thấy đầy đủ
+      return false; // Admin và Manager luôn thấy đầy đủ
     }
 
     let compPrefix = (typeof pinnedCompanyPrefix !== 'undefined' && pinnedCompanyPrefix) 
@@ -1437,47 +1438,28 @@
       return false;
     }
 
-    let normalizedTargetDvt = removeAccents(String(dvt || '')).toLowerCase().trim();
+    let targetText = removeAccents(String(dvt || '') + ' ' + String(productName || '')).toLowerCase().trim();
 
     for (const detail of matchedComp.dvtDetails) {
       let detailNameNorm = removeAccents(String(detail.name || '')).toLowerCase().trim();
-      if (detailNameNorm === normalizedTargetDvt && detail.status === 'Đóng') {
-        return true; // Khớp ĐVT và đang ở trạng thái 'Đóng' -> Ẩn
+      if (detailNameNorm && detail.status === 'Đóng') {
+        if (targetText.includes(detailNameNorm)) {
+          return true; // Khớp trạng thái 'Đóng' -> Ẩn
+        }
       }
     }
 
     return false;
   };
 
-  // HÀM KIỂM TRA TOÀN DIỆN TÍCH HỢP VÀO LỌC SẢN PHẨM
+  // HÀM LỌC SẢN PHẨM TẠI TAB BÁN HÀNG
   function isProductAllowedByCompanyDvt(p) {
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       return true;
     }
     
-    let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
-    let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase().startsWith(compPrefix));
-    
-    if (!matchedComp || !Array.isArray(matchedComp.dvtDetails) || matchedComp.dvtDetails.length === 0) {
-      return true;
-    }
-
-    let activeDvtList = matchedComp.dvtDetails.map(d => d.name);
-    if (activeDvtList.length === 0) {
-      activeDvtList = [p.dvt || 'cây'];
-    }
-
-    let productDvt = p.dvt || '';
-    let combinedCheckText = `${productDvt} ${p.name || ''}`;
-
-    for (const dvtItem of activeDvtList) {
-      if (window.isDvtHiddenForCurrentCompany(dvtItem, p.code)) {
-        let normDvt = removeAccents(dvtItem).toLowerCase().trim();
-        let normText = removeAccents(combinedCheckText).toLowerCase().trim();
-        if (normText.includes(normDvt)) {
-          return false; // Bị cấu hình 'Đóng' -> Ẩn sản phẩm
-        }
-      }
+    if (window.isDvtHiddenForCurrentCompany(p.dvt, p.code, p.name)) {
+      return false;
     }
 
     return true;
@@ -2491,7 +2473,6 @@
         matchCompanySelect = p.code.startsWith(selectedCompanyCode) || (p.companyCode && p.companyCode === selectedCompanyCode);
       }
 
-      // Tích hợp hàm kiểm tra thông minh chặn ĐVT ở trạng thái 'Đóng'
       let matchCompanyDvtConfig = isProductAllowedByCompanyDvt(p);
 
       if (!matchCompanyPrefix || !matchCompanySelect || !matchCompanyDvtConfig) continue;
@@ -2652,7 +2633,6 @@
       }
       if (!matchCompanySelect) continue;
 
-      // Kiểm tra chặn ĐVT ở trạng thái 'Đóng' thông qua hàm chuẩn hóa thông minh
       let matchCompanyDvtConfig = isProductAllowedByCompanyDvt(p);
       if (!matchCompanyDvtConfig) continue;
 
@@ -4574,6 +4554,7 @@
             const canEdit = (isOwner && isToday) || isManagerOrAdmin;
             const canDelete = (isOwner && isToday) || isManagerOrAdmin;
             const timeStr = formatOrderTime(o.createdAt);
+            
             let distanceBadgeHtml = '';
             if (o.lat && o.lng && o.storeId) {
               const targetStore = stores.find(s => String(s.id) === String(o.storeId));
@@ -4589,7 +4570,7 @@
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">CTu #${o.soCtu}</span>
-                  <span style="font-size:12px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr}</span>
+             <div style="font-size:12px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${o.ngayCtuFormatted} ${timeStr}</div>
                 </div>
                 <div style="font-size:14px; font-weight:800; color:var(--text-main); word-break:break-word;">
                   ${o.maDTPNNo} - ${o.maKH}
