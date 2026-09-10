@@ -346,6 +346,8 @@
     <div id="mobileTabBarContainer" class="mobile-tab-bar"></div>
 
     <div class="panel">
+      <!-- TAB FEEDBACK / PHẢN ÁNH -->
+<div id="tabPane_feedback" style="display:none;"></div>
       <!-- TAB SALES -->
       <div id="tabPane_sales" style="display:none;"></div>
       <!-- TAB SOGOC BH -->
@@ -434,7 +436,7 @@
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
+  let defaultTabOrder = ['sales', 'soGocBH', 'feedback', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
@@ -4286,15 +4288,16 @@ window.filterTabProducts = function(val) {
     const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
     const isViewer = currentUser && currentUser.role === 'viewer';
 
-    const tabConfigMap = {
-      sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
-      soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
-      customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: true },
-      productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
-      routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
-      company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
-      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
-    };
+   const tabConfigMap = {
+  sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
+  soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
+  feedback: { id: 'navFeedback', label: 'Phản Ánh', icon: 'fa-comments', defaultColor: '#8B5CF6', perm: true }, // Tab mới thêm
+  customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: true },
+  productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
+  routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
+  company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
+  users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
+};
 
     tabBar.innerHTML = currentTabOrder.map(tKey => {
       const cfg = tabConfigMap[tKey];
@@ -4312,7 +4315,101 @@ window.filterTabProducts = function(val) {
       <button class="btn btn-red btn-sm" style="font-weight: 800;" onclick="handleLogout()" title="Đăng xuất"><i class="fa-solid fa-power-off"></i> Thoát</button>
     `;
   }
+let feedbackList = [];
 
+window.submitMarketFeedback = async function(e) {
+  e.preventDefault();
+  const storeId = document.getElementById('feedbackStoreSelect').value;
+  const category = document.getElementById('feedbackCategory').value;
+  const content = document.getElementById('feedbackContent').value.trim();
+
+  if (!storeId) return alert("Vui lòng chọn khách hàng/tiệm liên quan!");
+  if (!content) return alert("Vui lòng nhập nội dung phản ánh!");
+
+  const targetStore = stores.find(s => String(s.id) === String(storeId));
+
+  const payload = {
+    id: 'fb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    storeId: storeId,
+    storeName: targetStore ? targetStore.name : '',
+    storeCode: targetStore ? targetStore.code : '',
+    category: category,
+    content: content,
+    salesCode: currentUser.code || '',
+    salesName: currentUser.name || '',
+    salesUid: currentUser.uid || '',
+    createdAt: serverTimestamp(),
+    dateStr: new Date().toISOString().slice(0, 10)
+  };
+
+  try {
+    await setDoc(doc(db, "marketFeedback", payload.id), payload);
+    feedbackList.unshift({ ...payload, createdAt: new Date() });
+    alert("✅ Đã gửi phản ánh thị trường thành công!");
+    document.getElementById('feedbackForm').reset();
+    renderTabContent('feedback', document.getElementById('tabPane_feedback'));
+  } catch (err) {
+    alert("Lỗi khi gửi phản ánh: " + err.message);
+  }
+else if (tab === 'feedback') {
+      if (feedbackList.length === 0) {
+        getDocs(query(collection(db, "marketFeedback"), orderBy("createdAt", "desc"), limit(50)))
+          .then(snap => {
+            feedbackList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const activePane = document.getElementById('tabPane_feedback');
+            if (activePane && currentTab === 'feedback') renderTabContent('feedback', activePane);
+          }).catch(e => {});
+      }
+
+      container.innerHTML = `
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-comments" style="color:var(--purple);"></i> Phản Ánh Thị Trường</h2>
+        </div>
+
+        <div class="card" style="margin-bottom:12px; padding:14px;">
+          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-pen-to-square"></i> Ghi Nhận Ý Kiến / Thị Trường Mới</h3>
+          <form id="feedbackForm" onsubmit="submitMarketFeedback(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <label style="font-size:12px; font-weight:700;">Chọn Khách Hàng / Tiệm:</label>
+            <select id="feedbackStoreSelect" required style="margin:0; padding:10px;">
+              <option value="">-- Chọn khách hàng --</option>
+              ${stores.map(s => `<option value="${s.id}">[${s.code || ''}] ${s.name}</option>`).join('')}
+            </select>
+
+            <label style="font-size:12px; font-weight:700;">Loại phản ánh:</label>
+            <select id="feedbackCategory" style="margin:0; padding:10px;">
+              <option value="Đối thủ cạnh tranh">Đối thủ cạnh tranh khuyến mãi</option>
+              <option value="Biến động giá">Ý kiến về giá / sản phẩm</option>
+              <option value="Tiệm đóng cửa / Nghỉ bán">Tiệm đóng cửa / Nghỉ bán tạm thời</option>
+              <option value="Khác">Ý kiến khác</option>
+            </select>
+
+            <label style="font-size:12px; font-weight:700;">Nội dung chi tiết:</label>
+            <textarea id="feedbackContent" rows="3" placeholder="Nhập chi tiết thông tin phản ánh..." required style="margin:0; padding:10px; border-radius:10px; border:1px solid var(--card-border); font-family:inherit;"></textarea>
+
+            <button type="submit" class="btn btn-purple" style="width:100%; justify-content:center; padding:12px; font-weight:800; margin-top:4px;">
+              <i class="fa-solid fa-paper-plane"></i> GỬI PHẢN ÁNH
+            </button>
+          </form>
+        </div>
+
+        <div style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--text-main);">Lịch sử phản ánh gần đây:</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${feedbackList.length > 0 ? feedbackList.map(fb => `
+            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="background:var(--purple-gradient); color:#fff; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:800;">${fb.category}</span>
+                <span style="font-size:11px; color:var(--text-muted);">${fb.dateStr || ''}</span>
+              </div>
+              <div style="font-size:14px; font-weight:800; color:var(--text-main);">${fb.storeName || 'Khách hàng'}</div>
+              <div style="font-size:13px; color:var(--text-muted); line-height:1.4; word-break:break-word;">${fb.content}</div>
+              <div style="font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
+                <span>👤 NV: <b>[${fb.salesCode}] ${fb.salesName}</b></span>
+              </div>
+            </div>
+          `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có nội dung phản ánh nào được ghi nhận.</div>`}
+        </div>
+      `;
+    }
   async function renderTabContent(tab, container) {
     const oldFooter = document.getElementById('dynamicCartFooter');
     if (oldFooter) oldFooter.remove();
