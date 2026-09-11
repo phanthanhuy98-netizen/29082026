@@ -398,7 +398,101 @@
   import {
     getStorage, ref, uploadString, getDownloadURL
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+// Biến lưu trữ hàm hủy đăng ký lắng nghe (nếu cần cleanup)
+let unsubStoresRealtime = null;
 
+function initRealtimeStoresSync() {
+  if (unsubStoresRealtime) unsubStoresRealtime(); // Hủy đăng ký cũ nếu có
+
+  // Lắng nghe realtime toàn bộ collection "stores" trên Firestore
+  onAuthStateChanged(authSvc, async (user) => {
+  if (!user) {
+    currentUser = null;
+    if (unsubStoresRealtime) unsubStoresRealtime(); // Ngắt kết nối realtime khi đăng xuất
+    document.getElementById('loginView').classList.remove('hidden');
+    document.getElementById('appView').classList.add('hidden');
+    return;
+  }
+
+  // ... (các đoạn code xử lý phân quyền và thông tin user hiện tại của bạn) ...
+
+  currentUser = { ... };
+
+  loadUserCustomPreferences();
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('appView').classList.remove('hidden');
+  
+  renderUI();
+
+  setTimeout(async () => {
+    await cleanupExpiredOrdersOptimized();
+    await loadMasterDataOptimized(false);
+
+    // KÍCH HOẠT LẮNG NGHE GPS REALTIME NGAY TẠI ĐÂY
+    initRealtimeStoresSync();
+
+    try {
+      const pos = await getHighAccuracyPosition();
+      currentSalesGPS = { lat: pos.lat, lng: pos.lng };
+    } catch (e) {
+      currentSalesGPS = DEFAULT_MAP_CENTER;
+    }
+
+    attachListeners();
+    window.syncOfflineCheckins();
+    window.syncOfflineOrders();
+  }, 50);
+});
+  unsubStoresRealtime = onSnapshot(collection(db, "stores"), (snapshot) => {
+    let hasChanges = false;
+    
+    snapshot.docChanges().forEach((change) => {
+      const updatedStoreData = { id: change.doc.id, ...change.doc.data() };
+      const index = stores.findIndex(s => String(s.id) === String(updatedStoreData.id));
+
+      if (change.type === "added" || change.type === "modified") {
+        if (index > -1) {
+          stores[index] = updatedStoreData;
+        } else {
+          stores.push(updatedStoreData);
+        }
+        hasChanges = true;
+      } 
+      else if (change.type === "removed") {
+        if (index > -1) {
+          stores.splice(index, 1);
+        }
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      // Cập nhật lại bộ nhớ đệm Index và LocalCache để đảm bảo tốc độ tìm kiếm
+      buildStoreIndex();
+      saveStoresToLocalCache(stores).catch(() => {});
+
+      // Tự động làm mới giao diện nếu người dùng đang đứng ở tab "Khách hàng" hoặc tab "Bán hàng"
+      if (currentTab === 'customers') {
+        filterTabCustomers(tabCustomerSearchKey);
+      } else if (currentTab === 'sales') {
+        const custSearchInp = document.getElementById('customerSearchInput');
+        if (custSearchInp && custSearchInp.value) {
+          filterSalesCustomers(custSearchInp.value);
+        }
+        // Nếu đang chọn một khách hàng cụ thể mà khách hàng đó vừa bị thay đổi GPS
+        if (activeVisitedStore) {
+          const freshStore = stores.find(s => String(s.id) === String(activeVisitedStore.id));
+          if (freshStore) {
+            activeVisitedStore = freshStore;
+          }
+        }
+      }
+    }
+  }, (error) => {
+    console.error("Lỗi đồng bộ Realtime GPS:", error);
+  });
+}
+  
   const firebaseConfig = {
     apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
     authDomain: "project-4126159910229398131.firebaseapp.com",
