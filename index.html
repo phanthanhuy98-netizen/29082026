@@ -388,16 +388,11 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
-    getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-    updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword
+    getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import {
-    getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction
+    getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteField, serverTimestamp, enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  import {
-    getStorage, ref, uploadString, getDownloadURL
-  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
@@ -412,7 +407,7 @@
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
   const db = getFirestore(app);
-  const storageSvc = getStorage(app);
+  
   enableIndexedDbPersistence(db).catch(() => {});
 
   const secondaryApp = initializeApp(firebaseConfig, "secondary");
@@ -421,8 +416,70 @@
   let currentUser = null;
   let currentTab = localStorage.getItem('dms_last_active_tab') || 'sales';
   let stores = [], orders = [], users = [];
+  function listenToStoresRealtime() {
+    if (unsubscribeStores) unsubscribeStores();
+
+    const storesRef = collection(db, "customers");
+    
+    unsubscribeStores = onSnapshot(storesRef, (snapshot) => {
+      stores = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+
+      renderCustomerList();
+    }, (error) => {
+      console.error("Lỗi đồng bộ GPS Realtime:", error);
+    });
+  }
   let lastVisibleOrderDoc = null;
   let hasMoreOrders = true;
+  // --- BƯỚC 3: THÊM HÀM GHIM VÀ XÓA GPS REALTIME ---
+  window.pinCustomerGPS = function(customerId) {
+    if (!navigator.geolocation) {
+      alert("Thiết bị của bạn không hỗ trợ định vị GPS!");
+      return;
+    }
+
+    alert("Hệ thống đang lấy tọa độ GPS từ thiết bị...");
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+
+      try {
+        const customerRef = doc(db, "customers", customerId);
+        await updateDoc(customerRef, {
+          lat: Number(lat),
+          lng: Number(lng),
+          updatedAt: serverTimestamp()
+        });
+
+        alert(`Ghim vị trí thành công!\nTọa độ: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      } catch (err) {
+        alert("Lỗi khi ghim GPS: " + err.message);
+      }
+    }, (err) => {
+      alert("Không thể truy cập GPS. Hãy bật dịch vụ vị trí trên thiết bị!");
+    }, { enableHighAccuracy: true });
+  };
+
+  window.removeCustomerGPS = async function(customerId) {
+    if (!confirm("Xác nhận xóa vị trí GPS của khách hàng này?")) return;
+
+    try {
+      const customerRef = doc(db, "customers", customerId);
+      await updateDoc(customerRef, {
+        lat: deleteField(),
+        lng: deleteField(),
+        updatedAt: serverTimestamp()
+      });
+
+      alert("Đã xóa định vị GPS!");
+    } catch (err) {
+      alert("Lỗi khi xóa GPS: " + err.message);
+    }
+  };
 
   const DEFAULT_MAP_CENTER = { lat: 11.5448, lng: 106.9056 };
 
