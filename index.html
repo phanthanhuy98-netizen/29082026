@@ -1541,34 +1541,51 @@
       const serverRoutesVersion = Number(serverMeta.routesVersion || 1);
       const serverStoresVersion = Number(serverMeta.storesVersion || 1);
 
+      const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
+      const localProductsVersion = Number(localStorage.getItem("productsVersion") || 0);
+      const localRoutesVersion = Number(localStorage.getItem("routesVersion") || 0);
+      const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
+
       let cachedComps, cachedPrds, cachedRoutes, cachedStores;
 
-      cachedComps = await loadCompaniesFromLocalCache();
-      if (!cachedComps || cachedComps.length === 0 || forceCloud) {
+      if (!forceCloud && localCompsVersion === serverCompsVersion) {
+        cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
+      }
+      if (!cachedComps || cachedComps.length === 0) {
         const cSnap = await getDocs(collection(db, "companies"));
         cachedComps = cSnap.docs.map(d => d.data());
-        await saveCompaniesToLocalCache(cachedComps);
+        if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(cachedComps);
+        localStorage.setItem("companiesVersion", serverCompsVersion);
       }
 
-      cachedPrds = await loadProductsFromLocalCache();
-      if (!cachedPrds || cachedPrds.length === 0 || forceCloud) {
+      if (!forceCloud && localProductsVersion === serverProductsVersion) {
+        cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
+      }
+      if (!cachedPrds || cachedPrds.length === 0) {
         const pSnap = await getDocs(collection(db, "products"));
         cachedPrds = pSnap.docs.map(d => d.data());
-        await saveProductsToLocalCache(cachedPrds);
+        if (typeof saveProductsToLocalCache === 'function') await saveProductsToLocalCache(cachedPrds);
+        localStorage.setItem("productsVersion", serverProductsVersion);
       }
 
-      cachedRoutes = await loadRoutesFromLocalCache();
-      if (!cachedRoutes || cachedRoutes.length === 0 || forceCloud) {
+      if (!forceCloud && localRoutesVersion === serverRoutesVersion) {
+        cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
+      }
+      if (!cachedRoutes || cachedRoutes.length === 0) {
         const rSnap = await getDocs(collection(db, "routes"));
         cachedRoutes = rSnap.docs.map(d => d.data());
-        await saveRoutesToLocalCache(cachedRoutes);
+        if (typeof saveRoutesToLocalCache === 'function') await saveRoutesToLocalCache(cachedRoutes);
+        localStorage.setItem("routesVersion", serverRoutesVersion);
       }
 
-      cachedStores = await loadStoresFromLocalCache();
-      if (!cachedStores || cachedStores.length === 0 || forceCloud) {
+      if (!forceCloud && localStoresVersion === serverStoresVersion) {
+        cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
+      }
+      if (!cachedStores || cachedStores.length === 0) {
         const sSnap = await getDocs(collection(db, "stores"));
         cachedStores = sSnap.docs.map(d => d.data());
-        await saveStoresToLocalCache(cachedStores);
+        if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(cachedStores);
+        localStorage.setItem("storesVersion", serverStoresVersion);
       }
 
       window.allCompanies = cachedComps || [];
@@ -1576,68 +1593,16 @@
       window.allRoutes = cachedRoutes || [];
       window.allStores = cachedStores || [];
 
-      companyList = window.allCompanies;
-      products = window.allProducts;
-      stores = window.allStores;
-      routeGroupsList = window.allRoutes;
+      if (typeof companyList !== 'undefined') companyList = window.allCompanies;
+      if (typeof products !== 'undefined') products = window.allProducts;
+      if (typeof stores !== 'undefined') stores = window.allStores;
+      if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes;
 
-      buildProductIndex();
-      buildStoreIndex();
-      renderUI();
-
-      // Bật Realtime Listener lắng nghe thay đổi collection "stores" trên Firestore
-      setupRealtimeStoresListener();
+      if (typeof buildProductIndex === 'function') buildProductIndex();
+      if (typeof buildStoreIndex === 'function') buildStoreIndex();
+      if (typeof renderUI === 'function') renderUI();
 
     } catch (error) {}
-  }
-
-  // --- HỆ THỐNG ĐỒNG BỘ GPS REALTIME (REALTIME STORES LISTENER) ---
-  function setupRealtimeStoresListener() {
-    onSnapshot(collection(db, "stores"), (snapshot) => {
-      let hasChanges = false;
-      snapshot.docChanges().forEach((change) => {
-        const updatedStoreData = change.doc.data();
-        const storeIdStr = String(updatedStoreData.id || change.doc.id);
-        
-        const existingIdx = stores.findIndex(s => String(s.id) === storeIdStr || String(s.code) === String(updatedStoreData.code));
-        if (existingIdx > -1) {
-          // Kiểm tra xem có thay đổi tọa độ GPS hoặc trạng thái ghim không
-          const oldStore = stores[existingIdx];
-          if (oldStore.lat !== updatedStoreData.lat || oldStore.lng !== updatedStoreData.lng || oldStore.pinnedByName !== updatedStoreData.pinnedByName) {
-            stores[existingIdx] = { ...oldStore, ...updatedStoreData };
-            hasChanges = true;
-          }
-        } else {
-          stores.push({ id: storeIdStr, ...updatedStoreData });
-          hasChanges = true;
-        }
-      });
-
-      if (hasChanges) {
-        saveStoresToLocalCache(stores);
-        buildStoreIndex();
-
-        // Tự động làm mới lại giao diện đang hiển thị liên quan đến khách hàng/GPS ngay lập tức mà không cần F5
-        if (currentTab === 'customers') {
-          filterTabCustomers(tabCustomerSearchKey);
-        } else if (currentTab === 'sales') {
-          const searchInput = document.getElementById('customerSearchInput');
-          if (searchInput && searchInput.value.trim() !== '') {
-            filterSalesCustomers(searchInput.value);
-          }
-          if (activeVisitedStore) {
-            // Cập nhật lại thông tin tiệm đang active nếu có thay đổi GPS
-            const refreshedActive = stores.find(s => String(s.id) === String(activeVisitedStore.id));
-            if (refreshedActive) activeVisitedStore = refreshedActive;
-          }
-        } else if (currentTab === 'soGocBH') {
-          const activePane = document.getElementById('tabPane_soGocBH');
-          if (activePane) renderTabContent('soGocBH', activePane);
-        }
-      }
-    }, (error) => {
-      console.error("Lỗi Realtime Stores Listener: ", error);
-    });
   }
 
   window.forceRefreshMasterDataFromCloud = async function() {
@@ -2287,11 +2252,11 @@
 
       if (matched.length > 0 && q.length > 0) {
         dropdown.innerHTML = matched.slice(0, 10).map(c => `
-          <div onclick="selectInlineCompany('${c.maCtu}', '${c.tenCtu}')" style="padding: 10px 12px; border-bottom: 1px solid var(--card-border); cursor: pointer; display: flex; justify-content: flex-start; align-items: center; gap: 12px; font-size: 13.5px; background: var(--card-bg);">
-            <span style="font-weight: 800; color: var(--primary); min-width: 35px;">${c.maCtu}</span>
-            <span style="color: var(--text-main); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.tenCtu || ''}</span>
-          </div>
-        `).join('');
+  <div onclick="selectInlineCompany('${c.maCtu}', '${c.tenCtu}')" style="padding: 10px 12px; border-bottom: 1px solid var(--card-border); cursor: pointer; display: flex; justify-content: flex-start; align-items: center; gap: 12px; font-size: 13.5px; background: var(--card-bg);">
+    <span style="font-weight: 800; color: var(--primary); min-width: 35px;">${c.maCtu}</span>
+    <span style="color: var(--text-main); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.tenCtu || ''}</span>
+  </div>
+`).join('');
         dropdown.classList.remove('hidden');
       } else {
         dropdown.classList.add('hidden');
@@ -2786,149 +2751,149 @@
   };
 
   window.filterTabCustomers = function(val) {
-    if (val !== undefined) tabCustomerSearchKey = removeAccents(val.trim());
-    const container = document.getElementById('tabCustomerCardContainer');
-    const hintEl = document.getElementById('tabCustSearchHint');
-    if (!container) return;
+  if (val !== undefined) tabCustomerSearchKey = removeAccents(val.trim());
+  const container = document.getElementById('tabCustomerCardContainer');
+  const hintEl = document.getElementById('tabCustSearchHint');
+  if (!container) return;
 
-    if (tabCustomerSearchKey === "" && !showOnlyPinnedGPS) {
-      container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút "Xem KH ghim GPS".</div>`;
-      if (hintEl) hintEl.innerText = "Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm hoặc chọn xem KH đã ghim.";
-      return;
+  if (tabCustomerSearchKey === "" && !showOnlyPinnedGPS) {
+    container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút "Xem KH ghim GPS".</div>`;
+    if (hintEl) hintEl.innerText = "Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm hoặc chọn xem KH đã ghim.";
+    return;
+  }
+
+  let matched = [];
+  for (const [id, entry] of storeIndexMap.entries()) {
+    const s = entry.store;
+    const latVal = Number(s.lat || 0);
+    const lngVal = Number(s.lng || 0);
+    const hasLat = !isNaN(latVal) && latVal !== 0 && !isNaN(lngVal) && lngVal !== 0;
+
+    let matchPinned = true;
+    if (showOnlyPinnedGPS) {
+      matchPinned = hasLat;
     }
 
-    let matched = [];
-    for (const [id, entry] of storeIndexMap.entries()) {
-      const s = entry.store;
-      const latVal = Number(s.lat || 0);
-      const lngVal = Number(s.lng || 0);
-      const hasLat = !isNaN(latVal) && latVal !== 0 && !isNaN(lngVal) && lngVal !== 0;
-
-      let matchPinned = true;
-      if (showOnlyPinnedGPS) {
-        matchPinned = hasLat;
-      }
-
-      let matchKey = true;
-      if (tabCustomerSearchKey !== "") {
-        const codeNorm = removeAccents(String(s.code || ''));
-        matchKey = codeNorm.includes(tabCustomerSearchKey);
-      }
-
-      if (matchPinned && matchKey) {
-        matched.push({ ...s, lat: latVal, lng: lngVal });
-        if (matched.length >= 50) break;
-      }
+    let matchKey = true;
+    if (tabCustomerSearchKey !== "") {
+      const codeNorm = removeAccents(String(s.code || ''));
+      matchKey = codeNorm.includes(tabCustomerSearchKey);
     }
 
-    matched.sort((a, b) => {
-      const aCode = removeAccents(String(a.code || ''));
-      const bCode = removeAccents(String(b.code || ''));
-      const aStartsWith = aCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
-      const bStartsWith = bCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
-      return aStartsWith - bStartsWith;
-    });
+    if (matchPinned && matchKey) {
+      matched.push({ ...s, lat: latVal, lng: lngVal });
+      if (matched.length >= 50) break;
+    }
+  }
 
-    const isViewer = currentUser.role === 'viewer';
-    const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+  matched.sort((a, b) => {
+    const aCode = removeAccents(String(a.code || ''));
+    const bCode = removeAccents(String(b.code || ''));
+    const aStartsWith = aCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
+    const bStartsWith = bCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
+    return aStartsWith - bStartsWith;
+  });
 
-    container.innerHTML = matched.length > 0 ? matched.map(s => {
-      const hasLat = s.lat && s.lat !== 0;
-      const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
-      
-      return `
-        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'}</span>
-            <span style="font-size: 11px; padding: 4px 8px; font-weight: 700; background: rgba(5, 150, 105, 0.12); color: #059669; border-radius: 6px;">
-              ${hasLat ? `📍 Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}
-            </span>
-          </div>
-          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
-          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
-          <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
-            <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
-            <span>💬 Zalo: <b>${s.zalo || '—'}</b></span>
-          </div>
-          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pInfo}</b></div>
-          <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
-            ${hasLat ? `
-              <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
-            ` : ''}
-            ${!isViewer && !hasLat ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
-            ${isAdminOrManager && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
-          </div>
+  const isViewer = currentUser.role === 'viewer';
+  const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+
+  container.innerHTML = matched.length > 0 ? matched.map(s => {
+    const hasLat = s.lat && s.lat !== 0;
+    const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
+    
+    return `
+      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'}</span>
+          <span style="font-size: 11px; padding: 4px 8px; font-weight: 700; background: rgba(5, 150, 105, 0.12); color: #059669; border-radius: 6px;">
+  ${hasLat ? `📍 Đã ghim (${Number(s.lat).toFixed(4)}, ${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}
+</span>
         </div>
-      `;
-    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
-
-    if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị ${matched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
-  };
-
-  window.filterTabProducts = function(val) {
-    const rawVal = val.trim();
-    tabProductSearchKey = removeAccents(rawVal);
-    const container = document.getElementById('productCardsContainer');
-    const hintEl = document.getElementById('tabPrdSearchHint');
-    if (!container) return;
-
-    if (tabProductSearchKey === "") {
-      container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>`;
-      if (hintEl) hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...";
-      return;
-    }
-
-    let matched = [];
-    for (const [id, entry] of productIndexMap.entries()) {
-      const p = entry.product;
-      const pCode = removeAccents(String(p.code || '')).toLowerCase();
-      
-      if (pCode.startsWith(tabProductSearchKey) || entry.searchableText.includes(tabProductSearchKey)) {
-        matched.push(p);
-      }
-    }
-
-    matched.sort((a, b) => {
-      const aCode = removeAccents(String(a.code || '')).toLowerCase();
-      const bCode = removeAccents(String(b.code || '')).toLowerCase();
-      const aStartsWith = aCode.startsWith(tabProductSearchKey) ? 0 : 1;
-      const bStartsWith = bCode.startsWith(tabProductSearchKey) ? 0 : 1;
-      return aStartsWith - bStartsWith;
-    });
-
-    matched = matched.slice(0, 20);
-
-    container.innerHTML = matched.length > 0 ? matched.map(p => {
-      let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
-      let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
-      
-      let activeDvtList = [];
-      if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
-        activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
-      }
-      if (activeDvtList.length === 0) {
-        if (matchedComp && matchedComp.customDvt) {
-          activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
-        } else {
-          activeDvtList = [p.dvt || 'cây'];
-        }
-      }
-      let activeDvtStr = activeDvtList.join(', ');
-
-      return `
-        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
-            <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvtStr}_Q/C: ${p.tyLeQuyDoi || 50}</span>
-          </div>
-          <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
-          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
+        <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
+        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
+        <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
+          <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
+          <span>💬 Zalo: <b>${s.zalo || '—'}</b></span>
         </div>
-      `;
-    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy vật tư phù hợp.</div>`;
+        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pInfo}</b></div>
+        <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
+          ${hasLat ? `
+            <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
+          ` : ''}
+          ${!isViewer && !hasLat ? `<button class="btn btn-amber btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="handleCustomerLocationAction('${s.id}')"><i class="fa-solid fa-location-crosshairs"></i> Ghim GPS</button>` : ''}
+          ${isAdminOrManager && hasLat && !isViewer ? `<button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="adminResetCustomerLocation('${s.id}')">Xóa GPS</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
 
-    if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
-  };
+  if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị ${matched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
+};
+
+window.filterTabProducts = function(val) {
+  const rawVal = val.trim();
+  tabProductSearchKey = removeAccents(rawVal);
+  const container = document.getElementById('productCardsContainer');
+  const hintEl = document.getElementById('tabPrdSearchHint');
+  if (!container) return;
+
+  if (tabProductSearchKey === "") {
+    container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>`;
+    if (hintEl) hintEl.innerText = "Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...";
+    return;
+  }
+
+  let matched = [];
+  for (const [id, entry] of productIndexMap.entries()) {
+    const p = entry.product;
+    const pCode = removeAccents(String(p.code || '')).toLowerCase();
+    
+    if (pCode.startsWith(tabProductSearchKey) || entry.searchableText.includes(tabProductSearchKey)) {
+      matched.push(p);
+    }
+  }
+
+  matched.sort((a, b) => {
+    const aCode = removeAccents(String(a.code || '')).toLowerCase();
+    const bCode = removeAccents(String(b.code || '')).toLowerCase();
+    const aStartsWith = aCode.startsWith(tabProductSearchKey) ? 0 : 1;
+    const bStartsWith = bCode.startsWith(tabProductSearchKey) ? 0 : 1;
+    return aStartsWith - bStartsWith;
+  });
+
+  matched = matched.slice(0, 20);
+
+  container.innerHTML = matched.length > 0 ? matched.map(p => {
+    let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+    let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+    
+    let activeDvtList = [];
+    if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+      activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+    }
+    if (activeDvtList.length === 0) {
+      if (matchedComp && matchedComp.customDvt) {
+        activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+      } else {
+        activeDvtList = [p.dvt || 'cây'];
+      }
+    }
+    let activeDvtStr = activeDvtList.join(', ');
+
+    return `
+      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
+          <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvtStr}_Q/C: ${p.tyLeQuyDoi || 50}</span>
+        </div>
+        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
+        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
+      </div>
+    `;
+  }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy vật tư phù hợp.</div>`;
+
+  if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
+};
 
   window.filterSoGocCards = function(val) {
     if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
@@ -3086,62 +3051,62 @@
   };
 
   window.editOrder = function(orderId) {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
-    const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+  const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
-    const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
-    const vnDate = new Date(vietnamTime);
-    const yyyy = vnDate.getFullYear();
-    const mm = String(vnDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(vnDate.getDate()).padStart(2, '0');
-    const todayStr = `${yyyy}-${mm}-${dd}`;
+  const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
+  const vnDate = new Date(vietnamTime);
+  const yyyy = vnDate.getFullYear();
+  const mm = String(vnDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(vnDate.getDate()).padStart(2, '0');
+  const todayStr = `${yyyy}-${mm}-${dd}`;
 
-    if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
-      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý.`);
-    }
+  if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
+    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý.`);
+  }
 
-    if (!isOwner && !isManagerOrAdmin) {
-      return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
-    }
+  if (!isOwner && !isManagerOrAdmin) {
+    return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
+  }
 
-    let targetStore = stores.find(s => String(s.id) === String(order.storeId));
-    if (!targetStore && order.maDTPNNo) {
-      targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
-    }
-    if (!targetStore) {
-      return alert("Không tìm thấy dữ liệu điểm bán của đơn hàng này trong hệ thống!");
-    }
+  let targetStore = stores.find(s => String(s.id) === String(order.storeId));
+  if (!targetStore && order.maDTPNNo) {
+    targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
+  }
+  if (!targetStore) {
+    return alert("Không tìm thấy dữ liệu điểm bán của đơn hàng này trong hệ thống!");
+  }
 
-    activeVisitedStore = targetStore;
-    editingOrderId = order.id;
-    existingOrderSoCtu = order.soCtu; 
+  activeVisitedStore = targetStore;
+  editingOrderId = order.id;
+  existingOrderSoCtu = order.soCtu; 
 
-    currentCart = {};
-    if (order.items && order.items.length > 0) {
-      order.items.forEach(item => {
-        const pKey = item.id || item.code;
-        const productObj = products.find(p => p.id === pKey || p.code === pKey || p.code === item.code);
-        const ratio = productObj?.tyLeQuyDoi || 50;
-        
-        const totalQty = Number(item.qty || 0);
-        if (totalQty > 0) { 
-          const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-          const le = ratio > 0 ? totalQty % ratio : totalQty;
+  currentCart = {};
+  if (order.items && order.items.length > 0) {
+    order.items.forEach(item => {
+      const pKey = item.id || item.code;
+      const productObj = products.find(p => p.id === pKey || p.code === pKey || p.code === item.code);
+      const ratio = productObj?.tyLeQuyDoi || 50;
+      
+      const totalQty = Number(item.qty || 0);
+      if (totalQty > 0) { 
+        const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+        const le = ratio > 0 ? totalQty % ratio : totalQty;
 
-          currentCart[pKey] = {
-            qty: totalQty,
-            kien: kien,
-            le: le
-          };
-        }
-      });
-    }
+        currentCart[pKey] = {
+          qty: totalQty,
+          kien: kien,
+          le: le
+        };
+      }
+    });
+  }
 
-    switchTab('sales');
-  };
+  switchTab('sales');
+};
 
   window.deleteSingleOrder = async function(orderId) {
     const order = orders.find(o => o.id === orderId);
@@ -3666,45 +3631,45 @@
   };
 
   window.exportSoGocExcel = function() {
-    const tableEl = document.getElementById('soGocExportTable');
-    if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
+  const tableEl = document.getElementById('soGocExportTable');
+  if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
 
-    const visibleCards = document.querySelectorAll('.so-goc-card-item');
-    const visibleSoCtuSet = new Set();
-    
-    visibleCards.forEach(card => {
-      if (card.style.display !== 'none') {
-        const soCtu = card.getAttribute('data-so-ctu');
-        if (soCtu) visibleSoCtuSet.add(String(soCtu));
-      }
-    });
-
-    const rows = tableEl.querySelectorAll('tbody tr');
-    let filteredRowsHtml = '';
-    let count = 0;
-
-    rows.forEach(row => {
-      const soCtuCell = row.cells[0];
-      if (soCtuCell && visibleSoCtuSet.has(String(soCtuCell.innerText.trim()))) {
-        filteredRowsHtml += row.outerHTML;
-        count++;
-      }
-    });
-
-    if (count === 0) {
-      return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc ngày hiện tại để xuất Excel!");
+  const visibleCards = document.querySelectorAll('.so-goc-card-item');
+  const visibleSoCtuSet = new Set();
+  
+  visibleCards.forEach(card => {
+    if (card.style.display !== 'none') {
+      const soCtu = card.getAttribute('data-so-ctu');
+      if (soCtu) visibleSoCtuSet.add(String(soCtu));
     }
+  });
 
-    const tempTable = document.createElement('table');
-    tempTable.innerHTML = `<thead>${tableEl.querySelector('thead').innerHTML}</thead><tbody>${filteredRowsHtml}</tbody>`;
+  const rows = tableEl.querySelectorAll('tbody tr');
+  let filteredRowsHtml = '';
+  let count = 0;
 
-    const wb = XLSX.utils.table_to_book(tempTable, { raw: true });
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const fromStr = soGocFilterDateFrom || 'tat_ca';
-    const toStr = soGocFilterDateTo || dateStr;
-    
-    XLSX.writeFile(wb, `SoGocBanHang_${fromStr}_den_${toStr}.xlsx`);
-  };
+  rows.forEach(row => {
+    const soCtuCell = row.cells[0];
+    if (soCtuCell && visibleSoCtuSet.has(String(soCtuCell.innerText.trim()))) {
+      filteredRowsHtml += row.outerHTML;
+      count++;
+    }
+  });
+
+  if (count === 0) {
+    return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc ngày hiện tại để xuất Excel!");
+  }
+
+  const tempTable = document.createElement('table');
+  tempTable.innerHTML = `<thead>${tableEl.querySelector('thead').innerHTML}</thead><tbody>${filteredRowsHtml}</tbody>`;
+
+  const wb = XLSX.utils.table_to_book(tempTable, { raw: true });
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fromStr = soGocFilterDateFrom || 'tat_ca';
+  const toStr = soGocFilterDateTo || dateStr;
+  
+  XLSX.writeFile(wb, `SoGocBanHang_${fromStr}_den_${toStr}.xlsx`);
+};
 
   window.exportCustomersExcel = function() {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền xuất file Excel!");
@@ -4175,85 +4140,83 @@
   };
 
   window.filterCompanyTable = function(val) {
-    const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.company-card-item');
-    cards.forEach(c => {
-      const maCtuEl = c.querySelector('input');
-      const maCtuText = maCtuEl ? removeAccents(maCtuEl.value).toLowerCase() : '';
-      const fullText = removeAccents(c.innerText).toLowerCase();
-      
-      const isMatch = maCtuText.startsWith(q) || fullText.includes(q);
-      c.style.display = isMatch ? '' : 'none';
-    });
-  };
+  const q = removeAccents(val.trim());
+  const cards = document.querySelectorAll('.company-card-item');
+  cards.forEach(c => {
+    const maCtuEl = c.querySelector('input');
+    const maCtuText = maCtuEl ? removeAccents(maCtuEl.value).toLowerCase() : '';
+    const fullText = removeAccents(c.innerText).toLowerCase();
+    
+    const isMatch = maCtuText.startsWith(q) || fullText.includes(q);
+    c.style.display = isMatch ? '' : 'none';
+  });
+};
 
   window.filterRouteTable = function(val) {
-    const q = removeAccents(val.trim());
-    const cards = document.querySelectorAll('.route-card-item');
-    cards.forEach(c => {
-      const groupInput = c.querySelector('input');
-      const groupCode = groupInput ? removeAccents(groupInput.value).toLowerCase() : '';
-      const fullText = removeAccents(c.innerText).toLowerCase();
-      
-      const isMatch = groupCode.startsWith(q) || fullText.includes(q);
-      c.style.display = isMatch ? '' : 'none';
-    });
-  };
+  const q = removeAccents(val.trim());
+  const cards = document.querySelectorAll('.route-card-item');
+  cards.forEach(c => {
+    const groupInput = c.querySelector('input');
+    const groupCode = groupInput ? removeAccents(groupInput.value).toLowerCase() : '';
+    const fullText = removeAccents(c.innerText).toLowerCase();
+    
+    const isMatch = groupCode.startsWith(q) || fullText.includes(q);
+    c.style.display = isMatch ? '' : 'none';
+  });
+};
 
   window.openCompanyListModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (!modalContainer) return;
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return;
 
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex; z-index:99999;" onclick="if(event.target === this) closeCompanyListModal()">
-        <div class="modal-content" style="max-width: 500px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; padding: 18px; border-radius: 18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
-            <h3 style="font-size: 16px; font-weight: 800; color: #DB2777;"><i class="fa-solid fa-building"></i> Danh Sách Công Ty (${companyList.length})</h3>
-            <button class="btn btn-red btn-sm" onclick="closeCompanyListModal()">Đóng</button>
-          </div>
-          <div style="margin-bottom: 10px;">
-            <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterModalCompanyList(this.value)" style="margin:0; padding:10px; font-size:14px;">
-          </div>
-          <div id="modalCompanyResults" style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
-            ${companyList.map(c => `
-              <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-                <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
-                <span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${c.tenCtu || ''}</span>
-              </div>
-            `).join('')}
-          </div>
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:99999;" onclick="if(event.target === this) closeCompanyListModal()">
+      <div class="modal-content" style="max-width: 500px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; padding: 18px; border-radius: 18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
+          <h3 style="font-size: 16px; font-weight: 800; color: #DB2777;"><i class="fa-solid fa-building"></i> Danh Sách Công Ty (${companyList.length})</h3>
+          <button class="btn btn-red btn-sm" onclick="closeCompanyListModal()">Đóng</button>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterModalCompanyList(this.value)" style="margin:0; padding:10px; font-size:14px;">
+        </div>
+        <div id="modalCompanyResults" style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
+          ${companyList.map(c => `
+            <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
+<span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${c.tenCtu || ''}</span>            </div>
+          `).join('')}
         </div>
       </div>
-    `;
-    modalContainer.classList.remove('hidden');
-  };
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+};
 
-  window.closeCompanyListModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-      modalContainer.innerHTML = '';
-      modalContainer.classList.add('hidden');
-    }
-  };
+window.closeCompanyListModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
+};
 
-  window.filterModalCompanyList = function(val) {
-    const q = removeAccents(val.trim());
-    const container = document.getElementById('modalCompanyResults');
-    if (!container) return;
+window.filterModalCompanyList = function(val) {
+  const q = removeAccents(val.trim());
+  const container = document.getElementById('modalCompanyResults');
+  if (!container) return;
 
-    const matched = companyList.filter(c => {
-      const text = removeAccents(`${c.maCtu || ''} ${c.tenCtu || ''}`);
-      return text.includes(q);
-    });
+  const matched = companyList.filter(c => {
+    const text = removeAccents(`${c.maCtu || ''} ${c.tenCtu || ''}`);
+    return text.includes(q);
+  });
 
-    container.innerHTML = matched.length > 0 ? matched.map(c => `
-      <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-        <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
-        <span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.tenCtu || ''}</span>
-      </div>
-    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy công ty phù hợp.</div>`;
-  };
-
+  container.innerHTML = matched.length > 0 ? matched.map(c => `
+    <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+      <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
+      <span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.tenCtu || ''}</span>
+    </div>
+  `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy công ty phù hợp.</div>`;
+};
   window.addUser = async function(e) {
     e.preventDefault();
     const code = document.getElementById('usCode').value.trim();
@@ -4292,6 +4255,8 @@
     selectStoreDirectly(storeId);
   };
 
+  let unsubscribeStoresRealtime = null;
+
   function attachListeners() {
     getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -4307,6 +4272,37 @@
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => {});
+
+    if (unsubscribeStoresRealtime) {
+      unsubscribeStoresRealtime();
+    }
+
+    unsubscribeStoresRealtime = onSnapshot(collection(db, "stores"), (snapshot) => {
+      let updatedStores = [];
+      snapshot.forEach(docSnap => {
+        updatedStores.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      stores = updatedStores;
+      saveStoresToLocalCache(stores).catch(() => {});
+      buildStoreIndex();
+
+      if (currentTab === 'customers') {
+        const pane = document.getElementById('tabPane_customers');
+        if (pane) filterTabCustomers(tabCustomerSearchKey);
+      } else if (currentTab === 'sales') {
+        const custInput = document.getElementById('customerSearchInput');
+        if (custInput) {
+          filterSalesCustomers(custInput.value);
+        }
+        if (activeVisitedStore) {
+          const freshStore = stores.find(s => String(s.id) === String(activeVisitedStore.id));
+          if (freshStore) {
+            activeVisitedStore = freshStore;
+            renderUI();
+          }
+        }
+      }
+    }, (error) => {});
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
@@ -4642,104 +4638,108 @@
           });
 
           if (orderTotalQty > 0) {
-            groupedOrdersMap.set(o.id, {
+           groupedOrdersMap.set(o.id, {
               orderId: o.id,
               soCtu: o.soCtu || 1,
-              ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
-                maKH: o.maKH || '—',
-                salesCode: o.salesCode || '',
-                salesName: o.salesName || '',
-                totalQty: orderTotalQty,
-                createdAt: o.createdAt,
-                itemsCount: o.items.filter(i => Number(i.qty || 0) > 0).length
-              });
-            }
+              ngayCtu: o.ngayCtu || '',
+              maDTPNNo: inferredMaDTPN,
+              maTuyen: maTuyenVal,
+              maNhanVien: o.salesCode || '',
+              tenNhanVien: o.salesName || '',
+              maKH: o.maKH || '',
+              items: o.items.filter(i => Number(i.qty || 0) > 0),
+              totalQty: orderTotalQty,
+              createdAt: o.createdAt
+            });
           }
         }
       });
 
-      const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+      const uniqueSalesList = Array.from(new Set(orders.map(o => o.salesCode).filter(Boolean)));
+      const todayStr = new Date().toISOString().slice(0, 10);
 
       container.innerHTML = `
-        <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-book" style="color:var(--emerald);"></i> Sổ Gốc Bán Hàng (${groupedOrdersMap.size})</h2>
+        <div class="tab-header-actions" style="margin-bottom:12px;">
+          <h2 style="font-weight:800; font-size:18px;"><i class="fa-solid fa-book" style="color:var(--emerald);"></i> Sổ Gốc Bán Hàng (${groupedOrdersMap.size})</h2>
           <div class="excel-group-btns">
+            ${currentUser.role === 'admin' ? `
+              <button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()" title="Xóa toàn bộ đơn hàng theo ngày"><i class="fa-solid fa-trash-can"></i> Xóa ngày</button>
+            ` : ''}
             <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-            <button class="btn btn-amber btn-sm" onclick="reloadSoGocDataManually()"><i class="fa-solid fa-rotate"></i> Làm mới</button>
-            ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa theo ngày</button>` : ''}
+            <button class="btn btn-amber btn-sm" onclick="reloadSoGocDataManually()"><i class="fa-solid fa-rotate"></i> Tải lại</button>
           </div>
         </div>
 
-        <div class="card" style="margin-bottom: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-          <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-            <span style="font-size: 11.5px; font-weight: 800; color: var(--text-muted);">Lọc nhanh:</span>
-            <button id="quickDateBtn_today" class="btn btn-sm ${soGocQuickDate==='today'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('today')">Hôm nay</button>
-            <button id="quickDateBtn_week" class="btn btn-sm ${soGocQuickDate==='week'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('week')">Tuần này</button>
-            <button id="quickDateBtn_month" class="btn btn-sm ${soGocQuickDate==='month'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('month')">Tháng này</button>
-            <button id="quickDateBtn_all" class="btn btn-sm ${soGocQuickDate==='all'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('all')">Tất cả</button>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="card" style="margin-bottom:10px; padding:12px; display:flex; flex-direction:column; gap:8px;">
+          <input type="text" id="soGocSearchInput" placeholder="🔍 Tìm theo số CTu, mã KH, tên NV..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; padding:12px 14px; font-size:15px;">
+          
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
             <div>
-              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 2px;">Từ ngày:</label>
-              <input type="date" id="soGocDateFrom" value="${soGocFilterDateFrom}" onchange="setSoGocDateFrom(this.value)" style="margin:0; padding:8px; font-size: 12px; font-weight: 700;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">Từ ngày:</label>
+              <input type="date" id="soGocDateFrom" value="${soGocFilterDateFrom}" onchange="setSoGocDateFrom(this.value)" style="margin:0; padding:8px; font-size:12px;">
             </div>
             <div>
-              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 2px;">Đến ngày:</label>
-              <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:8px; font-size: 12px; font-weight: 700;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">Đến ngày:</label>
+              <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:8px; font-size:12px;">
             </div>
           </div>
 
-          ${isAdminOrManager ? `
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            <span style="font-size:11.5px; font-weight:800; color:var(--text-muted);">Lọc nhanh:</span>
+            <button type="button" id="quickDateBtn_today" class="btn btn-sm ${soGocQuickDate==='today'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('today')">Hôm nay</button>
+            <button type="button" id="quickDateBtn_week" class="btn btn-sm ${soGocQuickDate==='week'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('week')">Tuần này</button>
+            <button type="button" id="quickDateBtn_month" class="btn btn-sm ${soGocQuickDate==='month'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('month')">Tháng này</button>
+            <button type="button" id="quickDateBtn_all" class="btn btn-sm ${soGocQuickDate==='all'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('all')">Tất cả</button>
+          </div>
+
+          ${!isSales ? `
             <div>
-              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 2px;">Lọc theo Nhân Viên:</label>
-              <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; padding:8px; font-size: 12px; font-weight: 700;">
+              <label style="font-size:11px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:2px;">Lọc nhân viên:</label>
+              <select onchange="setSoGocSalesFilter(this.value)" style="margin:0; padding:8px; font-size:12px; font-weight:800;">
                 <option value="">-- Tất cả nhân viên --</option>
-                ${Array.from(new Set(orders.map(o => o.salesCode).filter(Boolean))).map(sCode => {
-                  const ordObj = orders.find(o => o.salesCode === sCode);
-                  const sName = ordObj ? ordObj.salesName : sCode;
-                  return `<option value="${sCode}" ${soGocSalesFilter===sCode?'selected':''}>[${sCode}] ${sName}</option>`;
-                }).join('')}
+                ${uniqueSalesList.map(code => `<option value="${code}" ${soGocSalesFilter===code?'selected':''}>${code}</option>`).join('')}
               </select>
             </div>
           ` : ''}
-
-          <input type="text" placeholder="🔍 Gõ số chứng từ (#), mã khách hàng, tên KH hoặc tên NV..." oninput="filterSoGocCards(this.value)" value="" autocomplete="off" style="margin:0; padding:11px 14px; font-size: var(--font-size-search-input);">
         </div>
 
-        <div id="soGocCardsContainer" style="display: flex; flex-direction: column; gap: 8px;">
-          ${groupedOrdersMap.size > 0 ? Array.from(groupedOrdersMap.values()).map(o => {
-            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-            const canEditOrDel = isOwner || isAdminOrManager;
+        <div id="soGocCardListContainer" style="display:flex; flex-direction:column; gap:8px;">
+          ${groupedOrdersMap.size > 0 ? Array.from(groupedOrdersMap.values()).map(ord => {
+            const isOwner = currentUser.code === ord.maNhanVien || currentUser.uid === ord.salesUid;
+            const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+            const canEditOrDel = (ord.ngayCtu === todayStr || isManagerOrAdmin) && (isOwner || isManagerOrAdmin);
 
             return `
-              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maKH)}" data-ma-nv="${(o.salesCode||'').toLowerCase()}" data-ten-nv="${removeAccents(o.salesName||'')}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${ord.soCtu}" data-ma-dtpn="${removeAccents(ord.maDTPNNo)}" data-ma-nv="${removeAccents(ord.maNhanVien)}" data-ten-nv="${removeAccents(ord.tenNhanVien)}" data-ngay-ctu="${ord.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="background:rgba(16, 185, 129, 0.12); color:#10B981; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">CTu #${o.soCtu}</span>
-                  <span style="font-size:12px; color:var(--text-muted); font-weight:700;"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+                  <span style="background:var(--emerald-gradient); color:#fff; padding:3px 10px; border-radius:6px; font-size:13px; font-weight:800;">CTu #${ord.soCtu}</span>
+                  <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(ord.ngayCtu)} ${formatOrderTime(ord.createdAt)}</span>
                 </div>
-                <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); word-break: break-word;">${o.maKH}</div>
-                <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
-                  <span>👤 NV: <b style="color:#2563EB;">[${o.salesCode || ''}] ${o.salesName || ''}</b></span>
-                  <span>📦 Tổng SL: <b style="color:var(--emerald);">${o.totalQty}</b></span>
+                
+                <div style="font-size:14px; font-weight:800; color:var(--text-main); word-break:break-word;">
+                  👤 Tiệm: ${ord.maKH || ord.maDTPNNo}
                 </div>
-                <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:4px; flex-wrap:wrap;">
-                  <button class="btn btn-blue btn-sm" style="padding:6px 12px; font-size:12px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem</button>
+
+                <div style="font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between;">
+                  <span>Nhân viên: <b style="color:var(--text-main);">[${ord.maNhanVien}] ${ord.tenNhanVien}</b></span>
+                  <span>Tổng SL: <b style="color:#2563EB;">${ord.totalQty}</b></span>
+                </div>
+
+                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
+                  <button class="btn btn-blue btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openOrderDetailsModal('${ord.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
                   ${canEditOrDel ? `
-                    <button class="btn btn-amber btn-sm" style="padding:6px 12px; font-size:12px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
-                    <button class="btn btn-red btn-sm" style="padding:6px 12px; font-size:12px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    <button class="btn btn-amber btn-sm" style="padding:8px; font-size:12px;" onclick="editOrder('${ord.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                    <button class="btn btn-red btn-sm" style="padding:8px; font-size:12px;" onclick="deleteSingleOrder('${ord.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
                   ` : ''}
                 </div>
               </div>
             `;
-          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào trong hệ thống.</div>`}
+          }).join('') : `<div style="text-align:center; padding:30px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào được tạo.</div>`}
         </div>
 
-        ${hasMoreOrders ? `
-          <button id="loadMoreSoGocBtn" class="btn" style="width:100%; justify-content:center; margin-top:12px; padding:12px; font-weight:800;" onclick="loadMoreSoGoc()">
-            <i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn...
-          </button>
-        ` : ''}
+        <div style="margin-top:16px; text-align:center;">
+          ${hasMoreOrders ? `<button id="loadMoreSoGocBtn" class="btn btn-amber" onclick="loadMoreSoGoc()" style="width:100%; padding:12px; font-weight:800;"><i class="fa-solid fa-angles-down"></i> Tải Thêm Đơn Hàng Cũ Hơn</button>` : ''}
+        </div>
 
         <div style="display:none;">
           <table id="soGocExportTable">
@@ -4751,14 +4751,14 @@
                 <th>Mã Tuyến</th>
                 <th>Mã Nhân Viên</th>
                 <th>Tên Nhân Viên</th>
-                <th>Mã VTHH</th>
+                <th>Mã VTHH Co</th>
                 <th>Tên Hàng Hóa</th>
                 <th>Đơn Vị Tính</th>
                 <th>Số Lượng</th>
               </tr>
             </thead>
             <tbody>
-              {flatExcelRows.map(r => `
+              ${flatExcelRows.map(r => `
                 <tr>
                   <td>${r.soCtu}</td>
                   <td>${r.ngayCtuFormatted}</td>
@@ -4776,13 +4776,10 @@
           </table>
         </div>
       `;
-      setTimeout(() => {
-        if (soGocQuickDate && soGocQuickDate !== 'all') {
-          setSoGocQuickDateFilter(soGocQuickDate);
-        } else {
-          filterSoGocCards();
-        }
-      }, 50);
+
+      if (soGocFilterKeyword || soGocFilterDateFrom || soGocFilterDateTo || soGocSalesFilter) {
+        setTimeout(() => filterSoGocCards(), 50);
+      }
     }
 
     else if (tab === 'productsAdmin') {
@@ -4800,19 +4797,20 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tra cứu..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Gõ nhanh mã hoặc tên vật tư..." oninput="filterTabProducts(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
 
-        <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
+        <div id="productCardsContainer">
           <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
         </div>
-        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;"></small>
+        <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
+          Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...
+        </small>
       `;
     }
 
     else if (tab === 'routes') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      const isSalesOrViewer = currentUser.role === 'sales' || currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Tuyến Bán Hàng (${routeGroupsList.length})</h2>
@@ -4826,21 +4824,24 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm nhóm đối tượng hoặc nội dung tuyến..." oninput="filterRouteTable(this.value)" autocomplete="off" style="margin:0; padding:11px 14px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Tìm kiếm nhóm đối tượng hoặc nội dung tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:12px; font-size:14px;">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div id="routeCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${routeGroupsList.map((r, index) => `
             <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:800; font-size:14px; color:var(--purple);">Nhóm đối tượng:</span>
-                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteRouteItem(${index})"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+                <span style="background:var(--purple-gradient); color:#fff; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Nhóm: ${r.nhomDoiTuong || ''}</span>
+                ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteRouteItem(${index})" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
               </div>
-              <input type="text" value="${r.nhomDoiTuong || ''}" ${!isAdminOrManager ? 'readonly' : ''} onchange="updateRouteField(${index}, 'nhomDoiTuong', this.value)" style="margin:0; padding:10px; font-weight:800; font-size:14px;">
-              <div style="font-weight:700; font-size:12px; color:var(--text-muted); margin-top:2px;">Nội dung tuyến:</div>
-              <input type="text" value="${r.noiDung || ''}" ${!isAdminOrManager ? 'readonly' : ''} onchange="updateRouteField(${index}, 'noiDung', this.value)" style="margin:0; padding:10px; font-size:13.5px;">
-              <div style="font-weight:700; font-size:12px; color:var(--text-muted); margin-top:2px;">Ghi chú:</div>
-              <input type="text" value="${r.ghiChu || ''}" ${!isAdminOrManager ? 'readonly' : ''} onchange="updateRouteField(${index}, 'ghiChu', this.value)" style="margin:0; padding:10px; font-size:13.5px;">
+              <div>
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Nội dung tuyến:</label>
+                <input type="text" value="${r.noiDung || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${index}, 'noiDung', this.value)"` : 'readonly'} style="margin:2px 0 6px 0; padding:8px; font-size:13px; font-weight:700;">
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Ghi chú:</label>
+                <input type="text" value="${r.ghiChu || ''}" ${isAdminOrManager ? `onchange="updateRouteField(${index}, 'ghiChu', this.value)"` : 'readonly'} style="margin:2px 0 0 0; padding:8px; font-size:13px;">
+              </div>
             </div>
           `).join('')}
         </div>
@@ -4862,48 +4863,50 @@
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
-          <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterCompanyTable(this.value)" autocomplete="off" style="margin:0; padding:11px 14px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px; font-size:14px;">
         </div>
 
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div id="companyCardsContainer" style="display:flex; flex-direction:column; gap:10px;">
           ${companyList.map((c, index) => {
             const isClosed = c.status === 'Đóng';
             const dvtDetails = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
 
             return `
-              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosed ? 'rgba(225, 29, 72, 0.4)' : 'var(--card-border)'};">
+              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:10px; border:1px solid ${isClosed ? 'var(--rose)' : 'var(--card-border)'};">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-weight:800; font-size:13px; color:#DB2777;">Mã CTu:</span>
-                  <div style="display:flex; gap:4px; align-items:center;">
+                  <span style="background:linear-gradient(135deg, #DB2777 0%, #9D174D 100%); color:#fff; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">Mã: ${c.maCtu || ''}</span>
+                  <div style="display:flex; gap:6px; align-items:center;">
                     ${isAdminOrManager ? `
-                      <button class="btn btn-sm" style="background:${isClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:4px 8px; font-size:11px;" onclick="toggleCompanyStatus(${index})">${isClosed ? 'Đã Đóng Cty' : 'Đang Mở'}</button>
-                      <button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${index})"><i class="fa-solid fa-trash"></i></button>
+                      <button class="btn btn-sm ${isClosed ? 'btn-red' : 'btn-green'}" onclick="toggleCompanyStatus(${index})" style="padding:4px 10px; font-size:11px; font-weight:800;">${isClosed ? 'ĐÃ ĐÓNG' : 'ĐANG MỞ'}</button>
+                      <button class="btn btn-red btn-sm" onclick="deleteCompanyItem(${index})" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-trash"></i> Xóa</button>
                     ` : ''}
                   </div>
                 </div>
-                <input type="text" value="${c.maCtu || ''}" ${!isAdminOrManager ? 'readonly' : ''} onchange="updateCompanyField(${index}, 'maCtu', this.value)" style="margin:0; padding:10px; font-weight:800; font-size:14px;">
-                
-                <div style="font-weight:700; font-size:12px; color:var(--text-muted); margin-top:2px;">Tên Công Ty (TenCTu):</div>
-                <input type="text" value="${c.tenCtu || ''}" ${!isAdminOrManager ? 'readonly' : ''} onchange="updateCompanyField(${index}, 'tenCtu', this.value)" style="margin:0; padding:10px; font-size:13.5px;">
 
-                <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-top:4px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:12px; font-weight:800; color:var(--primary);">📋 Cấu hình Đơn Vị Tính (ĐVT):</span>
+                <div>
+                  <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Tên công ty:</label>
+                  <input type="text" value="${c.tenCtu || ''}" ${isAdminOrManager ? `onchange="updateCompanyField(${index}, 'tenCtu', this.value)"` : 'readonly'} style="margin:2px 0 0 0; padding:10px; font-size:14px; font-weight:800;">
+                </div>
+
+                <div style="background: var(--panel-bg); padding: 10px; border-radius: 10px; border: 1px solid var(--card-border);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                    <span style="font-size: 12px; font-weight: 800; color: var(--primary);">📦 Quản lý Đơn vị tính (ĐVT):</span>
                     ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding:3px 8px; font-size:11px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
                   </div>
+                  
                   <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     ${dvtDetails.length > 0 ? dvtDetails.map((d, dIdx) => {
                       const isDvtClosed = d.status === 'Đóng';
                       return `
-                        <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); border:1px solid ${isDvtClosed ? 'var(--rose)' : 'var(--card-border)'}; border-radius:8px; padding:4px 8px;">
-                          <span style="font-size:12px; font-weight:700; color:${isDvtClosed ? 'var(--rose)' : 'var(--text-main)'};">${d.name}</span>
+                        <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:8px; border:1px solid var(--card-border);">
+                          <span style="font-size:12px; font-weight:700; color:${isDvtClosed ? 'var(--text-muted)' : 'var(--text-main)'}; text-decoration:${isDvtClosed ? 'line-through' : 'none'};">${d.name}</span>
                           ${isAdminOrManager ? `
-                            <button type="button" class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:2px 6px; font-size:10px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${isDvtClosed ? 'Đóng' : 'Mở'}</button>
-                            <button type="button" class="btn btn-red btn-sm" style="padding:2px 5px; font-size:10px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>
+                            <button type="button" class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:2px 6px; font-size:10px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})" title="Đổi trạng thái">${isDvtClosed ? 'Mở' : 'Đóng'}</button>
+                            <button type="button" class="btn btn-red btn-sm" style="padding:2px 6px; font-size:10px;" onclick="removeCompanyDvt(${index}, ${dIdx})">✖</button>
                           ` : ''}
                         </div>
                       `;
-                    }).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa có ĐVT riêng (mặc định lấy theo vật tư).</span>'}
+                    }).join('') : '<span style="font-size:11.5px; color:var(--text-muted); font-weight:700;">Chưa cấu hình ĐVT riêng (Áp dụng mặc định).</span>'}
                   </div>
                 </div>
               </div>
@@ -4914,49 +4917,76 @@
     }
 
     else if (tab === 'users') {
-      const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      if (!isAdminOrManager) return;
+      const isAdmin = currentUser.role === 'admin';
+      const isManager = currentUser.role === 'manager';
+      if (!isAdmin && !isManager) return;
+      
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
         </div>
 
-        <div class="card" style="margin-bottom:12px; padding:12px;">
-          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:8px;"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Mới</h3>
-          <form onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
-            <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)..." required style="margin:0; padding:10px; font-size:13.5px;">
-            <input type="text" id="usName" placeholder="Tên nhân viên..." required style="margin:0; padding:10px; font-size:13.5px;">
-            <input type="text" id="usUsername" placeholder="Tài khoản / Email đăng nhập..." required style="margin:0; padding:10px; font-size:13.5px;">
-            <input type="password" id="usPass" placeholder="Mật khẩu đăng nhập..." required style="margin:0; padding:10px; font-size:13.5px;">
-            <select id="usRole" style="margin:0; padding:10px; font-size:13.5px;">
-              <option value="sales">Sales (Nhân viên kinh doanh)</option>
-              <option value="manager">Manager (Quản lý)</option>
-              <option value="admin">Admin (Quản trị viên)</option>
-              <option value="viewer">Viewer (Xem báo cáo)</option>
-            </select>
-            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
+        <div class="card" style="margin-bottom:14px; background:var(--card-bg); border:1px solid var(--card-border);">
+          <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:8px;"><i class="fa-solid fa-user-plus"></i> Thêm Nhân Viên Mới</h3>
+          <form id="userForm" onsubmit="addUser(event)">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:11px; font-weight:700;">Mã nhân viên:</label>
+                <input type="text" id="usCode" placeholder="VD: NV01" required style="margin:2px 0 8px 0; padding:10px; font-size:13px;">
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:700;">Họ tên nhân viên:</label>
+                <input type="text" id="usName" placeholder="VD: Nguyễn Văn A" required style="margin:2px 0 8px 0; padding:10px; font-size:13px;">
+              </div>
+            </div>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:11px; font-weight:700;">Tên đăng nhập / Email:</label>
+                <input type="text" id="usUsername" placeholder="nv01 hoặc email..." required style="margin:2px 0 8px 0; padding:10px; font-size:13px;">
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:700;">Mật khẩu:</label>
+                <input type="password" id="usPass" placeholder="Mật khẩu ít nhất 6 ký tự..." required style="margin:2px 0 8px 0; padding:10px; font-size:13px;">
+              </div>
+            </div>
+
+            <div>
+              <label style="font-size:11px; font-weight:700;">Phân quyền vai trò:</label>
+              <select id="usRole" style="margin:2px 0 10px 0; padding:10px; font-size:13px;">
+                <option value="sales">Sales (Nhân viên bán hàng)</option>
+                <option value="manager">Manager (Quản lý)</option>
+                <option value="admin">Admin (Quản trị viên toàn hệ thống)</option>
+                <option value="viewer">Viewer (Chỉ xem dữ liệu)</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN MỚI</button>
           </form>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${users.map(u => `
-            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; border:1px solid ${u.active === false ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'};">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px; font-size:12px; font-weight:800;">[${u.code || ''}] ${u.name}</span>
-                <span style="font-size:11px; font-weight:800; padding:2px 8px; background:rgba(124,58,237,0.12); color:var(--purple); border-radius:6px; text-transform:uppercase;">${u.role || 'sales'}</span>
+          ${users.map(u => {
+            const isProtected = u.email && u.email.toLowerCase() === 'phanthanhhuy98@gmail.com';
+            const isActive = u.active !== false;
+
+            return `
+              <div class="mobile-item-card" style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg);">
+                <div>
+                  <div style="font-size:14px; font-weight:800; color:var(--text-main);">[${u.code || 'NV'}] ${u.name || ''}</div>
+                  <div style="font-size:12px; color:var(--text-muted);">📧 ${u.email} • <b style="color:var(--primary);">${(u.role || 'sales').toUpperCase()}</b></div>
+                </div>
+                <div>
+                  ${!isProtected ? `
+                    <button class="btn btn-sm ${isActive ? 'btn-red' : 'btn-green'}" onclick="toggleUserActive('${u.uid}', ${!isActive})" style="font-weight:800; padding:6px 12px;">
+                      ${isActive ? 'Khóa' : 'Mở khóa'}
+                    </button>
+                  ` : `<span style="font-size:12px; font-weight:800; color:var(--emerald);">Bảo vệ</span>`}
+                </div>
               </div>
-              <div style="font-size:12px; color:var(--text-muted);">📧 Email: <b>${u.email}</b></div>
-              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
-                <button class="btn btn-sm" style="background:${u.active === false ? 'var(--emerald)' : 'var(--rose)'}; color:#fff; font-weight:800; padding:6px 12px; font-size:12px;" onclick="toggleUserActive('${u.uid}', ${u.active === false ? true : false})">
-                  ${u.active === false ? 'Mở khóa' : 'Khóa tài khoản'}
-                </button>
-              </div>
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       `;
     }
   }
-</script>
-</body>
-</html>
