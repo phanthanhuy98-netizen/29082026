@@ -3405,67 +3405,64 @@ window.confirmAndApplyHistoryCart = function() {
 
   let successCount = 0;
 
-  // Lặp qua từng sản phẩm đã chọn trong lịch sử để đẩy ra màn hình bán hàng
+  // Lặp qua từng sản phẩm đã chọn để ném ra ngoài màn hình chính
   window._tempCartFromHistory.forEach(item => {
-    let applied = false;
+    let triggered = false;
 
-    // Cách 1: Tìm ô input nhập số lượng của sản phẩm đó ngay trên màn hình bán hàng chính để gán giá trị
-    const targetInputs = document.querySelectorAll(`input[data-code="${item.code}"], input[id*="${item.code}"], input[name*="${item.code}"]`);
-    targetInputs.forEach(input => {
-      input.value = item.qty;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      applied = true;
+    // 1. Tìm các nút thêm sản phẩm hoặc dòng sản phẩm có chứa mã này trên giao diện và kích hoạt click
+    const productElements = document.querySelectorAll(`[data-code*="${item.code}"], [id*="${item.code}"]`);
+    productElements.forEach(el => {
+      // Tìm nút bấm cộng/thêm bên trong
+      const addBtn = el.querySelector('button, .fa-plus, [onclick*="cart"], [onclick*="add"]') || el;
+      if (addBtn && typeof addBtn.click === 'function') {
+        addBtn.click();
+        triggered = true;
+      }
     });
 
-    // Cách 2: Nếu ứng dụng có hàm thêm sản phẩm toàn cục, gọi trực tiếp hàm đó
-    if (!applied && typeof window.addToCart === 'function') {
-      try {
-        window.addToCart(item.code, item.qty, item);
-        applied = true;
-      } catch (err) {
-        console.error(err);
+    // 2. Nếu app có hàm toàn cục chuyên xử lý chọn hàng, gọi trực tiếp
+    if (!triggered) {
+      const globalFuncs = ['addToCart', 'selectProduct', 'addItem', 'chooseItem', 'chonSanPham'];
+      for (let fName of globalFuncs) {
+        if (typeof window[fName] === 'function') {
+          try {
+            window[fName](item.code, item.qty, item);
+            triggered = true;
+            break;
+          } catch (e) {}
+        }
       }
     }
 
-    // Cách 3: Đồng bộ vào mảng giỏ hàng chung nếu app sử dụng
-    if (!applied) {
-      if (!window.cart || !Array.isArray(window.cart)) window.cart = [];
-      let exist = window.cart.find(i => i.code === item.code);
-      if (exist) {
-        exist.qty = Number(exist.qty || 0) + item.qty;
-      } else {
-        window.cart.push({
-          id: item.code || Date.now().toString(),
-          code: item.code,
-          name: item.name,
-          dvt: item.dvt,
-          price: item.price,
-          donGia: item.price,
-          qty: item.qty
-        });
+    // 3. Nếu vẫn không bắt được, tự động bơm vào ô tìm kiếm, gõ mã và giả lập sự kiện enter/input
+    if (!triggered) {
+      const searchInput = document.querySelector('input[placeholder*="Gõ mã/tên vật tư"]') || document.querySelector('input[placeholder*="tìm kiếm"]');
+      if (searchInput) {
+        searchInput.value = item.code;
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        // Giả lập phím Enter để hệ thống app nhận diện và chọn sản phẩm
+        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        triggered = true;
       }
     }
 
     successCount++;
   });
 
-  // Kích hoạt làm mới giao diện bán hàng
+  // Kích hoạt các hàm render lại giao diện
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
     if (typeof renderSales === 'function') renderSales();
-    if (typeof renderSalesCart === 'function') renderSalesCart();
-  } catch (e) {
-    console.error(e);
-  }
+  } catch (e) {}
 
   window._tempCartFromHistory = [];
   window.closeCustomerHistoryModal();
   
-  alert(`🚀 Đã đưa ${successCount} mã vật tư cùng số lượng ra màn hình chính thành công! Sales có thể tiếp tục thêm mặt hàng mới.`);
+  alert(`🚀 Đã chuyển ${successCount} mã vật tư ra ngoài màn hình chính!`);
 };
-
 window.refreshHistoryModalUI = function() {
   const container = document.getElementById('historyModalBodyContent');
   if (container) {
