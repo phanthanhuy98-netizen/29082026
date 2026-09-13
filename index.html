@@ -3405,53 +3405,63 @@ window.confirmAndApplyHistoryCart = function() {
 
   let successCount = 0;
 
-  // Lặp qua từng sản phẩm đã chọn để ném ra ngoài màn hình chính
+  // Xử lý lần lượt từng sản phẩm đã chọn
   window._tempCartFromHistory.forEach(item => {
-    let triggered = false;
+    const code = item.code;
+    const qty = item.qty;
+    const dvt = String(item.dvt || '').toLowerCase();
 
-    // 1. Tìm các nút thêm sản phẩm hoặc dòng sản phẩm có chứa mã này trên giao diện và kích hoạt click
-    const productElements = document.querySelectorAll(`[data-code*="${item.code}"], [id*="${item.code}"]`);
-    productElements.forEach(el => {
-      // Tìm nút bấm cộng/thêm bên trong
-      const addBtn = el.querySelector('button, .fa-plus, [onclick*="cart"], [onclick*="add"]') || el;
-      if (addBtn && typeof addBtn.click === 'function') {
-        addBtn.click();
-        triggered = true;
-      }
-    });
-
-    // 2. Nếu app có hàm toàn cục chuyên xử lý chọn hàng, gọi trực tiếp
-    if (!triggered) {
-      const globalFuncs = ['addToCart', 'selectProduct', 'addItem', 'chooseItem', 'chonSanPham'];
-      for (let fName of globalFuncs) {
-        if (typeof window[fName] === 'function') {
-          try {
-            window[fName](item.code, item.qty, item);
-            triggered = true;
-            break;
-          } catch (e) {}
-        }
-      }
+    // 1. Tìm ô input tìm kiếm để gọi ra dòng sản phẩm trên giao diện
+    const searchInput = document.querySelector('input[placeholder*="Gõ mã/tên vật tư"]') || document.querySelector('input[placeholder*="tìm kiếm"]');
+    
+    if (searchInput) {
+      // Gõ mã vào ô tìm kiếm
+      searchInput.value = code;
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      // Đợi một nhịp ngắn để DOM render ra khung nhập liệu của sản phẩm đó, sau đó điền số lượng
+      setTimeout(() => {
+        // Tìm vùng chứa sản phẩm tương ứng với mã này trên màn hình
+        const productRows = document.querySelectorAll(`div, tr`);
+        productRows.forEach(row => {
+          if (row.textContent && row.textContent.includes(code)) {
+            // Tìm ô input Số lượng Lẻ hoặc Thùng bên trong dòng đó
+            const inputs = row.querySelectorAll('input[type="number"], input[type="text"]');
+            inputs.forEach(input => {
+              // Kiểm tra xem là ô nhập Lẻ hay Thùng dựa vào placeholder hoặc nhãn xung quanh
+              const parentText = row.textContent.toLowerCase();
+              if (dvt.includes('thùng') || dvt.includes('kiện') || dvt.includes('bao')) {
+                if (parentText.includes('thùng') || input.placeholder?.toLowerCase().includes('thùng')) {
+                  input.value = qty;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              } else {
+                // Mặc định điền vào ô Lẻ
+                if (parentText.includes('lẻ') || !parentText.includes('thùng')) {
+                  input.value = qty;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+            });
+          }
+        });
+      }, 150);
     }
 
-    // 3. Nếu vẫn không bắt được, tự động bơm vào ô tìm kiếm, gõ mã và giả lập sự kiện enter/input
-    if (!triggered) {
-      const searchInput = document.querySelector('input[placeholder*="Gõ mã/tên vật tư"]') || document.querySelector('input[placeholder*="tìm kiếm"]');
-      if (searchInput) {
-        searchInput.value = item.code;
-        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-        searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        // Giả lập phím Enter để hệ thống app nhận diện và chọn sản phẩm
-        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-        triggered = true;
-      }
+    // 2. Đồng thời gọi hàm lưu giỏ hàng của app nếu có
+    if (typeof window.addToCart === 'function') {
+      try {
+        window.addToCart(code, qty, item);
+      } catch (e) {}
     }
 
     successCount++;
   });
 
-  // Kích hoạt các hàm render lại giao diện
+  // Kích hoạt render lại giao diện
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
@@ -3461,7 +3471,7 @@ window.confirmAndApplyHistoryCart = function() {
   window._tempCartFromHistory = [];
   window.closeCustomerHistoryModal();
   
-  alert(`🚀 Đã chuyển ${successCount} mã vật tư ra ngoài màn hình chính!`);
+  alert(`🚀 Đã chuyển thành công ${successCount} mã vật tư ra ngoài màn hình chính!`);
 };
 window.refreshHistoryModalUI = function() {
   const container = document.getElementById('historyModalBodyContent');
