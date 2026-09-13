@@ -3355,28 +3355,37 @@ window.filterTabProducts = function(val) {
     modalContainer.classList.remove('hidden');
   };
 
-window.addQuickProductToCart = function(product) {
+window.addQuickProductToCart = function(productCode, productName, productDvt, productPrice) {
+  // Mở khung nhập số lượng chuyên nghiệp
+  const inputQty = prompt(`Nhập số lượng cho vật tư [${productCode}] ${productName}:`, "1");
+  if (inputQty === null) return; // Người dùng bấm Hủy
+  
+  const qtyNum = Number(inputQty);
+  if (isNaN(qtyNum) || qtyNum <= 0) {
+    return alert("⚠️ Số lượng phải lớn hơn 0!");
+  }
+
   if (typeof cart === 'undefined') window.cart = [];
   
-  // Kiểm tra xem sản phẩm đã có trong giỏ hàng chưa
-  let existingItem = cart.find(i => (i.code && i.code === product.code) || (i.id && i.id === product.code));
+  let existingItem = cart.find(i => (i.code && i.code === productCode) || (i.id && i.id === productCode));
   if (existingItem) {
-    existingItem.qty = Number(existingItem.qty || 0) + 1;
+    existingItem.qty = Number(existingItem.qty || 0) + qtyNum;
   } else {
     cart.push({
-      id: product.code || Date.now().toString(),
-      code: product.code || '',
-      name: product.name || '',
-      dvt: product.dvt || '',
-      price: product.price || 0,
-      qty: 1
+      id: productCode || Date.now().toString(),
+      code: productCode || '',
+      name: productName || '',
+      dvt: productDvt || '',
+      price: productPrice || 0,
+      qty: qtyNum
     });
   }
   
-  // Cập nhật lại giao diện giỏ hàng nếu hàm render giỏ hàng tồn tại
   if (typeof renderCart === 'function') renderCart();
   if (typeof updateCartCount === 'function') updateCartCount();
-};  
+  alert(`✅ Đã thêm ${qtyNum} ${productDvt || 'SP'} vào giỏ hàng!`);
+};
+
 window.openCustomerHistoryModal = function() {
   let currentStore = (typeof activeVisitedStore !== 'undefined' && activeVisitedStore) ? activeVisitedStore : window.activeVisitedStore;
   if (!currentStore) {
@@ -3403,7 +3412,6 @@ window.openCustomerHistoryModal = function() {
   });
 
   let totalOrdersCount = customerOrders.length;
-  let totalQtyAllTime = 0;
   let productFrequencyMap = new Map();
   let lastOrderDateStr = "Chưa có";
 
@@ -3416,7 +3424,6 @@ window.openCustomerHistoryModal = function() {
       o.items.forEach(item => {
         const qty = Number(item.qty || 0);
         if (qty > 0) {
-          totalQtyAllTime += qty;
           const key = item.code || item.id || item.name;
           if (!productFrequencyMap.has(key)) {
             productFrequencyMap.set(key, { 
@@ -3437,6 +3444,7 @@ window.openCustomerHistoryModal = function() {
   });
 
   const frequentProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
+  let totalUniqueProducts = frequentProducts.length; // Tổng mã vật tư khác nhau
 
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
@@ -3462,8 +3470,8 @@ window.openCustomerHistoryModal = function() {
               <div style="font-size: 16px; font-weight: 800; color: var(--primary); margin-top: 4px;">${totalOrdersCount} đơn</div>
             </div>
             <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
-              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Tổng sản lượng</div>
-              <div style="font-size: 16px; font-weight: 800; color: #10b981; margin-top: 4px;">${totalQtyAllTime} SP</div>
+              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Tổng mã vật tư</div>
+              <div style="font-size: 16px; font-weight: 800; color: #10b981; margin-top: 4px;">${totalUniqueProducts} mã</div>
             </div>
             <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
               <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Đơn gần nhất</div>
@@ -3473,14 +3481,14 @@ window.openCustomerHistoryModal = function() {
 
           <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
             <div style="font-size: 13.5px; font-weight: 800; color: #f59e0b; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-              <span><i class="fa-solid fa-star"></i> Top Vật Tư Thường Nhập (${frequentProducts.length} mã):</span>
-              <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(Bấm để thêm vào giỏ)</span>
+              <span><i class="fa-solid fa-star"></i> Top Vật Tư Thường Nhập (${totalUniqueProducts} mã):</span>
+              <span style="font-size: 11px; color: #10b981; font-weight: 800;">(Bấm để nhập số lượng mua)</span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto;">
               ${frequentProducts.length > 0 ? frequentProducts.map((fp, index) => `
-                <div onclick="if(typeof addQuickProductToCart === 'function') { addQuickProductToCart({code: '${fp.code || ''}', name: '${(fp.name || '').replace(/'/g, "\\'")}', dvt: '${fp.dvt || ''}', price: ${fp.price || 0}}); closeCustomerHistoryModal(); alert('Đã thêm ${fp.name} vào giỏ hàng!'); }" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--card-border); font-size: 12.5px; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='rgba(16, 185, 129, 0.1)'" onmouseout="this.style.background='var(--panel-bg)'">
+                <div onclick="addQuickProductToCart('${fp.code || ''}', '${(fp.name || '').replace(/'/g, "\\'")}', '${fp.dvt || ''}', ${fp.price || 0}); closeCustomerHistoryModal();" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--card-border); font-size: 12.5px; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='rgba(16, 185, 129, 0.15)'" onmouseout="this.style.background='var(--panel-bg)'">
                   <div><b style="color: var(--primary);">${index + 1}.</b> <b style="color: var(--primary);">[${fp.code || ''}]</b> ${fp.name || ''}</div>
-                  <div style="text-align: right;"><span style="color: #10b981; font-weight: 800;">${fp.totalQty} ${fp.dvt || ''}</span></div>
+                  <div style="text-align: right;"><span style="color: #10b981; font-weight: 800;">Đã mua: ${fp.totalQty} ${fp.dvt || ''}</span> <i class="fa-solid fa-cart-plus" style="margin-left: 6px; color: #10b981;"></i></div>
                 </div>
               `).join('') : '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Chưa có dữ liệu sản phẩm.</div>'}
             </div>
