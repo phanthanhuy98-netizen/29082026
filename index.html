@@ -3403,75 +3403,64 @@ window.confirmAndApplyHistoryCart = function() {
     return alert("⚠️ Bạn chưa chọn sản phẩm nào trong phiên này!");
   }
 
-  let successCount = 0;
+  // 1. Tìm tất cả các biến mảng có khả năng là giỏ hàng / danh sách sản phẩm trong app gốc
+  let targetArray = null;
+  const possibleVarNames = ['cart', 'selectedItems', 'orderItems', 'currentItems', 'items', 'listCart', 'selectedProducts'];
+  
+  for (let vName of possibleVarNames) {
+    if (window[vName] && Array.isArray(window[vName])) {
+      targetArray = window[vName];
+      break;
+    }
+  }
 
-  // Xử lý lần lượt từng sản phẩm đã chọn
+  // Nếu không tìm thấy biến mảng toàn cục, ép tạo mới mảng cart gắn vào window
+  if (!targetArray) {
+    window.cart = [];
+    targetArray = window.cart;
+  }
+
+  // 2. Đưa toàn bộ danh sách đã chọn vào mảng của ứng dụng
   window._tempCartFromHistory.forEach(item => {
-    const code = item.code;
-    const qty = item.qty;
-    const dvt = String(item.dvt || '').toLowerCase();
-
-    // 1. Tìm ô input tìm kiếm để gọi ra dòng sản phẩm trên giao diện
-    const searchInput = document.querySelector('input[placeholder*="Gõ mã/tên vật tư"]') || document.querySelector('input[placeholder*="tìm kiếm"]');
-    
-    if (searchInput) {
-      // Gõ mã vào ô tìm kiếm
-      searchInput.value = code;
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-      
-      // Đợi một nhịp ngắn để DOM render ra khung nhập liệu của sản phẩm đó, sau đó điền số lượng
-      setTimeout(() => {
-        // Tìm vùng chứa sản phẩm tương ứng với mã này trên màn hình
-        const productRows = document.querySelectorAll(`div, tr`);
-        productRows.forEach(row => {
-          if (row.textContent && row.textContent.includes(code)) {
-            // Tìm ô input Số lượng Lẻ hoặc Thùng bên trong dòng đó
-            const inputs = row.querySelectorAll('input[type="number"], input[type="text"]');
-            inputs.forEach(input => {
-              // Kiểm tra xem là ô nhập Lẻ hay Thùng dựa vào placeholder hoặc nhãn xung quanh
-              const parentText = row.textContent.toLowerCase();
-              if (dvt.includes('thùng') || dvt.includes('kiện') || dvt.includes('bao')) {
-                if (parentText.includes('thùng') || input.placeholder?.toLowerCase().includes('thùng')) {
-                  input.value = qty;
-                  input.dispatchEvent(new Event('input', { bubbles: true }));
-                  input.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-              } else {
-                // Mặc định điền vào ô Lẻ
-                if (parentText.includes('lẻ') || !parentText.includes('thùng')) {
-                  input.value = qty;
-                  input.dispatchEvent(new Event('input', { bubbles: true }));
-                  input.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-              }
-            });
-          }
-        });
-      }, 150);
+    let existing = targetArray.find(i => (i.code && i.code === item.code) || (i.id && i.id === item.code));
+    if (existing) {
+      existing.qty = Number(existing.qty || 0) + Number(item.qty || 0);
+    } else {
+      targetArray.push({
+        id: item.code || Date.now().toString(),
+        code: item.code,
+        name: item.name,
+        dvt: item.dvt,
+        price: item.price || 0,
+        donGia: item.price || 0,
+        qty: Number(item.qty || 0)
+      });
     }
 
-    // 2. Đồng thời gọi hàm lưu giỏ hàng của app nếu có
-    if (typeof window.addToCart === 'function') {
-      try {
-        window.addToCart(code, qty, item);
-      } catch (e) {}
-    }
-
-    successCount++;
+    // Đồng thời thử gọi các hàm thêm sản phẩm gốc nếu app có định nghĩa
+    ['addToCart', 'addItem', 'selectProduct', 'chonVatTu'].forEach(fName => {
+      if (typeof window[fName] === 'function') {
+        try { window[fName](item.code, item.qty, item); } catch(e) {}
+      }
+    });
   });
 
-  // Kích hoạt render lại giao diện
+  // 3. Ép toàn bộ các hàm render giao diện của app chạy lại để hiện sản phẩm ra ngoài
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
     if (typeof renderSales === 'function') renderSales();
-  } catch (e) {}
+    if (typeof renderSalesCart === 'function') renderSalesCart();
+    if (typeof loadCart === 'function') loadCart();
+  } catch (e) {
+    console.error(e);
+  }
 
+  const addedCount = window._tempCartFromHistory.length;
   window._tempCartFromHistory = [];
   window.closeCustomerHistoryModal();
   
-  alert(`🚀 Đã chuyển thành công ${successCount} mã vật tư ra ngoài màn hình chính!`);
+  alert(`🚀 Đã đẩy thành công ${addedCount} mã hàng ra giỏ ngoài màn hình chính!`);
 };
 window.refreshHistoryModalUI = function() {
   const container = document.getElementById('historyModalBodyContent');
