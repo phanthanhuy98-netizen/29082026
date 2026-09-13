@@ -3564,7 +3564,6 @@ window.openCustomerHistoryModal = function() {
   if (!currentStore) {
     currentStore = { name: "DO THI PHUONG LAN", code: "20*P.LAN" };
   }
-  window._currentHistoryStore = currentStore;
 
   const targetName = String(currentStore.name || "DO THI PHUONG LAN").trim().toUpperCase();
   const targetCode = String(currentStore.code || "20*P.LAN").trim().toUpperCase();
@@ -3582,10 +3581,22 @@ window.openCustomerHistoryModal = function() {
     const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.ngayCtu || 0).getTime();
     return timeB - timeA;
   });
-  window._currentCustomerOrders = customerOrders;
 
+  let totalOrdersCount = customerOrders.length;
   let productFrequencyMap = new Map();
+  let lastOrderDateStr = "Chưa có";
+  let totalSpentAllTime = 0;
+
+  if (totalOrdersCount > 0) {
+    lastOrderDateStr = customerOrders[0].ngayCtu || 'Gần đây';
+  }
+
   customerOrders.forEach((o) => {
+    // Tính tổng tiền đơn hàng nếu có
+    if (o.totalAmount || o.tongTien) {
+      totalSpentAllTime += Number(o.totalAmount || o.tongTien || 0);
+    }
+    
     if (Array.isArray(o.items)) {
       o.items.forEach(item => {
         const qty = Number(item.qty || 0);
@@ -3609,28 +3620,94 @@ window.openCustomerHistoryModal = function() {
     }
   });
 
-  window._tempHistoryProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
+  const frequentProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
+  let totalUniqueProducts = frequentProducts.length;
 
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
   modalContainer.classList.remove('hidden');
   modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeCustomerHistoryModal()">
-      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 500px; width: 95%; margin: auto; border-radius: 10px; padding: 10px; max-height: 88vh;">
+    <div class="modal" style="display:flex; z-index:999999; backdrop-filter: blur(3px);" onclick="if(event.target === this) closeCustomerHistoryModal()">
+      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 500px; width: 95%; margin: auto; border-radius: 12px; padding: 14px; max-height: 88vh; border: 1px solid var(--card-border); box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
         
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; border-bottom:1px solid var(--card-border); padding-bottom:4px;">
+        <!-- HEADER TIÊU ĐỀ -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
           <div>
-            <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin:0;"><i class="fa-solid fa-chart-line"></i> Lịch Sử & Chọn Nhanh</h3>
-            <p style="font-size:10.5px; color:var(--text-muted); margin:1px 0 0 0;">Tiệm: <b style="color:var(--text-main);">${currentStore.name}</b></p>
+            <h3 style="font-size:15px; font-weight:800; color:var(--primary); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Tra Cứu Lịch Sử Mua Hàng</h3>
+            <p style="font-size:11px; color:var(--text-muted); margin:2px 0 0 0;">Khách hàng: <b style="color:var(--text-main);">${currentStore.name}</b></p>
           </div>
-          <button class="btn btn-red" onclick="closeCustomerHistoryModal()" style="font-size:10.5px; padding:3px 8px; background: #ef4444; color: #fff; border:none; border-radius:4px; cursor:pointer;">Đóng</button>
+          <button class="btn btn-red" onclick="closeCustomerHistoryModal()" style="font-size:11px; padding:4px 10px; background: #ef4444; color: #fff; border:none; border-radius:6px; cursor:pointer; font-weight: 700;">Đóng</button>
         </div>
 
-        <div id="historyModalBodyContent" style="overflow-y:auto; flex:1; padding-right:2px;">
-          ${window.getHistoryModalHTML(currentStore)}
-        </div>
+        <!-- NỘI DUNG CUỘN -->
+        <div style="overflow-y:auto; flex:1; display: flex; flex-direction: column; gap: 10px; padding-right: 2px;">
+          
+          <!-- THỐNG KÊ TỔNG QUAN (DẠNG DASHBOARD MINI) -->
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+            <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px; text-align: center;">
+              <div style="font-size: 10px; font-weight: 700; color: var(--text-muted);">Tổng số đơn</div>
+              <div style="font-size: 14px; font-weight: 800; color: var(--primary); margin-top: 2px;">${totalOrdersCount} đơn</div>
+            </div>
+            <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px; text-align: center;">
+              <div style="font-size: 10px; font-weight: 700; color: var(--text-muted);">Mã hàng từng mua</div>
+              <div style="font-size: 14px; font-weight: 800; color: #10b981; margin-top: 2px;">${totalUniqueProducts} mã</div>
+            </div>
+            <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px; text-align: center;">
+              <div style="font-size: 10px; font-weight: 700; color: var(--text-muted);">Giao dịch gần nhất</div>
+              <div style="font-size: 11px; font-weight: 800; color: #f59e0b; margin-top: 4px;">${lastOrderDateStr}</div>
+            </div>
+          </div>
 
+          <!-- TOP VẬT TƯ KHÁCH HAY MUA (THAM KHẢO) -->
+          <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px;">
+            <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+              <span><i class="fa-solid fa-star"></i> Top Vật Tư Khách Hay Mua (${totalUniqueProducts} mã)</span>
+              <span style="font-size: 9.5px; color: var(--text-muted); background: var(--panel-bg); padding: 2px 6px; border-radius: 4px;">Tham khảo</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto;">
+              ${frequentProducts.length > 0 ? frequentProducts.map((fp, index) => `
+                <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--card-border); font-size: 11.5px;">
+                  <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;">
+                    <b style="color: var(--primary);">${index + 1}.</b> <b style="color: var(--text-main);">[${fp.code || ''}]</b> ${fp.name || ''}
+                  </div>
+                  <div style="color: #10b981; font-weight: 800; white-space: nowrap;">
+                    Đã mua: ${fp.totalQty} ${fp.dvt || ''}
+                  </div>
+                </div>
+              `).join('') : '<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Chưa có dữ liệu sản phẩm.</div>'}
+            </div>
+          </div>
+
+          <!-- NHẬT KÝ CHI TIẾT CÁC ĐƠN CŨ -->
+          <div style="font-size: 12px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+            <i class="fa-solid fa-receipt text-primary"></i> Chi Tiết Nhật Ký Đơn Hàng (${customerOrders.length}):
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto;">
+            ${customerOrders.length > 0 ? customerOrders.map(o => `
+              <div style="padding: 8px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px;">
+                  <span style="background: rgba(3, 105, 161, 0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 800;">CTu #${o.soCtu || 1}</span>
+                  <span style="color: var(--text-muted); font-weight: 600;">${o.ngayCtu || ''}</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 3px; background: var(--panel-bg); padding: 6px; border-radius: 6px;">
+                  ${(o.items || []).filter(i => Number(i.qty || 0) > 0).map((i, idx) => `
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; align-items: center;">
+                      <span style="color: var(--text-main);"><b style="color: var(--text-muted);">${idx + 1}.</b> [${i.code || ''}] ${i.name || ''}</span>
+                      <span style="font-weight: 800; color: #10b981; white-space: nowrap; margin-left: 6px;">${i.qty || 0} ${i.dvt || ''}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('') : `
+              <div style="text-align: center; padding: 25px; color: var(--text-muted); font-size: 12px; background: var(--card-bg); border-radius: 8px;">
+                Khách hàng này chưa có lịch sử đơn hàng nào trong hệ thống.
+              </div>
+            `}
+          </div>
+
+        </div>
       </div>
     </div>
   `;
