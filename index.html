@@ -3043,17 +3043,16 @@ window.filterTabProducts = function(val) {
     filterSoGocCards();
   };
 
-window.reloadSoGocDataManually = async function() {
-  try {
-    let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
-    if (currentUser && currentUser.role === 'sales') {
-      q = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), limit(50));
-    }
-    const snap = await getDocs(q);
-    orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (currentUser && currentUser.role === 'sales') {
-      orders.sort((a, b) => (Number(b.soCtu) || 0) - (Number(a.soCtu) || 0));
-    }
+  window.reloadSoGocDataManually = async function() {
+    try {
+      const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30)));
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -3295,6 +3294,65 @@ window.reloadSoGocDataManually = async function() {
       modalContainer.innerHTML = '';
       modalContainer.classList.add('hidden');
     }
+  };
+
+  window.openCurrentCustomerOrderModal = function() {
+    if (!activeVisitedStore) return;
+    const storeIdStr = String(activeVisitedStore.id);
+    const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
+    const currentOrders = orders.filter(o => {
+      const matchId = String(o.storeId || '') === storeIdStr;
+      let inferredCode = o.maDTPNNo || '';
+      if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+        inferredCode = o.maKH.split(' - ')[0].trim();
+      }
+      const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+      const isToday = o.ngayCtu === todayStr;
+      const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+      return (matchId || matchCode) && isToday && isOwner && o.status !== 'Đã hủy';
+    });
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeCurrentCustomerOrderModal()">
+        <div class="modal-content fullscreen-modal">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-list-check"></i> Đơn Hàng Trong Ngày: ${activeVisitedStore.name}</h3>
+            <button class="btn btn-red" onclick="closeCurrentCustomerOrderModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+          </div>
+          <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+            ${currentOrders.length > 0 ? currentOrders.map(o => {
+              const validItemsCount = (o.items || []).filter(i => Number(i.qty || 0) > 0).length;
+              return `
+                <div class="mobile-item-card" style="margin-bottom:0; display:flex; flex-direction:column; gap:8px; padding:16px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="background:rgba(37,99,235,0.12); color:#2563EB; padding:4px 10px; border-radius:6px; font-size:13px; font-weight:800;">CTu #${o.soCtu || 1}</span>
+                    <span style="font-size:13px; color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${formatOrderTime(o.createdAt)}</span>
+                  </div>
+                  <div style="font-size:14px; color:var(--text-muted);">Số lượng sản phẩm: <b style="color:var(--text-main); font-size:15px;">${validItemsCount} mã</b></div>
+                  <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:4px;">
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn btn-amber" style="padding:10px 16px; font-weight:800; font-size:13px;" onclick="closeCurrentCustomerOrderModal(); editOrder('${o.id}')"><i class="fa-solid fa-pen-to-square"></i> Sửa Đơn Này</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('') : `
+              <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:700; font-size:15px;">Chưa có đơn hàng nào của khách ini được ghi trong hôm nay.</div>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
   };
 
 // Lưu danh sách sản phẩm tạm thời để gọi an toàn tuyệt đối không sợ lỗi ký tự
@@ -4691,18 +4749,20 @@ window.closeCustomerHistoryModal = function() {
   };
 
   function attachListeners() {
-let ordersQuery = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
-if (currentUser && currentUser.role === 'sales') {
-  // Bỏ orderBy để tránh lỗi thiếu Index, lọc thuần theo salesCode
-  ordersQuery = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), limit(50));
-}
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
 
-getDocs(ordersQuery).then(snap => {
-  orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  // Sắp xếp lại thứ tự giảm dần theo soCtu ngay trên client
-  if (currentUser && currentUser.role === 'sales') {
-    orders.sort((a, b) => (Number(b.soCtu) || 0) - (Number(a.soCtu) || 0));
-  }
+      if (currentTab === 'soGocBH' || currentTab === 'sales') {
+        const activePane = document.getElementById(`tabPane_${currentTab}`);
+        if (activePane) renderTabContent(currentTab, activePane);
+      }
+    }).catch(e => {});
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
