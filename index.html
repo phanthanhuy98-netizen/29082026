@@ -3403,48 +3403,67 @@ window.confirmAndApplyHistoryCart = function() {
     return alert("⚠️ Bạn chưa chọn sản phẩm nào trong phiên này!");
   }
 
-  if (!window.cart || !Array.isArray(window.cart)) window.cart = [];
+  let successCount = 0;
 
+  // Lặp qua từng sản phẩm đã chọn trong lịch sử để đẩy ra màn hình bán hàng
   window._tempCartFromHistory.forEach(item => {
-    let exist = window.cart.find(i => (i.code && i.code === item.code) || (i.id && i.id === item.code));
-    if (exist) {
-      exist.qty = Number(exist.qty || 0) + item.qty;
-    } else {
-      window.cart.push({
-        id: item.code || Date.now().toString(),
-        code: item.code,
-        name: item.name,
-        dvt: item.dvt,
-        price: item.price,
-        donGia: item.price,
-        qty: item.qty
-      });
-    }
+    let applied = false;
 
-    if (typeof window.addToCart === 'function') {
+    // Cách 1: Tìm ô input nhập số lượng của sản phẩm đó ngay trên màn hình bán hàng chính để gán giá trị
+    const targetInputs = document.querySelectorAll(`input[data-code="${item.code}"], input[id*="${item.code}"], input[name*="${item.code}"]`);
+    targetInputs.forEach(input => {
+      input.value = item.qty;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      applied = true;
+    });
+
+    // Cách 2: Nếu ứng dụng có hàm thêm sản phẩm toàn cục, gọi trực tiếp hàm đó
+    if (!applied && typeof window.addToCart === 'function') {
       try {
         window.addToCart(item.code, item.qty, item);
+        applied = true;
       } catch (err) {
-        console.log("Bỏ qua lỗi gọi hàm phụ:", err);
+        console.error(err);
       }
     }
+
+    // Cách 3: Đồng bộ vào mảng giỏ hàng chung nếu app sử dụng
+    if (!applied) {
+      if (!window.cart || !Array.isArray(window.cart)) window.cart = [];
+      let exist = window.cart.find(i => i.code === item.code);
+      if (exist) {
+        exist.qty = Number(exist.qty || 0) + item.qty;
+      } else {
+        window.cart.push({
+          id: item.code || Date.now().toString(),
+          code: item.code,
+          name: item.name,
+          dvt: item.dvt,
+          price: item.price,
+          donGia: item.price,
+          qty: item.qty
+        });
+      }
+    }
+
+    successCount++;
   });
 
+  // Kích hoạt làm mới giao diện bán hàng
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
     if (typeof renderSales === 'function') renderSales();
     if (typeof renderSalesCart === 'function') renderSalesCart();
-    if (typeof saveCartToStorage === 'function') saveCartToStorage();
   } catch (e) {
-    console.error("Lỗi đồng bộ giao diện:", e);
+    console.error(e);
   }
 
-  const countAdded = window._tempCartFromHistory.length;
   window._tempCartFromHistory = [];
   window.closeCustomerHistoryModal();
   
-  alert(`🚀 Đã chuyển thành công ${countAdded} mã vật tư ra màn hình chính! Sales có thể tiếp tục thêm mặt hàng mới.`);
+  alert(`🚀 Đã đưa ${successCount} mã vật tư cùng số lượng ra màn hình chính thành công! Sales có thể tiếp tục thêm mặt hàng mới.`);
 };
 
 window.refreshHistoryModalUI = function() {
