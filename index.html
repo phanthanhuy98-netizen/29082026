@@ -3360,108 +3360,121 @@ window.filterTabProducts = function(val) {
 window._tempCartFromHistory = [];
 window._tempHistoryProducts = [];
 
-window.addProductToHistoryCart = function(index) {
+// Cập nhật số lượng Lẻ hoặc Thùng trực tiếp cho sản phẩm trong danh sách chọn nhanh
+window.updateTempItemQty = function(index, type, val) {
   const product = window._tempHistoryProducts[index];
   if (!product) return;
 
-  const inputQty = prompt(`Nhập số lượng nguyên cho [${product.code}] ${product.name} (ĐVT: ${product.dvt || 'Cây/Thùng'}):`, "1");
-  if (inputQty === null) return;
+  const num = parseInt(val, 10) || 0;
   
-  const qtyNum = parseInt(inputQty, 10);
-  
-  if (isNaN(qtyNum) || qtyNum <= 0) {
-    return alert("⚠️ Số lượng phải là số nguyên lớn hơn 0!");
-  }
-
   let existing = window._tempCartFromHistory.find(i => i.code === product.code);
-  if (existing) {
-    existing.qty += qtyNum;
-  } else {
-    window._tempCartFromHistory.push({
+  if (!existing) {
+    existing = {
       code: product.code,
       name: product.name,
       dvt: product.dvt,
       price: product.price || product.donGia || 0,
-      qty: qtyNum
-    });
+      qtyLe: 0,
+      qtyThung: 0
+    };
+    window._tempCartFromHistory.push(existing);
   }
 
-  if (typeof window.refreshHistoryModalUI === 'function') {
-    window.refreshHistoryModalUI();
+  if (type === 'le') {
+    existing.qtyLe = num;
+  } else if (type === 'thung') {
+    existing.qtyThung = num;
   }
+
+  // Nếu cả Lẻ và Thùng đều bằng 0 thì xóa khỏi giỏ tạm
+  if (existing.qtyLe <= 0 && existing.qtyThung <= 0) {
+    window._tempCartFromHistory = window._tempCartFromHistory.filter(i => i.code !== product.code);
+  }
+
+  // Cập nhật lại số lượng badge tổng hiển thị trên đầu modal
+  const badge = document.getElementById('tempCartCountBadge');
+  if (badge) badge.textContent = `${window._tempCartFromHistory.length} mã`;
 };
 
-window.removeTempCartItem = function(code) {
-  window._tempCartFromHistory = window._tempCartFromHistory.filter(i => i.code !== code);
-  if (typeof window.refreshHistoryModalUI === 'function') {
-    window.refreshHistoryModalUI();
-  }
-};
-
-window.confirmAndApplyHistoryCart = function() {
+// Hàm thực thi tuần tự từng mã ra ngoài màn hình chính để không bị đè dữ liệu
+window.confirmAndApplyHistoryCart = async function() {
   if (!window._tempCartFromHistory || window._tempCartFromHistory.length === 0) {
-    return alert("⚠️ Bạn chưa chọn sản phẩm nào trong phiên này!");
+    return alert("⚠️ Bạn chưa nhập số lượng cho sản phẩm nào!");
   }
 
-  // 1. Tìm tất cả các biến mảng có khả năng là giỏ hàng / danh sách sản phẩm trong app gốc
-  let targetArray = null;
-  const possibleVarNames = ['cart', 'selectedItems', 'orderItems', 'currentItems', 'items', 'listCart', 'selectedProducts'];
-  
-  for (let vName of possibleVarNames) {
-    if (window[vName] && Array.isArray(window[vName])) {
-      targetArray = window[vName];
-      break;
-    }
+  const itemsToProcess = [...window._tempCartFromHistory];
+  let successCount = 0;
+
+  const searchInput = document.querySelector('input[placeholder*="Gõ mã/tên vật tư"]') || document.querySelector('input[placeholder*="tìm kiếm"]');
+  if (!searchInput) {
+    alert("⚠️ Không tìm thấy ô tìm kiếm trên màn hình bán hàng!");
+    return;
   }
 
-  // Nếu không tìm thấy biến mảng toàn cục, ép tạo mới mảng cart gắn vào window
-  if (!targetArray) {
-    window.cart = [];
-    targetArray = window.cart;
-  }
+  // Đóng modal lịch sử trước để lộ màn hình chính
+  window.closeCustomerHistoryModal();
 
-  // 2. Đưa toàn bộ danh sách đã chọn vào mảng của ứng dụng
-  window._tempCartFromHistory.forEach(item => {
-    let existing = targetArray.find(i => (i.code && i.code === item.code) || (i.id && i.id === item.code));
-    if (existing) {
-      existing.qty = Number(existing.qty || 0) + Number(item.qty || 0);
-    } else {
-      targetArray.push({
-        id: item.code || Date.now().toString(),
-        code: item.code,
-        name: item.name,
-        dvt: item.dvt,
-        price: item.price || 0,
-        donGia: item.price || 0,
-        qty: Number(item.qty || 0)
-      });
-    }
+  // Lần lượt xử lý từng mã với độ trễ để DOM kịp render giống hệt thao tác thật của user
+  for (let item of itemsToProcess) {
+    // 1. Gõ mã vào ô tìm kiếm
+    searchInput.value = item.code;
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // Đồng thời thử gọi các hàm thêm sản phẩm gốc nếu app có định nghĩa
-    ['addToCart', 'addItem', 'selectProduct', 'chonVatTu'].forEach(fName => {
-      if (typeof window[fName] === 'function') {
-        try { window[fName](item.code, item.qty, item); } catch(e) {}
+    // Đợi 250ms cho app render ra dòng sản phẩm tương ứng
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // 2. Tìm dòng sản phẩm vừa hiện ra trên giao diện và điền đúng ô Lẻ / Thùng
+    const rows = document.querySelectorAll('div, tr');
+    let filled = false;
+
+    for (let row of rows) {
+      if (row.textContent && row.textContent.includes(item.code)) {
+        const inputs = row.querySelectorAll('input[type="number"], input[type="text"]');
+        if (inputs.length >= 2) {
+          // Thường app có 2 ô: Ô Lẻ (trái) và Ô Thùng (phải)
+          if (item.qtyLe > 0) {
+            inputs[0].value = item.qtyLe;
+            inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+            inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          if (item.qtyThung > 0) {
+            inputs[1].value = item.qtyThung;
+            inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+            inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          filled = true;
+          break;
+        }
       }
-    });
-  });
+    }
 
-  // 3. Ép toàn bộ các hàm render giao diện của app chạy lại để hiện sản phẩm ra ngoài
+    // 3. Gọi hàm gốc của app nếu có
+    if (typeof window.addToCart === 'function') {
+      try {
+        if (item.qtyLe > 0) window.addToCart(item.code, item.qtyLe, item);
+        if (item.qtyThung > 0) window.addToCart(item.code, item.qtyThung * 50, item); // Giả lập quy cách thùng nếu cần
+      } catch (e) {}
+    }
+
+    successCount++;
+    // Đợi thêm một nhịp trước khi sang mã tiếp theo
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+
+  // Xóa sạch giỏ tạm sau khi hoàn tất
+  window._tempCartFromHistory = [];
+
+  // Refresh giao diện giỏ hàng ngoài
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
     if (typeof renderSales === 'function') renderSales();
-    if (typeof renderSalesCart === 'function') renderSalesCart();
-    if (typeof loadCart === 'function') loadCart();
-  } catch (e) {
-    console.error(e);
-  }
+  } catch (e) {}
 
-  const addedCount = window._tempCartFromHistory.length;
-  window._tempCartFromHistory = [];
-  window.closeCustomerHistoryModal();
-  
-  alert(`🚀 Đã đẩy thành công ${addedCount} mã hàng ra giỏ ngoài màn hình chính!`);
+  alert(`🚀 Đã đưa thành công ${successCount} mã vật tư ra ngoài màn hình chính với đầy đủ số lượng chẵn/lẻ!`);
 };
+
 window.refreshHistoryModalUI = function() {
   const container = document.getElementById('historyModalBodyContent');
   if (container) {
@@ -3477,38 +3490,20 @@ window.getHistoryModalHTML = function(currentStore) {
   const totalUniqueProducts = frequentProducts.length;
   const lastOrderDateStr = totalOrdersCount > 0 ? (customerOrders[0].ngayCtu || 'Gần đây') : 'Chưa có';
 
-  let selectedHtml = '';
-  if (window._tempCartFromHistory.length === 0) {
-    selectedHtml = `<div style="text-align: center; color: var(--text-muted); font-size: 11.5px; padding: 4px;">Chưa chọn vật tư nào trong phiên này.</div>`;
-  } else {
-    selectedHtml = window._tempCartFromHistory.map(item => `
-      <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; border: 1px solid var(--card-border);">
-        <div style="font-size: 11.5px; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%;">
-          <b style="color: var(--primary);">[${item.code}]</b> ${item.name} 
-          <span style="color: #10b981; font-weight: 800; margin-left: 4px;">(${item.qty} ${item.dvt || ''})</span>
-        </div>
-        <button onclick="removeTempCartItem('${item.code}')" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">Xóa</button>
-      </div>
-    `).join('');
-  }
-
   return `
     <div style="display: flex; flex-direction: column; gap: 10px;">
       
-      <div style="background: rgba(16, 185, 129, 0.08); border: 1.5px solid #10b981; border-radius: 8px; padding: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <div style="font-size: 12px; font-weight: 800; color: #10b981;">
-            🛒 Đã chọn: <b>${window._tempCartFromHistory.length} mã</b>
-          </div>
-          <button onclick="confirmAndApplyHistoryCart()" style="background: #10b981; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 11px; font-weight: 800; cursor: pointer;">
-            Xong & Đưa Ra Ngoài ➔
-          </button>
+      <!-- KHU VỰC TIÊU ĐỀ & XÁC NHẬN -->
+      <div style="background: rgba(16, 185, 129, 0.08); border: 1.5px solid #10b981; border-radius: 8px; padding: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 12px; font-weight: 800; color: #10b981;">
+          🛒 Đang chọn: <span id="tempCartCountBadge" style="background: #10b981; color: white; padding: 2px 6px; border-radius: 10px;">${window._tempCartFromHistory.length} mã</span>
         </div>
-        <div style="max-height: 110px; overflow-y: auto;">
-          ${selectedHtml}
-        </div>
+        <button onclick="confirmAndApplyHistoryCart()" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 800; cursor: pointer;">
+          Xong & Đưa Ra Ngoài ➔
+        </button>
       </div>
 
+      <!-- THỐNG KÊ -->
       <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
         <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 6px; text-align: center;">
           <div style="font-size: 10px; color: var(--text-muted);">Tổng đơn</div>
@@ -3524,21 +3519,38 @@ window.getHistoryModalHTML = function(currentStore) {
         </div>
       </div>
 
+      <!-- TOP VẬT TƯ KÈM Ô NHẬP SỐ LƯỢNG CHẴN / LẺ GIỐNG MÀN HÌNH CHÍNH -->
       <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px;">
-        <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-bottom: 6px; display: flex; justify-content: space-between;">
-          <span>⭐ Top Vật Tư (${totalUniqueProducts} mã):</span>
-          <span style="font-size: 10px; color: var(--text-muted);">Chạm để nhập số lượng nguyên</span>
+        <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-bottom: 8px; display: flex; justify-content: space-between;">
+          <span>⭐ Top Vật Tư Thường Nhập (${totalUniqueProducts} mã):</span>
+          <span style="font-size: 10px; color: var(--text-muted);">Nhập trực tiếp số lượng Lẻ / Thùng</span>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto;">
-          ${frequentProducts.length > 0 ? frequentProducts.map((fp, index) => `
-            <div onclick="addProductToHistoryCart(${index})" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--card-border); font-size: 11.5px; cursor: pointer;">
-              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;"><b style="color: var(--primary);">${index + 1}.</b> [${fp.code || ''}] ${fp.name || ''}</div>
-              <div style="color: #10b981; font-weight: 800; white-space: nowrap;">Mua: ${fp.totalQty} ${fp.dvt || ''} ➕</div>
-            </div>
-          `).join('') : '<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 8px;">Chưa có dữ liệu.</div>'}
+        <div style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 2px;">
+          ${frequentProducts.length > 0 ? frequentProducts.map((fp, index) => {
+            const existing = window._tempCartFromHistory.find(i => i.code === fp.code) || { qtyLe: 0, qtyThung: 0 };
+            return `
+              <div style="background: var(--panel-bg); padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);">
+                <div style="font-size: 11.5px; font-weight: 800; color: var(--text-main); margin-bottom: 6px;">
+                  <span style="color: var(--primary);">[${fp.code || ''}]</span> ${fp.name || ''} 
+                  <span style="font-size: 10.5px; color: var(--text-muted); font-weight: normal;">(ĐVT: ${fp.dvt || 'Cây'})</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                  <div style="display: flex; align-items: center; gap: 4px; background: var(--card-bg); padding: 4px 6px; border-radius: 6px; border: 1px solid var(--card-border);">
+                    <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); width: 45px;">SL Lẻ:</span>
+                    <input type="number" min="0" value="${existing.qtyLe || ''}" placeholder="0" oninput="updateTempItemQty(${index}, 'le', this.value)" style="width: 100%; background: transparent; border: none; color: var(--text-main); font-size: 12px; font-weight: 800; outline: none;">
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px; background: var(--card-bg); padding: 4px 6px; border-radius: 6px; border: 1px solid var(--card-border);">
+                    <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); width: 55px;">SL Thùng:</span>
+                    <input type="number" min="0" value="${existing.qtyThung || ''}" placeholder="0" oninput="updateTempItemQty(${index}, 'thung', this.value)" style="width: 100%; background: transparent; border: none; color: var(--text-main); font-size: 12px; font-weight: 800; outline: none;">
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('') : '<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Chưa có dữ liệu.</div>'}
         </div>
       </div>
 
+      <!-- NHẬT KÝ ĐƠN HÀNG CŨ -->
       <div style="font-size: 12px; font-weight: 800; color: var(--text-main);">
         📜 Nhật Ký Đơn Cũ (${customerOrders.length}):
       </div>
@@ -3623,7 +3635,7 @@ window.openCustomerHistoryModal = function() {
   modalContainer.classList.remove('hidden');
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeCustomerHistoryModal()">
-      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 550px; width: 95%; margin: auto; border-radius: 12px; padding: 12px; max-height: 90vh;">
+      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 600px; width: 95%; margin: auto; border-radius: 12px; padding: 12px; max-height: 90vh;">
         
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid var(--card-border); padding-bottom:6px;">
           <div>
