@@ -3370,45 +3370,66 @@ window.addQuickProductFromHistory = function(index) {
     return alert("⚠️ Số lượng phải lớn hơn 0!");
   }
 
-  // Đồng bộ giỏ hàng ra toàn cục window để ứng dụng nhận diện
-  if (!window.cart || !Array.isArray(window.cart)) {
-    window.cart = [];
+  let addedSuccessfully = false;
+
+  // 1. Thử tìm và gọi hàm thêm sản phẩm có sẵn trong source code gốc của ứng dụng
+  const possibleFunctionNames = ['addToCart', 'selectProduct', 'addItem', 'updateItemQty', 'addProductToOrder', 'chooseProduct'];
+  for (let funcName of possibleFunctionNames) {
+    if (typeof window[funcName] === 'function') {
+      try {
+        // Thử truyền các tham số phổ biến
+        window[funcName](product.code, qtyNum, product);
+        addedSuccessfully = true;
+        break;
+      } catch (err) {
+        console.log(`Thử hàm ${funcName} không thành công, chuyển cách khác.`);
+      }
+    }
   }
-  
-  let existingItem = window.cart.find(i => (i.code && i.code === product.code) || (i.id && i.id === product.code));
-  if (existingItem) {
-    existingItem.qty = Number(existingItem.qty || 0) + qtyNum;
-  } else {
-    window.cart.push({
-      id: product.code || Date.now().toString(),
-      code: product.code || '',
-      name: product.name || '',
-      dvt: product.dvt || '',
-      price: Number(product.price || 0),
-      qty: qtyNum
+
+  // 2. Nếu không gọi được hàm gốc, tự động cập nhật vào các biến quản lý đơn hàng/giỏ hàng phổ biến và kích hoạt input trên giao diện
+  if (!addedSuccessfully) {
+    // Tìm các mảng giỏ hàng / sản phẩm đã chọn trong scope toàn cục
+    ['cart', 'selectedItems', 'orderItems', 'currentOrderItems', 'selectedProducts'].forEach(varName => {
+      if (typeof window[varName] !== 'undefined' && Array.isArray(window[varName])) {
+        let existing = window[varName].find(i => (i.code === product.code) || (i.id === product.code));
+        if (existing) {
+          existing.qty = Number(existing.qty || 0) + qtyNum;
+        } else {
+          window[varName].push({
+            id: product.code,
+            code: product.code,
+            name: product.name,
+            dvt: product.dvt,
+            price: product.price || 0,
+            qty: qtyNum
+          });
+        }
+        addedSuccessfully = true;
+      }
     });
   }
 
-  // Cập nhật hiển thị số lượng giỏ hàng trên giao diện ngay lập tức
-  const cartBadge = document.querySelector('[id*="cart"], .fa-cart-shopping, [onclick*="cart"]');
-  const cartCountEls = document.querySelectorAll('span, div');
-  cartCountEls.forEach(el => {
-    if (el.textContent && el.textContent.includes('Giỏ hàng:')) {
-      el.textContent = `Giỏ hàng: ${window.cart.length} mã`;
-    }
+  // 3. Quét và cập nhật trực tiếp các ô input số lượng sản phẩm trên màn hình bán hàng nếu có sẵn
+  const productInputs = document.querySelectorAll(`input[data-code="${product.code}"], input[id*="${product.code}"]`);
+  productInputs.forEach(input => {
+    input.value = qtyNum;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    addedSuccessfully = true;
   });
 
-  // Gọi các hàm render giỏ hàng nếu hệ thống có sẵn
+  // 4. Kích hoạt render lại toàn bộ giao diện bán hàng
   try {
+    if (typeof renderSales === 'function') renderSales();
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
-    if (typeof renderSalesCart === 'function') renderSalesCart();
-    if (typeof saveCartToStorage === 'function') saveCartToStorage();
+    if (typeof renderOrderForm === 'function') renderOrderForm();
   } catch (e) {
     console.error(e);
   }
 
-  alert(`✅ Đã thêm thành công ${qtyNum} ${product.dvt || 'SP'} vào giỏ hàng!`);
+  alert(`✅ Đã thêm ${qtyNum} ${product.dvt || 'SP'} ([${product.code}] ${product.name}) vào đơn hàng hiện tại!`);
 };
 
 window.openCustomerHistoryModal = function() {
