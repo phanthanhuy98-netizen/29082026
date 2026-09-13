@@ -3355,6 +3355,8 @@ window.filterTabProducts = function(val) {
     modalContainer.classList.remove('hidden');
   };
 
+// Lưu danh sách sản phẩm tạm thời để gọi an toàn tuyệt đối không sợ lỗi ký tự
+// Biến tạm lưu giỏ hàng nội bộ bên trong bảng lịch sử
 window._tempCartFromHistory = [];
 window._tempHistoryProducts = [];
 
@@ -3534,24 +3536,24 @@ window.getHistoryModalHTML = function(currentStore) {
       <div style="font-size: 11px; font-weight: 700; color: var(--text-main);">
         📜 Nhật Ký Đơn Cũ (Chỉ xem):
       </div>
-  <div style="display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto;">
-  ${customerOrders.length > 0 ? customerOrders.map(o => `
-    <div style="padding: 5px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 5px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; font-size: 10px;">
-        <b style="color: #0369a1;">CTu #${o.soCtu || 1}</b>
-        <span style="color: var(--text-muted);">${o.ngayCtu || ''}</span>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 1px; background: var(--panel-bg); padding: 3px; border-radius: 4px;">
-        ${(o.items || []).filter(i => Number(i.qty || 0) > 0).map((i, idx) => `
-          <div style="display: flex; justify-content: space-between; font-size: 10.5px;">
-            <span><b>${idx + 1}.</b> [${i.code || ''}] ${i.name || ''}</span>
-            <span style="font-weight: 700; color: #10b981;">${i.qty || 0} ${i.dvt || ''}</span>
+      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto;">
+        ${customerOrders.length > 0 ? customerOrders.map(o => `
+          <div style="padding: 5px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; font-size: 10px;">
+              <b style="color: #0369a1;">CTu #${o.soCtu || 1}</b>
+              <span style="color: var(--text-muted);">${o.ngayCtu || ''}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 1px; background: var(--panel-bg); padding: 3px; border-radius: 4px;">
+              ${(o.items || []).filter(i => Number(i.qty || 0) > 0).map((i, idx) => `
+                <div style="display: flex; justify-content: space-between; font-size: 10.5px;">
+                  <span><b>${idx + 1}.</b> [${i.code || ''}] ${i.name || ''}</span>
+                  <span style="font-weight: 700; color: #10b981;">${i.qty || 0} ${i.dvt || ''}</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
-        `).join('')}
+        `).join('') : '<div style="font-size: 10px; color: var(--text-muted); text-align: center;">Không có lịch sử.</div>'}
       </div>
-    </div>
-  `).join('') : '<div style="font-size: 10px; color: var(--text-muted); text-align: center;">Không có lịch sử.</div>'}
-</div>
 
     </div>
   `;
@@ -3725,6 +3727,7 @@ window.openCustomerHistoryModal = async function() {
   `;
 
   try {
+    // Truy vấn chỉ theo storeId để tránh bắt buộc phải tạo Composite Index phức tạp trên Firestore
     const q = query(
       collection(db, "orders"),
       where("storeId", "==", storeIdStr)
@@ -3733,12 +3736,14 @@ window.openCustomerHistoryModal = async function() {
     const snap = await getDocs(q);
     let customerOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+    // Sắp xếp theo ngày mới nhất ngay tại client-side
     customerOrders.sort((a, b) => {
       const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.ngayCtu || 0).getTime();
       const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.ngayCtu || 0).getTime();
       return timeB - timeA;
     });
 
+    // Cắt lấy đúng 10 đơn hàng gần nhất
     customerOrders = customerOrders.slice(0, 10);
     window._currentCustomerOrders = customerOrders;
 
@@ -3804,6 +3809,7 @@ window.closeCustomerHistoryModal = function() {
     modalContainer.classList.add('hidden');
   }
 };
+  // -------------------------------------------------------------
 
   window.openCurrentCartModal = function() {
     let itemsList = [];
@@ -4012,7 +4018,7 @@ window.closeCustomerHistoryModal = function() {
       }
 
       const currentSalesString = `${currentUser.name}`;
-     const currentCustomerString = `${activeVisitedStore.code || ''} - ${activeVisitedStore.name || ''}`;
+      const currentCustomerString = `${activeVisitedStore.code || 'KH'} - ${activeVisitedStore.name}`;
       const nowLocal = new Date();
       const yyyy = nowLocal.getFullYear();
       const mm = String(nowLocal.getMonth() + 1).padStart(2, '0');
@@ -4665,15 +4671,12 @@ window.closeCustomerHistoryModal = function() {
             <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterModalCompanyList(this.value)" style="margin:0; padding:10px; font-size:14px;">
           </div>
           <div id="modalCompanyResults" style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
-${companyList.map((c, index) => `
-            <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <b style="color:var(--primary); font-size:14px;">${c.maCtu}</b>
-                <div style="font-size:13px; color:var(--text-main); font-weight:600;">${c.tenCtu || ''}</div>
+            ${companyList.map(c => `
+              <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
+                <span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; word-break: break-word; overflow-wrap: break-word; white-space: normal;">${c.tenCtu || ''}</span>
               </div>
-              <span style="font-size:11px; padding:3px 8px; border-radius:4px; font-weight:800; background:${c.status === 'Đóng' ? 'rgba(225,29,72,0.15); color:var(--rose);' : 'rgba(5,150,105,0.15); color:var(--emerald);'}">${c.status || 'Mở'}</span>
-            </div>
-          `).join('')}
+            `).join('')}
           </div>
         </div>
       </div>
@@ -4693,698 +4696,627 @@ ${companyList.map((c, index) => `
     const q = removeAccents(val.trim());
     const container = document.getElementById('modalCompanyResults');
     if (!container) return;
-    
+
     const matched = companyList.filter(c => {
       const text = removeAccents(`${c.maCtu || ''} ${c.tenCtu || ''}`);
       return text.includes(q);
     });
 
     container.innerHTML = matched.length > 0 ? matched.map(c => `
-      <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <b style="color:var(--primary); font-size:14px;">${c.maCtu}</b>
-          <div style="font-size:13px; color:var(--text-main); font-weight:600;">${c.tenCtu || ''}</div>
-        </div>
-        <span style="font-size:11px; padding:3px 8px; border-radius:4px; font-weight:800; background:${c.status === 'Đóng' ? 'rgba(225,29,72,0.15); color:var(--rose);' : 'rgba(5,150,105,0.15); color:var(--emerald);'}">${c.status || 'Mở'}</span>
+      <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+        <span style="font-weight: 800; color: var(--primary); min-width: 40px; font-size: 14px;">${c.maCtu}</span>
+        <span style="color: var(--text-main); font-weight: 600; font-size: 13.5px; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.tenCtu || ''}</span>
       </div>
-    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không tìm thấy công ty phù hợp.</div>`;
+    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy công ty phù hợp.</div>`;
   };
 
-  window.openRouteListModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (!modalContainer) return;
+  window.addUser = async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('usCode').value.trim();
+    const name = document.getElementById('usName').value.trim();
+    const usernameInput = document.getElementById('usUsername').value.trim();
+    const password = document.getElementById('usPass').value.trim();
+    const roleInput = document.getElementById('usRole').value.trim();
+    const role = roleInput.toLowerCase();
+    
+    const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex; z-index:99999;" onclick="if(event.target === this) closeRouteListModal()">
-        <div class="modal-content" style="max-width: 500px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; padding: 18px; border-radius: 18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
-            <h3 style="font-size: 16px; font-weight: 800; color: #8B5CF6;"><i class="fa-solid fa-route"></i> Danh Sách Tuyến (${routeGroupsList.length})</h3>
-            <button class="btn btn-red btn-sm" onclick="closeRouteListModal()">Đóng</button>
-          </div>
-          <div style="margin-bottom: 10px;">
-            <input type="text" placeholder="🔍 Tìm kiếm nhóm hoặc tên tuyến..." oninput="filterModalRouteList(this.value)" style="margin:0; padding:10px; font-size:14px;">
-          </div>
-          <div id="modalRouteResults" style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
-            ${routeGroupsList.map(r => `
-              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                  <b style="color:#8B5CF6; font-size:14px;">Nhóm ${r.nhomDoiTuong}</b>
-                  <div style="font-size:13px; color:var(--text-main); font-weight:600;">${r.noiDung || ''}</div>
-                </div>
-                <span style="font-size:11px; color:var(--text-muted);">${r.ghiChu || ''}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    `;
-    modalContainer.classList.remove('hidden');
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await secondaryAuth.signOut();
+      document.getElementById('userForm').reset();
+      alert("✅ Tạo tài khoản thành công!");
+      users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code, role, active: true });
+      renderUI();
+    } catch (err) { alert("Lỗi: " + err.message); }
   };
 
-  window.closeRouteListModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-      modalContainer.innerHTML = '';
-      modalContainer.classList.add('hidden');
+  window.toggleUserActive = async function(uid, active) { 
+    const targetUser = users.find(u => u.uid === uid);
+    if (targetUser && targetUser.email && targetUser.email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
+      return alert("⛔ AN TOÀN HỆ THỐNG: Không được phép khóa tài khoản admin gốc!");
     }
+    await updateDoc(doc(db, "users", uid), { active }); 
+    const uIndex = users.findIndex(u => u.uid === uid);
+    if(uIndex > -1) users[uIndex].active = active;
+    alert(active ? "✅ Đã mở khóa tài khoản!" : "🔒 Đã khóa tài khoản thành công!");
+    renderUI();
   };
 
-  window.filterModalRouteList = function(val) {
-    const q = removeAccents(val.trim());
-    const container = document.getElementById('modalRouteResults');
-    if (!container) return;
-
-    const matched = routeGroupsList.filter(r => {
-      const text = removeAccents(`${r.nhomDoiTuong || ''} ${r.noiDung || ''} ${r.ghiChu || ''}`);
-      return text.includes(q);
-    });
-
-    container.innerHTML = matched.length > 0 ? matched.map(r => `
-      <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <b style="color:#8B5CF6; font-size:14px;">Nhóm ${r.nhomDoiTuong}</b>
-          <div style="font-size:13px; color:var(--text-main); font-weight:600;">${r.noiDung || ''}</div>
-        </div>
-        <span style="font-size:11px; color:var(--text-muted);">${r.ghiChu || ''}</span>
-      </div>
-    `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Không tìm thấy tuyến phù hợp.</div>`;
+  window.selectUnsubmittedDraftStore = function(storeId) {
+    selectStoreDirectly(storeId);
   };
 
-  window.toggleTabVisibilityQuick = function(tabName) {
-    let hidden = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
-    if (hidden.includes(tabName)) {
-      hidden = hidden.filter(t => t !== tabName);
-    } else {
-      hidden.push(tabName);
+  function attachListeners() {
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
+
+      if (currentTab === 'soGocBH' || currentTab === 'sales') {
+        const activePane = document.getElementById(`tabPane_${currentTab}`);
+        if (activePane) renderTabContent(currentTab, activePane);
+      }
+    }).catch(e => {});
+
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+      getDocs(collection(db, "users")).then(snap => {
+        users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+        if (currentTab === 'users') {
+          const activePane = document.getElementById('tabPane_users');
+          if (activePane) renderTabContent(currentTab, activePane);
+        }
+      }).catch(e => {});
     }
-    localStorage.setItem('dms_hidden_tabs', JSON.stringify(hidden));
-    renderTabBarOrder();
-    alert("✅ Đã cập nhật trạng thái hiển thị của tab!");
-  };
-
-  window.toggleWakeLockPref = function() {
-    const current = localStorage.getItem('dms_pref_wakelock') === 'true';
-    const nextVal = !current;
-    localStorage.setItem('dms_pref_wakelock', nextVal ? 'true' : 'false');
-    toggleScreenWakeLock(nextVal);
-    openSettingsModal();
-  };
-
-  function renderTabBarOrder() {
-    const container = document.getElementById('mobileTabBarContainer');
-    if (!container) return;
-
-    const tabLabels = {
-      sales: "Bán Hàng",
-      soGocBH: "Sổ Gốc BH",
-      customers: "Khách Hàng",
-      productsAdmin: "Vật Tư",
-      routes: "Tuyến",
-      company: "Công Ty",
-      users: "Nhân Viên"
-    };
-
-    const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
-
-    const filteredOrder = currentTabOrder.filter(tKey => !hiddenTabs.includes(tKey));
-    if (filteredOrder.length === 0) {
-      currentTabOrder = [...defaultTabOrder];
-    }
-
-    const activeList = currentTabOrder.filter(tKey => !hiddenTabs.includes(tKey));
-
-    container.innerHTML = activeList.map(tKey => {
-      const isActive = currentTab === tKey;
-      const customColor = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || '#2563EB';
-
-      return `
-        <button class="btn ${isActive ? '' : ''}" style="flex: 0 0 auto; min-width: 82px; justify-content: center; padding: 10px 14px; font-size: 13px; font-weight: 800; border-radius: 12px; background: ${isActive ? customColor : 'var(--card-bg)'}; color: ${isActive ? '#FFFFFF' : 'var(--text-main)'}; border: 1px solid ${isActive ? customColor : 'var(--card-border)'}; box-shadow: ${isActive ? '0 4px 15px rgba(0,0,0,0.15)' : 'none'};" onclick="switchTab('${tKey}')">
-          ${tabLabels[tKey]}
-        </button>
-      ` + (tKey === 'soGocBH' && currentUser && currentUser.role !== 'viewer' ? `
-        <button class="btn" style="flex: 0 0 auto; min-width: 44px; padding: 10px 12px; border-radius: 12px; background: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border);" onclick="openSettingsModal()" title="Cài đặt">
-          <i class="fa-solid fa-gear"></i>
-        </button>
-      ` : '');
-    }).join('') + (!activeList.includes('soGocBH') && currentUser && currentUser.role !== 'viewer' ? `
-      <button class="btn" style="flex: 0 0 auto; min-width: 44px; padding: 10px 12px; border-radius: 12px; background: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border);" onclick="openSettingsModal()" title="Cài đặt">
-        <i class="fa-solid fa-gear"></i>
-      </button>
-    ` : '');
   }
 
   window.switchTab = function(tabName) {
     currentTab = tabName;
     localStorage.setItem('dms_last_active_tab', tabName);
     renderUI();
-    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   function renderUI() {
+    if (!currentUser) return;
+    const isAdmin = currentUser.role === 'admin';
+    const isManager = currentUser.role === 'manager';
+    const isViewer = currentUser.role === 'viewer';
+    
+    if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].includes(currentTab)) {
+      currentTab = 'customers';
+    }
+
     renderTabBarOrder();
 
-    ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'].forEach(t => {
-      const pane = document.getElementById(`tabPane_${t}`);
-      if (pane) {
-        if (currentTab === t) {
-          pane.style.display = 'block';
-          renderTabContent(t, pane);
-        } else {
-          pane.style.display = 'none';
-          pane.innerHTML = '';
-        }
-      }
+    ['sales', 'customers', 'soGocBH', 'productsAdmin', 'routes', 'company', 'users'].forEach(tabName => {
+      const pane = document.getElementById(`tabPane_${tabName}`);
+      if (pane) pane.style.display = 'none';
     });
-  }
 
-  function renderTabContent(tKey, paneEl) {
-    const isViewer = currentUser && currentUser.role === 'viewer';
-    const isAdminOrManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-
-    if (tKey === 'sales') {
-      if (!activeVisitedStore) {
-        paneEl.innerHTML = `
-          <div style="display:flex; flex-direction:column; gap:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-store"></i> Chọn Khách Hàng Bán Hàng</h2>
-            </div>
-            
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <select id="routeDropdownSelect" onchange="onRouteSelected(this.value)" style="margin:0; padding:10px; font-size:13px; font-weight:700;">
-                <option value="">-- Lọc theo Tuyến --</option>
-                ${routeGroupsList.map(r => `<option value="${r.nhomDoiTuong}" ${selectedRouteCode === r.nhomDoiTuong ? 'selected' : ''}>Nhóm ${r.nhomDoiTuong}: ${r.noiDung || ''}</option>`).join('')}
-              </select>
-              <button class="btn btn-amber" style="justify-content:center; padding:10px; font-weight:800; font-size:13px;" onclick="refreshStoresGPSData()"><i class="fa-solid fa-rotate"></i> Làm mới GPS</button>
-            </div>
-
-            <input type="text" id="customerSearchInput" placeholder="🔍 Gõ mã KH (VD: 51Duyen1) hoặc tên tiệm..." oninput="debounceFilterSalesCustomers(this.value)" autocomplete="off" style="margin:0; padding:12px; font-size: var(--font-size-search-input); border-radius:12px;">
-            <div id="customerSearchHint" style="font-size:12px; color:var(--text-muted); font-weight:700;">Vui lòng nhập mã khách hàng hoặc chọn tuyến...</div>
-
-            <div id="salesCustomerResultContainer" style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>
-            </div>
-          </div>
-        `;
-        setTimeout(() => {
-          const inp = document.getElementById('customerSearchInput');
-          if (inp) {
-            inp.value = customerSearchKeyword;
-            if (customerSearchKeyword) filterSalesCustomers(customerSearchKeyword);
-            inp.focus();
-          }
-        }, 50);
+    const activePane = document.getElementById(`tabPane_${currentTab}`);
+    if (activePane) {
+      activePane.style.display = 'block';
+      if (currentTab === 'users' && users.length === 0 && (isAdmin || isManager)) {
+        getDocs(collection(db, "users")).then(snap => {
+          users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+          renderTabContent(currentTab, activePane);
+        }).catch(e => { renderTabContent(currentTab, activePane); });
       } else {
-        const store = activeVisitedStore;
-        const pName = store.pinnedByName ? `[${store.pinnedByCode || ''}] ${store.pinnedByName}` : 'Chưa có';
-        const hasLat = Boolean(store.lat && Number(store.lat) !== 0);
-
-        paneEl.innerHTML = `
-          <div style="display:flex; flex-direction:column; gap:12px;">
-            <div style="background:var(--card-bg); border:1px solid var(--primary); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:6px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.1);">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">${store.code || 'KH'}</span>
-                <button class="btn btn-red btn-sm" style="padding:5px 12px; font-size:12px; font-weight:800;" onclick="resetSelectedStore()"><i class="fa-solid fa-arrow-left"></i> Đổi tiệm</button>
-              </div>
-              <div style="font-size:16px; font-weight:800; color:var(--text-main);">${store.name}</div>
-              <div style="font-size:12px; color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${store.address || 'Chưa có địa chỉ'}</div>
-              <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); flex-wrap:wrap; gap:4px;">
-                <span>👤 NV ghim: <b style="color:#2563EB;">${pName}</b></span>
-                <span style="color:${hasLat ? 'var(--emerald)' : 'var(--rose)'}; font-weight:800;">${hasLat ? '📍 Đã ghim GPS' : '⚠️ Chưa ghim GPS'}</span>
-              </div>
-              
-              <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:4px;">
-                ${hasLat ? `
-                  <button class="btn btn-green btn-sm" style="justify-content:center; padding:8px; font-size:12px; font-weight:800;" onclick="openNativeNavigator(${Number(store.lat)}, ${Number(store.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
-                ` : `
-                  <button class="btn btn-amber btn-sm" style="justify-content:center; padding:8px; font-size:12px; font-weight:800;" onclick="checkinActiveStoreGPS()"><i class="fa-solid fa-location-crosshairs"></i> Check-in GPS</button>
-                `}
-                <button class="btn btn-blue btn-sm" style="justify-content:center; padding:8px; font-size:12px; font-weight:800;" onclick="openCurrentCustomerOrderModal()"><i class="fa-solid fa-receipt"></i> Đơn hôm nay</button>
-                <button class="btn btn-purple btn-sm" style="justify-content:center; padding:8px; font-size:12px; font-weight:800;" onclick="openCustomerHistoryModal()"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử</button>
-              </div>
-            </div>
-
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <div style="display:flex; gap:8px; align-items:center;">
-                <input type="text" id="pinnedCompanyInput" placeholder="🏢 Lọc mã Cty (VD: 01, 02)..." value="${pinnedCompanyPrefix ? pinnedCompanyPrefix.toUpperCase() : ''}" oninput="onPinnedCompanyChanged(this.value)" autocomplete="off" style="margin:0; padding:10px; font-size:13px; font-weight:800; flex: 1;">
-                <button class="btn btn-amber btn-sm" style="padding: 10px 14px; font-size: 13px; font-weight: 800;" onclick="openAddProductModal()"><i class="fa-solid fa-cart-plus"></i> Thêm vật tư</button>
-              </div>
-              <div id="inlineCompanyDropdown" class="hidden" style="position:relative; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; max-height:180px; overflow-y:auto; z-index:50; box-shadow:0 10px 25px rgba(0,0,0,0.1);"></div>
-              <div id="pinnedCompanyBadge"></div>
-              
-              <div style="position:relative;">
-                <input type="text" id="productSearchInput" placeholder="🔍 Gõ mã hoặc tên vật tư cần tìm..." oninput="debounceFilterSalesProducts(this.value)" autocomplete="off" style="margin:0; padding:12px 14px 12px 38px; font-size: var(--font-size-search-input); border-radius:12px; width: 100%;">
-<i class="fa-solid fa-magnifying-glass" style="position:absolute; left:14px; top:16px; color:var(--text-muted); font-size:14px; pointer-events:none;"></i>            </div>
-
-            <div id="mobileProductListContainer" style="display:flex; flex-direction:column; gap:8px;">
-              <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700;">Nhập từ khóa để tìm kiếm vật tư...</div>
-            </div>
-          </div>
-
-          <div id="dynamicCartFooter" class="sticky-cart-footer">
-            <div style="display:flex; flex-direction:column;">
-              <span id="stickyCartSkuCount" style="font-size:13px; font-weight:800; color:var(--text-main);">Đã chọn: 0 mã hàng</span>
-              <span style="font-size:11px; color:var(--text-muted);">Khách: ${store.name}</span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <button class="btn btn-blue btn-sm" style="padding:10px 14px; font-weight:800; font-size:13px;" onclick="openCurrentCartModal()"><i class="fa-solid fa-eye"></i> Xem giỏ</button>
-              <button class="btn btn-green" style="padding:10px 18px; font-weight:800; font-size:13px; border-radius:10px;" onclick="submitOrder()"><i class="fa-solid fa-paper-plane"></i> GỬI ĐƠN</button>
-            </div>
-          </div>
-
-          <div class="floating-cart-trigger" onclick="openCurrentCartModal()">
-            <i class="fa-solid fa-cart-shopping"></i> Giỏ hàng <span id="floatTriggerCount" style="background:#fff; color:#D97706; padding:1px 6px; border-radius:10px; font-size:11px;">0</span>
-          </div>
-        `;
-        setTimeout(() => {
-          filterSalesProducts();
-          updateCartTotalsUI();
-        }, 50);
+        renderTabContent(currentTab, activePane);
       }
-    } else if (tKey === 'soGocBH') {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      if (!soGocFilterDateFrom) soGocFilterDateFrom = todayStr;
-      if (!soGocFilterDateTo) soGocFilterDateTo = todayStr;
-
-      const userListForFilter = users || [];
-
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-book-journal-whills"></i> Sổ Gốc Bán Hàng</h2>
-            <div class="excel-group-btns">
-              ${!isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
-              ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash"></i> Xóa theo ngày</button>` : ''}
-              <button class="btn btn-amber btn-sm" onclick="reloadSoGocDataManually()"><i class="fa-solid fa-rotate"></i> Tải lại</button>
-            </div>
-          </div>
-
-          <div style="display:flex; flex-direction:column; gap:8px; background:var(--card-bg); border:1px solid var(--card-border); padding:10px; border-radius:12px;">
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-              <div>
-                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Từ ngày:</label>
-                <input type="date" id="soGocDateFrom" value="${soGocFilterDateFrom}" onchange="setSoGocDateFrom(this.value)" style="margin:0; padding:6px; font-size:12px;">
-              </div>
-              <div>
-                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">Đến ngày:</label>
-                <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:6px; font-size:12px;">
-              </div>
-            </div>
-
-            <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
-              <button id="quickDateBtn_today" class="btn btn-sm ${soGocQuickDate==='today'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('today')">Hôm nay</button>
-              <button id="quickDateBtn_week" class="btn btn-sm ${soGocQuickDate==='week'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('week')">Tuần này</button>
-              <button id="quickDateBtn_month" class="btn btn-sm ${soGocQuickDate==='month'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('month')">Tháng này</button>
-              <button id="quickDateBtn_all" class="btn btn-sm ${soGocQuickDate==='all'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('all')">Tất cả</button>
-            </div>
-
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-              <input type="text" placeholder="🔍 Tìm kiếm Số CTu, Mã KH, Nhân viên..." oninput="filterSoGocCards(this.value)" style="margin:0; padding:8px 10px; font-size:13px;">
-              <select onchange="setSoGocSalesFilter(this.value)" style="margin:0; padding:8px; font-size:12px; font-weight:700;">
-                <option value="">-- Tất cả Nhân viên --</option>
-                ${userListForFilter.map(u => `<option value="${u.code}" ${soGocSalesFilter === u.code ? 'selected' : ''}>[${u.code}] ${u.name}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-
-          <div id="soGocCardContainer" style="display:flex; flex-direction:column; gap:8px;">
-            ${orders.length > 0 ? orders.map(o => {
-              const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
-              const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-              const canEditDelete = isOwner || isAdminOrManager;
-
-              let inferredMaDTPN = o.maDTPNNo || '';
-              if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
-                inferredMaDTPN = o.maKH.split(' - ')[0].trim();
-              }
-
-              return `
-                <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu || 1}" data-ma-dtpn="${removeAccents(inferredMaDTPN)}" data-ma-nv="${removeAccents(o.salesCode || '')}" data-ten-nv="${removeAccents(o.salesName || '')}" data-ngay-ctu="${o.ngayCtu || ''}" style="display:flex; flex-direction:column; gap:6px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:800;">CTu #${o.soCtu || 1}</span>
-                    <span style="font-size:11.5px; font-weight:700; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
-                  </div>
-                  <div style="font-size:13.5px; font-weight:800; color:var(--text-main); word-break:break-word;">KH: ${o.maKH || '—'}</div>
-                  <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
-                    <span>👤 NV: <b style="color:#2563EB;">[${o.salesCode || ''}] ${o.salesName || ''}</b></span>
-                    <span>📦 Số mã: <b style="color:var(--emerald);">${validItems.length} mã</b></span>
-                  </div>
-                  <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
-                    <button class="btn btn-blue btn-sm" style="flex:1; padding:6px; font-size:11.5px;" onclick="openOrderDetailsModal('${o.id}')"><i class="fa-solid fa-eye"></i> Xem CTu</button>
-                    ${canEditDelete && !isViewer ? `
-                      <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:11.5px;" onclick="editOrder('${o.id}')"><i class="fa-solid fa-pen"></i> Sửa</button>
-                      <button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:11.5px;" onclick="deleteSingleOrder('${o.id}')"><i class="fa-solid fa-trash"></i> Xóa</button>
-                    ` : ''}
-                  </div>
-                </div>
-              `;
-            }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào được ghi nhận.</div>`}
-          </div>
-
-          ${hasMoreOrders ? `
-            <button id="loadMoreSoGocBtn" class="btn" style="width:100%; justify-content:center; padding:12px; font-weight:800;" onclick="loadMoreSoGoc()">
-              <i class="fa-solid fa-angles-down"></i> Tải thêm đơn hàng cũ hơn...
-            </button>
-          ` : ''}
-
-          <div style="display:none;" id="soGocExportTable">
-            <table>
-              <thead>
-                <tr>
-                  <th>SoCtu</th>
-                  <th>NgayCtu</th>
-                  <th>MaDTPN</th>
-                  <th>TenDTPN</th>
-                  <th>MaVTHH</th>
-                  <th>TenVTHH</th>
-                  <th>DVT</th>
-                  <th>SoLuong</th>
-                  <th>MaNhanVien</th>
-                  <th>TenNhanVien</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${orders.map(o => {
-                  let inferredMaDTPN = o.maDTPNNo || '';
-                  if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
-                    inferredMaDTPN = o.maKH.split(' - ')[0].trim();
-                  }
-                  let inferredTenDTPN = o.maKH || '';
-                  if (inferredTenDTPN.includes(' - ')) {
-                    inferredTenDTPN = inferredTenDTPN.split(' - ').slice(1).join(' - ').trim();
-                  }
-
-                  const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
-                  return validItems.map(item => `
-                    <tr>
-                      <td>${o.soCtu || 1}</td>
-                      <td>${o.ngayCtu || ''}</td>
-                      <td>${inferredMaDTPN}</td>
-                      <td>${inferredTenDTPN}</td>
-                      <td>${item.code || ''}</td>
-                      <td>${item.name || ''}</td>
-                      <td>${item.dvt || 'hộp'}</td>
-                      <td>${item.qty || 0}</td>
-                      <td>${o.salesCode || ''}</td>
-                      <td>${o.salesName || ''}</td>
-                    </tr>
-                  `).join('');
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-      setTimeout(() => {
-        filterSoGocCards();
-      }, 50);
-    } else if (tKey === 'customers') {
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-users"></i> Khách Hàng (${stores.length})</h2>
-            <div class="excel-group-btns">
-              ${!isViewer ? `<button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
-              ${isAdminOrManager ? `
-                <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Nhập Excel<input type="file" accept=".xlsx, .xls" onchange="importCustomersExcel(event)" style="display:none;"></label>
-              ` : ''}
-            </div>
-          </div>
-
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" id="tabCustomerSearchInput" placeholder="🔍 Gõ mã KH hoặc tên tiệm để tìm..." oninput="filterTabCustomers(this.value)" autocomplete="off" style="margin:0; padding:10px; font-size:14px; flex:1;">
-            <button id="togglePinnedGPSBtn" class="btn btn-sm" style="padding:10px; font-size:12px; font-weight:800; white-space:nowrap;" onclick="togglePinnedGPSFilter()">
-              <i class="fa-solid fa-map-location-dot"></i> Xem KH ghim GPS
-            </button>
-          </div>
-          <div id="tabCustSearchHint" style="font-size:12px; color:var(--text-muted); font-weight:700;">Đang ẩn dữ liệu để hệ thống chạy siêu mượt. Hãy tìm kiếm hoặc chọn xem KH đã ghim.</div>
-
-          <div id="tabCustomerCardContainer" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Danh sách đang ẩn để tối ưu tốc độ. Vui lòng gõ từ khóa tìm kiếm hoặc bấm nút "Xem KH ghim GPS".</div>
-          </div>
-        </div>
-      `;
-      setTimeout(() => {
-        const inp = document.getElementById('tabCustomerSearchInput');
-        if (inp && tabCustomerSearchKey) {
-          inp.value = tabCustomerSearchKey;
-          filterTabCustomers(tabCustomerSearchKey);
-        }
-      }, 50);
-    } else if (tKey === 'productsAdmin') {
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-box-open"></i> Vật Tư (${products.length})</h2>
-            <div class="excel-group-btns">
-              ${!isViewer ? `<button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
-              ${isAdminOrManager ? `
-                <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel<input type="file" accept=".xlsx, .xls" onchange="importProductsExcel(event)" style="display:none;"></label>
-              ` : ''}
-            </div>
-          </div>
-
-          <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" autocomplete="off" style="margin:0; padding:10px; font-size:14px;">
-          <div id="tabPrdSearchHint" style="font-size:12px; color:var(--text-muted); font-weight:700;">Vui lòng gõ mã hoặc tên vật tư để tìm kiếm...</div>
-
-          <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="text-align:center; padding:20px; color:var(--text-muted); font-weight:700; background:var(--card-bg); border-radius:12px;">Nhập mã hoặc tên vật tư để tìm kiếm...</div>
-          </div>
-        </div>
-      `;
-    } else if (tKey === 'routes') {
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-route"></i> Tuyến Bán Hàng</h2>
-            <div class="excel-group-btns">
-              <button class="btn btn-blue btn-sm" onclick="openRouteListModal()"><i class="fa-solid fa-list"></i> Xem danh sách</button>
-              ${!isViewer ? `<button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
-              ${isAdminOrManager ? `
-                <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel<input type="file" accept=".xlsx, .xls" onchange="importRoutesExcel(event)" style="display:none;"></label>
-                <button class="btn btn-amber btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm mới</button>
-              ` : ''}
-            </div>
-          </div>
-
-          <input type="text" placeholder="🔍 Tìm kiếm nhóm hoặc tên tuyến..." oninput="filterRouteTable(this.value)" style="margin:0; padding:10px; font-size:14px;">
-
-          <div style="display:flex; flex-direction:column; gap:8px; max-height:65vh; overflow-y:auto; padding-right:2px;">
-            ${routeGroupsList.map((r, i) => `
-              <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:6px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:12px; font-weight:800; color:#8B5CF6;">Nhóm</span>
-                  ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:3px 8px; font-size:11px;" onclick="deleteRouteItem(${i})"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
-                </div>
-                <input type="text" value="${r.nhomDoiTuong || ''}" onchange="updateRouteField(${i}, 'nhomDoiTuong', this.value)" ${isAdminOrManager ? '' : 'readonly'} style="margin:0; padding:8px; font-size:13px; font-weight:800; color:#8B5CF6;">
-                <input type="text" value="${r.noiDung || ''}" onchange="updateRouteField(${i}, 'noiDung', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên tuyến..." style="margin:0; padding:8px; font-size:13px;">
-                <input type="text" value="${r.ghiChu || ''}" onchange="updateRouteField(${i}, 'ghiChu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Ghi chú..." style="margin:0; padding:8px; font-size:12px;">
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    } else if (tKey === 'company') {
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-building"></i> Quản Lý Công Ty & ĐVT</h2>
-            <div class="excel-group-btns">
-              <button class="btn btn-purple btn-sm" onclick="openCompanyListModal()"><i class="fa-solid fa-list"></i> Xem danh sách</button>
-              ${!isViewer ? `<button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
-              ${isAdminOrManager ? `
-                <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel<input type="file" accept=".xlsx, .xls" onchange="importCompanyExcel(event)" style="display:none;"></label>
-                <button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>
-              ` : ''}
-            </div>
-          </div>
-
-          <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:10px; font-size:14px;">
-
-          <div style="display:flex; flex-direction:column; gap:10px; max-height:65vh; overflow-y:auto; padding-right:2px;">
-            ${companyList.map((c, i) => `
-              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="font-size:12px; font-weight:800; color:var(--primary);">Mã CTu: <b>${c.maCtu}</b></span>
-                  <div style="display:flex; gap:6px; align-items:center;">
-                    <button class="btn btn-sm" style="background:${c.status === 'Đóng' ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:4px 10px; font-size:11.5px;" onclick="toggleCompanyStatus(${i})">${c.status === 'Đóng' ? '🔒 Đã khóa' : '🔓 Đang mở'}</button>
-                    ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:11px;" onclick="deleteCompanyItem(${i})"><i class="fa-solid fa-trash"></i></button>` : ''}
-                  </div>
-                </div>
-                <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${i}, 'tenCtu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px; font-size:13px; font-weight:800;">
-                
-                <div style="background:var(--panel-bg); padding:8px; border-radius:10px; border:1px solid var(--card-border);">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:11.5px; font-weight:800; color:var(--text-muted);">Danh sách ĐVT (Đóng/Mở):</span>
-                    ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="padding:2px 8px; font-size:10.5px;" onclick="addCompanyDvtPrompt(${i})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
-                  </div>
-                  <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                    ${Array.isArray(c.dvtDetails) && c.dvtDetails.length > 0 ? c.dvtDetails.map((d, dIdx) => `
-                      <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
-                        <span style="font-size:11px; font-weight:700; color:${d.status === 'Đóng' ? 'var(--rose)' : 'var(--emerald)'};">${d.name} (${d.status || 'Mở'})</span>
-                        ${isAdminOrManager ? `
-                          <button class="btn btn-sm" style="padding:1px 4px; font-size:9.5px; background:${d.status === 'Đóng' ? 'var(--emerald)' : 'var(--rose)'}; color:#fff;" onclick="toggleCompanyDvtStatus(${i}, ${dIdx})">${d.status === 'Đóng' ? 'Mở' : 'Khóa'}</button>
-                          <button class="btn btn-sm btn-red" style="padding:1px 4px; font-size:9.5px;" onclick="removeCompanyDvt(${i}, ${dIdx})">×</button>
-                        ` : ''}
-                      </div>
-                    `).join('') : '<span style="font-size:11.5px; color:var(--text-muted);">Chưa cấu hình ĐVT riêng.</span>'}
-                  </div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    } else if (tKey === 'users') {
-      paneEl.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="tab-header-actions" style="margin-bottom:0;">
-            <h2 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-user-gear"></i> Quản Lý Tài Khoản Nhân Viên</h2>
-            ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" onclick="openCreateUserModal()"><i class="fa-solid fa-user-plus"></i> Tạo tài khoản</button>` : ''}
-          </div>
-
-          <div style="display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; padding-right:2px;">
-            ${users.map((u, i) => `
-              <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px; font-size:11.5px; font-weight:800;">${u.code || 'NV'}</span>
-                  <span style="font-size:11px; font-weight:800; padding:2px 8px; border-radius:4px; background:${u.active !== false ? 'rgba(5,150,105,0.15); color:var(--emerald);' : 'rgba(225,29,72,0.15); color:var(--rose);'}">${u.active !== false ? 'Hoạt động' : 'Đã khóa'}</span>
-                </div>
-                <div style="font-size:14px; font-weight:800; color:var(--text-main);">${u.name || ''}</div>
-                <div style="font-size:12px; color:var(--text-muted);">Email: <b>${u.email || ''}</b> | Quyền: <b style="color:var(--primary);">${u.role || 'sales'}</b></div>
-                ${isAdminOrManager ? `
-                  <div style="display:flex; gap:6px; margin-top:4px;">
-                    <button class="btn btn-sm ${u.active !== false ? 'btn-red' : 'btn-green'}" style="padding:6px 10px; font-size:11.5px;" onclick="toggleUserActiveStatus('${u.id}', ${u.active !== false})">${u.active !== false ? 'Khóa tài khoản' : 'Mở khóa'}</button>
-                  </div>
-                ` : ''}
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
     }
   }
 
-  window.openCreateUserModal = function() {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-      return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tạo nhân viên mới!");
-    }
+  function renderTabBarOrder() {
+    const tabBar = document.getElementById('mobileTabBarContainer');
+    if (!tabBar) return;
 
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (!modalContainer) return;
+    const hiddenTabs = JSON.parse(localStorage.getItem('dms_hidden_tabs') || '[]');
+    const isViewer = currentUser && currentUser.role === 'viewer';
 
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeCreateUserModal()">
-        <div class="modal-content" style="max-width: 400px; padding: 20px; border-radius: 18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
-            <h3 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Mới</h3>
-            <button class="btn btn-red btn-sm" onclick="closeCreateUserModal()">Đóng</button>
+    const tabConfigMap = {
+      sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
+      soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
+      customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: true },
+      productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
+      routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
+      company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
+      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
+    };
+
+    tabBar.innerHTML = currentTabOrder.map(tKey => {
+      const cfg = tabConfigMap[tKey];
+      if (!cfg || !cfg.perm || hiddenTabs.includes(tKey)) return '';
+      const customCol = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || cfg.defaultColor;
+
+      return `
+        <button id="${cfg.id}" class="btn btn-sm" style="background: ${customCol}; color: #FFFFFF; font-weight: 800;" onclick="switchTab('${tKey}')">
+          <i class="fa-solid ${cfg.icon}"></i> ${cfg.label}
+        </button>
+      `;
+    }).join('') + `
+      <button class="btn btn-sm" style="background: #475569; color: #FFFFFF; font-weight: 800;" onclick="openSettingsModal()" title="Cài đặt hệ thống & giao diện"><i class="fa-solid fa-gear"></i> Cài đặt</button>
+      ${!isViewer ? `<button class="btn btn-purple btn-sm" style="font-weight: 800;" onclick="openChangePasswordModal()" title="Đổi mật khẩu"><i class="fa-solid fa-key"></i> Đổi MK</button>` : ''}
+      <button class="btn btn-red btn-sm" style="font-weight: 800;" onclick="handleLogout()" title="Đăng xuất"><i class="fa-solid fa-power-off"></i> Thoát</button>
+    `;
+  }
+
+  async function renderTabContent(tab, container) {
+    const oldFooter = document.getElementById('dynamicCartFooter');
+    if (oldFooter) oldFooter.remove();
+    const oldFloat = document.getElementById('floatingCartTrigger');
+    if (oldFloat) oldFloat.remove();
+
+    if (tab === 'sales') {
+      let selectedSkuCount = 0;
+      
+      Object.values(currentCart).forEach(c => {
+        if (c && c.qty > 0) {
+          selectedSkuCount++;
+        }
+      });
+
+      let unsubmittedStoresList = [];
+      if (currentUser.role === 'sales' && !editingOrderId) {
+        try {
+          const allDrafts = await getAllUnsubmittedDraftsAsync();
+          if (allDrafts && allDrafts.length > 0) {
+            const draftMap = new Map(allDrafts.map(d => [d.storeId, d.cart]));
+            stores.forEach(s => {
+              if (!activeVisitedStore || String(activeVisitedStore.id) !== String(s.id)) {
+                if (draftMap.has(String(s.id))) {
+                  unsubmittedStoresList.push(s);
+                }
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      container.innerHTML = `
+        ${unsubmittedStoresList.length > 0 ? `
+          <div style="background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-size: 13px; font-weight: 800; color: #D97706; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> Bạn có đơn hàng chưa gửi lên sổ gốc (${unsubmittedStoresList.length} tiệm):</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${unsubmittedStoresList.map(st => `
+                <button class="btn btn-amber btn-sm" onclick="selectUnsubmittedDraftStore('${st.id}')" style="font-weight:700;"><i class="fa-solid fa-store"></i> ${st.name}</button>
+              `).join('')}
+            </div>
           </div>
-          <form onsubmit="submitCreateUser(event)">
-            <label style="font-size:12px; font-weight:700;">Mã nhân viên (VD: NV01):</label>
-            <input type="text" id="newCodeInput" required style="margin-bottom:8px;">
-            <label style="font-size:12px; font-weight:700;">Họ và tên:</label>
-            <input type="text" id="newNameInput" required style="margin-bottom:8px;">
-            <label style="font-size:12px; font-weight:700;">Email đăng nhập:</label>
-            <input type="email" id="newEmailInput" required style="margin-bottom:8px;">
-            <label style="font-size:12px; font-weight:700;">Mật khẩu ban đầu:</label>
-            <input type="password" id="newPassInput" required style="margin-bottom:8px;">
-            <label style="font-size:12px; font-weight:700;">Phân quyền (Role):</label>
-            <select id="newRoleSelect" style="margin-bottom:14px;">
-              <option value="sales">Sales (Nhân viên bán hàng)</option>
-              <option value="manager">Manager (Quản lý)</option>
-              <option value="admin">Admin (Quản trị hệ thống)</option>
-              <option value="viewer">Viewer (Xem báo cáo)</option>
-            </select>
-            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
-          </form>
+        ` : ''}
+
+        <div class="card" style="margin-bottom:10px; border:1px solid ${activeVisitedStore ? 'var(--card-border)' : 'var(--primary)'};">
+          ${!activeVisitedStore ? `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+              <h3 style="font-weight:800; margin:0; display:flex; align-items:center; gap:6px; color: var(--text-main);">
+                <i class="fa-solid fa-store" style="color:var(--primary);"></i> Nhập Mã Khách Hàng 
+              </h3>
+            </div>
+
+            <div style="margin-bottom: 6px;">
+              <label style="font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">📌 Tuyến Khách Hàng:</label>
+              <select id="routeSelectBox" onchange="onRouteSelected(this.value)" style="padding:12px 14px; font-weight:700; width:100%; margin:0;">
+                <option value="">-- Tất cả tuyến --</option>
+                ${Array.isArray(routeGroupsList) ? routeGroupsList.map(r => `<option value="${r.nhomDoiTuong}" ${selectedRouteCode===r.nhomDoiTuong?'selected':''}>${r.nhomDoiTuong} ${r.noiDung?'- '+r.noiDung:''}</option>`).join('') : ''}
+              </select>
+            </div>
+
+            <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0 0 8px 0; padding:13px 15px; font-size: var(--font-size-search-input);">
+
+            <div id="salesCustomerResultContainer">
+             <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>
+            </div>
+
+            <small id="customerSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px;">
+              Vui lòng nhập mã khách hàng tối đa 30 ký tự hoặc chọn tuyến...
+            </small>
+          ` : `
+            <div style="background: rgba(37, 99, 235, 0.08); padding: 12px 14px; border-radius: 12px; color: var(--text-main); display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(37, 99, 235, 0.25);">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span style="font-size: var(--font-size-sub-meta); font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px;">${activeVisitedStore.code||'KH'}</span>
+                  ${!editingOrderId ? `<button class="btn btn-amber btn-sm" style="padding:4px 8px; font-size:11px;" onclick="resetSelectedStore()"><i class="fa-solid fa-rotate"></i> Đổi Khách</button>` : ''}
+                  ${editingOrderId ? '<span style="font-size:var(--font-size-sub-meta); font-weight:800; color:var(--amber);">(Đang Sửa Đơn)</span>' : ''}
+                </div>
+                <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
+                  ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? `
+                    <button class="btn btn-green btn-sm" onclick="openNativeNavigator(${Number(activeVisitedStore.lat)}, ${Number(activeVisitedStore.lng)})" style="font-weight:700; padding:6px 10px; font-size:12px;"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
+                  ` : ''}
+                  <button class="btn btn-amber btn-sm" onclick="checkinActiveStoreGPS()" style="font-weight:700; padding:6px 10px; font-size:12px; white-space:nowrap;">
+                    <i class="fa-solid fa-location-crosshairs"></i> ${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Lưu GPS'}
+                  </button>
+                </div>
+              </div>
+              <div style="font-size: calc(var(--font-size-customer-name) * 1.5); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${activeVisitedStore.name}">
+                ${activeVisitedStore.name}
+              </div>
+             <div style="font-size: 12px; color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap;">
+  <span style="word-break:break-word;"><i class="fa-solid fa-location-dot" style="color:var(--emerald);"></i> ${activeVisitedStore.address||'Chưa có địa chỉ'}</span>
+  <span>• GPS: <b style="color:${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'var(--emerald)' : 'var(--amber)'};">${activeVisitedStore.lat && Number(activeVisitedStore.lat) !== 0 ? 'Đã ghim' : 'Chưa'}</b></span>
+</div>
+            </div>
+          `}
+        </div>
+
+        ${activeVisitedStore ? `
+          <div class="card" style="border:1px solid var(--primary); margin-bottom: 100px;">
+            <div style="display:flex; align-items:center; margin-bottom: 8px; gap: 6px; width: 100%; flex-wrap: wrap;">
+              <button class="btn btn-blue btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openCurrentCustomerOrderModal()"><i class="fa-solid fa-list-check"></i> Xem Đơn</button>
+              <button class="btn btn-purple btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openCurrentCartModal()"><i class="fa-solid fa-cart-shopping"></i> Giỏ Hàng</button>
+              <button class="btn btn-amber btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px;" onclick="openAddProductModal()"><i class="fa-solid fa-plus"></i> Thêm SP</button>
+              
+              <button class="btn btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px; background: #DB2777; color: #fff;" onclick="openCompanyListModal()">
+                <i class="fa-solid fa-building"></i> DS Cty
+              </button>
+
+              <button class="btn btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px; background: #0D9488; color: #fff;" onclick="openCustomerHistoryModal()">
+                <i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử
+              </button>
+            </div>
+
+            <div style="background: rgba(59, 130, 246, 0.15); border: 2px solid rgba(59, 130, 246, 0.5); border-radius: 14px; padding: 12px; margin-bottom: 10px; position: relative;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 14px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                  <i class="fa-solid fa-thumbtack"></i> GHIM MÃ CÔNG TY:
+                </label>
+                <div id="pinnedCompanyBadge"></div>
+              </div>
+              <div style="display: flex; gap: 8px; position: relative; align-items: center;">
+<input type="text" id="pinnedCompanyInput" maxlength="10" placeholder="Gõ 2 ký tự mã hoặc tên cty..." oninput="onPinnedCompanyChanged(this.value)" onfocus="onPinnedCompanyFocused()" autocomplete="off" style="margin:0; padding:10px 12px; font-size:13px; font-weight:700; flex:1;">
+              <div id="inlineCompanyDropdown" class="hidden" style="position: absolute; top: 100%; left: 0; width: 100%; max-height: 200px; overflow-y: auto; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; z-index: 99; box-shadow: 0 10px 25px rgba(0,0,0,0.15); margin-top: 4px;"></div>
+            </div>
+            ${pinnedCompanyPrefix ? `
+              <button class="btn btn-sm" style="background:var(--rose); color:#fff; font-weight:800; width:100%; justify-content:center; margin-top:8px;" onclick="clearPinnedCompany()">
+                <i class="fa-solid fa-xmark"></i> Bỏ ghim cty (Hiển thị tất cả)
+              </button>
+            ` : ''}
+          </div>
+
+          <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+            <div style="position:relative; flex:1;">
+              <input type="text" id="productSearchInput" placeholder="Gõ mã/tên vật tư tìm kiếm..." oninput="debounceFilterSalesProducts(this.value)" value="${productSearchKeyword}" autocomplete="off" style="margin:0; padding:12px 14px 12px 38px; font-size:var(--font-size-search-input);">
+              <i class="fa-solid fa-magnifying-glass" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:14px;"></i>
+            </div>
+            ${productSearchKeyword ? `
+              <button class="btn btn-sm btn-red" style="padding:10px 12px;" onclick="clearProductSearchBox()"><i class="fa-solid fa-xmark"></i> Xóa</button>
+            ` : ''}
+          </div>
+
+          <div id="mobileProductListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+          <small id="productSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:6px; text-align:center;"></small>
+        </div>
+
+        <div id="dynamicCartFooter" class="sticky-cart-footer">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="stickyCartSkuCount" style="font-weight:800; color:var(--primary); font-size:14px;">Đã chọn: ${selectedSkuCount} mã hàng</span>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-amber" style="padding:10px 14px; font-weight:800; font-size:13px;" onclick="openAddProductModalSelectedTab()">
+              <i class="fa-solid fa-box-archive"></i> Xem giỏ
+            </button>
+            <button class="btn btn-green" style="padding:10px 18px; font-weight:800; font-size:13px; box-shadow:0 4px 15px rgba(5,150,105,0.3);" onclick="submitOrder()">
+              <i class="fa-solid fa-paper-plane"></i> GỬI ĐƠN
+            </button>
+          </div>
+        </div>
+
+        <div id="floatingCartTrigger" class="floating-cart-trigger" onclick="scrollToCartFooter()">
+          <i class="fa-solid fa-cart-shopping"></i> Giỏ hàng: <span id="floatTriggerCount">${selectedSkuCount}</span> mã
+        </div>
+      ` : ''}
+    `;
+
+    if (tab === 'sales') {
+      filterSalesProducts();
+      if (!activeVisitedStore) {
+        filterSalesCustomers();
+      }
+    }
+  } else if (tab === 'customers') {
+    container.innerHTML = `
+      <div class="tab-header-actions">
+        <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Danh Sách Khách Hàng</h3>
+        <div class="excel-group-btns">
+          ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
+            <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải KH<input type="file" accept=".xlsx, .xls" style="display:none;" onchange="importCustomersExcel(event)"></label>
+          ` : ''}
+          <button class="btn btn-blue btn-sm" onclick="refreshStoresGPSData()"><i class="fa-solid fa-rotate"></i> Làm mới GPS</button>
+          <button id="togglePinnedGPSBtn" class="btn btn-sm" style="background:#E2E8F0; color:#1E293B; font-weight:800;" onclick="togglePinnedGPSFilter()"><i class="fa-solid fa-map-location-dot"></i> Xem KH ghim GPS</button>
         </div>
       </div>
+      <div style="margin-bottom:10px;">
+        <input type="text" id="tabCustomerSearchInput" placeholder="🔍 Gõ mã khách hàng để tìm kiếm..." oninput="filterTabCustomers(this.value)" value="${tabCustomerSearchKey}" autocomplete="off" style="margin:0; padding:12px 14px; font-size:var(--font-size-search-input);">
+      </div>
+      <div id="tabCustomerCardContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <small id="tabCustSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:8px; text-align:center;"></small>
     `;
-    modalContainer.classList.remove('hidden');
-  };
+    filterTabCustomers(tabCustomerSearchKey);
+  } else if (tab === 'soGocBH') {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const fromVal = soGocFilterDateFrom || todayStr;
+    const toVal = soGocFilterDateTo || todayStr;
 
-  window.closeCreateUserModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-      modalContainer.innerHTML = '';
-      modalContainer.classList.add('hidden');
-    }
-  };
+    container.innerHTML = `
+      <div class="tab-header-actions" style="flex-direction:column; align-items:flex-start;">
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center; flex-wrap:wrap; gap:8px;">
+          <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-book" style="color:var(--emerald);"></i> Sổ Gốc Bán Hàng (${orders.length})</h3>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-amber btn-sm" onclick="reloadSoGocDataManually()"><i class="fa-solid fa-rotate"></i> Tải lại</button>
+            <button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+              <button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash"></i> Xóa theo ngày</button>
+            ` : ''}
+          </div>
+        </div>
+        
+        <div style="display:flex; gap:6px; flex-wrap:wrap; width:100%; margin-top:6px; align-items:center;">
+          <button id="quickDateBtn_today" class="btn btn-sm ${soGocQuickDate==='today'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('today')">Hôm nay</button>
+          <button id="quickDateBtn_week" class="btn btn-sm ${soGocQuickDate==='week'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('week')">Tuần này</button>
+          <button id="quickDateBtn_month" class="btn btn-sm ${soGocQuickDate==='month'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('month')">Tháng này</button>
+          <button id="quickDateBtn_all" class="btn btn-sm ${soGocQuickDate==='all'?'btn-amber':''}" onclick="setSoGocQuickDateFilter('all')">Tất cả</button>
+        </div>
 
-  window.submitCreateUser = async function(e) {
-    e.preventDefault();
-    const code = document.getElementById('newCodeInput').value.trim();
-    const name = document.getElementById('newNameInput').value.trim();
-    const email = document.getElementById('newEmailInput').value.trim().toLowerCase();
-    const pass = document.getElementById('newPassInput').value.trim();
-    const role = document.getElementById('newRoleSelect').value;
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; width:100%; margin-top:6px;">
+          <div>
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Từ ngày:</label>
+            <input type="date" id="soGocDateFrom" value="${fromVal}" onchange="setSoGocDateFrom(this.value)" style="margin:0; padding:6px; font-size:12px;">
+          </div>
+          <div>
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">Đến ngày:</label>
+            <input type="date" id="soGocDateTo" value="${toVal}" onchange="setSoGocDateTo(this.value)" style="margin:0; padding:6px; font-size:12px;">
+          </div>
+        </div>
+      </div>
 
-    try {
-      const userCred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
-      const newUid = userCred.user.uid;
+      <div style="display:flex; gap:6px; margin-bottom:10px;">
+        <input type="text" placeholder="🔍 Tìm kiếm số CTu, mã tiệm, tên NV..." oninput="filterSoGocCards(this.value)" value="${soGocFilterKeyword}" style="margin:0; padding:10px; font-size:13px; flex:1;">
+        ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+          <select onchange="setSoGocSalesFilter(this.value)" style="margin:0; padding:8px; font-size:12px; width:140px;">
+            <option value="">-- Tất cả NV --</option>
+            ${users.map(u => `<option value="${u.code}" ${soGocSalesFilter===u.code?'selected':''}>${u.code} - ${u.name}</option>`).join('')}
+          </select>
+        ` : ''}
+      </div>
 
-      const userPayload = {
-        code, name, email, role, active: true, createdAt: serverTimestamp()
-      };
+      <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
+        ${orders.map(o => {
+          let inferredMaDTPN = o.maDTPNNo || '';
+          if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
+            inferredMaDTPN = o.maKH.split(' - ')[0].trim();
+          }
+          const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
+          return `
+            <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu || ''}" data-ma-dtpn="${removeAccents(inferredMaDTPN)}" data-ma-nv="${o.salesCode || ''}" data-ten-nv="${removeAccents(o.salesName || '')}" data-ngay-ctu="${o.ngayCtu || ''}" style="margin-bottom:8px; display:flex; flex-direction:column; gap:6px; padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:6px; font-size:12px; font-weight:800;">CTu #${o.soCtu || 1}</span>
+                <span style="font-size:11.5px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+              </div>
+              <div style="font-size:13px; font-weight:800; color:var(--text-main);">
+                🛒 Tiệm: <b style="color:var(--primary);">${o.maKH || '—'}</b>
+              </div>
+              <div style="font-size:11.5px; color:var(--text-muted);">
+                👤 NV bán: <b style="color:#2563EB;">[${o.salesCode || ''}] ${o.salesName || ''}</b> (${validItems.length} mã hàng)
+              </div>
+              <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:4px; flex-wrap:wrap;">
+                <button class="btn btn-blue btn-sm" style="padding:6px 10px; font-size:11.5px;" onclick="openOrderDetailsModal('${o.id}')"><i class="fa-solid fa-eye"></i> Xem</button>
+                <button class="btn btn-amber btn-sm" style="padding:6px 10px; font-size:11.5px;" onclick="editOrder('${o.id}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                <button class="btn btn-red btn-sm" style="padding:6px 10px; font-size:11.5px;" onclick="deleteSingleOrder('${o.id}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
 
-      await setDoc(doc(db, "users", newUid), userPayload);
-      await signOut(secondaryAuth);
+      ${hasMoreOrders ? `
+        <button id="loadMoreSoGocBtn" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800; margin-top:12px;" onclick="loadMoreSoGoc()">
+          TẢI THÊM ĐƠN HÀNG CŨ HƠN...
+        </button>
+      ` : ''}
 
-      users.push({ id: newUid, ...userPayload });
-      alert("✅ Tạo tài khoản nhân viên mới thành công!");
-      closeCreateUserModal();
-      renderUI();
-    } catch (err) {
-      alert("Lỗi tạo tài khoản: " + err.message);
-    }
-  };
-
-  window.toggleUserActiveStatus = async function(userId, currentActiveStatus) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
-    const nextStatus = !currentActiveStatus;
-
-    try {
-      await updateDoc(doc(db, "users", userId), { active: nextStatus });
-      const uObj = users.find(u => u.id === userId);
-      if (uObj) uObj.active = nextStatus;
-      renderUI();
-      alert("✅ Đã cập nhật trạng thái tài khoản thành công!");
-    } catch (err) {
-      alert("Lỗi: " + err.message);
-    }
-  };
-
-  function attachListeners() {
-    onSnapshot(collection(db, "orders"), (snapshot) => {
-      let remoteOrders = [];
-      snapshot.forEach(docSnap => {
-        remoteOrders.push({ id: docSnap.id, ...docSnap.data() });
-      });
-
-      remoteOrders.sort((a, b) => {
-        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.ngayCtu || 0).getTime();
-        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.ngayCtu || 0).getTime();
-        return timeB - timeA;
-      });
-
-      orders = remoteOrders;
-
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane && currentTab === 'soGocBH') {
-        renderTabContent('soGocBH', activePane);
-      }
-    });
-
-    onSnapshot(collection(db, "users"), (snapshot) => {
-      let uList = [];
-      snapshot.forEach(d => uList.push({ id: d.id, ...d.data() }));
-      users = uList;
-      if (currentTab === 'users') {
-        const pane = document.getElementById('tabPane_users');
-        if (pane) renderTabContent('users', pane);
-      }
-    });
+      <div style="display:none;">
+        <table id="soGocExportTable">
+          <thead>
+            <tr>
+              <th>Số CTu</th>
+              <th>Ngày CTu</th>
+              <th>Mã KH</th>
+              <th>Tên Khách Hàng</th>
+              <th>Mã Nhân Viên</th>
+              <th>Tên Nhân Viên</th>
+              <th>Mã Vật Tư</th>
+              <th>Tên Vật Tư</th>
+              <th>ĐVT</th>
+              <th>Số Lượng</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orders.map(o => {
+              let rowsHtml = '';
+              const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
+              validItems.forEach(item => {
+                rowsHtml += `
+                  <tr>
+                    <td>${o.soCtu || ''}</td>
+                    <td>${o.ngayCtu || ''}</td>
+                    <td>${o.maDTPNNo || ''}</td>
+                    <td>${o.maKH || ''}</td>
+                    <td>${o.salesCode || ''}</td>
+                    <td>${o.salesName || ''}</td>
+                    <td>${item.code || ''}</td>
+                    <td>${item.name || ''}</td>
+                    <td>${item.dvt || ''}</td>
+                    <td>${item.qty || 0}</td>
+                  </tr>
+                `;
+              });
+              return rowsHtml;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    soGocFilterDateFrom = fromVal;
+    soGocFilterDateTo = toVal;
+    filterSoGocCards();
+  } else if (tab === 'productsAdmin') {
+    container.innerHTML = `
+      <div class="tab-header-actions">
+        <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-boxes-stacked" style="color:var(--primary);"></i> Quản Lý Vật Tư (${products.length})</h3>
+        <div class="excel-group-btns">
+          ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
+            <button class="btn btn-green btn-sm" onclick="exportProductsExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải VT<input type="file" accept=".xlsx, .xls" style="display:none;" onchange="importProductsExcel(event)"></label>
+          ` : ''}
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <input type="text" placeholder="🔍 Gõ mã hoặc tên vật tư để tìm kiếm..." oninput="filterTabProducts(this.value)" value="${tabProductSearchKey}" autocomplete="off" style="margin:0; padding:12px 14px; font-size:var(--font-size-search-input);">
+      </div>
+      <div id="productCardsContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <small id="tabPrdSearchHint" style="color:var(--text-muted); font-weight:700; display:block; margin-top:8px; text-align:center;"></small>
+    `;
+    filterTabProducts(tabProductSearchKey);
+  } else if (tab === 'routes') {
+    container.innerHTML = `
+      <div class="tab-header-actions">
+        <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-route" style="color:var(--purple);"></i> Quản Lý Tuyến Bán Hàng (${routeGroupsList.length})</h3>
+        <div class="excel-group-btns">
+          ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
+            <button class="btn btn-green btn-sm" onclick="exportRoutesExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Tuyến<input type="file" accept=".xlsx, .xls" style="display:none;" onchange="importRoutesExcel(event)"></label>
+            <button class="btn btn-purple btn-sm" onclick="addNewRoute()"><i class="fa-solid fa-plus"></i> Thêm tuyến</button>
+          ` : ''}
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <input type="text" placeholder="🔍 Tìm kiếm theo nhóm tuyến hoặc nội dung..." oninput="filterRouteTable(this.value)" style="margin:0; padding:10px; font-size:13px;">
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${routeGroupsList.map((r, index) => `
+          <div class="mobile-item-card route-card-item" style="display:flex; flex-direction:column; gap:6px; padding:12px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span style="font-size:11.5px; font-weight:800; color:var(--text-muted);">Nhóm:</span>
+              <input type="text" value="${r.nhomDoiTuong || ''}" onchange="updateRouteField(${index}, 'nhomDoiTuong', this.value)" style="margin:0; padding:6px; font-size:13px; font-weight:800; width:90px;" ${currentUser.role === 'sales' || currentUser.role === 'viewer' ? 'readonly' : ''}>
+            </div>
+            <div>
+              <input type="text" value="${r.noiDung || ''}" onchange="updateRouteField(${index}, 'noiDung', this.value)" placeholder="Nội dung tuyến..." style="margin:0; padding:8px; font-size:13px; font-weight:700;" ${currentUser.role === 'sales' || currentUser.role === 'viewer' ? 'readonly' : ''}>
+            </div>
+            ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+              <div style="display:flex; justify-content:flex-end;">
+                <button class="btn btn-red btn-sm" style="padding:4px 10px;" onclick="deleteRouteItem(${index})"><i class="fa-solid fa-trash"></i> Xóa</button>
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else if (tab === 'company') {
+    container.innerHTML = `
+      <div class="tab-header-actions">
+        <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Quản Lý Công Ty & ĐVT (${companyList.length})</h3>
+        <div class="excel-group-btns">
+          ${currentUser.role !== 'sales' && currentUser.role !== 'viewer' ? `
+            <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+            <label class="btn btn-amber btn-sm" style="cursor:pointer; margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Cty<input type="file" accept=".xlsx, .xls" style="display:none;" onchange="importCompanyExcel(event)"></label>
+            <button class="btn btn-amber btn-sm" style="background:#DB2777; color:#fff;" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm cty</button>
+          ` : ''}
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <input type="text" placeholder="🔍 Tìm kiếm mã hoặc tên công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:10px; font-size:13px;">
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${companyList.map((c, index) => {
+          const isClosed = c.status === 'Đóng';
+          return `
+            <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid ${isClosed ? 'var(--rose)' : 'var(--card-border)'};">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <input type="text" value="${c.maCtu || ''}" onchange="updateCompanyField(${index}, 'maCtu', this.value)" style="margin:0; padding:6px; font-size:13px; font-weight:800; width:90px;" ${currentUser.role === 'sales' || currentUser.role === 'viewer' ? 'readonly' : ''}>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn btn-sm" style="background:${isClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff;" onclick="toggleCompanyStatus(${index})">${isClosed ? 'Công ty ĐÓNG' : 'Công ty MỞ'}</button>
+                  ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+                    <button class="btn btn-red btn-sm" style="padding:4px 8px;" onclick="deleteCompanyItem(${index})"><i class="fa-solid fa-trash"></i></button>
+                  ` : ''}
+                </div>
+              </div>
+              <div>
+                <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${index}, 'tenCtu', this.value)" placeholder="Tên công ty..." style="margin:0; padding:8px; font-size:13.5px; font-weight:700;" ${currentUser.role === 'sales' || currentUser.role === 'viewer' ? 'readonly' : ''}>
+              </div>
+              <div style="background:var(--panel-bg); padding:8px; border-radius:8px; border:1px solid var(--card-border);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span style="font-size:12px; font-weight:800; color:var(--primary);">Trạng thái ĐVT theo Công ty:</span>
+                  ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+                    <button class="btn btn-amber btn-sm" style="padding:3px 8px; font-size:11px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>
+                  ` : ''}
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  ${Array.isArray(c.dvtDetails) && c.dvtDetails.length > 0 ? c.dvtDetails.map((d, dIdx) => {
+                    const isDvtClosed = d.status === 'Đóng';
+                    return `
+                      <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
+                        <span style="font-size:11.5px; font-weight:700; color:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'};">${d.name} (${isDvtClosed ? 'Đóng' : 'Mở'})</span>
+                        <button class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:2px 6px; font-size:10px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${isDvtClosed ? 'Mở' : 'Khóa'}</button>
+                        ${currentUser.role === 'admin' || currentUser.role === 'manager' ? `
+                          <button class="btn btn-red btn-sm" style="padding:2px 5px; font-size:10px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>
+                        ` : ''}
+                      </div>
+                    `;
+                  }).join('') : '<span style="font-size:11.5px; color:var(--text-muted);">Chưa có thiết lập ĐVT riêng. (Mặc định mở)</span>'}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } else if (tab === 'users') {
+    container.innerHTML = `
+      <div class="tab-header-actions">
+        <h3 style="font-size:16px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h3>
+      </div>
+      <div class="card" style="margin-bottom:12px;">
+        <h4 style="font-size:13.5px; font-weight:800; color:var(--primary); margin-bottom:8px;"><i class="fa-solid fa-user-plus"></i> Tạo Tài Khoản Mới</h4>
+        <form id="userForm" onsubmit="addUser(event)">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+            <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)" required style="margin:0 0 6px 0; padding:10px; font-size:13px;">
+            <input type="text" id="usName" placeholder="Họ và tên" required style="margin:0 0 6px 0; padding:10px; font-size:13px;">
+          </div>
+          <input type="text" id="usUsername" placeholder="Tên đăng nhập hoặc Email" required style="margin:0 0 6px 0; padding:10px; font-size:13px;">
+          <input type="password" id="usPass" placeholder="Mật khẩu" required style="margin:0 0 6px 0; padding:10px; font-size:13px;">
+          <select id="usRole" required style="margin:0 0 8px 0; padding:10px; font-size:13px;">
+            <option value="sales">Sales (Nhân viên bán hàng)</option>
+            <option value="viewer">Viewer (Chỉ xem)</option>
+            <option value="manager">Manager (Quản lý)</option>
+            <option value="admin">Admin (Quản trị viên)</option>
+          </select>
+          <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800; font-size:13px;">TẠO TÀI KHOẢN</button>
+        </form>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${users.map(u => `
+          <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:800; color:var(--primary); font-size:13px;">[${u.code || ''}] ${u.name || ''}</span>
+              <span style="font-size:11px; padding:2px 6px; background:rgba(37,99,235,0.1); color:#2563EB; font-weight:800; border-radius:4px;">${u.role}</span>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted);">📧 Email: <b>${u.email || '—'}</b></div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button class="btn btn-sm" style="background:${u.active !== false ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; padding:6px 12px; font-weight:800;" onclick="toggleUserActive('${u.uid}', ${u.active === false ? 'true' : 'false'})">
+                ${u.active !== false ? '🔒 Khóa tài khoản' : '🔓 Mở khóa'}
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
   }
+}
 </script>
 </body>
 </html>
