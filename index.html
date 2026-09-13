@@ -3714,7 +3714,6 @@ window.openCustomerHistoryModal = async function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
-  // Hiển thị khung modal với trạng thái đang tải
   modalContainer.classList.remove('hidden');
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999; backdrop-filter: blur(4px);" onclick="if(event.target === this) closeCustomerHistoryModal()">
@@ -3723,26 +3722,32 @@ window.openCustomerHistoryModal = async function() {
           <h3 style="font-size:20px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Mua Hàng</h3>
           <button onclick="closeCustomerHistoryModal()" style="font-size:14px; padding:8px 16px; background: #ef4444; color: #fff; border:none; border-radius:10px; cursor:pointer; font-weight: 900;">Đóng</button>
         </div>
-        <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">Đang tải 10 đơn hàng gần nhất của khách...</div>
+        <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">Đang tải lịch sử mua hàng của khách...</div>
       </div>
     </div>
   `;
 
   try {
-    // Truy vấn trực tiếp Firestore theo storeId, sắp xếp theo ngày mới nhất và giới hạn đúng 10 đơn
+    // Truy vấn chỉ theo storeId để tránh bắt buộc phải tạo Composite Index phức tạp trên Firestore
     const q = query(
       collection(db, "orders"),
-      where("storeId", "==", storeIdStr),
-      orderBy("ngayCtu", "desc"),
-      limit(10)
+      where("storeId", "==", storeIdStr)
     );
     
     const snap = await getDocs(q);
-    const customerOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    let customerOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+    // Sắp xếp theo ngày mới nhất ngay tại client-side
+    customerOrders.sort((a, b) => {
+      const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.ngayCtu || 0).getTime();
+      const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.ngayCtu || 0).getTime();
+      return timeB - timeA;
+    });
+
+    // Cắt lấy đúng 10 đơn hàng gần nhất
+    customerOrders = customerOrders.slice(0, 10);
     window._currentCustomerOrders = customerOrders;
 
-    // Tổng hợp top vật tư từ 10 đơn hàng này
     let productFrequencyMap = new Map();
     customerOrders.forEach((o) => {
       if (Array.isArray(o.items)) {
@@ -3769,7 +3774,6 @@ window.openCustomerHistoryModal = async function() {
 
     window._tempHistoryProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
 
-    // Cập nhật lại nội dung modal sau khi lấy được dữ liệu
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex; z-index:999999; backdrop-filter: blur(4px);" onclick="if(event.target === this) closeCustomerHistoryModal()">
         <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 620px; width: 96%; margin: auto; border-radius: 18px; padding: 20px; max-height: 92vh; border: 2.5px solid var(--card-border); box-shadow: 0 16px 40px rgba(0,0,0,0.7);">
