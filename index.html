@@ -3047,16 +3047,13 @@ window.reloadSoGocDataManually = async function() {
   try {
     let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
     if (currentUser && currentUser.role === 'sales') {
-      q = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), orderBy("soCtu", "desc"), limit(30));
+      q = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), limit(50));
     }
     const snap = await getDocs(q);
     orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (!snap.empty) {
-        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 30;
-      } else {
-        hasMoreOrders = false;
-      }
+    if (currentUser && currentUser.role === 'sales') {
+      orders.sort((a, b) => (Number(b.soCtu) || 0) - (Number(a.soCtu) || 0));
+    }
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -4694,25 +4691,18 @@ window.closeCustomerHistoryModal = function() {
   };
 
   function attachListeners() {
-    let ordersQuery = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
+let ordersQuery = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30));
 if (currentUser && currentUser.role === 'sales') {
-  ordersQuery = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), orderBy("soCtu", "desc"), limit(30));
+  // Bỏ orderBy để tránh lỗi thiếu Index, lọc thuần theo salesCode
+  ordersQuery = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), limit(50));
 }
 
 getDocs(ordersQuery).then(snap => {
   orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (!snap.empty) {
-        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 30;
-      } else {
-        hasMoreOrders = false;
-      }
-
-      if (currentTab === 'soGocBH' || currentTab === 'sales') {
-        const activePane = document.getElementById(`tabPane_${currentTab}`);
-        if (activePane) renderTabContent(currentTab, activePane);
-      }
-    }).catch(e => {});
+  // Sắp xếp lại thứ tự giảm dần theo soCtu ngay trên client
+  if (currentUser && currentUser.role === 'sales') {
+    orders.sort((a, b) => (Number(b.soCtu) || 0) - (Number(a.soCtu) || 0));
+  }
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
