@@ -3355,30 +3355,22 @@ window.filterTabProducts = function(val) {
     modalContainer.classList.remove('hidden');
   };
 
-  window.closeCurrentCustomerOrderModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-      modalContainer.innerHTML = '';
-      modalContainer.classList.add('hidden');
-    }
-  };
-
-  // --- TÍNH NĂNG LỊCH SỬ CHĂM SÓC KHÁCH HÀNG CHUYÊN NGHIỆP ---
-  window.openCustomerHistoryModal = function() {
+ window.openCustomerHistoryModal = function() {
   if (!activeVisitedStore) {
     return alert("⚠️ Vui lòng chọn khách hàng trước khi xem lịch sử chăm sóc!");
   }
 
-  const storeIdStr = String(activeVisitedStore.id);
+  const storeIdStr = String(activeVisitedStore.id || '').trim();
   const storeCodeStr = String(activeVisitedStore.code || '').trim().toUpperCase();
 
-  // Lọc toàn bộ đơn hàng của khách hàng này
-  const customerOrders = orders.filter(o => {
-    if (o.status === 'Đã hủy') return false;
-    const matchId = String(o.storeId || '') === storeIdStr;
-    let inferredCode = (o.maDTPNNo || '').trim().toUpperCase();
-    if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
-      inferredCode = o.maKH.split(' - ')[0].trim().toUpperCase();
+  // Lọc toàn bộ đơn hàng an toàn tuyệt đối không bị crash
+  const customerOrders = (orders || []).filter(o => {
+    if (!o || o.status === 'Đã hủy') return false;
+    const matchId = String(o.storeId || '').trim() === storeIdStr;
+    
+    let inferredCode = String(o.maDTPNNo || '').trim().toUpperCase();
+    if (!inferredCode && o.maKH && String(o.maKH).includes(' - ')) {
+      inferredCode = String(o.maKH).split(' - ')[0].trim().toUpperCase();
     }
     const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
     return matchId || matchCode;
@@ -3390,8 +3382,7 @@ window.filterTabProducts = function(val) {
     return timeB - timeA;
   });
 
-  // Tính toán các chỉ số cốt lõi (KPIs)
-  const totalOrdersCount = customerOrders.length;
+  let totalOrdersCount = customerOrders.length;
   let totalQtyAllTime = 0;
   let productFrequencyMap = new Map();
   let lastOrderDateStr = "Chưa có";
@@ -3400,7 +3391,7 @@ window.filterTabProducts = function(val) {
     lastOrderDateStr = formatDateDDMMYYYY(customerOrders[0].ngayCtu);
   }
 
-  customerOrders.forEach((o, idx) => {
+  customerOrders.forEach((o) => {
     if (Array.isArray(o.items)) {
       o.items.forEach(item => {
         const qty = Number(item.qty || 0);
@@ -3434,19 +3425,16 @@ window.filterTabProducts = function(val) {
     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeCustomerHistoryModal()">
       <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column;">
         
-        <!-- Header -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:10px;">
           <div>
             <h3 style="font-size:17px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-chart-line"></i> Dashboard Lịch Sử & Chăm Sóc KH</h3>
-            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">Tiệm: <b style="color:var(--text-main);">${activeVisitedStore.name}</b> (${activeVisitedStore.code || 'KH'})</p>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">Tiệm: <b style="color:var(--text-main);">${activeVisitedStore.name || ''}</b> (${activeVisitedStore.code || 'KH'})</p>
           </div>
           <button class="btn btn-red" onclick="closeCustomerHistoryModal()" style="font-size:13px; padding:6px 14px;">Đóng</button>
         </div>
 
-        <!-- Scrollable Content -->
         <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:12px; padding-right:4px;">
           
-          <!-- KHỐI 1: TỔNG QUAN CHỈ SỐ (KPIs) -->
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
             <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
               <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Tổng số đơn</div>
@@ -3462,7 +3450,6 @@ window.filterTabProducts = function(val) {
             </div>
           </div>
 
-          <!-- KHỐI 2: MA TRẬN SẢN PHẨM ƯA THÍCH (SMART RECOMMENDATION) -->
           <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
             <div style="font-size: 13.5px; font-weight: 800; color: var(--amber); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
               <i class="fa-solid fa-star"></i> Top Vật Tư Khách Thường Xuyên Nhập (${frequentProducts.length} mã):
@@ -3471,18 +3458,17 @@ window.filterTabProducts = function(val) {
               ${frequentProducts.length > 0 ? frequentProducts.map(fp => `
                 <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--card-border); font-size: 12.5px;">
                   <div>
-                    <b style="color: var(--primary);">[${fp.code}]</b> <span style="font-weight: 700; color: var(--text-main);">${fp.name}</span>
+                    <b style="color: var(--primary);">[${fp.code || ''}]</b> <span style="font-weight: 700; color: var(--text-main);">${fp.name || ''}</span>
                   </div>
                   <div style="text-align: right; white-space: nowrap;">
-                    <span style="color: var(--emerald); font-weight: 800;">${fp.totalQty} ${fp.dvt}</span>
-                    <span style="color: var(--text-muted); font-size: 11px; margin-left: 4px;">(${fp.buyCount} lần)</span>
+                    <span style="color: var(--emerald); font-weight: 800;">${fp.totalQty || 0} ${fp.dvt || ''}</span>
+                    <span style="color: var(--text-muted); font-size: 11px; margin-left: 4px;">(${fp.buyCount || 0} lần)</span>
                   </div>
                 </div>
               `).join('') : '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Chưa có dữ liệu thống kê sản phẩm thường mua.</div>'}
             </div>
           </div>
 
-          <!-- KHỐI 3: NHẬT KÝ CHỨNG TỪ & HÀNH ĐỘNG NHANH -->
           <div style="font-size: 13.5px; font-weight: 800; color: var(--text-main); display: flex; justify-content: space-between; align-items: center;">
             <span><i class="fa-solid fa-receipt"></i> Nhật Ký Các Đơn Đã Lập (${customerOrders.length}):</span>
           </div>
@@ -3503,8 +3489,8 @@ window.filterTabProducts = function(val) {
               <div style="display: flex; flex-direction: column; gap: 4px; background: var(--panel-bg); padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);">
                 ${(o.items || []).filter(i => Number(i.qty || 0) > 0).map(i => `
                   <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-main);">
-                    <span><b>[${i.code}]</b> ${i.name}</span>
-                    <span style="font-weight: 800; color: var(--emerald);">${i.qty} ${i.dvt}</span>
+                    <span><b>[${i.code || ''}]</b> ${i.name || ''}</span>
+                    <span style="font-weight: 800; color: var(--emerald);">${i.qty || 0} ${i.dvt || ''}</span>
                   </div>
                 `).join('')}
               </div>
