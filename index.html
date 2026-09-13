@@ -1162,7 +1162,7 @@
     if (lastCleanup === todayStr) return;
 
     try {
-      const pastDate = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000));
+      const pastDate = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000));
       const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
       const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(50));
@@ -3700,82 +3700,103 @@ function formatOrderDate(dateInput) {
   return String(dateInput);
 }
 
-window.openCustomerHistoryModal = function() {
+window.openCustomerHistoryModal = async function() {
   let currentStore = (typeof activeVisitedStore !== 'undefined' && activeVisitedStore) ? activeVisitedStore : window.activeVisitedStore;
   if (!currentStore) {
-    currentStore = { name: "DO THI PHUONG LAN", code: "20*P.LAN" };
+    return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
   window._currentHistoryStore = currentStore;
   window._historyShowAllTop = false;
   window._historyOpenOrderId = null;
 
-  const targetName = String(currentStore.name || "DO THI PHUONG LAN").trim().toUpperCase();
-  const targetCode = String(currentStore.code || "20*P.LAN").trim().toUpperCase();
-
-  const allOrders = (typeof orders !== 'undefined' && Array.isArray(orders)) ? orders : (window.orders || []);
-
-  const customerOrders = allOrders.filter(o => {
-    if (!o || o.status === 'Đã hủy') return false;
-    const orderString = JSON.stringify(o).toUpperCase();
-    return (targetCode && orderString.includes(targetCode)) || (targetName && orderString.includes(targetName));
-  });
-
-  customerOrders.sort((a, b) => {
-    const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.ngayCtu || 0).getTime();
-    const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.ngayCtu || 0).getTime();
-    return timeB - timeA;
-  });
-  window._currentCustomerOrders = customerOrders;
-
-  let productFrequencyMap = new Map();
-  customerOrders.forEach((o) => {
-    if (Array.isArray(o.items)) {
-      o.items.forEach(item => {
-        const qty = Number(item.qty || 0);
-        if (qty > 0) {
-          const key = item.code || item.id || item.name;
-          if (!productFrequencyMap.has(key)) {
-            productFrequencyMap.set(key, { 
-              name: item.name, 
-              code: item.code, 
-              dvt: item.dvt, 
-              totalQty: 0, 
-              buyCount: 0 
-            });
-          }
-          let entry = productFrequencyMap.get(key);
-          entry.totalQty += qty;
-          entry.buyCount += 1;
-        }
-      });
-    }
-  });
-
-  window._tempHistoryProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
+  const storeIdStr = String(currentStore.id || currentStore.code);
 
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
+  // Hiển thị khung modal với trạng thái đang tải
   modalContainer.classList.remove('hidden');
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999; backdrop-filter: blur(4px);" onclick="if(event.target === this) closeCustomerHistoryModal()">
-      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 620px; width: 96%; margin: auto; border-radius: 18px; padding: 20px; max-height: 92vh; border: 2.5px solid var(--card-border); box-shadow: 0 16px 40px rgba(0,0,0,0.7);">
-        
+      <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 620px; width: 96%; margin: auto; border-radius: 18px; padding: 20px; max-height: 92vh; border: 2.5px solid var(--card-border);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2.5px solid var(--card-border); padding-bottom:14px;">
-          <div>
-            <h3 style="font-size:24px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Mua Hàng</h3>
-            <p style="font-size:16px; color:var(--text-main); font-weight:900; margin:6px 0 0 0;">Tiệm: <span style="color:var(--primary);">${currentStore.name}</span></p>
-          </div>
-          <button onclick="closeCustomerHistoryModal()" style="font-size:16px; padding:10px 22px; background: #ef4444; color: #fff; border:none; border-radius:10px; cursor:pointer; font-weight: 900;">Đóng</button>
+          <h3 style="font-size:20px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Mua Hàng</h3>
+          <button onclick="closeCustomerHistoryModal()" style="font-size:14px; padding:8px 16px; background: #ef4444; color: #fff; border:none; border-radius:10px; cursor:pointer; font-weight: 900;">Đóng</button>
         </div>
-
-        <div id="historyModalBodyContent" style="overflow-y:auto; flex:1; padding-right:2px;">
-          ${window.getHistoryModalHTML(currentStore)}
-        </div>
-
+        <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">Đang tải 10 đơn hàng gần nhất của khách...</div>
       </div>
     </div>
   `;
+
+  try {
+    // Truy vấn trực tiếp Firestore theo storeId, sắp xếp theo ngày mới nhất và giới hạn đúng 10 đơn
+    const q = query(
+      collection(db, "orders"),
+      where("storeId", "==", storeIdStr),
+      orderBy("ngayCtu", "desc"),
+      limit(10)
+    );
+    
+    const snap = await getDocs(q);
+    const customerOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    window._currentCustomerOrders = customerOrders;
+
+    // Tổng hợp top vật tư từ 10 đơn hàng này
+    let productFrequencyMap = new Map();
+    customerOrders.forEach((o) => {
+      if (Array.isArray(o.items)) {
+        o.items.forEach(item => {
+          const qty = Number(item.qty || 0);
+          if (qty > 0) {
+            const key = item.code || item.id || item.name;
+            if (!productFrequencyMap.has(key)) {
+              productFrequencyMap.set(key, { 
+                name: item.name, 
+                code: item.code, 
+                dvt: item.dvt, 
+                totalQty: 0, 
+                buyCount: 0 
+              });
+            }
+            let entry = productFrequencyMap.get(key);
+            entry.totalQty += qty;
+            entry.buyCount += 1;
+          }
+        });
+      }
+    });
+
+    window._tempHistoryProducts = Array.from(productFrequencyMap.values()).sort((a, b) => b.totalQty - a.totalQty);
+
+    // Cập nhật lại nội dung modal sau khi lấy được dữ liệu
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex; z-index:999999; backdrop-filter: blur(4px);" onclick="if(event.target === this) closeCustomerHistoryModal()">
+        <div class="modal-content fullscreen-modal" style="background: var(--panel-bg); display: flex; flex-direction: column; max-width: 620px; width: 96%; margin: auto; border-radius: 18px; padding: 20px; max-height: 92vh; border: 2.5px solid var(--card-border); box-shadow: 0 16px 40px rgba(0,0,0,0.7);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2.5px solid var(--card-border); padding-bottom:14px;">
+            <div>
+              <h3 style="font-size:22px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Mua Hàng</h3>
+              <p style="font-size:15px; color:var(--text-main); font-weight:900; margin:6px 0 0 0;">Tiệm: <span style="color:var(--primary);">${currentStore.name}</span> (10 đơn gần nhất)</p>
+            </div>
+            <button onclick="closeCustomerHistoryModal()" style="font-size:16px; padding:10px 22px; background: #ef4444; color: #fff; border:none; border-radius:10px; cursor:pointer; font-weight: 900;">Đóng</button>
+          </div>
+          <div id="historyModalBodyContent" style="overflow-y:auto; flex:1; padding-right:2px;">
+            ${window.getHistoryModalHTML(currentStore)}
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeCustomerHistoryModal()">
+        <div class="modal-content" style="text-align:center; padding:30px;">
+          <h3 style="color:var(--rose); margin-bottom:10px;">Lỗi tải lịch sử</h3>
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:15px;">${err.message}</p>
+          <button onclick="closeCustomerHistoryModal()" class="btn btn-red">Đóng</button>
+        </div>
+      </div>
+    `;
+  }
 };
 
 window.closeCustomerHistoryModal = function() {
