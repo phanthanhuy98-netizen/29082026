@@ -3364,12 +3364,13 @@ window.addProductToHistoryCart = function(index) {
   const product = window._tempHistoryProducts[index];
   if (!product) return;
 
-  const inputQty = prompt(`Nhập số lượng cho [${product.code}] ${product.name}:`, "1");
+  const inputQty = prompt(`Nhập số lượng nguyên cho [${product.code}] ${product.name} (ĐVT: ${product.dvt || 'Cây/Thùng'}):`, "1");
   if (inputQty === null) return;
   
-  const qtyNum = Number(inputQty);
+  const qtyNum = parseInt(inputQty, 10);
+  
   if (isNaN(qtyNum) || qtyNum <= 0) {
-    return alert("⚠️ Số lượng phải lớn hơn 0!");
+    return alert("⚠️ Số lượng phải là số nguyên lớn hơn 0!");
   }
 
   let existing = window._tempCartFromHistory.find(i => i.code === product.code);
@@ -3380,7 +3381,7 @@ window.addProductToHistoryCart = function(index) {
       code: product.code,
       name: product.name,
       dvt: product.dvt,
-      price: product.price || 0,
+      price: product.price || product.donGia || 0,
       qty: qtyNum
     });
   }
@@ -3402,39 +3403,33 @@ window.confirmAndApplyHistoryCart = function() {
     return alert("⚠️ Bạn chưa chọn sản phẩm nào trong phiên này!");
   }
 
-  // Đẩy từng sản phẩm ra màn hình bán hàng chính bằng cách mô phỏng hành động gọi hàm gốc của app
-  window._tempCartFromHistory.forEach(item => {
-    let added = false;
-    
-    // 1. Thử gọi hàm addToCart chuẩn của ứng dụng nếu tồn tại
-    if (typeof window.addToCart === 'function') {
-      window.addToCart(item.code, item.qty, item);
-      added = true;
-    } 
-    
-    // 2. Nếu không có hàm trực tiếp, thử tìm ô input tìm kiếm/nhập liệu ngoài màn hình chính để bơm mã vào
-    if (!added) {
-      const searchInputs = document.querySelectorAll('input[placeholder*="vật tư"], input[placeholder*="Mã"], input[placeholder*="tìm kiếm"]');
-      for (let input of searchInputs) {
-        input.value = item.code;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        added = true;
-        break;
-      }
-    }
+  if (!window.cart || !Array.isArray(window.cart)) window.cart = [];
 
-    // 3. Dự phòng lưu thẳng vào mảng giỏ hàng toàn cục phổ biến
-    if (!window.cart || !Array.isArray(window.cart)) window.cart = [];
-    let exist = window.cart.find(i => i.code === item.code);
+  window._tempCartFromHistory.forEach(item => {
+    let exist = window.cart.find(i => (i.code && i.code === item.code) || (i.id && i.id === item.code));
     if (exist) {
       exist.qty = Number(exist.qty || 0) + item.qty;
     } else {
-      window.cart.push(item);
+      window.cart.push({
+        id: item.code || Date.now().toString(),
+        code: item.code,
+        name: item.name,
+        dvt: item.dvt,
+        price: item.price,
+        donGia: item.price,
+        qty: item.qty
+      });
+    }
+
+    if (typeof window.addToCart === 'function') {
+      try {
+        window.addToCart(item.code, item.qty, item);
+      } catch (err) {
+        console.log("Bỏ qua lỗi gọi hàm phụ:", err);
+      }
     }
   });
 
-  // Kích hoạt các hàm render lại giao diện bán hàng bên ngoài
   try {
     if (typeof renderCart === 'function') renderCart();
     if (typeof updateCartCount === 'function') updateCartCount();
@@ -3442,14 +3437,14 @@ window.confirmAndApplyHistoryCart = function() {
     if (typeof renderSalesCart === 'function') renderSalesCart();
     if (typeof saveCartToStorage === 'function') saveCartToStorage();
   } catch (e) {
-    console.error(e);
+    console.error("Lỗi đồng bộ giao diện:", e);
   }
 
   const countAdded = window._tempCartFromHistory.length;
   window._tempCartFromHistory = [];
   window.closeCustomerHistoryModal();
   
-  alert(`🚀 Đã chuyển ${countAdded} mã hàng ra màn hình chính thành công! Sales có thể tiếp tục chọn thêm các mặt hàng mới.`);
+  alert(`🚀 Đã chuyển thành công ${countAdded} mã vật tư ra màn hình chính! Sales có thể tiếp tục thêm mặt hàng mới.`);
 };
 
 window.refreshHistoryModalUI = function() {
@@ -3472,10 +3467,10 @@ window.getHistoryModalHTML = function(currentStore) {
     selectedHtml = `<div style="text-align: center; color: var(--text-muted); font-size: 11.5px; padding: 4px;">Chưa chọn vật tư nào trong phiên này.</div>`;
   } else {
     selectedHtml = window._tempCartFromHistory.map(item => `
-      <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 5px 8px; border-radius: 6px; margin-bottom: 3px; border: 1px solid var(--card-border);">
+      <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; border: 1px solid var(--card-border);">
         <div style="font-size: 11.5px; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%;">
           <b style="color: var(--primary);">[${item.code}]</b> ${item.name} 
-          <span style="color: #10b981; font-weight: 800; margin-left: 4px;">(${item.qty} ${item.dvt})</span>
+          <span style="color: #10b981; font-weight: 800; margin-left: 4px;">(${item.qty} ${item.dvt || ''})</span>
         </div>
         <button onclick="removeTempCartItem('${item.code}')" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">Xóa</button>
       </div>
@@ -3485,7 +3480,6 @@ window.getHistoryModalHTML = function(currentStore) {
   return `
     <div style="display: flex; flex-direction: column; gap: 10px;">
       
-      <!-- KHU VỰC SẢN PHẨM ĐÃ CHỌN (GỌN GÀNG, DỄ NHÌN TRÊN MOBILE) -->
       <div style="background: rgba(16, 185, 129, 0.08); border: 1.5px solid #10b981; border-radius: 8px; padding: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
           <div style="font-size: 12px; font-weight: 800; color: #10b981;">
@@ -3495,12 +3489,11 @@ window.getHistoryModalHTML = function(currentStore) {
             Xong & Đưa Ra Ngoài ➔
           </button>
         </div>
-        <div style="max-height: 100px; overflow-y: auto;">
+        <div style="max-height: 110px; overflow-y: auto;">
           ${selectedHtml}
         </div>
       </div>
 
-      <!-- THỐNG KÊ NHỎ GỌN -->
       <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
         <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 6px; text-align: center;">
           <div style="font-size: 10px; color: var(--text-muted);">Tổng đơn</div>
@@ -3516,11 +3509,10 @@ window.getHistoryModalHTML = function(currentStore) {
         </div>
       </div>
 
-      <!-- TOP VẬT TƯ THƯỜNG NHẬP -->
       <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px;">
         <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-bottom: 6px; display: flex; justify-content: space-between;">
           <span>⭐ Top Vật Tư (${totalUniqueProducts} mã):</span>
-          <span style="font-size: 10px; color: var(--text-muted);">Chạm để chọn thêm</span>
+          <span style="font-size: 10px; color: var(--text-muted);">Chạm để nhập số lượng nguyên</span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto;">
           ${frequentProducts.length > 0 ? frequentProducts.map((fp, index) => `
@@ -3532,11 +3524,10 @@ window.getHistoryModalHTML = function(currentStore) {
         </div>
       </div>
 
-      <!-- NHẬT KÝ ĐƠN HÀNG CŨ -->
       <div style="font-size: 12px; font-weight: 800; color: var(--text-main);">
         📜 Nhật Ký Đơn Cũ (${customerOrders.length}):
       </div>
-      <div style="display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto;">
+      <div style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto;">
         ${customerOrders.length > 0 ? customerOrders.map(o => `
           <div style="padding: 8px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; font-size: 11px;">
@@ -3552,7 +3543,7 @@ window.getHistoryModalHTML = function(currentStore) {
               `).join('')}
             </div>
           </div>
-        `).join('') : '<div style="text-align: center; padding: 10px; color: var(--text-muted); font-size: 11px;">Không có lịch sử.</div>'}
+        `).join('') : '<div style="font-size: 10px; color: var(--text-muted); text-align: center;">Không có lịch sử.</div>'}
       </div>
 
     </div>
