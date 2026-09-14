@@ -4519,6 +4519,10 @@ window.filterModalCompanyList = function(val) {
 <button class="btn btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px; background: #DB2777; color: #fff;" onclick="openCompanyListModal()">
   <i class="fa-solid fa-building"></i> DS Cty
 </button>
+<button class="btn btn-sm" style="font-weight: 800; padding: 10px 12px; font-size: 12px; background: #7C3AED; color: #fff;" onclick="openStoreHistoryModal()">
+    <i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử
+  </button>
+</div>
 </div>
             <!-- Ô GHIM MÃ CÔNG TY TÍCH HỢP TÌM KIẾM NHANH INLINE & GỢI Ý GỌN GÀNG -->
             <div style="background: rgba(59, 130, 246, 0.15); border: 2px solid rgba(59, 130, 246, 0.5); border-radius: 14px; padding: 12px; margin-bottom: 10px; position: relative;">
@@ -4996,6 +5000,179 @@ window.filterModalCompanyList = function(val) {
       `;
     }
   }
+  // Biến lưu trạng thái tab trong Modal Lịch sử ('top' hoặc 'diary')
+window._historyModalTab = 'top';
+
+window.openStoreHistoryModal = function() {
+  if (!activeVisitedStore) {
+    return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
+  }
+  window._historyModalTab = 'top';
+  window._renderStoreHistoryContent();
+};
+
+window.switchHistoryTab = function(tabName) {
+  window._historyModalTab = tabName;
+  window._renderStoreHistoryContent();
+};
+
+window._renderStoreHistoryContent = function() {
+  const storeIdStr = String(activeVisitedStore.id);
+  const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+  let customerOrders = orders.filter(o => {
+    const matchId = String(o.storeId || '') === storeIdStr;
+    let inferredCode = o.maDTPNNo || '';
+    if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+      inferredCode = o.maKH.split(' - ')[0].trim();
+    }
+    const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+    return (matchId || matchCode) && o.status !== 'Đã hủy';
+  });
+
+  customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
+  const recentOrders = customerOrders.slice(0, 20);
+
+  let productStatsMap = new Map();
+  customerOrders.forEach(o => {
+    if (o.items && Array.isArray(o.items)) {
+      o.items.forEach(item => {
+        const itemQty = Number(item.qty || 0);
+        if (itemQty > 0) {
+          const pKey = item.id || item.code;
+          if (!productStatsMap.has(pKey)) {
+            productStatsMap.set(pKey, {
+              code: item.code || '',
+              name: item.name || '',
+              dvt: item.dvt || 'hộp',
+              totalQty: 0,
+              orderCount: 0
+            });
+          }
+          let stats = productStatsMap.get(pKey);
+          stats.totalQty += itemQty;
+          stats.orderCount += 1;
+        }
+      });
+    }
+  });
+
+  let topProductsList = Array.from(productStatsMap.values());
+  topProductsList.sort((a, b) => b.totalQty - a.totalQty);
+
+  const isTopTab = window._historyModalTab === 'top';
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return;
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeStoreHistoryModal()">
+      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; max-width:600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:10px;">
+          <h3 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử: ${activeVisitedStore.name}</h3>
+          <button class="btn btn-red btn-sm" onclick="closeStoreHistoryModal()">Đóng</button>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <button class="btn ${isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('top')">
+            🔥 Top sản phẩm hay mua
+          </button>
+          <button class="btn ${!isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('diary')">
+            📖 Nhật ký đơn cũ (${recentOrders.length})
+          </button>
+        </div>
+
+        <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+          ${isTopTab ? `
+            ${topProductsList.length > 0 ? topProductsList.map(tp => `
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:8px;">
+                  <span style="font-size:12px; font-weight:800; color:var(--primary);">[${tp.code}]</span>
+                  <span style="font-size:13.5px; font-weight:700; color:var(--text-main); word-break:break-word;">${tp.name}</span>
+                  <span style="font-size:11.5px; color:var(--text-muted);">Đã mua: <b style="color:var(--emerald);">${tp.totalQty} ${tp.dvt}</b> (${tp.orderCount} lần đơn)</span>
+                </div>
+                <button class="btn btn-green btn-sm" style="padding:6px 10px; font-weight:800; font-size:11.5px;" onclick="addTopProductToCart('${tp.code}')">
+                  <i class="fa-solid fa-plus"></i> Thêm
+                </button>
+              </div>
+            `).join('') : `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>`}
+          ` : `
+            ${recentOrders.length > 0 ? recentOrders.map(o => {
+              const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
+              const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
+              const accordionId = `acc_order_${o.id}`;
+
+              return `
+                <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; overflow:hidden;">
+                  <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                      <span style="font-size:12px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px;">#${o.soCtu}</span>
+                      <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                      <span style="font-size:12px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
+                      <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:11px; color:var(--text-muted); transition:transform 0.2s;"></i>
+                    </div>
+                  </div>
+
+                  <div id="${accordionId}" class="hidden" style="padding:10px 14px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px; background:var(--card-bg);">
+                    <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:2px;">Nhân viên lập: <b>[${o.salesCode || ''}] ${o.salesName || ''}</b></div>
+                    ${validItems.map(item => `
+                      <div style="display:flex; justify-content:space-between; font-size:13px; border-bottom:1px dashed var(--card-border); padding-bottom:4px;">
+                        <span style="color:var(--text-main); font-weight:600; flex:1; padding-right:6px;">[${item.code}] ${item.name}</span>
+                        <span style="font-weight:800; color:#2563EB; white-space:nowrap;">${item.qty} ${item.dvt}</span>
+                      </div>
+                    `).join('')}
+                    <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+                      <button class="btn btn-amber btn-sm" style="font-size:11px; padding:4px 10px;" onclick="closeStoreHistoryModal(); editOrder('${o.id}')">
+                        <i class="fa-solid fa-pen"></i> Sửa đơn này
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('') : `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào gần đây.</div>`}
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+};
+
+window.closeStoreHistoryModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
+};
+
+window.toggleOrderAccordion = function(accId) {
+  const el = document.getElementById(accId);
+  const iconEl = document.getElementById(`icon_${accId}`);
+  if (!el) return;
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    if (iconEl) iconEl.style.transform = 'rotate(180deg)';
+  } else {
+    el.classList.add('hidden');
+    if (iconEl) iconEl.style.transform = 'rotate(0deg)';
+  }
+};
+
+window.addTopProductToCart = function(productCode) {
+  const p = products.find(x => x.code === productCode || x.id === productCode);
+  if (!p) return alert("Không tìm thấy thông tin vật tư này trong danh mục!");
+  
+  const keyId = p.id || p.code;
+  if (!currentCart[keyId]) {
+    currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
+  }
+  
+  window.adjustQty(keyId, 'le', 1);
+  if (typeof triggerHaptic === 'function') triggerHaptic(20);
+  alert(`✅ Đã thêm 1 [${p.code}] vào giỏ hàng!`);
+};
 </script>
 </body>
 </html>
