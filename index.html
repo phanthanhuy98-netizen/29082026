@@ -5375,19 +5375,121 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   // Thêm nút mới giao diện tab Hàng:
 // <button class="btn btn-red btn-sm" onclick="deleteAllAndImportProductsExcel(event)"><i class="fa-solid fa-triangle-exclamation"></i> Xóa & Tải Mới Hàng</button>
 
+window.deleteAllAndImportCustomersExcel = async function(e) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    return alert("Chỉ tài khoản Admin mới có quyền thực hiện tính năng này!");
+  }
+
+  const confirmed = await window.showCustomConfirm(
+    "XÁC NHẬN XÓA TOÀN BỘ KHÁCH HÀNG", 
+    "Hành động này sẽ XÓA SẠCH toàn bộ danh sách khách hàng cũ và ghi đè bằng danh sách mới từ Excel. Bạn có chắc chắn muốn tiếp tục?", 
+    "fa-triangle-exclamation", 
+    "Đồng ý Xóa & Tải Mới", 
+    "Hủy"
+  );
+  if (!confirmed) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx, .xls';
+  fileInput.onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (!jsonData || jsonData.length === 0) {
+          return alert("File Excel không có dữ liệu!");
+        }
+
+        alert(`Đang tiến hành xóa dữ liệu cũ và tải lên ${jsonData.length} khách hàng mới...`);
+
+        // Xóa toàn bộ dữ liệu cũ trên Firestore
+        const storeSnap = await getDocs(collection(db, "stores"));
+        const batches = [];
+        let currentBatch = writeBatch(db);
+        let operationCount = 0;
+
+        storeSnap.forEach((docSnap) => {
+          currentBatch.delete(docSnap.ref);
+          operationCount++;
+          if (operationCount >= 400) {
+            batches.push(currentBatch.commit());
+            currentBatch = writeBatch(db);
+            operationCount = 0;
+          }
+        });
+        if (operationCount > 0) {
+          batches.push(currentBatch.commit());
+        }
+        await Promise.all(batches);
+
+        // Thêm mới dữ liệu từ file Excel
+        const newStoresList = jsonData.map((item, idx) => ({
+          id: String(item.id || item.maKH || ('kh_' + Date.now() + '_' + idx)),
+          code: String(item.code || item.maKH || '').trim(),
+          name: String(item.name || item.tenKH || '').trim(),
+          address: String(item.address || item.diaChi || '').trim(),
+          phone: String(item.phone || item.sdt || '').trim(),
+          lat: Number(item.lat || 0),
+          lng: Number(item.lng || 0)
+        }));
+
+        let uploadBatches = [];
+        let uploadBatch = writeBatch(db);
+        let upCount = 0;
+
+        newStoresList.forEach(s => {
+          const docRef = doc(collection(db, "stores"), s.id);
+          uploadBatch.set(docRef, s);
+          upCount++;
+          if (upCount >= 400) {
+            uploadBatches.push(uploadBatch.commit());
+            uploadBatch = writeBatch(db);
+            upCount = 0;
+          }
+        });
+        if (upCount > 0) {
+          uploadBatches.push(uploadBatch.commit());
+        }
+        await Promise.all(uploadBatches);
+
+        stores = newStoresList;
+        await saveStoresToLocalCache(stores);
+        buildStoreIndex();
+
+        playSystemSound('success');
+        alert("Đã xóa toàn bộ khách hàng cũ và tải mới thành công!");
+        renderUI();
+      } catch (err) {
+        alert("Lỗi khi xử lý file Excel: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  fileInput.click();
+};
+
 window.deleteAllAndImportProductsExcel = async function(e) {
   if (!currentUser || currentUser.role !== 'admin') {
     return alert("Chỉ tài khoản Admin mới có quyền thực hiện tính năng này!");
   }
 
   const confirmed = await window.showCustomConfirm(
-    "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ (HÀNG)", 
-    "Hành động này sẽ XÓA SẠCH toàn bộ danh mục vật tư cũ trên hệ thống và ghi đè hoàn toàn bằng danh sách mới từ file Excel. Bạn có chắc chắn muốn tiếp tục?", 
+    "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ", 
+    "Hành động này sẽ XÓA SẠCH toàn bộ vật tư cũ và ghi đè bằng danh sách mới từ Excel. Bạn có chắc chắn muốn tiếp tục?", 
     "fa-triangle-exclamation", 
     "Đồng ý Xóa & Tải Mới", 
     "Hủy"
   );
- if (!confirmed) return;
+  if (!confirmed) return;
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
@@ -5411,7 +5513,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
 
         alert(`Đang tiến hành xóa danh mục cũ và tải lên ${jsonData.length} vật tư mới...`);
 
-        // 1. Xóa toàn bộ dữ liệu collection 'products' trên Firestore
         const prodSnap = await getDocs(collection(db, "products"));
         let batches = [];
         let currentBatch = writeBatch(db);
@@ -5431,7 +5532,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
         }
         await Promise.all(batches);
 
-        // 2. Thêm mới dữ liệu vật tư từ Excel
         const newProductsList = jsonData.map((item, idx) => ({
           id: String(item.id || item.code || ('pr_' + Date.now() + '_' + idx)),
           code: String(item.code || item.maVT || '').trim(),
@@ -5459,7 +5559,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
         }
         await Promise.all(uploadBatches);
 
-        // Cập nhật biến toàn cục và bộ nhớ cục bộ
         products = newProductsList;
         await saveProductsToLocalCache(products);
         buildProductIndex();
