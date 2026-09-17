@@ -5697,40 +5697,44 @@ window.markOrderAsViewed = async function(orderId) {
 };
 window.markAsViewedAndClose = async function(orderId) {
   const targetId = orderId || window.currentViewingOrderId;
-  
-  // Tìm kiếm linh hoạt theo id hoặc orderUuid hoặc soCtu
   let order = orders.find(o => o.id === targetId || o.orderUuid === targetId || String(o.soCtu) === String(targetId));
   
-  // Nếu vẫn không tìm thấy trong mảng, lấy tạm chứng từ đang xem hoặc chứng từ đầu tiên trùng số
   if (!order && window.currentViewingOrderId) {
     order = orders.find(o => o.id === window.currentViewingOrderId);
   }
 
   if (order) {
-    order.isViewed = true;
+    // Đảo ngược trạng thái: Nếu đang xem (true) thì thành chưa xem (false), và ngược lại
+    order.isViewed = !order.isViewed;
     
-    // Tìm đúng document ID thực tế trên Firestore để cập nhật chính xác
     const firestoreDocId = order.id || order.orderUuid;
     if (firestoreDocId) {
       try {
-        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: true });
+        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
       } catch (e) {
         console.error("Lỗi cập nhật CSDL:", e);
       }
     }
   }
 
-  // Đóng modal trước
+  // Đóng modal chi tiết
   closeOrderDetailsModal();
 
-  // Ép đổi màu giao diện cho tất cả các thẻ card trên sổ gốc khớp số chứng từ
+  // Cập nhật lại màu sắc ngay lập tức trên giao diện theo trạng thái mới (Xanh hoặc Trắng)
   if (order && order.soCtu) {
     const targetCards = document.querySelectorAll('.so-goc-card-item');
     targetCards.forEach(card => {
       const cardSoCtu = card.getAttribute('data-so-ctu');
       if (cardSoCtu === String(order.soCtu)) {
-        card.style.setProperty('background-color', '#d4edda', 'important');
-        card.style.setProperty('border-color', '#c3e6cb', 'important');
+        if (order.isViewed) {
+          // Bật màu xanh lá
+          card.style.setProperty('background-color', '#d4edda', 'important');
+          card.style.setProperty('border-color', '#c3e6cb', 'important');
+        } else {
+          // Tắt (trả về màu mặc định của thẻ)
+          card.style.removeProperty('background-color');
+          card.style.removeProperty('border-color');
+        }
       }
     });
   }
