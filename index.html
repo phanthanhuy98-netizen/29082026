@@ -3286,30 +3286,77 @@ window.editOrder = function(orderId) {
     switchTab('soGocBH');
   };
 
-  window.openOrderDetailsModal = function(orderId) {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
-window.currentViewingOrderId = orderId;
-    let inferredMaDTPN = order.maDTPNNo || '';
-    if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
-      inferredMaDTPN = order.maKH.split(' - ')[0].trim();
-    }
+ window.openOrderDetailsModal = async function(orderId) {
+  const order = orders.find(o => String(o.id) === String(orderId) || String(o.orderUuid) === String(orderId) || String(o.soCtu) === String(orderId));
+  if (!order) return;
+  window.currentViewingOrderId = orderId;
 
-    const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
+  // Kiểm tra quyền Kế toán
+  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
+  const isAccountant = userRole === 'accountant' || userRole === 'ketoan';
 
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (!modalContainer) return;
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-        <div class="modal-content fullscreen-modal">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-           <div style="display: flex; gap: 8px; align-items: center;">
-<button class="btn btn-green" onclick="markAsViewedAndClose('${order.id || order.orderUuid || order.soCtu}')" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">    <i class="fa-solid fa-check"></i> Đã xem
-  </button>
-  <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
-</div>
+  // Kiểm tra trạng thái đã xem từ máy con (IndexedDB)
+  const viewedSet = await getLocalViewedSet();
+  const isViewedLocally = viewedSet.has(String(orderId)) || viewedSet.has(String(order.id)) || viewedSet.has(String(order.soCtu));
+
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return;
+
+  const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
+      <div class="modal-content fullscreen-modal">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+          <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            ${isAccountant ? `
+              <button id="btnMarkViewed" class="btn btn-green" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                <i class="fa-solid fa-check"></i> ${isViewedLocally ? 'Bỏ đã xem' : 'Đã xem'}
+              </button>
+            ` : ''}
+            <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
           </div>
+        </div>
+        <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
+          <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
+          <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
+          <div>Mã KH: <b style="color:var(--text-main);">${order.inferredMaTPN || ''}</b></div>
+          <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || ''} - ${order.tenKH || ''}</b></div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">
+          ${validItems.map(item => {
+            const productObj = products.find(p => p.id === item.id || p.code === item.code);
+            const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+            const qty = Number(item.qty || 0);
+            const thung = Math.floor(qty / ratio);
+            const le = qty % ratio;
+            let qtyStr = '';
+            if (thung > 0) qtyStr += `${thung} thùng `;
+            if (le > 0 || thung === 0) qtyStr += `${le} cây`;
+            return `
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); padding:10px 14px; border-radius:8px;">
+                <div style="font-weight:700; color:var(--text-main); font-size:15px; margin-bottom:4px;">[${item.code}] ${item.name}</div>
+                <div style="font-size:13px; color:var(--primary);">SL: <b>${qtyStr.trim()}</b></div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+
+  // Gắn sự kiện click an toàn qua JavaScript giúp chạy 100% không bị lỗi kẹt template string
+  setTimeout(() => {
+    const btn = document.getElementById('btnMarkViewed');
+    if (btn) {
+      btn.onclick = function() {
+        markAsViewedAndClose('${order.id || order.orderUuid || order.soCtu}');
+      };
+    }
+  }, 100);
+};
           <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
             <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
             <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
