@@ -3271,7 +3271,12 @@ window.currentViewingOrderId = orderId;
         <div class="modal-content fullscreen-modal">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
             <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-            <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+           <div style="display: flex; gap: 8px; align-items: center;">
+  <button class="btn btn-green" onclick="markAsViewedAndClose(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    <i class="fa-solid fa-check"></i> Đã xem
+  </button>
+  <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+</div>
           </div>
           <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
             <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
@@ -3315,44 +3320,14 @@ window.currentViewingOrderId = orderId;
     `;
     modalContainer.classList.remove('hidden');
   };
-window.closeOrderDetailsModal = async function() {
-    // Nếu là tài khoản kế toán và đang mở một đơn chưa xem
-    if (currentUser && currentUser.role === 'accountant' && window.currentViewingOrderId) {
-        const orderId = window.currentViewingOrderId;
-        const order = orders.find(o => o.id === orderId);
-        
-        if (order && !order.isViewed) {
-            // Hiển thị bảng hỏi xác nhận sử dụng hàm thông báo chuẩn của app bạn
-            const confirmViewed = await window.showCustomConfirm(
-                "Xác nhận đơn hàng",
-                "Bạn có muốn đánh dấu đơn hàng này là 'Đã xem' không?",
-                "fa-eye",
-                "Đã xem",
-                "Để sau"
-            );
-
-            if (confirmViewed) {
-                order.isViewed = true;
-                try {
-                    await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-                    const activePane = document.getElementById('tabPane_soGocBH');
-                    if (activePane) renderTabContent('soGocBH', activePane);
-                } catch (e) {
-                    console.error("Lỗi cập nhật đã xem:", e);
-                }
-            }
-        }
-        window.currentViewingOrderId = null;
-    }
-
-    // Tiến hành đóng modal chi tiết như bình thường
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-        modalContainer.innerHTML = '';
-        modalContainer.classList.add('hidden');
-    }
-};
-
+window.closeOrderDetailsModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer') || document.getElementById('orderDetailModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
+  window.currentViewingOrderId = null;
+}
   window.openCurrentCustomerOrderModal = function() {
     if (!activeVisitedStore) return;
     const storeIdStr = String(activeVisitedStore.id);
@@ -4793,13 +4768,11 @@ const isAccountant = currentUser.role === 'accountant';
 
 // Kế toán và Manager sẽ không có quyền sửa/xóa (canModify = false)
 const canModify = (isOwner || isAdmin) && !isAccountant;
-
 // Nếu là kế toán và đơn hàng đã được xem, tạo style nền xanh lá
-const viewedBgStyle = (isAccountant && o.isViewed) ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
-
-           return `
-            <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.id}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle}; display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+const viewedBgStyle = o.isViewed ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
+return `
+  <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.id}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle} display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
@@ -5628,12 +5601,25 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   };
   fileInput.click();
 };
-  window.promptCloseOrderView = async function(orderId) {
-  const order = orders.find(o => o.id === orderId);
-  if (!order) return;
+window.promptCloseOrderView = async function(orderId) {
+  const targetId = orderId || window.currentViewingOrderId;
+  const order = orders.find(o => o.id === targetId);
+  if (!order) {
+    closeOrderDetailsModal();
+    return;
+  }
 
-  // CHỈ TÀI KHOẢN KẾ TOÁN mới hiển thị bảng hỏi này khi đơn chưa xem
-  if (currentUser.role === 'accountant' && !order.isViewed) {
+  // Chuẩn hóa role của user hiện tại về dạng chữ thường không dấu để check cho chuẩn
+ const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
+const isAccountantRole = userRole === 'accountant' || userRole === 'ketoan';
+
+const accountantButtonHtml = `
+  <button class="btn btn-green" onclick="markAsViewedAndClose('${order.id || order.orderUuid}')" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Bỏ đã xem' : 'Đã xem'}
+  </button>
+`;
+
+  if (currentUser && isAccountantRole && !order.isViewed) {
     const confirmViewed = await window.showCustomConfirm(
       "Xác nhận xem đơn hàng",
       "Đơn hàng này đã xem xong?",
@@ -5645,10 +5631,7 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     if (confirmViewed) {
       order.isViewed = true;
       try {
-        // Cập nhật trạng thái lên Firebase Firestore
-        await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-        
-        // Cập nhật lại giao diện Sổ gốc ngay lập tức
+        await updateDoc(doc(db, "orders", targetId), { isViewed: true });
         const activePane = document.getElementById('tabPane_soGocBH');
         if (activePane) renderTabContent('soGocBH', activePane);
       } catch (e) {
@@ -5657,9 +5640,7 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     }
   }
 
-  // Thực hiện đóng màn hình chi tiết đơn hàng / quay lại danh sách
-  // (Thay thế bằng hàm đóng modal hiện tại của bạn)
-  closeDetailModalOrGoBack(); 
+  closeOrderDetailsModal();
 };
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 window.markOrderAsViewed = async function(orderId) {
@@ -5681,6 +5662,63 @@ window.markOrderAsViewed = async function(orderId) {
       console.error("Lỗi cập nhật trạng thái đã xem:", e);
     }
   }
+};
+window.markAsViewedAndClose = async function(orderId) {
+  const targetId = orderId || window.currentViewingOrderId;
+  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId) || String(o.soCtu) === String(targetId));
+  
+  if (!order && window.currentViewingOrderId) {
+    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
+  }
+
+  if (!order) {
+    if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
+    return;
+  }
+
+  // Đảo ngược trạng thái: 
+  // - Nếu đang chưa xem (hoặc undefined/false) -> Bấm lần 1 thành TRUE (Chuyển xanh)
+  // - Nếu đang là true -> Bấm lần 2 thành FALSE (Mất màu/Thu hồi)
+  order.isViewed = !Boolean(order.isViewed);
+  
+  // Lưu trạng thái lên Firebase Firestore
+  const firestoreDocId = order.id || order.orderUuid;
+  if (firestoreDocId) {
+    try {
+      await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
+    } catch (e) {
+      console.error("Lỗi cập nhật CSDL:", e);
+    }
+  }
+
+  // Đóng modal chi tiết ngay lập tức (KHÔNG HỎI GÌ CẢ)
+  if (typeof closeOrderDetailsModal === 'function') {
+    closeOrderDetailsModal();
+  }
+
+  // Cập nhật đổi màu hoặc xóa màu trực tiếp trên giao diện ngay lập tức
+  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
+  allCards.forEach(card => {
+    const cardSoCtu = card.getAttribute('data-so-ctu');
+    const cardHtml = card.innerHTML || '';
+    
+    // Kiểm tra khớp số chứng từ hoặc ID để đổi đúng thẻ
+    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
+                    (order.soCtu && cardHtml.includes(String(order.soCtu))) || 
+                    (order.id && cardHtml.includes(String(order.id)));
+
+    if (isMatch) {
+      if (order.isViewed) {
+        // Lần bấm 1: Ép chuyển sang màu xanh lá ngay lập tức
+        card.style.setProperty('background-color', '#d4edda', 'important');
+        card.style.setProperty('border-color', '#c3e6cb', 'important');
+      } else {
+        // Lần bấm 2: Thu hồi (Xóa sạch màu xanh, trả về như cũ)
+        card.style.removeProperty('background-color');
+        card.style.removeProperty('border-color');
+      }
+    }
+  });
 };
 </script>
 </body>
