@@ -4760,11 +4760,18 @@ ${activeVisitedStore ? `
         <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${allGroupedList.length > 0 ? allGroupedList.map(o => {
            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
 const isAdmin = currentUser.role === 'admin';
-const canModify = isOwner || isAdmin;
+const isAccountant = currentUser.role === 'accountant';
+
+// Kế toán và Manager sẽ không có quyền sửa/xóa (canModify = false)
+const canModify = isOwner || isAdmin; 
+
+// Nếu là kế toán và đơn hàng đã được xem, tạo style nền xanh lá
+const viewedBgStyle = (isAccountant && o.isViewed) ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
 
            return `
-              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle}; display: flex; flex-direction: column; gap: 8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
@@ -5593,6 +5600,39 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     reader.readAsArrayBuffer(file);
   };
   fileInput.click();
+};
+  window.promptCloseOrderView = async function(orderId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+
+  // CHỈ TÀI KHOẢN KẾ TOÁN mới hiển thị bảng hỏi này khi đơn chưa xem
+  if (currentUser.role === 'accountant' && !order.isViewed) {
+    const confirmViewed = await window.showCustomConfirm(
+      "Xác nhận xem đơn hàng",
+      "Đơn hàng này đã xem xong?",
+      "fa-eye",
+      "Đã xem",
+      "Để sau"
+    );
+
+    if (confirmViewed) {
+      order.isViewed = true;
+      try {
+        // Cập nhật trạng thái lên Firebase Firestore
+        await updateDoc(doc(db, "orders", orderId), { isViewed: true });
+        
+        // Cập nhật lại giao diện Sổ gốc ngay lập tức
+        const activePane = document.getElementById('tabPane_soGocBH');
+        if (activePane) renderTabContent('soGocBH', activePane);
+      } catch (e) {
+        console.error("Lỗi cập nhật trạng thái xem:", e);
+      }
+    }
+  }
+
+  // Thực hiện đóng màn hình chi tiết đơn hàng / quay lại danh sách
+  // (Thay thế bằng hàm đóng modal hiện tại của bạn)
+  closeDetailModalOrGoBack(); 
 };
 </script>
 </body>
