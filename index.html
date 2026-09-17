@@ -4773,7 +4773,7 @@ ${activeVisitedStore ? `
 // Kế toán và Manager sẽ không có quyền sửa/xóa (canModify = false)
 const canModify = (isOwner || isAdmin) && !isAccountant;
 return `
-  <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.id}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle} display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
+  <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.soCtu}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle} display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
@@ -5646,20 +5646,18 @@ const accountantButtonHtml = `
 };
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 // 1. Hàm hiển thị chi tiết (Chỉ tài khoản Kế toán mới thấy nút Đã xem)
-window.markOrderAsViewed = function(orderId) {
-  const order = (typeof allGroupedList !== 'undefined' ? allGroupedList : orders).find(o => String(o.id) === String(orderId) || String(o.orderId) === String(orderId) || String(o.soCtu) === String(orderId));
+window.markOrderAsViewed = function(soCtu) {
+  // Tìm đúng duy nhất số chứng từ
+  const order = (typeof allGroupedList !== 'undefined' ? allGroupedList : orders).find(o => String(o.soCtu) === String(soCtu));
   if (!order) return;
   
-  const storageKey = `dms_viewed_order_${order.id || order.orderId || order.soCtu}`;
+  const storageKey = `dms_viewed_order_${order.soCtu}`;
   const isLocalViewed = localStorage.getItem(storageKey) === 'true';
   
-  // Kiểm tra quyền Kế toán linh hoạt hơn
   const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
   const isAccountant = userRole === 'accountant' || userRole === 'ketoan';
 
-  // Lấy danh sách sản phẩm trong đơn
   const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
-
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
@@ -5667,11 +5665,11 @@ window.markOrderAsViewed = function(orderId) {
     <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
       <div class="modal-content fullscreen-modal">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || ''}</h3>
+          <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu}</h3>
           <div style="display: flex; gap: 8px; align-items: center;">
             
             ${isAccountant ? `
-              <button class="btn" onclick="saveViewedStatusLocally('${order.id || order.orderId || order.soCtu}')" style="font-size:14px; padding:8px 16px; background-color: ${isLocalViewed ? '#6c757d' : '#10b981'}; color: white; border: none; border-radius: 6px; cursor: pointer;">
+              <button class="btn" onclick="saveViewedStatusLocally('${order.soCtu}')" style="font-size:14px; padding:8px 16px; background-color: ${isLocalViewed ? '#6c757d' : '#10b981'}; color: white; border: none; border-radius: 6px; cursor: pointer;">
                 <i class="fa-solid fa-check"></i> ${isLocalViewed ? 'Bỏ đã xem' : 'Đã xem'}
               </button>
             ` : ''}
@@ -5687,7 +5685,6 @@ window.markOrderAsViewed = function(orderId) {
           <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || order.tenKH || '—'}</b></div>
         </div>
 
-        <!-- PHẦN HIỂN THỊ DANH SÁCH SẢN PHẨM -->
         <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
           ${validItems.length > 0 ? validItems.map(item => `
             <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
@@ -5698,32 +5695,24 @@ window.markOrderAsViewed = function(orderId) {
             </div>
           `).join('') : '<div style="text-align:center; color:#999; padding:20px;">Không có chi tiết sản phẩm</div>'}
         </div>
-
       </div>
     </div>
   `;
   modalContainer.classList.remove('hidden');
 };
-// 2. Hàm lưu trạng thái vào LocalStorage và đổi màu giao diện ngay lập tức
-window.saveViewedStatusLocally = function(targetId) {
-  const storageKey = `dms_viewed_order_${targetId}`;
+
+window.saveViewedStatusLocally = function(soCtu) {
+  const storageKey = `dms_viewed_order_${soCtu}`;
   const currentState = localStorage.getItem(storageKey) === 'true';
   const newState = !currentState; 
   
-  // 1. Lưu trạng thái mới
   localStorage.setItem(storageKey, newState);
 
-  // 2. Quét thẻ để đổi màu chính xác (Đã khắc phục lỗi loạn màu)
+  // Quét cực chuẩn: Chỉ đổi màu thẻ nào có data-so-ctu khớp đúng 100%
   const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
   allCards.forEach(card => {
-    const cardOnclick = card.getAttribute('onclick') || '';
     const cardSoCtu = card.getAttribute('data-so-ctu') || '';
-    
-    // Khóa mục tiêu chính xác tuyệt đối: Bọc ID trong dấu nháy để 19 không bị nhầm thành 196
-    const isMatchId = cardOnclick.includes(`'${targetId}'`) || cardOnclick.includes(`"${targetId}"`);
-    const isMatchSoCtu = String(cardSoCtu) === String(targetId);
-
-    if (isMatchId || isMatchSoCtu) {
+    if (String(cardSoCtu) === String(soCtu)) {
       if (newState) {
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
@@ -5734,7 +5723,6 @@ window.saveViewedStatusLocally = function(targetId) {
     }
   });
 
-  // 3. Tự động đóng modal
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (modalContainer) {
     modalContainer.classList.add('hidden');
