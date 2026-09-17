@@ -5698,48 +5698,42 @@ window.markOrderAsViewed = async function(orderId) {
 window.markAsViewedAndClose = async function(orderId) {
   const targetId = orderId || window.currentViewingOrderId;
   
-  // Tìm chính xác đơn hàng
-  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId));
-  if (!order && window.currentViewingOrderId) {
-    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
-  }
-
-  if (!order) {
-    closeOrderDetailsModal();
-    return;
-  }
-
-  // Đảo trạng thái (True <-> False)
-  order.isViewed = !order.isViewed;
+  // Tìm kiếm linh hoạt theo id hoặc orderUuid hoặc soCtu
+  let order = orders.find(o => o.id === targetId || o.orderUuid === targetId || String(o.soCtu) === String(targetId));
   
-  // Lưu lên Firestore theo đúng ID chứng từ
-  const firestoreDocId = order.id || order.orderUuid;
-  if (firestoreDocId) {
-    try {
-      await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
-    } catch (e) {
-      console.error("Lỗi cập nhật CSDL:", e);
-    }
+  // Nếu vẫn không tìm thấy trong mảng, lấy tạm chứng từ đang xem hoặc chứng từ đầu tiên trùng số
+  if (!order && window.currentViewingOrderId) {
+    order = orders.find(o => o.id === window.currentViewingOrderId);
   }
 
-  // Đóng modal chi tiết ngay lập tức
-  closeOrderDetailsModal();
-
-  // Đổi màu trực tiếp thẻ card tương ứng trên giao diện dựa vào ID hoặc số chứng từ của chính đơn đó
-  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
-  allCards.forEach(card => {
-    const cardHtml = card.innerHTML || '';
-    // Kiểm tra xem thẻ card này có chứa đúng số chứng từ hoặc ID của đơn hàng đang thao tác hay không
-    if (cardHtml.includes(String(order.soCtu)) || (order.id && cardHtml.includes(String(order.id)))) {
-      if (order.isViewed) {
-        card.style.setProperty('background-color', '#d4edda', 'important');
-        card.style.setProperty('border-color', '#c3e6cb', 'important');
-      } else {
-        card.style.removeProperty('background-color');
-        card.style.removeProperty('border-color');
+  if (order) {
+    order.isViewed = true;
+    
+    // Tìm đúng document ID thực tế trên Firestore để cập nhật chính xác
+    const firestoreDocId = order.id || order.orderUuid;
+    if (firestoreDocId) {
+      try {
+        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: true });
+      } catch (e) {
+        console.error("Lỗi cập nhật CSDL:", e);
       }
     }
-  });
+  }
+
+  // Đóng modal trước
+  closeOrderDetailsModal();
+
+  // Ép đổi màu giao diện cho tất cả các thẻ card trên sổ gốc khớp số chứng từ
+  if (order && order.soCtu) {
+    const targetCards = document.querySelectorAll('.so-goc-card-item');
+    targetCards.forEach(card => {
+      const cardSoCtu = card.getAttribute('data-so-ctu');
+      if (cardSoCtu === String(order.soCtu)) {
+        card.style.setProperty('background-color', '#d4edda', 'important');
+        card.style.setProperty('border-color', '#c3e6cb', 'important');
+      }
+    });
+  }
 };
 </script>
 </body>
