@@ -3102,14 +3102,13 @@ window.filterTabProducts = function(val) {
     }
   };
 
-  window.editOrder = function(orderId) {
+window.editOrder = function(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
   const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-  const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const isAdmin = currentUser.role === 'admin'; // Chỉ cho phép Admin hoặc chính Sales tạo đơn được sửa
 
-  // Lấy chính xác ngày theo múi giờ Việt Nam (GMT+7)
   const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
   const vnDate = new Date(vietnamTime);
   const yyyy = vnDate.getFullYear();
@@ -3117,14 +3116,14 @@ window.filterTabProducts = function(val) {
   const dd = String(vnDate.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}-${mm}-${dd}`;
 
-  if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
-    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý.`);
+  if (order.ngayCtu !== todayStr && !isAdmin) {
+    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản trị viên (Admin).`);
   }
 
-  if (!isOwner && !isManagerOrAdmin) {
-    return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
+  // Chặn Manager, chỉ cho phép Sales chủ sở hữu đơn hoặc Admin
+  if (!isOwner && !isAdmin) {
+    return alert("⛔ Quản lý (Manager) không có quyền sửa đơn hàng của Sales!");
   }
-
   let targetStore = stores.find(s => String(s.id) === String(order.storeId));
   if (!targetStore && order.maDTPNNo) {
     targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
@@ -3161,31 +3160,31 @@ window.filterTabProducts = function(val) {
   switchTab('sales');
 };
 
-  window.deleteSingleOrder = async function(orderId) {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+ window.deleteSingleOrder = async function(orderId) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
-    const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
-    const todayStr = new Date().toISOString().slice(0, 10);
+  const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+  const isAdmin = currentUser.role === 'admin'; // Chỉ Admin hoặc Sales sở hữu mới được xóa
+  const todayStr = new Date().toISOString().slice(0, 10);
 
-    if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
-      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự xóa!`);
-    }
+  if (order.ngayCtu !== todayStr && !isAdmin) {
+    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự xóa!`);
+  }
 
-    if (!isOwner && !isManagerOrAdmin) {
-      return alert("⛔ Bạn không có quyền xóa đơn hàng của nhân viên khác!");
-    }
+  // Chặn Manager, chỉ cho phép Sales chủ sở hữu đơn hoặc Admin
+  if (!isOwner && !isAdmin) {
+    return alert("⛔ Quản lý (Manager) không có quyền xóa đơn hàng của Sales!");
+  }
 
-    const confirmDel = await window.showCustomConfirm(
-      "Xóa Đơn Hàng",
-      "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
-      "fa-trash",
-      "Xóa đơn",
-      "Hủy"
-    );
-    if (!confirmDel) return;
-
+  const confirmDel = await window.showCustomConfirm(
+    "Xóa Đơn Hàng",
+    "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
+    "fa-trash",
+    "Xóa đơn",
+    "Hủy"
+  );
+  if (!confirmDel) return;
     try {
       await deleteDoc(doc(db, "orders", orderId));
       orders = orders.filter(o => o.id !== orderId);
@@ -4760,8 +4759,9 @@ ${activeVisitedStore ? `
 
         <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${allGroupedList.length > 0 ? allGroupedList.map(o => {
-            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-            const canModify = isOwner || isAdminOrManager;
+           const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+const isAdmin = currentUser.role === 'admin';
+const canModify = isOwner || isAdmin;
 
            return `
               <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
