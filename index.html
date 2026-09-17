@@ -3271,7 +3271,7 @@ window.currentViewingOrderId = orderId;
         <div class="modal-content fullscreen-modal">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
             <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-            <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+            <button class="btn btn-red" onclick="promptCloseOrderView(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px;">Đóng</button>
           </div>
           <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
             <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
@@ -5628,12 +5628,16 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   };
   fileInput.click();
 };
-  window.promptCloseOrderView = async function(orderId) {
-  const order = orders.find(o => o.id === orderId);
-  if (!order) return;
+window.promptCloseOrderView = async function(orderId) {
+  const targetId = orderId || window.currentViewingOrderId;
+  const order = orders.find(o => o.id === targetId);
+  if (!order) {
+    closeOrderDetailsModal();
+    return;
+  }
 
-  // CHỈ TÀI KHOẢN KẾ TOÁN mới hiển thị bảng hỏi này khi đơn chưa xem
-  if (currentUser.role === 'accountant' && !order.isViewed) {
+  // CHỈ TÀI KHOẢN KẾ TOÁN mới hiện bảng hỏi khi đơn chưa xem
+  if (currentUser && currentUser.role === 'accountant' && !order.isViewed) {
     const confirmViewed = await window.showCustomConfirm(
       "Xác nhận xem đơn hàng",
       "Đơn hàng này đã xem xong?",
@@ -5645,10 +5649,7 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     if (confirmViewed) {
       order.isViewed = true;
       try {
-        // Cập nhật trạng thái lên Firebase Firestore
-        await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-        
-        // Cập nhật lại giao diện Sổ gốc ngay lập tức
+        await updateDoc(doc(db, "orders", targetId), { isViewed: true });
         const activePane = document.getElementById('tabPane_soGocBH');
         if (activePane) renderTabContent('soGocBH', activePane);
       } catch (e) {
@@ -5657,9 +5658,7 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     }
   }
 
-  // Thực hiện đóng màn hình chi tiết đơn hàng / quay lại danh sách
-  // (Thay thế bằng hàm đóng modal hiện tại của bạn)
-  closeDetailModalOrGoBack(); 
+  closeOrderDetailsModal();
 };
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 window.markOrderAsViewed = async function(orderId) {
