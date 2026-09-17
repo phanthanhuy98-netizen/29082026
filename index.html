@@ -3256,10 +3256,13 @@ window.editOrder = function(orderId) {
   window.openOrderDetailsModal = function(orderId) {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
-window.currentViewingOrderId = orderId;
-    let inferredMaDTPN = order.maDTPNNo || '';
-    if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
-      inferredMaDTPN = order.maKH.split(' - ')[0].trim();
+
+    // QUAN TRỌNG: Lưu lại ID đơn hàng đang mở để lúc đóng còn biết đường cập nhật
+    window.currentViewingOrderId = orderId; 
+
+    let inferredMADTPN = order.maDTPNNo || '';
+    if (!inferredMADTPN && order.maKH && order.maKH.includes(' - ')) {
+        inferredMADTPN = order.maKH.split(' - ')[0].trim();
     }
 
     const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
@@ -3316,36 +3319,30 @@ window.currentViewingOrderId = orderId;
     modalContainer.classList.remove('hidden');
   };
 window.closeOrderDetailsModal = async function() {
-    // Nếu là tài khoản kế toán và đang mở một đơn chưa xem
+    // Nếu là kế toán và đang có đơn hàng đang mở
     if (currentUser && currentUser.role === 'accountant' && window.currentViewingOrderId) {
         const orderId = window.currentViewingOrderId;
         const order = orders.find(o => o.id === orderId);
         
         if (order && !order.isViewed) {
-            // Hiển thị bảng hỏi xác nhận sử dụng hàm thông báo chuẩn của app bạn
-            const confirmViewed = await window.showCustomConfirm(
-                "Xác nhận đơn hàng",
-                "Bạn có muốn đánh dấu đơn hàng này là 'Đã xem' không?",
-                "fa-eye",
-                "Đã xem",
-                "Để sau"
-            );
-
-            if (confirmViewed) {
-                order.isViewed = true;
-                try {
-                    await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-                    const activePane = document.getElementById('tabPane_soGocBH');
-                    if (activePane) renderTabContent('soGocBH', activePane);
-                } catch (e) {
-                    console.error("Lỗi cập nhật đã xem:", e);
+            order.isViewed = true;
+            try {
+                // Cập nhật lên Firebase Firestore
+                await updateDoc(doc(db, "orders", orderId), { isViewed: true });
+                
+                // Render lại giao diện Sổ Gốc để đổi màu xanh lá ngay lập tức
+                const activePane = document.getElementById('tabPane_soGocBH');
+                if (activePane) {
+                    renderTabContent('soGocBH', activePane);
                 }
+            } catch (e) {
+                console.error("Lỗi cập nhật đã xem:", e);
             }
         }
-        window.currentViewingOrderId = null;
+        window.currentViewingOrderId = null; // Xóa bộ nhớ tạm
     }
 
-    // Tiến hành đóng modal chi tiết như bình thường
+    // Đóng cửa sổ modal như bình thường
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
         modalContainer.innerHTML = '';
