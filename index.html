@@ -3271,22 +3271,13 @@ window.currentViewingOrderId = orderId;
         <div class="modal-content fullscreen-modal">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
             <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-   <div style="display: flex; gap: 8px; align-items: center;">
-  ${
-    (() => {
-      const role = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
-      const isAccountant = role === 'accountant' || role === 'ketoan';
-      if (!isAccountant) return '';
-
-      return `
-        <button class="btn btn-green" onclick="markAsViewedAndClose(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
-          <i class="fa-solid fa-check"></i> Đã xem
-        </button>
-      `;
-    })()
-  }
-  <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px; background-color: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer;">Đóng</button>
+           <div style="display: flex; gap: 8px; align-items: center;">
+  <button class="btn btn-green" onclick="markAsViewedAndClose(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    <i class="fa-solid fa-check"></i> Đã xem
+  </button>
+  <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
 </div>
+          </div>
           <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
             <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
             <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
@@ -5729,83 +5720,6 @@ window.markAsViewedAndClose = async function(orderId) {
     }
   });
 };
-  // 1. Hàm khi kế toán bấm nút "Đã xem" trong modal chi tiết
-window.markAsViewedAndClose = async function(orderId) {
-  const targetId = orderId || window.currentViewingOrderId;
-  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId) || String(o.soCtu) === String(targetId));
-  
-  if (!order && window.currentViewingOrderId) {
-    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
-  }
-
-  if (!order) {
-    if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
-    return;
-  }
-
-  // Lấy danh sách ID đã xem từ máy con (localStorage)
-  let viewedOrdersList = JSON.parse(localStorage.getItem('dms_local_viewed_orders') || '[]');
-  const uniqueKey = String(order.id || order.orderUuid || order.soCtu);
-
-  // Đảo trạng thái: Nếu có rồi thì bỏ ra (bỏ màu), chưa có thì thêm vào (tô màu)
-  const index = viewedOrdersList.indexOf(uniqueKey);
-  if (index > -1) {
-    viewedOrdersList.splice(index, 1); // Bỏ đã xem
-    order.isViewed = false;
-  } else {
-    viewedOrdersList.push(uniqueKey); // Thêm vào danh sách đã xem
-    order.isViewed = true;
-  }
-
-  // Lưu ngược lại vào máy con (Không tốn 1 lượt đọc/ghi nào lên Firebase)
-  localStorage.setItem('dms_local_viewed_orders', JSON.stringify(viewedOrdersList));
-
-  // Đóng modal chi tiết ngay lập tức
-  if (typeof closeOrderDetailsModal === 'function') {
-    closeOrderDetailsModal();
-  }
-
-  // Cập nhật màu trực tiếp trên giao diện ngay lập tức mà không cần F5
-  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
-  allCards.forEach(card => {
-    const cardSoCtu = card.getAttribute('data-so-ctu');
-    const cardHtml = card.innerHTML || '';
-    
-    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
-                    (order.soCtu && cardHtml.includes(String(order.soCtu))) || 
-                    (order.id && cardHtml.includes(String(order.id)));
-
-    if (isMatch) {
-      if (order.isViewed) {
-        card.style.setProperty('background-color', '#d4edda', 'important');
-        card.style.setProperty('border-color', '#c3e6cb', 'important');
-      } else {
-        card.style.removeProperty('background-color');
-        card.style.removeProperty('border-color');
-      }
-    }
-  });
-};
-
-// 2. Hàm tự động quét và khôi phục màu sắc từ localStorage khi mở/tải lại trang Sổ Gốc
-window.applyLocalViewedStylesToCards = function() {
-  const viewedOrdersList = JSON.parse(localStorage.getItem('dms_local_viewed_orders') || '[]');
-  if (viewedOrdersList.length === 0) return;
-
-  const allCards = document.querySelectorAll('.so-goc-card-item');
-  allCards.forEach(card => {
-    const cardSoCtu = card.getAttribute('data-so-ctu');
-    if (cardSoCtu && viewedOrdersList.includes(String(cardSoCtu))) {
-      card.style.setProperty('background-color', '#d4edda', 'important');
-      card.style.setProperty('border-color', '#c3e6cb', 'important');
-    }
-  });
-};
-
-// Tự động kích hoạt tô màu mỗi khi tải hoặc làm mới danh sách Sổ Gốc
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(window.applyLocalViewedStylesToCards, 500);
-});
 </script>
 </body>
 </html>
