@@ -5644,31 +5644,76 @@ const accountantButtonHtml = `
 };
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 window.markOrderAsViewed = async function(orderId) {
-  let order = orders.find(o => String(o.id) === String(orderId) || String(o.soCtu) === String(orderId));
-  if (!order) return;
+  if (!currentUser || currentUser.role !== 'accountant') return;
+  
+  const order = orders.find(o => o.id === orderId);
+  if (order && !order.isViewed) {
+    order.isViewed = true;
+    try {
+      // Cập nhật trạng thái lên Firestore
+      await updateDoc(doc(db, "orders", orderId), { isViewed: true });
+      
+      // Render lại giao diện Sổ Gốc để đổi màu ngay lập tức
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) {
+        renderTabContent('soGocBH', activePane);
+      }
+    } catch (e) {
+      console.error("Lỗi cập nhật trạng thái đã xem:", e);
+    }
+  }
+};
+window.markAsViewedAndClose = async function(orderId) {
+  const targetId = orderId || window.currentViewingOrderId;
+  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId) || String(o.soCtu) === String(targetId));
+  
+  if (!order && window.currentViewingOrderId) {
+    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
+  }
 
-  // Chuẩn hóa trạng thái hiện tại và đảo ngược nó
-  const currentStatus = order.isViewed === true || order.isViewed === 'true' || order.isViewed === 1;
-  order.isViewed = !currentStatus;
+  if (!order) {
+    if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
+    return;
+  }
 
-  // Lưu lên Firebase
-  const firestoreDocId = order.id || order.orderUuid || order.soCtu;
+  // Đảo ngược trạng thái: 
+  // - Nếu đang chưa xem (hoặc undefined/false) -> Bấm lần 1 thành TRUE (Chuyển xanh)
+  // - Nếu đang là true -> Bấm lần 2 thành FALSE (Mất màu/Thu hồi)
+  order.isViewed = !Boolean(order.isViewed);
+  
+  // Lưu trạng thái lên Firebase Firestore
+  const firestoreDocId = order.id || order.orderUuid;
   if (firestoreDocId) {
     try {
       await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
     } catch (e) {
-      console.error("Lỗi cập nhật:", e);
+      console.error("Lỗi cập nhật CSDL:", e);
     }
   }
 
-  // Quét và đổi màu ngay lập tức trên DOM hiện tại
-  const allCards = document.querySelectorAll('.so-goc-card-item');
+  // Đóng modal chi tiết ngay lập tức (KHÔNG HỎI GÌ CẢ)
+  if (typeof closeOrderDetailsModal === 'function') {
+    closeOrderDetailsModal();
+  }
+
+  // Cập nhật đổi màu hoặc xóa màu trực tiếp trên giao diện ngay lập tức
+  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
   allCards.forEach(card => {
-    if (card.getAttribute('onclick')?.includes(String(orderId))) {
+    const cardSoCtu = card.getAttribute('data-so-ctu');
+    const cardHtml = card.innerHTML || '';
+    
+    // Kiểm tra khớp số chứng từ hoặc ID để đổi đúng thẻ
+    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
+                    (order.soCtu && cardHtml.includes(String(order.soCtu))) || 
+                    (order.id && cardHtml.includes(String(order.id)));
+
+    if (isMatch) {
       if (order.isViewed) {
+        // Lần bấm 1: Ép chuyển sang màu xanh lá ngay lập tức
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
       } else {
+        // Lần bấm 2: Thu hồi (Xóa sạch màu xanh, trả về như cũ)
         card.style.removeProperty('background-color');
         card.style.removeProperty('border-color');
       }
