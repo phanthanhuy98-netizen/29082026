@@ -3253,75 +3253,99 @@ window.editOrder = function(orderId) {
     switchTab('soGocBH');
   };
 
-window.openOrderDetailsModal = function(orderId) {
-    // 1. Lưu lại ID đơn hàng cho kế toán (dòng này an toàn, không làm ảnh hưởng gì)
-    window.currentViewingOrderId = orderId;
-
-    // 2. Tìm đơn hàng trong danh sách
+  window.openOrderDetailsModal = function(orderId) {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
-
-    let inferredMADTPN = order.maDTPNNo || '';
-    if (!inferredMADTPN && order.maKH && order.maKH.includes(' - ')) {
-        inferredMADTPN = order.maKH.split(' - ')[0].trim();
+window.currentViewingOrderId = orderId;
+    let inferredMaDTPN = order.maDTPNNo || '';
+    if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
+      inferredMaDTPN = order.maKH.split(' - ')[0].trim();
     }
 
     const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
 
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
-
-    // 3. Render giao diện chi tiết chứng từ (giữ nguyên logic gốc của app bạn)
     modalContainer.innerHTML = `
-        <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-            <div class="modal-content" style="max-width: 600px; width: 95%; background: white; border-radius: 12px; padding: 20px; max-height: 90vh; overflow-y: auto;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin:0; font-size: 18px; color: #1e293b;">📄 Chi Tiết Chứng Từ #${order.soCtu || ''}</h3>
-                    <button type="button" class="btn-danger" onclick="closeOrderDetailsModal()" style="background: #e11d48; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600;">Đóng</button>
-                </div>
-                
-                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 14px; color: #334155;">
-                    <div>Ngày chứng từ: <b>${order.ngayCtu || ''}</b> &nbsp;|&nbsp; Nhân viên: <b>[${order.maNhanVien || ''}] ${order.tenNhanVien || ''}</b></div>
-                    <div style="margin-top: 5px;">Mã KH: <b>${order.maKH || ''}</b></div>
-                    <div style="margin-top: 5px;">Khách hàng: <b>${order.tenKhachHang || ''}</b></div>
-                </div>
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
+        <div class="modal-content fullscreen-modal">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
+            <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+          </div>
+          <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
+            <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
+            <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
+            <div>Mã KH: <b style="color:var(--text-main);">${inferredMaDTPN}</b></div>
+            <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || '—'}</b></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">
+       ${validItems.length > 0 ? validItems.map(item => {
+  const productObj = products.find(p => p.id === item.id || p.code === item.code);
+  const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+  
+  const totalQty = Number(item.qty || 0);
+  const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+  const le = ratio > 0 ? totalQty % ratio : totalQty;
+  const unitName = item.dvt || 'gói';
 
-                <div style="display: flex; flex-direction: column; gap: 8px;">
-                    ${validItems.map(item => `
-                        <div style="background: white; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px;">
-                            <div style="font-weight: 600; color: #0f172a;">${item.tenSanPham || item.maSanPham || ''}</div>
-                            <div style="font-size: 13px; color: #64748b; margin-top: 3px;">SL: <b style="color: #0284c7;">${item.qty}</b></div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
+  let qtyText = '';
+  if (kien > 0 && le > 0) {
+    qtyText = `<b>${kien}</b> Thùng <b>${le}</b> ${unitName}`;
+  } else if (kien > 0) {
+    qtyText = `<b>${kien}</b> Thùng`;
+  } else {
+    qtyText = `<b>${totalQty}</b> ${unitName}`;
+  }
+
+  return `
+    <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 14px; font-size:14px;">
+      <div style="display:flex; justify-content:space-between; font-weight:800; color:var(--text-main); margin-bottom:4px;">
+        <span style="font-size:15px;">[${item.code || ''}] ${item.name || ''}</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; color:var(--text-muted); align-items:center;">
+        <span>SL: <span style="color:#2563EB; font-size:14px;">${qtyText}</span></span>
+      </div>
+    </div>
+  `;
+}).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted);">Không có sản phẩm hợp lệ.</div>`}
+          </div>
         </div>
+      </div>
     `;
     modalContainer.classList.remove('hidden');
-};
-
+  };
 window.closeOrderDetailsModal = async function() {
-    // Nếu là kế toán và đang mở đơn chưa xem -> cập nhật trạng thái đã xem
+    // Nếu là tài khoản kế toán và đang mở một đơn chưa xem
     if (currentUser && currentUser.role === 'accountant' && window.currentViewingOrderId) {
         const orderId = window.currentViewingOrderId;
         const order = orders.find(o => o.id === orderId);
         
         if (order && !order.isViewed) {
-            order.isViewed = true;
-            try {
-                await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-                const activePane = document.getElementById('tabPane_soGocBH');
-                if (activePane) {
-                    renderTabContent('soGocBH', activePane);
+            // Hiển thị bảng hỏi xác nhận sử dụng hàm thông báo chuẩn của app bạn
+            const confirmViewed = await window.showCustomConfirm(
+                "Xác nhận đơn hàng",
+                "Bạn có muốn đánh dấu đơn hàng này là 'Đã xem' không?",
+                "fa-eye",
+                "Đã xem",
+                "Để sau"
+            );
+
+            if (confirmViewed) {
+                order.isViewed = true;
+                try {
+                    await updateDoc(doc(db, "orders", orderId), { isViewed: true });
+                    const activePane = document.getElementById('tabPane_soGocBH');
+                    if (activePane) renderTabContent('soGocBH', activePane);
+                } catch (e) {
+                    console.error("Lỗi cập nhật đã xem:", e);
                 }
-            } catch (e) {
-                console.error("Lỗi cập nhật đã xem:", e);
             }
         }
         window.currentViewingOrderId = null;
     }
 
-    // Đóng modal
+    // Tiến hành đóng modal chi tiết như bình thường
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
         modalContainer.innerHTML = '';
@@ -5658,31 +5682,6 @@ window.markOrderAsViewed = async function(orderId) {
     }
   }
 };
-  document.addEventListener('click', async function(event) {
-    // Kiểm tra nếu người dùng bấm vào nút Đóng trong modal chi tiết chứng từ
-    const closeBtn = event.target.closest('button, .btn, span');
-    if (closeBtn && (closeBtn.textContent.includes('Đóng') || closeBtn.classList.contains('close-modal'))) {
-        
-        // Nếu là tài khoản kế toán và đang có đơn hàng đang xem
-        if (currentUser && currentUser.role === 'accountant' && window.currentViewingOrderId) {
-            const orderId = window.currentViewingOrderId;
-            const order = orders.find(o => o.id === orderId);
-            
-            if (order && !order.isViewed) {
-                // Đánh dấu đã xem luôn hoặc hiện bảng hỏi xác nhận
-                order.isViewed = true;
-                try {
-                    await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-                    const activePane = document.getElementById('tabPane_soGocBH');
-                    if (activePane) renderTabContent('soGocBH', activePane);
-                } catch (e) {
-                    console.error("Lỗi cập nhật đã xem:", e);
-                }
-            }
-            window.currentViewingOrderId = null;
-        }
-    }
-});
 </script>
 </body>
 </html>
