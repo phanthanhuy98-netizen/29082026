@@ -5645,11 +5645,11 @@ window.promptCloseOrderView = async function(orderId) {
  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
 const isAccountantRole = userRole === 'accountant' || userRole === 'ketoan';
 
-const accountantButtonHtml = (isAccountantRole || currentUser.role === 'admin') ? `
-  <button class="btn btn-green" onclick="markAsViewedAndClose(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
-    <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Đã xem (Bỏ qua)' : 'Đã xem'}
+const accountantButtonHtml = `
+  <button class="btn btn-green" onclick="markAsViewedAndClose('${order.id || order.orderUuid}')" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Bỏ đã xem' : 'Đã xem'}
   </button>
-` : '';
+`;
 
   if (currentUser && isAccountantRole && !order.isViewed) {
     const confirmViewed = await window.showCustomConfirm(
@@ -5696,33 +5696,40 @@ window.markOrderAsViewed = async function(orderId) {
   }
 };
 window.markAsViewedAndClose = async function(orderId) {
+  // Dùng đúng orderId được truyền vào từ nút bấm, nếu không có mới lấy biến tạm
   const targetId = orderId || window.currentViewingOrderId;
-  let order = orders.find(o => o.id === targetId || o.orderUuid === targetId || String(o.soCtu) === String(targetId));
   
-  if (!order && window.currentViewingOrderId) {
-    order = orders.find(o => o.id === window.currentViewingOrderId);
+  // Tìm chính xác duy nhất 1 đơn hàng khớp ID
+  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId));
+  
+  if (!order) {
+    console.error("Không tìm thấy đơn hàng với ID:", targetId);
+    closeOrderDetailsModal();
+    return;
   }
 
-  if (order) {
-    // Đảo trạng thái đã xem (True <-> False)
-    order.isViewed = !order.isViewed;
-    
-    // Lưu lên Firebase
-    const firestoreDocId = order.id || order.orderUuid;
-    if (firestoreDocId) {
-      try {
-        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
-      } catch (e) {
-        console.error("Lỗi cập nhật CSDL:", e);
-      }
+  // Đảo trạng thái đã xem (True <-> False)
+  order.isViewed = !order.isViewed;
+  
+  // Lưu trạng thái lên Firebase theo đúng ID document đó
+  const firestoreDocId = order.id || order.orderUuid;
+  if (firestoreDocId) {
+    try {
+      await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
+    } catch (e) {
+      console.error("Lỗi cập nhật CSDL:", e);
     }
   }
 
-  // Đóng modal chi tiết ngay lập tức (Không hỏi xác nhận gì thêm)
+  // Đóng modal chi tiết ngay lập tức
   closeOrderDetailsModal();
 
-  // Ép đổi màu trực tiếp dựa trên tất cả các thẻ có chứa mã chứng từ hoặc ID
-  if (order) {
+  // Render lại toàn bộ tab Sổ Gốc để đồng bộ giao diện sạch sẽ, chống mất màu lung tung
+  const activePane = document.getElementById('tabPane_soGocBH');
+  if (activePane && typeof renderTabContent === 'function') {
+    renderTabContent('soGocBH', activePane);
+  }
+};
     const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item, tr');
     allCards.forEach(card => {
       const htmlContent = card.innerHTML || '';
