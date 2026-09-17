@@ -4800,7 +4800,7 @@ const isAccountant = currentUser.role === 'accountant';
 const canModify = (isOwner || isAdmin) && !isAccountant;
 
 // Nếu là kế toán và đơn hàng đã được xem, tạo style nền xanh lá
-const viewedBgStyle = (isAccountant && o.isViewed) ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
+const viewedBgStyle = o.isViewed ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
 
            return `
             <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.id}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle}; display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
@@ -5642,8 +5642,14 @@ window.promptCloseOrderView = async function(orderId) {
   }
 
   // Chuẩn hóa role của user hiện tại về dạng chữ thường không dấu để check cho chuẩn
-  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
-  const isAccountantRole = userRole === 'accountant' || userRole === 'ketoan' || userRole.includes('kế toán');
+ const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
+const isAccountantRole = userRole === 'accountant' || userRole === 'ketoan';
+
+const accountantButtonHtml = (isAccountantRole || currentUser.role === 'admin') ? `
+  <button class="btn btn-green" onclick="markAsViewedAndClose(window.currentViewingOrderId)" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Đã xem (Bỏ qua)' : 'Đã xem'}
+  </button>
+` : '';
 
   if (currentUser && isAccountantRole && !order.isViewed) {
     const confirmViewed = await window.showCustomConfirm(
@@ -5694,16 +5700,30 @@ window.markAsViewedAndClose = async function(orderId) {
   const order = orders.find(o => o.id === targetId);
   
   if (order) {
+    // Đảo ngược hoặc bật trạng thái đã xem
     order.isViewed = true;
     try {
+      // 1. Cập nhật dữ liệu lên Firestore
       await updateDoc(doc(db, "orders", targetId), { isViewed: true });
+      
+      // 2. Cập nhật trực tiếp style màu xanh lá cho thẻ card ngoài danh sách ngay lập tức (DOM Manipulation)
+      const targetCard = document.querySelector(`.so-goc-card-item[data-so-ctu="${order.soCtu}"]`);
+      if (targetCard) {
+        targetCard.style.backgroundColor = '#d4edda';
+        targetCard.style.borderColor = '#c3e6cb';
+      }
+
+      // 3. Render lại tab Sổ Gốc ngầm để đồng bộ dữ liệu toàn cục
       const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) renderTabContent('soGocBH', activePane);
+      if (activePane) {
+        renderTabContent('soGocBH', activePane);
+      }
     } catch (e) {
       console.error("Lỗi cập nhật trạng thái đã xem:", e);
     }
   }
   
+  // Đóng modal chi tiết
   closeOrderDetailsModal();
 };
 </script>
