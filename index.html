@@ -5697,35 +5697,43 @@ window.markOrderAsViewed = async function(orderId) {
 };
 window.markAsViewedAndClose = async function(orderId) {
   const targetId = orderId || window.currentViewingOrderId;
-  const order = orders.find(o => o.id === targetId);
   
+  // Tìm kiếm linh hoạt theo id hoặc orderUuid hoặc soCtu
+  let order = orders.find(o => o.id === targetId || o.orderUuid === targetId || String(o.soCtu) === String(targetId));
+  
+  // Nếu vẫn không tìm thấy trong mảng, lấy tạm chứng từ đang xem hoặc chứng từ đầu tiên trùng số
+  if (!order && window.currentViewingOrderId) {
+    order = orders.find(o => o.id === window.currentViewingOrderId);
+  }
+
   if (order) {
     order.isViewed = true;
-    try {
-      // 1. Lưu trạng thái đã xem lên Firestore
-      await updateDoc(doc(db, "orders", targetId), { isViewed: true });
-      
-      // 2. Ép thẻ đơn hàng ngoài giao diện Sổ Gốc chuyển sang màu xanh lá ngay lập tức
-      const targetCards = document.querySelectorAll('.so-goc-card-item');
-      targetCards.forEach(card => {
-        if (card.getAttribute('data-so-ctu') === String(order.soCtu)) {
-          card.style.setProperty('background-color', '#d4edda', 'important');
-          card.style.setProperty('border-color', '#c3e6cb', 'important');
-        }
-      });
-
-      // 3. Đồng bộ ngầm lại dữ liệu Sổ Gốc
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) {
-        renderTabContent('soGocBH', activePane);
+    
+    // Tìm đúng document ID thực tế trên Firestore để cập nhật chính xác
+    const firestoreDocId = order.id || order.orderUuid;
+    if (firestoreDocId) {
+      try {
+        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: true });
+      } catch (e) {
+        console.error("Lỗi cập nhật CSDL:", e);
       }
-    } catch (e) {
-      console.error("Lỗi cập nhật trạng thái đã xem:", e);
     }
   }
-  
-  // Đóng modal chi tiết chứng từ
+
+  // Đóng modal trước
   closeOrderDetailsModal();
+
+  // Ép đổi màu giao diện cho tất cả các thẻ card trên sổ gốc khớp số chứng từ
+  if (order && order.soCtu) {
+    const targetCards = document.querySelectorAll('.so-goc-card-item');
+    targetCards.forEach(card => {
+      const cardSoCtu = card.getAttribute('data-so-ctu');
+      if (cardSoCtu === String(order.soCtu)) {
+        card.style.setProperty('background-color', '#d4edda', 'important');
+        card.style.setProperty('border-color', '#c3e6cb', 'important');
+      }
+    });
+  }
 };
 </script>
 </body>
