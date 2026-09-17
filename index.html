@@ -5645,44 +5645,30 @@ const accountantButtonHtml = `
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 window.markOrderAsViewed = async function(orderId) {
   let order = orders.find(o => String(o.id) === String(orderId) || String(o.soCtu) === String(orderId));
-  
   if (!order) return;
 
-  // Đảo ngược trạng thái ngay lập tức trong 1 chạm
-  order.isViewed = !Boolean(order.isViewed);
-  
-  // Lưu trạng thái lên Firebase Firestore
+  // Chuẩn hóa trạng thái hiện tại và đảo ngược nó
+  const currentStatus = order.isViewed === true || order.isViewed === 'true' || order.isViewed === 1;
+  order.isViewed = !currentStatus;
+
+  // Lưu lên Firebase
   const firestoreDocId = order.id || order.orderUuid || order.soCtu;
   if (firestoreDocId) {
     try {
       await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
     } catch (e) {
-      console.error("Lỗi cập nhật CSDL:", e);
+      console.error("Lỗi cập nhật:", e);
     }
   }
 
-  // Đóng modal chi tiết nếu đang mở
-  if (typeof closeOrderDetailsModal === 'function') {
-    closeOrderDetailsModal();
-  }
-
-  // Cập nhật đổi màu hoặc xóa màu trực tiếp trên giao diện ngay lập tức
-  const allCards = document.querySelectorAll('.mobile-item-card, so-goc-card-item');
+  // Quét và đổi màu ngay lập tức trên DOM hiện tại
+  const allCards = document.querySelectorAll('.so-goc-card-item');
   allCards.forEach(card => {
-    const cardHtml = card.innerHTML || '';
-    const cardSoCtu = card.getAttribute('data-so-ctu');
-    
-    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
-                    (order.id && cardHtml.includes(String(order.id))) ||
-                    (order.soCtu && cardHtml.includes(String(order.soCtu)));
-
-    if (isMatch) {
+    if (card.getAttribute('onclick')?.includes(String(orderId))) {
       if (order.isViewed) {
-        // Bật màu xanh lá ngay từ lần bấm đầu tiên
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
       } else {
-        // Thu hồi (Xóa màu xanh) ở lần bấm thứ hai
         card.style.removeProperty('background-color');
         card.style.removeProperty('border-color');
       }
