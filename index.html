@@ -3320,33 +3320,12 @@ window.currentViewingOrderId = orderId;
     `;
     modalContainer.classList.remove('hidden');
   };
-window.closeOrderDetailsModal = async function() {
-    // Nếu là tài khoản kế toán và đang mở một đơn chưa xem
-    if (currentUser && currentUser.role === 'accountant' && window.currentViewingOrderId) {
-        const orderId = window.currentViewingOrderId;
-        const order = orders.find(o => o.id === orderId);
-        
-        if (order && !order.isViewed) {
-            // Hiển thị bảng hỏi xác nhận sử dụng hàm thông báo chuẩn của app bạn
-            const confirmViewed = await window.showCustomConfirm(
-                "Xác nhận đơn hàng",
-                "Bạn có muốn đánh dấu đơn hàng này là 'Đã xem' không?",
-                "fa-eye",
-                "Đã xem",
-                "Để sau"
-            );
-
-            if (confirmViewed) {
-                order.isViewed = true;
-                try {
-                    await updateDoc(doc(db, "orders", orderId), { isViewed: true });
-                    const activePane = document.getElementById('tabPane_soGocBH');
-                    if (activePane) renderTabContent('soGocBH', activePane);
-                } catch (e) {
-                    console.error("Lỗi cập nhật đã xem:", e);
-                }
-            }
-        }
+window.closeOrderDetailsModal = function() {
+  const modalContainer = document.getElementById('orderDetailModalContainer'); // Hoặc tên biến modal của bạn
+  if (modalContainer) {
+    modalContainer.classList.add('hidden');
+  }
+};
         window.currentViewingOrderId = null;
     }
 
@@ -5696,44 +5675,51 @@ window.markOrderAsViewed = async function(orderId) {
   }
 };
 window.markAsViewedAndClose = async function(orderId) {
+  // Lấy ID chuẩn của đơn hàng
   const targetId = orderId || window.currentViewingOrderId;
+  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId));
   
-  // Tìm kiếm linh hoạt theo id hoặc orderUuid hoặc soCtu
-  let order = orders.find(o => o.id === targetId || o.orderUuid === targetId || String(o.soCtu) === String(targetId));
-  
-  // Nếu vẫn không tìm thấy trong mảng, lấy tạm chứng từ đang xem hoặc chứng từ đầu tiên trùng số
   if (!order && window.currentViewingOrderId) {
-    order = orders.find(o => o.id === window.currentViewingOrderId);
+    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
   }
 
-  if (order) {
-    order.isViewed = true;
-    
-    // Tìm đúng document ID thực tế trên Firestore để cập nhật chính xác
-    const firestoreDocId = order.id || order.orderUuid;
-    if (firestoreDocId) {
-      try {
-        await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: true });
-      } catch (e) {
-        console.error("Lỗi cập nhật CSDL:", e);
-      }
+  if (!order) {
+    if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
+    return;
+  }
+
+  // Đảo trạng thái đã xem (True <-> False)
+  order.isViewed = !order.isViewed;
+  
+  // Cập nhật trạng thái lên Firebase Firestore
+  const firestoreDocId = order.id || order.orderUuid;
+  if (firestoreDocId) {
+    try {
+      await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
+    } catch (e) {
+      console.error("Lỗi cập nhật CSDL:", e);
     }
   }
 
-  // Đóng modal trước
-  closeOrderDetailsModal();
+  // Đóng Modal chi tiết ngay lập tức (Xóa tiệt cái bảng thông báo xác nhận)
+  if (typeof closeOrderDetailsModal === 'function') {
+    closeOrderDetailsModal();
+  }
 
-  // Ép đổi màu giao diện cho tất cả các thẻ card trên sổ gốc khớp số chứng từ
-  if (order && order.soCtu) {
-    const targetCards = document.querySelectorAll('.so-goc-card-item');
-    targetCards.forEach(card => {
-      const cardSoCtu = card.getAttribute('data-so-ctu');
-      if (cardSoCtu === String(order.soCtu)) {
+  // Ép đổi màu xanh lá / hoặc bỏ màu ngay trên giao diện danh sách Sổ Gốc
+  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
+  allCards.forEach(card => {
+    const cardHtml = card.innerHTML || '';
+    if (cardHtml.includes(String(order.soCtu)) || (order.id && cardHtml.includes(String(order.id)))) {
+      if (order.isViewed) {
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
+      } else {
+        card.style.removeProperty('background-color');
+        card.style.removeProperty('border-color');
       }
-    });
-  }
+    }
+  });
 };
 </script>
 </body>
