@@ -3106,12 +3106,8 @@ window.filterTabProducts = function(val) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
-const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-const isAdmin = currentUser.role === 'admin';
-
-if (!isOwner && !isAdmin) {
-  return alert("⛔ Tài khoản Manager không có quyền sửa đơn hàng của Sales!");
-}
+  const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+  const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   // Lấy chính xác ngày theo múi giờ Việt Nam (GMT+7)
   const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
@@ -4762,29 +4758,29 @@ ${activeVisitedStore ? `
           <input type="text" placeholder="🔍 Tìm theo số CTu, mã KH, tên KH hoặc mã NV..." oninput="filterSoGocCards(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
         </div>
 
-     <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
-  ${allGroupedList.length > 0 ? allGroupedList.map(o => {
-    // 1. Đặt các biến logic kiểm tra ở đây (trước chữ return)
-    const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-    const isAdmin = currentUser.role === 'admin';
-    const canModify = isOwner || isAdmin;
+        <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
+          ${allGroupedList.length > 0 ? allGroupedList.map(o => {
+            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+            const canModify = isOwner || isAdminOrManager;
 
-    // 2. Sau đó mới đến từ khóa return và mở chuỗi HTML ``
-    return `
-      <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
-          <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
-              <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
-          <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
-          ${canModify ? `
-            <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
-            <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
-          ` : ''}
-        </div>
-      </div>
-    `;
-  }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào được lập.</div>`}
-</div>
+           return `
+              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+                  <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    ${(() => {
+                     let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
+                      if (matchedStore && matchedStore.lat && Number(matchedStore.lat) !== 0 && o.lat && Number(o.lat) !== 0) {
+                        let distance = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                        let distStr = distance > 1000 ? (distance / 1000).toFixed(1) + ' km' : Math.round(distance) + ' m';
+                        let isClose = distance <= 50;
+                        return `<span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClose ? 'var(--emerald)' : 'var(--amber)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>`;
+                      }
+                      return '';
+                    })()}
+                    <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${o.ngayCtuFormatted} ${formatOrderTime(o.createdAt)}</span>
+                  </div>
+                </div>
 
                 <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;">
                   ${o.maKH || o.maDTPNNo}
@@ -4797,9 +4793,10 @@ ${activeVisitedStore ? `
 
                 <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
                   <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
-                const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-const isAdmin = currentUser.role === 'admin'; // Chỉ định nghĩa Admin mới được sửa/xóa
-const canModify = isOwner || isAdmin;
+                  ${canModify ? `
+                    <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                    <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                  ` : ''}
                 </div>
               </div>
             `;
