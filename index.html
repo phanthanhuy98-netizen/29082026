@@ -5667,7 +5667,7 @@ window.markOrderAsViewed = async function(orderId) {
 };
 window.markAsViewedAndClose = async function(orderId) {
   const targetId = orderId || window.currentViewingOrderId;
-  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId));
+  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId) || String(o.soCtu) === String(targetId));
   
   if (!order && window.currentViewingOrderId) {
     order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
@@ -5678,12 +5678,12 @@ window.markAsViewedAndClose = async function(orderId) {
     return;
   }
 
-  // KIỂM TRA TRẠNG THÁI RÕ RÀNG: Nếu đang là true thì chuyển thành false, ngược lại thì thành true
-  // Tránh việc bị dính giá trị undefined ở lần bấm đầu tiên
-  const currentState = order.isViewed === true;
-  order.isViewed = !currentState;
+  // Đảo ngược trạng thái: 
+  // - Nếu đang chưa xem (hoặc undefined/false) -> Bấm lần 1 thành TRUE (Chuyển xanh)
+  // - Nếu đang là true -> Bấm lần 2 thành FALSE (Mất màu/Thu hồi)
+  order.isViewed = !Boolean(order.isViewed);
   
-  // Lưu trạng thái mới lên Firebase Firestore
+  // Lưu trạng thái lên Firebase Firestore
   const firestoreDocId = order.id || order.orderUuid;
   if (firestoreDocId) {
     try {
@@ -5701,14 +5701,21 @@ window.markAsViewedAndClose = async function(orderId) {
   // Cập nhật đổi màu hoặc xóa màu trực tiếp trên giao diện ngay lập tức
   const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
   allCards.forEach(card => {
+    const cardSoCtu = card.getAttribute('data-so-ctu');
     const cardHtml = card.innerHTML || '';
-    if (cardHtml.includes(String(order.soCtu)) || (order.id && cardHtml.includes(String(order.id)))) {
+    
+    // Kiểm tra khớp số chứng từ hoặc ID để đổi đúng thẻ
+    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
+                    (order.soCtu && cardHtml.includes(String(order.soCtu))) || 
+                    (order.id && cardHtml.includes(String(order.id)));
+
+    if (isMatch) {
       if (order.isViewed) {
-        // Lần 1: Bật màu xanh lá
+        // Lần bấm 1: Ép chuyển sang màu xanh lá ngay lập tức
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
       } else {
-        // Lần 2: Thu hồi (Xóa màu xanh)
+        // Lần bấm 2: Thu hồi (Xóa sạch màu xanh, trả về như cũ)
         card.style.removeProperty('background-color');
         card.style.removeProperty('border-color');
       }
