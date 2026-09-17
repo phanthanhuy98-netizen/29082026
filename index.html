@@ -939,13 +939,16 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 36);
+      const request = indexedDB.open("DMS_OfflineDB", 37);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
         const dbInstance = e.target.result;
         if (!dbInstance.objectStoreNames.contains("offlineOrders")) dbInstance.createObjectStore("offlineOrders", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localProducts")) dbInstance.createObjectStore("localProducts", { keyPath: "code" });
+        if (!dbInstance.objectStoreNames.contains("localViewedOrders")) {
+  dbInstance.createObjectStore("localViewedOrders", { keyPath: "id" });
+}
         
         if (dbInstance.objectStoreNames.contains("localStores")) {
           dbInstance.deleteObjectStore("localStores");
@@ -983,7 +986,37 @@
       tx.onerror = () => resolve();
     });
   }
+window.markAsViewedAndClose = async function(orderId) {
+  const targetId = orderId || window.currentViewingOrderId;
+  if (!targetId) return;
 
+  // Lưu/Xóa trạng thái trên IndexedDB (không tốn Firebase read/write)
+  const isNowViewed = await toggleLocalViewedStatus(targetId);
+
+  // Đóng modal ngay lập tức
+  if (typeof closeOrderDetailsModal === 'function') {
+    closeOrderDetailsModal();
+  }
+
+  // Cập nhật đổi màu trực tiếp trên giao diện danh sách Sổ Gốc
+  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
+  allCards.forEach(card => {
+    const cardSoCtu = card.getAttribute('data-so-ctu');
+    const cardHtml = card.innerHTML || '';
+    
+    const isMatch = cardHtml.includes(String(targetId)) || (cardSoCtu && cardHtml.includes(String(cardSoCtu)));
+
+    if (isMatch) {
+      if (isNowViewed) {
+        card.style.setProperty('background-color', '#d4edda', 'important');
+        card.style.setProperty('border-color', '#c3e6cb', 'important');
+      } else {
+        card.style.removeProperty('background-color');
+        card.style.removeProperty('border-color');
+      }
+    }
+  });
+};
   async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -5665,55 +5698,29 @@ window.markOrderAsViewed = async function(orderId) {
 };
 window.markAsViewedAndClose = async function(orderId) {
   const targetId = orderId || window.currentViewingOrderId;
-  let order = orders.find(o => String(o.id) === String(targetId) || String(o.orderUuid) === String(targetId) || String(o.soCtu) === String(targetId));
-  
-  if (!order && window.currentViewingOrderId) {
-    order = orders.find(o => String(o.id) === String(window.currentViewingOrderId));
-  }
+  if (!targetId) return;
 
-  if (!order) {
-    if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
-    return;
-  }
+  // Lưu/Xóa trạng thái trên IndexedDB (Không tốn Firebase Read/Write)
+  const isNowViewed = await toggleLocalViewedStatus(targetId);
 
-  // Đảo ngược trạng thái: 
-  // - Nếu đang chưa xem (hoặc undefined/false) -> Bấm lần 1 thành TRUE (Chuyển xanh)
-  // - Nếu đang là true -> Bấm lần 2 thành FALSE (Mất màu/Thu hồi)
-  order.isViewed = !Boolean(order.isViewed);
-  
-  // Lưu trạng thái lên Firebase Firestore
-  const firestoreDocId = order.id || order.orderUuid;
-  if (firestoreDocId) {
-    try {
-      await updateDoc(doc(db, "orders", String(firestoreDocId)), { isViewed: order.isViewed });
-    } catch (e) {
-      console.error("Lỗi cập nhật CSDL:", e);
-    }
-  }
-
-  // Đóng modal chi tiết ngay lập tức (KHÔNG HỎI GÌ CẢ)
+  // Đóng modal ngay lập tức
   if (typeof closeOrderDetailsModal === 'function') {
     closeOrderDetailsModal();
   }
 
-  // Cập nhật đổi màu hoặc xóa màu trực tiếp trên giao diện ngay lập tức
+  // Cập nhật đổi màu trực tiếp trên giao diện danh sách Sổ Gốc
   const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
   allCards.forEach(card => {
     const cardSoCtu = card.getAttribute('data-so-ctu');
     const cardHtml = card.innerHTML || '';
     
-    // Kiểm tra khớp số chứng từ hoặc ID để đổi đúng thẻ
-    const isMatch = (cardSoCtu && String(cardSoCtu) === String(order.soCtu)) || 
-                    (order.soCtu && cardHtml.includes(String(order.soCtu))) || 
-                    (order.id && cardHtml.includes(String(order.id)));
+    const isMatch = cardHtml.includes(String(targetId)) || (cardSoCtu && cardHtml.includes(String(cardSoCtu)));
 
     if (isMatch) {
-      if (order.isViewed) {
-        // Lần bấm 1: Ép chuyển sang màu xanh lá ngay lập tức
+      if (isNowViewed) {
         card.style.setProperty('background-color', '#d4edda', 'important');
         card.style.setProperty('border-color', '#c3e6cb', 'important');
       } else {
-        // Lần bấm 2: Thu hồi (Xóa sạch màu xanh, trả về như cũ)
         card.style.removeProperty('background-color');
         card.style.removeProperty('border-color');
       }
