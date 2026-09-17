@@ -5647,21 +5647,22 @@ const accountantButtonHtml = `
   // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
 // 1. Hàm hiển thị chi tiết (Chỉ tài khoản Kế toán mới thấy nút Đã xem)
 window.markOrderAsViewed = function(orderId) {
-  // Tìm đơn hàng trong mảng dữ liệu (điều chỉnh tên mảng 'allGroupedList' hoặc 'orders' tùy file của bạn)
-  const order = (typeof allGroupedList !== 'undefined' ? allGroupedList : orders).find(o => String(o.id) === String(orderId) || String(o.orderId) === String(orderId));
+  const order = (typeof allGroupedList !== 'undefined' ? allGroupedList : orders).find(o => String(o.id) === String(orderId) || String(o.orderId) === String(orderId) || String(o.soCtu) === String(orderId));
   if (!order) return;
   
-  // Đọc trạng thái từ máy con
   const storageKey = `dms_viewed_order_${order.id || order.orderId || order.soCtu}`;
   const isLocalViewed = localStorage.getItem(storageKey) === 'true';
   
-  // Kiểm tra quyền Kế toán
-  const isAccountant = currentUser && currentUser.role === 'accountant';
+  // Kiểm tra quyền Kế toán linh hoạt hơn
+  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
+  const isAccountant = userRole === 'accountant' || userRole === 'ketoan';
+
+  // Lấy danh sách sản phẩm trong đơn
+  const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
 
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
-  // Render Giao diện Modal
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
       <div class="modal-content fullscreen-modal">
@@ -5682,13 +5683,27 @@ window.markOrderAsViewed = function(orderId) {
         <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
           <div>Ngày chứng từ: <b style="color:var(--text-main);">${order.ngayCtu || ''}</b></div>
           <div>Nhân viên: <b style="color:var(--text-main);">${order.salesName || order.tenNhanVien || ''}</b></div>
+          <div>Mã KH: <b style="color:var(--text-main);">${order.maDTPNNo || ''}</b></div>
+          <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || order.tenKH || '—'}</b></div>
         </div>
+
+        <!-- PHẦN HIỂN THỊ DANH SÁCH SẢN PHẨM -->
+        <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+          ${validItems.length > 0 ? validItems.map(item => `
+            <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:800; color:var(--text-main);">[${item.code || ''}] ${item.name || ''}</div>
+                <div style="font-size:12px; color:var(--text-muted);">SL: <b style="color:#2563EB;">${item.qty} ${item.dvt || 'hộp'}</b></div>
+              </div>
+            </div>
+          `).join('') : '<div style="text-align:center; color:#999; padding:20px;">Không có chi tiết sản phẩm</div>'}
+        </div>
+
       </div>
     </div>
   `;
   modalContainer.classList.remove('hidden');
 };
-
 // 2. Hàm lưu trạng thái vào LocalStorage và đổi màu giao diện ngay lập tức
 window.saveViewedStatusLocally = function(targetId) {
   const storageKey = `dms_viewed_order_${targetId}`;
