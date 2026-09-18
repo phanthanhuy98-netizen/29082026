@@ -5094,18 +5094,13 @@ recentOrders.forEach(o => {
             if (itemQty > 0) {
                 const pKey = String(item.id || item.code || '').trim();
                 if (!productStatsMap.has(pKey)) {
-                    // Tìm kiếm chính xác trong danh mục products gốc với mọi trường hợp tên mã
-                    const prod = (typeof products !== 'undefined' && Array.isArray(products)) 
-                        ? products.find(p => String(p.id||'').trim() === pKey || String(p.code||'').trim() === pKey || String(p.maSP||'').trim() === pKey) 
-                        : null;
-                    
-                    // Lấy hệ số quy cách chuẩn từ danh mục, nếu không có thì quét tiếp trong item, cuối cùng mới fallback về 1 hoặc 50 tùy loại
-                    const quyCachChuan = prod ? Number(prod['Q/c'] || prod.quyCach || prod.tyleQuyDoi || prod.qc || prod.Qc || 1) : Number(item['Q/c'] || item.quyCach || item.tyleQuyDoi || 1);
+                    // Ưu tiên bóc trực tiếp Q/c hoặc quy cách có sẵn ngay trong item của đơn hàng cũ
+                    const quyCachChuan = Number(item['Q/c'] || item.quyCach || item.tyleQuyDoi || item.qc || item.Qc || 0);
 
                     productStatsMap.set(pKey, {
                         code: item.code || item.id || '',
                         name: item.name || '',
-                        dvt: item.dvt || prod?.dvt || 'gói',
+                        dvt: item.dvt || 'gói',
                         tyleQuyDoi: quyCachChuan,
                         totalQty: 0,
                         orderCount: 0
@@ -5207,15 +5202,22 @@ ${isTopTab ? (() => {
 
         <div id="${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
 ${prods.map(tp => {
-    const ratio = Number(tp.tyleQuyDoi || 1);
-    const totalQty = Number(tp.totalQty || 0);
+    let ratio = Number(tp.tyleQuyDoi || 0);
     
-    // Nếu có quy cách > 1 thì tiến hành chia Thùng - Lẻ, ngược lại giữ nguyên đơn vị thường
+    // Nếu trong dữ liệu chưa có tỷ lệ, tự động quét thông minh ngay trong tên sản phẩm (ví dụ *48g thì quy cách là 48)
+    if (ratio <= 0 && tp.name) {
+        const match = tp.name.match(/\*(\d+)/);
+        if (match) ratio = Number(match[1]);
+    }
+    if (ratio <= 0) ratio = 1; // Fallback cuối cùng
+
+    const totalQty = Number(tp.totalQty || 0);
+    const unitName = tp.dvt || 'gói';
     let qtyText = '';
+
     if (ratio > 1) {
         const kien = Math.floor(totalQty / ratio);
         const le = totalQty % ratio;
-        const unitName = tp.dvt || 'gói';
         if (kien > 0 && le > 0) {
             qtyText = `${kien} Thùng ${le} ${unitName}`;
         } else if (kien > 0) {
@@ -5224,7 +5226,7 @@ ${prods.map(tp => {
             qtyText = `${totalQty} ${unitName}`;
         }
     } else {
-        qtyText = `${totalQty} ${tp.dvt || 'gói'}`;
+        qtyText = `${totalQty} ${unitName}`;
     }
 
     return `
