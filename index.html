@@ -939,7 +939,7 @@
   let idbDb = null;
   function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 37);
+      const request = indexedDB.open("DMS_OfflineDB", 36);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -1663,7 +1663,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     document.getElementById('appView').classList.remove('hidden');
     
     const hashTab = window.location.hash.replace('#', '');
-  const defaultStartup = currentUser.role === 'accountant' ? 'soGocBH' : (localStorage.getItem('dms_default_startup_tab') || 'sales');
+    const defaultStartup = localStorage.getItem('dms_default_startup_tab') || 'sales';
     if (hashTab && currentTabOrder.includes(hashTab)) {
       currentTab = hashTab;
     } else {
@@ -3102,13 +3102,14 @@ window.filterTabProducts = function(val) {
     }
   };
 
-window.editOrder = function(orderId) {
+  window.editOrder = function(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
   const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-  const isAdmin = currentUser.role === 'admin'; // Chỉ cho phép Admin hoặc chính Sales tạo đơn được sửa
+  const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
+  // Lấy chính xác ngày theo múi giờ Việt Nam (GMT+7)
   const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
   const vnDate = new Date(vietnamTime);
   const yyyy = vnDate.getFullYear();
@@ -3116,14 +3117,14 @@ window.editOrder = function(orderId) {
   const dd = String(vnDate.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}-${mm}-${dd}`;
 
-  if (order.ngayCtu !== todayStr && !isAdmin) {
-    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản trị viên (Admin).`);
+  if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
+    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự sửa!\nVui lòng liên hệ Quản lý.`);
   }
 
-  // Chặn Manager, chỉ cho phép Sales chủ sở hữu đơn hoặc Admin
-  if (!isOwner && !isAdmin) {
-    return alert("⛔ Quản lý (Manager) không có quyền sửa đơn hàng của Sales!");
+  if (!isOwner && !isManagerOrAdmin) {
+    return alert("⛔ Bạn không có quyền sửa đơn hàng của nhân viên khác!");
   }
+
   let targetStore = stores.find(s => String(s.id) === String(order.storeId));
   if (!targetStore && order.maDTPNNo) {
     targetStore = stores.find(s => String(s.code) === String(order.maDTPNNo));
@@ -3160,31 +3161,31 @@ window.editOrder = function(orderId) {
   switchTab('sales');
 };
 
- window.deleteSingleOrder = async function(orderId) {
-  const order = orders.find(o => o.id === orderId);
-  if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
+  window.deleteSingleOrder = async function(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
-  const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-  const isAdmin = currentUser.role === 'admin'; // Chỉ Admin hoặc Sales sở hữu mới được xóa
-  const todayStr = new Date().toISOString().slice(0, 10);
+    const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
+    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+    const todayStr = new Date().toISOString().slice(0, 10);
 
-  if (order.ngayCtu !== todayStr && !isAdmin) {
-    return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự xóa!`);
-  }
+    if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
+      return alert(`⛔ Đơn hàng lập ngày ${order.ngayCtu} đã qua ngày mới, nhân viên không được tự xóa!`);
+    }
 
-  // Chặn Manager, chỉ cho phép Sales chủ sở hữu đơn hoặc Admin
-  if (!isOwner && !isAdmin) {
-    return alert("⛔ Quản lý (Manager) không có quyền xóa đơn hàng của Sales!");
-  }
+    if (!isOwner && !isManagerOrAdmin) {
+      return alert("⛔ Bạn không có quyền xóa đơn hàng của nhân viên khác!");
+    }
 
-  const confirmDel = await window.showCustomConfirm(
-    "Xóa Đơn Hàng",
-    "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
-    "fa-trash",
-    "Xóa đơn",
-    "Hủy"
-  );
-  if (!confirmDel) return;
+    const confirmDel = await window.showCustomConfirm(
+      "Xóa Đơn Hàng",
+      "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
+      "fa-trash",
+      "Xóa đơn",
+      "Hủy"
+    );
+    if (!confirmDel) return;
+
     try {
       await deleteDoc(doc(db, "orders", orderId));
       orders = orders.filter(o => o.id !== orderId);
@@ -3253,102 +3254,77 @@ window.editOrder = function(orderId) {
     switchTab('soGocBH');
   };
 
- window.openOrderDetailsModal = function(orderId) {
-  const order = orders.find(o => String(o.id) === String(orderId) || String(o.soCtu) === String(orderId));
-  if (!order) return;
-  window.currentViewingOrderId = orderId;
+  window.openOrderDetailsModal = function(orderId) {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
 
-  // 1. Đọc trạng thái từ máy con (Không tốn lượt read Firebase)
-  const storageKey = `dms_viewed_order_${order.id || order.orderUuid || order.soCtu}`;
-  const localViewedStatus = localStorage.getItem(storageKey) === 'true';
-  order.isViewed = order.isViewed || localViewedStatus;
+    let inferredMaDTPN = order.maDTPNNo || '';
+    if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
+      inferredMaDTPN = order.maKH.split(' - ')[0].trim();
+    }
 
-  let inferredMaDTPN = order.maDTPNNo || '';
-  if (!inferredMaDTPN && order.maKH && order.maKH.includes(' - ')) {
-    inferredMaDTPN = order.maKH.split(' - ')[0].trim();
-  }
+    const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
 
-  const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
-  
-  // 2. Kiểm tra phân quyền: Đảm bảo chỉ "accountant" hoặc "ketoan" mới thấy
-  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
-  const isAccountant = userRole === 'accountant' || userRole === 'ketoan';
-
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-  
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-      <div class="modal-content fullscreen-modal">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            
-            <!-- CHỈ KẾ TOÁN MỚI THẤY NÚT NÀY -->
-            ${isAccountant ? `
-              <button class="btn" id="modalViewedBtn_${orderId}" onclick="markAsViewedAndClose('${order.id || order.orderUuid || order.soCtu}')" style="font-size:14px; padding:8px 16px; background-color: ${order.isViewed ? '#6c757d' : '#10b981'}; color: white; border: none; border-radius: 6px; cursor: pointer;">
-                <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Bỏ đã xem' : 'Đã xem'}
-              </button>
-            ` : ''}
-            
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
+        <div class="modal-content fullscreen-modal">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
             <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
           </div>
-        </div>
-        <!-- Các thông tin khác giữ nguyên -->
-        <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
-          <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
-          <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
-          <div>Mã KH: <b style="color:var(--text-main);">${inferredMaDTPN}</b></div>
-          <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || '—'}</b></div>
-        </div>
-        <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-        <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-          <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-          ${validItems.map(item => {
-            // Logic tìm tỷ lệ quy đổi của sản phẩm
-            const productObj = products.find(p => p.id === item.id || p.code === item.code);
-            const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50; // Mặc định 50 nếu không có
-            
-            const totalQty = Number(item.qty || 0);
-            const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-            const le = ratio > 0 ? totalQty % ratio : totalQty;
-            const unitName = item.dvt || 'hộp';
+          <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
+            <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
+            <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
+            <div>Mã KH: <b style="color:var(--text-main);">${inferredMaDTPN}</b></div>
+            <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || '—'}</b></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">
+       ${validItems.length > 0 ? validItems.map(item => {
+  const productObj = products.find(p => p.id === item.id || p.code === item.code);
+  const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+  
+  const totalQty = Number(item.qty || 0);
+  const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+  const le = ratio > 0 ? totalQty % ratio : totalQty;
+  const unitName = item.dvt || 'gói';
 
-            let qtyText = '';
-            if (kien > 0 && le > 0) {
-              qtyText = `${kien} Thùng ${le} ${unitName}`;
-            } else if (kien > 0) {
-              qtyText = `${kien} Thùng`;
-            } else {
-              qtyText = `${totalQty} ${unitName}`;
-            }
+  let qtyText = '';
+  if (kien > 0 && le > 0) {
+    qtyText = `<b>${kien}</b> Thùng <b>${le}</b> ${unitName}`;
+  } else if (kien > 0) {
+    qtyText = `<b>${kien}</b> Thùng`;
+  } else {
+    qtyText = `<b>${totalQty}</b> ${unitName}`;
+  }
 
-            return `
-            <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="font-weight:800; color:var(--text-main);">[${item.code}] ${item.name}</div>
-                <div style="font-size:12px; color:var(--text-muted);">
-                  SL: <b style="color:#2563EB; font-size:14px;">${qtyText}</b> 
-                  (Tổng: ${totalQty})
-                </div>
-              </div>
-            </div>
-            `;
-          }).join('')}
-        </div>
+  return `
+    <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 14px; font-size:14px;">
+      <div style="display:flex; justify-content:space-between; font-weight:800; color:var(--text-main); margin-bottom:4px;">
+        <span style="font-size:15px;">[${item.code || ''}] ${item.name || ''}</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; color:var(--text-muted); align-items:center;">
+        <span>SL: <span style="color:#2563EB; font-size:14px;">${qtyText}</span></span>
       </div>
     </div>
   `;
-  modalContainer.classList.remove('hidden');
-};
-window.closeOrderDetailsModal = function() {
-  const modalContainer = document.getElementById('dynamicModalContainer') || document.getElementById('orderDetailModalContainer');
-  if (modalContainer) {
-    modalContainer.innerHTML = '';
-    modalContainer.classList.add('hidden');
-  }
-  window.currentViewingOrderId = null;
-}
+}).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted);">Không có sản phẩm hợp lệ.</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+  };
+
+  window.closeOrderDetailsModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (modalContainer) {
+      modalContainer.innerHTML = '';
+      modalContainer.classList.add('hidden');
+    }
+  };
+
   window.openCurrentCustomerOrderModal = function() {
     if (!activeVisitedStore) return;
     const storeIdStr = String(activeVisitedStore.id);
@@ -4430,14 +4406,15 @@ window.filterModalCompanyList = function(val) {
     const isViewer = currentUser && currentUser.role === 'viewer';
 
     const tabConfigMap = {
-    sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: currentUser && ['admin', 'manager', 'sales'].includes(currentUser.role) },
-    soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: currentUser && ['admin', 'manager', 'sales', 'accountant'].includes(currentUser.role) },
-    customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: currentUser && currentUser.role !== 'accountant' }, // <-- Đã chặn kế toán ở đây
-    productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: currentUser && ['admin', 'manager', 'sales'].includes(currentUser.role) },
-    routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: currentUser && ['admin', 'manager', 'sales'].includes(currentUser.role) },
-    company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: currentUser && ['admin', 'manager', 'sales'].includes(currentUser.role) },
-    users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
-  };
+      sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: !currentUser || currentUser.role !== 'viewer' },
+      soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#10B981', perm: !currentUser || currentUser.role !== 'viewer' },
+      customers: { id: 'navCustomers', label: 'KH', icon: 'fa-address-book', defaultColor: '#0D9488', perm: true },
+      productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: !currentUser || currentUser.role !== 'viewer' },
+      routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: !currentUser || currentUser.role !== 'viewer' },
+      company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: !currentUser || currentUser.role !== 'viewer' },
+      users: { id: 'navUsers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
+    };
+
     tabBar.innerHTML = currentTabOrder.map(tKey => {
       const cfg = tabConfigMap[tKey];
       if (!cfg || !cfg.perm || hiddenTabs.includes(tKey)) return '';
@@ -4782,24 +4759,13 @@ ${activeVisitedStore ? `
         </div>
 
         <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
-         ${allGroupedList.length > 0 ? allGroupedList.map(o => {
-    const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-    const isAdmin = currentUser.role === 'admin';
-    const isAccountant = currentUser.role === 'accountant';
+          ${allGroupedList.length > 0 ? allGroupedList.map(o => {
+            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+            const canModify = isOwner || isAdminOrManager;
 
-    // 1. CHÈN ĐOẠN ĐỌC LOCALSTORAGE TẠI ĐÂY
-    const localKey = `dms_viewed_order_${o.soCtu}`;
-    const isLocalViewed = localStorage.getItem(localKey) === 'true';
-    o.isViewed = o.isViewed || isLocalViewed;
-    const viewedBgStyle = o.isViewed ? 'background-color: #d4edda !important; border-color: #c3e6cb !important;' : '';
-
-    // Kế toán và Manager sẽ không có quyền sửa/xóa (canModify = false)
-
-// Kế toán và Manager sẽ không có quyền sửa/xóa (canModify = false)
-const canModify = (isOwner || isAdmin) && !isAccountant;
-return `
-  <div class="mobile-item-card so-goc-card-item" onclick="markOrderAsViewed('${o.soCtu}')" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="${viewedBgStyle} display: flex; flex-direction: column; gap: 8px; cursor: pointer;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+           return `
+              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                   <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
                   <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
@@ -4828,8 +4794,9 @@ return `
                 <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
                   <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
                   ${canModify ? `
-<button class="btn btn-amber btn-sm" style="padding:8px;" onclick="event.stopPropagation(); editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
-<button class="btn btn-red btn-sm" style="padding:8px;" onclick="event.stopPropagation(); deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                    <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                  ` : ''}
                 </div>
               </div>
             `;
@@ -5022,7 +4989,6 @@ return `
             <select id="usRole" style="margin:0; padding:10px;">
               <option value="sales">Sales (Nhân viên bán hàng)</option>
               <option value="manager">Manager (Quản lý)</option>
-              <option value="accountant">Kế toán (Accountant)</option>
               <option value="admin">Admin (Quản trị viên)</option>
               <option value="viewer">Viewer (Chỉ xem)</option>
             </select>
@@ -5201,27 +5167,8 @@ ${isTopTab ? (() => {
             <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
               <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:8px;">
                 <span style="font-size:13px; font-weight:800; color:var(--primary);">[${tp.code}]</span>
-<span style="font-size:14px; font-weight:700; color:var(--emerald); word-break:break-word;">${tp.name}</span>
-     <span style="font-size:12px; color:var(--text-muted);">
-  ${(() => {
-    const productObj = products.find(p => p.id === tp.code || p.code === tp.code);
-    const ratio = productObj?.tyLeQuyDoi || 50;
-    const totalQty = Number(tp.totalQty || 0);
-    const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-    const le = ratio > 0 ? totalQty % ratio : totalQty;
-    const unitName = tp.dvt || 'hộp';
-
-    let qtyText = '';
-    if (kien > 0 && le > 0) {
-      qtyText = `<b>${kien}</b> Thùng <b>${le}</b> ${unitName}`;
-    } else if (kien > 0) {
-      qtyText = `<b>${kien}</b> Thùng`;
-    } else {
-      qtyText = `<b>${totalQty}</b> ${unitName}`;
-    }
-   return `Đã mua: <span style="color:var(--text-main);">${qtyText}</span> (${tp.orderCount} lần đơn)`;
-  })()}
-</span>
+                <span style="font-size:14px; font-weight:700; color:var(--text-main); word-break:break-word;">${tp.name}</span>
+                <span style="font-size:12px; color:var(--text-muted);">Đã mua: <b style="color:var(--emerald);">${tp.totalQty} ${tp.dvt}</b> (${tp.orderCount} lần đơn)</span>
               </div>
             </div>
           `).join('')}
@@ -5270,7 +5217,7 @@ ${isTopTab ? (() => {
 
   return `
     <div style="display:flex; justify-content:space-between; font-size:15px; border-bottom:1px dashed var(--card-border); padding:3px 0; color:var(--prod-code-color);">
-     <span style="font-weight:700; color:var(--emerald);">${item.name || ''}</span>
+      <span style="font-weight:700; color:#2563EB;">[${item.code || ''}] ${item.name || ''}</span>
       <span style="font-weight:800; color:#2563EB; white-space:nowrap;">${qtyText}</span>
     </div>
   `;
@@ -5626,161 +5573,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     reader.readAsArrayBuffer(file);
   };
   fileInput.click();
-};
-window.promptCloseOrderView = async function(orderId) {
-  const targetId = orderId || window.currentViewingOrderId;
-  const order = orders.find(o => o.id === targetId);
-  if (!order) {
-    closeOrderDetailsModal();
-    return;
-  }
-
-  // Chuẩn hóa role của user hiện tại về dạng chữ thường không dấu để check cho chuẩn
- const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
-const isAccountantRole = userRole === 'accountant' || userRole === 'ketoan';
-
-const accountantButtonHtml = `
-  <button class="btn btn-green" onclick="markAsViewedAndClose('${order.id || order.orderUuid}')" style="font-size:14px; padding:8px 16px; background-color: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
-    <i class="fa-solid fa-check"></i> ${order.isViewed ? 'Bỏ đã xem' : 'Đã xem'}
-  </button>
-`;
-
-  if (currentUser && isAccountantRole && !order.isViewed) {
-    const confirmViewed = await window.showCustomConfirm(
-      "Xác nhận xem đơn hàng",
-      "Đơn hàng này đã xem xong?",
-      "fa-eye",
-      "Đã xem",
-      "Để sau"
-    );
-
-    if (confirmViewed) {
-      order.isViewed = true;
-      try {
-        await updateDoc(doc(db, "orders", targetId), { isViewed: true });
-        const activePane = document.getElementById('tabPane_soGocBH');
-        if (activePane) renderTabContent('soGocBH', activePane);
-      } catch (e) {
-        console.error("Lỗi cập nhật trạng thái xem:", e);
-      }
-    }
-  }
-
-  closeOrderDetailsModal();
-};
-  // Hàm đánh dấu đơn hàng đã xem dành riêng cho kế toán
-// 1. Hàm hiển thị chi tiết (Chỉ tài khoản Kế toán mới thấy nút Đã xem)
-window.markOrderAsViewed = function(soCtu) {
-  // Tìm đúng duy nhất số chứng từ
-  const order = (typeof allGroupedList !== 'undefined' ? allGroupedList : orders).find(o => String(o.soCtu) === String(soCtu));
-  if (!order) return;
-  
-  const storageKey = `dms_viewed_order_${order.soCtu}`;
-  const isLocalViewed = localStorage.getItem(storageKey) === 'true';
-  
-  const userRole = currentUser && currentUser.role ? currentUser.role.trim().toLowerCase() : '';
-  const isAccountant = userRole === 'accountant' || userRole === 'ketoan';
-
-  const validItems = (order.items || []).filter(item => Number(item.qty || 0) > 0);
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-      <div class="modal-content fullscreen-modal">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu}</h3>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            
-            ${isAccountant ? `
-              <button class="btn" onclick="saveViewedStatusLocally('${order.soCtu}')" style="font-size:14px; padding:8px 16px; background-color: ${isLocalViewed ? '#6c757d' : '#10b981'}; color: white; border: none; border-radius: 6px; cursor: pointer;">
-                <i class="fa-solid fa-check"></i> ${isLocalViewed ? 'Bỏ đã xem' : 'Đã xem'}
-              </button>
-            ` : ''}
-            
-            <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
-          </div>
-        </div>
-        
-      <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
-  <div>Ngày chứng từ: <b style="color:var(--text-main);">
-    ${(() => {
-      const d = order.ngayCtu || '';
-      const p = d.split('T')[0].split('-');
-      return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : d;
-    })()}
-  </b></div>
-  <div>Nhân viên: <b style="color:var(--text-main);">${order.salesName || order.tenNhanVien || ''}</b></div>
-  <div>Mã KH: <b style="color:var(--text-main);">${order.maDTPNNo || ''}</b></div>
-  <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || order.tenKH || '—'}</b></div>
-</div>
-        <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-          ${validItems.length > 0 ? validItems.map(item => {
-            // Logic tìm tỷ lệ quy đổi của sản phẩm
-            const productObj = products.find(p => p.id === item.id || p.code === item.code);
-            const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-            
-            const totalQty = Number(item.qty || 0);
-            const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-            const le = ratio > 0 ? totalQty % ratio : totalQty;
-            const unitName = item.dvt || 'hộp';
-
-            let qtyText = '';
-            if (kien > 0 && le > 0) {
-              qtyText = `${kien} Thùng ${le} ${unitName}`;
-            } else if (kien > 0) {
-              qtyText = `${kien} Thùng`;
-            } else {
-              qtyText = `${totalQty} ${unitName}`;
-            }
-
-            return `
-            <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="font-size: 16px; font-weight: 600; color: var(--text-main); line-height: 1.4; margin-bottom: 4px;">[${item.code || ''}] ${item.name || ''}</div>
-                <div style="font-size:15px; color:var(--text-muted);">
-                  SL: <b style="color:#2563EB;">${qtyText}</b> 
-                  (Tổng: ${totalQty})
-                </div>
-              </div>
-            </div>
-            `;
-          }).join('') : '<div style="text-align:center; color:#999; padding:20px;">Không có chi tiết sản phẩm</div>'}
-        </div>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
-};
-
-window.saveViewedStatusLocally = function(soCtu) {
-  const storageKey = `dms_viewed_order_${soCtu}`;
-  const currentState = localStorage.getItem(storageKey) === 'true';
-  const newState = !currentState; 
-  
-  localStorage.setItem(storageKey, newState);
-
-  // Quét cực chuẩn: Chỉ đổi màu thẻ nào có data-so-ctu khớp đúng 100%
-  const allCards = document.querySelectorAll('.mobile-item-card, .so-goc-card-item');
-  allCards.forEach(card => {
-    const cardSoCtu = card.getAttribute('data-so-ctu') || '';
-    if (String(cardSoCtu) === String(soCtu)) {
-      if (newState) {
-        card.style.setProperty('background-color', '#d4edda', 'important');
-        card.style.setProperty('border-color', '#c3e6cb', 'important');
-      } else {
-        card.style.removeProperty('background-color');
-        card.style.removeProperty('border-color');
-      }
-    }
-  });
-
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (modalContainer) {
-    modalContainer.classList.add('hidden');
-  } else if (typeof closeOrderDetailsModal === 'function') {
-    closeOrderDetailsModal();
-  }
 };
 </script>
 </body>
