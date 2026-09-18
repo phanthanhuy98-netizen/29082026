@@ -5093,16 +5093,25 @@ recentOrders.forEach(o => {
             const itemQty = Number(item.qty || 0);
             if (itemQty > 0) {
                 const pKey = item.id || item.code;
-                // Chỉ lấy dữ liệu từ đơn mới nhất (lần gặp đầu tiên trong mảng recentOrders), bỏ qua các đơn cũ phía sau để không bị cộng dồn lệch số lượng
                 if (!productStatsMap.has(pKey)) {
+                    // Dò tìm hệ số quy đổi ngay từ danh mục products gốc
+                    const prod = (typeof products !== 'undefined' && Array.isArray(products)) 
+                        ? products.find(p => String(p.id) === String(pKey) || String(p.code) === String(pKey) || String(p.maSP) === String(pKey)) 
+                        : null;
+                    const quyCachChuan = prod ? Number(prod['Q/c'] || prod.quyCach || prod.tyleQuyDoi || prod.qc || 50) : Number(item.tyleQuyDoi || 50);
+
                     productStatsMap.set(pKey, {
-                        code: item.code || '',
+                        code: item.code || item.id || '',
                         name: item.name || '',
-                        dvt: item.dvt || 'gói',
-                        totalQty: itemQty, // Lấy đúng số lượng của đơn mới nhất
-                        orderCount: 1
+                        dvt: item.dvt || prod?.dvt || 'gói',
+                        tyleQuyDoi: quyCachChuan, // Lưu thẳng hệ số chuẩn vào đây
+                        totalQty: 0,
+                        orderCount: 0
                     });
                 }
+                let stats = productStatsMap.get(pKey);
+                stats.totalQty += itemQty;
+                stats.orderCount += 1;
             }
         });
     }
@@ -5196,17 +5205,14 @@ ${isTopTab ? (() => {
 
         <div id="${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
 ${prods.map(tp => {
-    // 1. Dùng đúng cách tìm kiếm sản phẩm và lấy hệ số quy đổi hệt như tab Nhật ký đơn cũ
-    const productObj = typeof products !== 'undefined' ? products.find(p => p.id === tp.code || p.code === tp.code || p.maSP === tp.code) : null;
-    const ratio = productObj ? Number(productObj.tyleQuyDoi || productObj['Q/c'] || productObj.quyCach || 50) : 50;
+    // Lấy trực tiếp hệ số đã được gán sẵn
+    const ratio = Number(tp.tyleQuyDoi || 50);
     
-    // 2. Lấy số lượng và đơn vị tính
     const totalQty = Number(tp.totalQty || 0);
     const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
     const le = ratio > 0 ? totalQty % ratio : totalQty;
-    const unitName = tp.dvt || productObj?.dvt || 'gói';
+    const unitName = tp.dvt || 'gói';
 
-    // 3. Logic hiển thị Thùng / Lẻ chuẩn xác hệt Nhật ký đơn
     let qtyText = '';
     if (kien > 0 && le > 0) {
         qtyText = `${kien} Thùng ${le} ${unitName}`;
@@ -5216,7 +5222,6 @@ ${prods.map(tp => {
         qtyText = `${totalQty} ${unitName}`;
     }
 
-    // 4. Trả về HTML đồng bộ
     return `
     <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
         <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:8px;">
