@@ -875,14 +875,37 @@
             </div>
           </div>
 
-          ${isAdmin ? `
-            <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
-              <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-rotate"></i> 6. Làm Mới Dữ Liệu Hệ Thống</div>
-              <button class="btn btn-amber" style="width: 100%; justify-content: center; padding: 12px; font-weight: 800; font-size: 13px;" onclick="forceRefreshMasterDataFromCloud()">
-                <i class="fa-solid fa-rotate"></i> LÀM MỚI DỮ LIỆU ĐÁM MÂY (CACHE)
-              </button>
-            </div>
-          ` : ''}
+       ${isAdmin ? `
+        <!-- Mục 6: Cấu hình Trụ sở (MỚI) -->
+        <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;">
+            <i class="fa-solid fa-building-shield"></i> 6. Cấu Hình Trụ Sở Chính (HQ)
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">Dùng làm gốc GPS để tính khoảng cách và sắp xếp đơn hàng từ gần đến xa.</p>
+          
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="number" step="any" id="configHqLat" placeholder="Vĩ độ (Lat)" value="${localStorage.getItem('dms_hq_lat') || ''}" style="flex: 1; padding: 8px; font-size: 12px; border: 1px solid var(--card-border); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+            <input type="number" step="any" id="configHqLng" placeholder="Kinh độ (Lng)" value="${localStorage.getItem('dms_hq_lng') || ''}" style="flex: 1; padding: 8px; font-size: 12px; border: 1px solid var(--card-border); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+          </div>
+
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-blue" style="flex: 1; justify-content: center; padding: 8px; font-size: 11px; font-weight: bold;" onclick="captureHQFromGPS()">
+              <i class="fa-solid fa-location-crosshairs"></i> Lấy GPS Hiện Tại
+            </button>
+            <button type="button" class="btn btn-green" style="flex: 1; justify-content: center; padding: 8px; font-size: 11px; font-weight: bold;" onclick="saveHQConfig()">
+              <i class="fa-solid fa-floppy-disk"></i> Lưu Tọa Độ
+            </button>
+          </div>
+        </div>
+
+        <!-- Mục 7: Làm mới dữ liệu (Đã đổi số 6 thành 7) -->
+        <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
+          <div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 8px;"><i class="fa-solid fa-rotate"></i> 7. Làm Mới Dữ Liệu Hệ Thống</div>
+          <button class="btn btn-amber" style="width: 100%; justify-content: center; padding: 12px; font-weight: 800; font-size: 13px;" onclick="forceRefreshMasterDataFromCloud()">
+            <i class="fa-solid fa-rotate"></i> LÀM MỚI DỮ LIỆU ĐÁM MÂY (CACHE)
+          </button>
+        </div>
+      ` : ''}
         </div>
       </div>
     `;
@@ -3735,48 +3758,114 @@ ${(() => {
     }
   };
 
- window.exportSoGocExcel = function() {
-  const tableEl = document.getElementById('soGocExportTable');
-  if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
+// ==========================================
+// HÀM XUẤT EXCEL SỔ GỐC (CÓ TÍNH KHOẢNG CÁCH)
+// ==========================================
 
-  // Lọc các dòng theo trạng thái đang hiển thị trên giao diện (tuân theo bộ lọc ngày/nhân viên)
-  const visibleCards = document.querySelectorAll('.so-goc-card-item');
-  const visibleSoCtuSet = new Set();
-  
-  visibleCards.forEach(card => {
-    if (card.style.display !== 'none') {
-      const soCtu = card.getAttribute('data-so-ctu');
-      if (soCtu) visibleSoCtuSet.add(String(soCtu));
-    }
-  });
-
-  // Tạo bảng tạm thời chứa các dòng thuộc các chứng từ đang hiển thị
-  const rows = tableEl.querySelectorAll('tbody tr');
-  let filteredRowsHtml = '';
-  let count = 0;
-
-  rows.forEach(row => {
-    const soCtuCell = row.cells[0];
-    if (soCtuCell && visibleSoCtuSet.has(String(soCtuCell.innerText.trim()))) {
-      filteredRowsHtml += row.outerHTML;
-      count++;
-    }
-  });
-
-  if (count === 0) {
-    return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc ngày hiện tại để xuất Excel!");
+window.exportSoGocExcel = function() {
+  // 1. Hàm tính khoảng cách bên trong (công thức Haversine)
+  function calculateDistanceKM(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 9999;
+    const R = 6371; // Bán kính Trái Đất (km)
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Number((R * c).toFixed(2));
   }
 
-  // Tạo bảng ảo để xuất file Excel đúng phần đang lọc
-  const tempTable = document.createElement('table');
-  tempTable.innerHTML = `<thead>${tableEl.querySelector('thead').innerHTML}</thead><tbody>${filteredRowsHtml}</tbody>`;
+  // 2. Lấy tọa độ trụ sở từ cấu hình
+  const hqLat = parseFloat(localStorage.getItem('dms_hq_lat'));
+  const hqLng = parseFloat(localStorage.getItem('dms_hq_lng'));
+  const hasHQ = !isNaN(hqLat) && !isNaN(hqLng);
 
+  if (!hasHQ) {
+    console.warn("Chưa cấu hình tọa độ công ty, file Excel sẽ không được sắp xếp theo tuyến đường.");
+  }
+
+  // 3. Lấy bảng dữ liệu xuất Excel (Giả sử id bảng của bạn là soGocExportTable)
+  // Nếu id bảng của bạn khác, hãy sửa 'soGocExportTable' thành id đúng của bạn
+  const tableEl = document.getElementById('soGocExportTable'); 
+  if (!tableEl) return alert("Không tìm thấy dữ liệu bảng để xuất!");
+
+  // Chỉ lấy các dòng đang hiển thị (bỏ qua các dòng bị ẩn do bộ lọc)
+  const rows = Array.from(tableEl.querySelectorAll('tbody tr')).filter(r => r.style.display !== 'none');
+  if (rows.length === 0) return alert("Không có dữ liệu đơn hàng nào để xuất!");
+
+  let exportData = [];
+
+  // 4. Duyệt qua từng dòng để lấy dữ liệu và tính khoảng cách
+  rows.forEach(row => {
+    const soCtu = row.cells[0] ? row.cells[0].innerText.trim() : "";
+    let distance = 9999; // Mặc định 9999 nếu không có tọa độ (để rớt xuống cuối)
+
+    // TÌM TỌA ĐỘ GPS CỦA ĐƠN HÀNG NÀY:
+    // (Ưu tiên lấy từ thuộc tính dataset trên thẻ tr nếu có, VD: data-lat, data-lng)
+    let ordLat = parseFloat(row.getAttribute('data-lat'));
+    let ordLng = parseFloat(row.getAttribute('data-lng'));
+
+    // Nếu không có trên thẻ tr, tìm trong mảng orders (nếu mảng orders đang tồn tại)
+    if ((isNaN(ordLat) || isNaN(ordLng)) && typeof orders !== 'undefined') {
+      const matchedOrder = orders.find(o => String(o.soCtu) === soCtu);
+      if (matchedOrder) {
+        ordLat = parseFloat(matchedOrder.lat);
+        ordLng = parseFloat(matchedOrder.lng);
+      }
+    }
+
+    // Tính số Km
+    if (hasHQ && !isNaN(ordLat) && !isNaN(ordLng)) {
+      distance = calculateDistanceKM(hqLat, hqLng, ordLat, ordLng);
+    }
+
+    exportData.push({
+      originalRow: row,
+      distance: distance
+    });
+  });
+
+  // 5. Sắp xếp danh sách từ gần đến xa trụ sở
+  if (hasHQ) {
+    exportData.sort((a, b) => a.distance - b.distance);
+  }
+
+  // 6. Xây dựng một bảng HTML ảo (clone) để xuất Excel
+  const tempTable = document.createElement('table');
+  
+  // Clone thẻ thead và chèn thêm 1 cột tiêu đề
+  const thead = tableEl.querySelector('thead').cloneNode(true);
+  const theadRow = thead.querySelector('tr');
+  if (theadRow) {
+    const th = document.createElement('th');
+    th.innerText = "Cách Cty (km)"; // Tiêu đề cột mới
+    theadRow.appendChild(th);
+  }
+  tempTable.appendChild(thead);
+
+  // Clone các dòng tbody theo thứ tự đã sắp xếp và chèn thêm số km
+  const tbody = document.createElement('tbody');
+  exportData.forEach(item => {
+    const clonedRow = item.originalRow.cloneNode(true);
+    const td = document.createElement('td');
+    
+    // Nếu khoảng cách = 9999 nghĩa là đơn đó chưa ghi nhận GPS
+    td.innerText = item.distance === 9999 ? "Chưa có GPS" : item.distance;
+    
+    clonedRow.appendChild(td);
+    tbody.appendChild(clonedRow);
+  });
+  tempTable.appendChild(tbody);
+
+  // 7. Gọi thư viện SheetJS (XLSX) để xuất file
+  if (typeof XLSX === 'undefined') return alert("Lỗi: Thư viện xuất Excel chưa được tải!");
+  
   const wb = XLSX.utils.table_to_book(tempTable, { raw: true });
   const dateStr = new Date().toISOString().slice(0, 10);
-  const fromStr = soGocFilterDateFrom || 'tat_ca';
-  const toStr = soGocFilterDateTo || dateStr;
   
-  XLSX.writeFile(wb, `SoGocBanHang_${fromStr}_den_${toStr}.xlsx`);
+  // Lưu file
+  XLSX.writeFile(wb, `SoGocBanHang_ToiUuTuyenDuong_${dateStr}.xlsx`);
 };
 
   window.exportCustomersExcel = function() {
@@ -5646,6 +5735,74 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     reader.readAsArrayBuffer(file);
   };
   fileInput.click();
+};
+  // Hàm tính khoảng cách giữa 2 điểm GPS (trả về km)
+function calculateDistanceKM(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 9999; // Nếu thiếu tọa độ thì trả về số cực lớn
+  const R = 6371; // Bán kính Trái Đất (km)
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c).toFixed(2)); // Trả về km làm tròn 2 chữ số thập phân
+}
+  // ==========================================
+// HÀM XỬ LÝ CẤU HÌNH TRỤ SỞ (HQ GPS)
+// ==========================================
+
+window.captureHQFromGPS = async function() {
+  if (!navigator.geolocation) {
+    return alert("Trình duyệt hoặc thiết bị của bạn không hỗ trợ định vị GPS.");
+  }
+  
+  try {
+    // Bắt đầu lấy tọa độ (Yêu cầu độ chính xác cao)
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, { 
+        enableHighAccuracy: true, 
+        timeout: 10000,
+        maximumAge: 0
+      });
+    });
+    
+    // Lấy được tọa độ thì điền vào 2 ô input trong bảng cài đặt
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    
+    const latInput = document.getElementById('configHqLat');
+    const lngInput = document.getElementById('configHqLng');
+    
+    if(latInput && lngInput) {
+      latInput.value = lat;
+      lngInput.value = lng;
+    }
+    
+    alert(`🎯 Đã lấy vị trí GPS thành công!\n- Lat: ${lat}\n- Lng: ${lng}\n\n👉 Nhớ bấm "Lưu Tọa Độ" để hoàn tất nhé!`);
+  } catch (err) {
+    alert("Không thể lấy GPS: " + err.message + "\nVui lòng kiểm tra xem đã bật Vị trí (Location) trên máy và cấp quyền cho trình duyệt chưa.");
+  }
+};
+
+window.saveHQConfig = function() {
+  const latInput = document.getElementById('configHqLat');
+  const lngInput = document.getElementById('configHqLng');
+  
+  if (!latInput || !lngInput) return;
+
+  const lat = latInput.value.trim();
+  const lng = lngInput.value.trim();
+  
+  if (!lat || !lng) {
+    return alert("Vui lòng nhập đầy đủ Vĩ độ (Lat) và Kinh độ (Lng), hoặc bấm 'Lấy GPS Hiện Tại'!");
+  }
+  
+  // Lưu vào bộ nhớ tạm của trình duyệt (localStorage)
+  localStorage.setItem('dms_hq_lat', lat);
+  localStorage.setItem('dms_hq_lng', lng);
+  
+  alert("✅ Đã lưu tọa độ Trụ sở thành công!\nTừ giờ file xuất Sổ Gốc sẽ tự động tính khoảng cách từ vị trí này.");
 };
 </script>
 </body>
