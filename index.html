@@ -5798,44 +5798,66 @@ window.saveHQConfig = function() {
     return alert("Vui lòng nhập đầy đủ Vĩ độ (Lat) và Kinh độ (Lng), hoặc bấm 'Lấy GPS Hiện Tại'!");
   }
   
-  // Lưu vào bộ nhớ tạm của trình duyệt (localStorage)
-  localStorage.setItem('dms_hq_lat', lat);
-  localStorage.setItem('dms_hq_lng', lng);
-  
-  alert("✅ Đã lưu tọa độ Trụ sở thành công!\nTừ giờ file xuất Sổ Gốc sẽ tự động tính khoảng cách từ vị trí này.");
-};
-// HÀM: Tự động tải tọa độ GPS trụ sở nếu máy con chưa có
-async function autoFetchHQLocationIfMissing() {
-  const localLat = localStorage.getItem('dms_hq_lat');
-  const localLng = localStorage.getItem('dms_hq_lng');
-  
-  if (!localLat || !localLng) {
-    try {
-      // Tự động quét và nhận diện biến Database của hệ thống
-      let currentDB = null;
-      if (typeof db !== 'undefined') currentDB = db;
-      else if (typeof firestore !== 'undefined') currentDB = firestore;
-      else if (typeof firebase !== 'undefined' && firebase.firestore) currentDB = firebase.firestore();
+ // Lưu vào bộ nhớ tạm của trình duyệt (localstorage)
+const currentTime = Date.now();
+localStorage.setItem('dms_hq_lat', lat);
+localStorage.setItem('dms_hq_lng', lng);
+localStorage.setItem('dms_hq_updatedAt', currentTime); // Bổ sung mốc thời gian
 
-      if (currentDB) {
-        const doc = await currentDB.collection('settings').doc('company_hq').get();
-        if (doc.exists) {
-          const data = doc.data();
-          if (data.lat && data.lng) {
-            localStorage.setItem('dms_hq_lat', data.lat);
-            localStorage.setItem('dms_hq_lng', data.lng);
-            console.log("✅ Đã tự động kéo tọa độ Trụ sở lần đầu thành công!");
-          }
-        }
-      } else {
-        console.warn("Chưa tìm thấy kết nối Firebase Database để tải tọa độ.");
-      }
-    } catch (e) {
-      console.log("Lỗi khi kéo tọa độ Trụ sở lần đầu:", e);
-    }
-  }
+// BỔ SUNG: Đẩy tọa độ và thời gian lên Firebase Database
+let currentDB = null;
+if (typeof db !== 'undefined') currentDB = db;
+else if (typeof firestore !== 'undefined') currentDB = firestore;
+else if (typeof firebase !== 'undefined' && firebase.firestore) currentDB = firebase.firestore();
+
+if (currentDB) {
+    currentDB.collection('settings').doc('company_hq').set({
+        lat: lat,
+        lng: lng,
+        updatedAt: currentTime
+    }, { merge: true });
 }
-autoFetchHQLocationIfMissing();
+
+alert("✅ Đã lưu tọa độ Trụ sở thành công và đồng bộ lên hệ thống!\nTừ giờ file xuất sổ Gốc sẽ tự động tính khoảng cách từ vị trí này.");
+};
+// HÀM: Tự động tải tọa độ GPS trụ sở nếu máy con chưa có hoặc có bản cập nhật mới
+async function autoFetchHQLocationIfMissing() {
+    const localLat = localStorage.getItem('dms_hq_lat');
+    const localLng = localStorage.getItem('dms_hq_lng');
+    const localUpdatedAt = localStorage.getItem('dms_hq_updatedAt') || 0; // Lấy thời gian ở máy
+
+    try {
+        // Tự động quét và nhận diện biến Database của hệ thống
+        let currentDB = null;
+        if (typeof db !== 'undefined') currentDB = db;
+        else if (typeof firestore !== 'undefined') currentDB = firestore;
+        else if (typeof firebase !== 'undefined' && firebase.firestore) currentDB = firebase.firestore();
+
+        if (currentDB) {
+            const doc = await currentDB.collection('settings').doc('company_hq').get();
+            if (doc.exists) {
+                const data = doc.data();
+                const serverUpdatedAt = data.updatedAt || 0; // Lấy thời gian trên Firebase
+
+                // CHÌA KHÓA: Nếu máy thiếu tọa độ HOẶC tọa độ trên server mới hơn
+                if (!localLat || !localLng || serverUpdatedAt > localUpdatedAt) {
+                    if (data.lat && data.lng) {
+                        localStorage.setItem('dms_hq_lat', data.lat);
+                        localStorage.setItem('dms_hq_lng', data.lng);
+                        localStorage.setItem('dms_hq_updatedAt', serverUpdatedAt);
+                        console.log("✅ Đã cập nhật tọa độ Trụ sở mới từ hệ thống!");
+                    }
+                }
+            } else {
+                console.warn("Chưa tìm thấy dữ liệu tọa độ trụ sở trên Firebase.");
+            }
+        } else {
+            console.warn("Chưa tìm thấy kết nối Firebase Database để tải tọa độ.");
+        }
+    } catch (e) {
+        console.log("Lỗi khi kéo tọa độ Trụ sở lần đầu:", e);
+    }
+}
 </script>
 </body>
 </html>
