@@ -5785,40 +5785,46 @@ window.captureHQFromGPS = async function() {
   }
 };
 
-window.saveHQConfig = function() {
-  const latInput = document.getElementById('configHqLat');
-  const lngInput = document.getElementById('configHqLng');
-  
-  if (!latInput || !lngInput) return;
+window.saveHQConfig = async function() {
+    const latInput = document.getElementById('configHqLat');
+    const lngInput = document.getElementById('configHqLng');
 
-  const lat = latInput.value.trim();
-  const lng = lngInput.value.trim();
-  
-  if (!lat || !lng) {
-    return alert("Vui lòng nhập đầy đủ Vĩ độ (Lat) và Kinh độ (Lng), hoặc bấm 'Lấy GPS Hiện Tại'!");
-  }
-  
- // Lưu vào bộ nhớ tạm của trình duyệt (localstorage)
-const currentTime = Date.now();
-localStorage.setItem('dms_hq_lat', lat);
-localStorage.setItem('dms_hq_lng', lng);
-localStorage.setItem('dms_hq_updatedAt', currentTime); // Bổ sung mốc thời gian
+    if (!latInput || !lngInput) return;
 
-// BỔ SUNG: Đẩy tọa độ và thời gian lên Firebase Database
-let currentDB = null;
-if (typeof db !== 'undefined') currentDB = db;
-else if (typeof firestore !== 'undefined') currentDB = firestore;
-else if (typeof firebase !== 'undefined' && firebase.firestore) currentDB = firebase.firestore();
+    const lat = latInput.value.trim();
+    const lng = lngInput.value.trim();
 
-if (currentDB) {
-    currentDB.collection('settings').doc('company_hq').set({
-        lat: lat,
-        lng: lng,
-        updatedAt: currentTime
-    }, { merge: true });
-}
+    if (!lat || !lng) {
+        return alert("Vui lòng nhập đầy đủ vĩ độ (Lat) và Kinh độ (Lng), hoặc bấm 'Lấy GPS Hiện Tại'!");
+    }
 
-alert("✅ Đã lưu tọa độ Trụ sở thành công và đồng bộ lên hệ thống!\nTừ giờ file xuất sổ Gốc sẽ tự động tính khoảng cách từ vị trí này.");
+    const currentTime = Date.now();
+
+    // 1. Lưu vào localStorage của thiết bị hiện tại
+    localStorage.setItem('dms_hq_lat', lat);
+    localStorage.setItem('dms_hq_lng', lng);
+    localStorage.setItem('dms_hq_updatedAt', currentTime);
+
+    // 2. ĐẨY LÊN FIREBASE ĐỂ CÁC MÁY KHÁC (LAPTOP) KÉO VỀ ĐƯỢC
+    try {
+        let currentDB = null;
+        if (typeof db !== 'undefined') currentDB = db;
+        else if (typeof firestore !== 'undefined') currentDB = firestore;
+        else if (typeof firebase !== 'undefined' && firebase.firestore) currentDB = firebase.firestore();
+
+        if (currentDB) {
+            await currentDB.collection('settings').doc('company_hq').set({
+                lat: lat,
+                lng: lng,
+                updatedAt: currentTime
+            }, { merge: true });
+            console.log("✅ Đã đồng bộ tọa độ HQ lên Firebase thành công!");
+        }
+    } catch (err) {
+        console.error("Lỗi đẩy lên Firebase:", err);
+    }
+
+    alert("✅ Đã lưu tọa độ Trụ sở thành công và đồng bộ lên hệ thống!");
 };
 // HÀM: Tự động tải tọa độ GPS trụ sở nếu máy con chưa có hoặc có bản cập nhật mới
 async function autoFetchHQLocationIfMissing() {
