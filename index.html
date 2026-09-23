@@ -5353,7 +5353,7 @@ else if (tab === 'kpi') {
                   </div>
                 </div>
 
-               <!-- DANH SÁCH TOÀN BỘ SẢN PHẨM NHÂN VIÊN ĐÃ BÁN -->
+           <!-- DANH SÁCH TOÀN BỘ SẢN PHẨM ĐÃ BÁN (CHUẨN THÙNG / LẺ) -->
                   <div id="${accId}" class="hidden" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:rgba(255,255,255,0.5);">
                     <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                       <span><i class="fa-solid fa-boxes-stacked"></i> CHI TIẾT SẢN PHẨM ĐÃ BÁN:</span>
@@ -5361,7 +5361,6 @@ else if (tab === 'kpi') {
                     </div>
                     <div style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto; padding-right:4px;">
                       ${(() => {
-                        // Gom nhóm toàn bộ sản phẩm của riêng nhân viên này
                         const repSkusMap = {};
                         orders.forEach(o => {
                           if (o.status === 'Đã hủy') return;
@@ -5370,10 +5369,14 @@ else if (tab === 'kpi') {
                             if (Array.isArray(o.items)) {
                               o.items.forEach(item => {
                                 let skuName = String(item.name || item.sku || 'Sản phẩm khác').trim();
-                                let ratio = Number(item.ratio || 1);
+                                let ratio = Number(item.ratio || 0);
+                                if (ratio <= 0) ratio = 1; // Tránh chia cho 0
                                 let q = Number(item.qty || 0);
-                                if (!repSkusMap[skuName]) repSkusMap[skuName] = { qty: 0, ratio: ratio > 0 ? ratio : 1, unit: item.unit || 'Thùng' };
-                                repSkusMap[skuName].qty += q;
+                                
+                                if (!repSkusMap[skuName]) {
+                                  repSkusMap[skuName] = { totalQty: 0, ratio: ratio, unit: item.unit || 'gói' };
+                                }
+                                repSkusMap[skuName].totalQty += q;
                               });
                             }
                           }
@@ -5381,15 +5384,21 @@ else if (tab === 'kpi') {
 
                         const sortedSkus = Object.keys(repSkusMap).map(sku => {
                           const data = repSkusMap[sku];
-                          const sKien = Math.floor(data.qty / data.ratio);
-                          const sLe = data.qty % data.ratio;
-                          return { name: sku, totalQty: data.qty, kien: sKien, le: sLe, unit: data.unit };
-                        }).sort((a, b) => b.totalQty - a.totalQty);
+                          const sKien = Math.floor(data.totalQty / data.ratio);
+                          const sLe = data.totalQty % data.ratio;
+                          return { name: sku, kien: sKien, le: sLe, unit: data.unit, raw: data.totalQty };
+                        }).sort((a, b) => b.raw - a.raw);
 
                         if (sortedSkus.length === 0) return '<div style="font-size:10px; color:var(--text-muted); font-style:italic;">Chưa có phát sinh sản phẩm</div>';
 
                         return sortedSkus.map(skuObj => {
-                          const strQty = skuObj.kien > 0 ? (skuObj.le > 0 ? `${skuObj.kien} Thùng ${skuObj.le} ${skuObj.unit}` : `${skuObj.kien} Thùng`) : `${skuObj.le} ${skuObj.unit}`;
+                          let strQty = '';
+                          if (skuObj.kien > 0) {
+                            strQty = skuObj.le > 0 ? `${skuObj.kien} Thùng ${skuObj.le} ${skuObj.unit}` : `${skuObj.kien} Thùng`;
+                          } else {
+                            strQty = `${skuObj.le} ${skuObj.unit}`;
+                          }
+
                           return `
                             <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(0,0,0,0.03);">
                               <span style="color:var(--text-main); font-weight:700; max-width:70%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${skuObj.name}">• ${skuObj.name}</span>
