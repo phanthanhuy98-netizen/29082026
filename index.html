@@ -5123,24 +5123,7 @@ let prevstats = { kien: 0, don: 0 };
 orders.forEach(o => {
   if (o.status === 'Đã hủy') return;
 
-  // 1. Tính toán cho Kỳ hiện tại (tuân thủ bộ lọc ngày như Hôm Nay, Tuần Này...)
-  const inCurrent = (!filterStart || (o.ngayCtu >= filterStart && o.ngayCtu <= filterEnd));
-  if (inCurrent) {
-    currentStats.don += 1;
-    if (o.maKh || o.makh) currentStats.tiems.add(o.maKh || o.makh);
-    if (o.items) {
-      o.items.forEach(item => {
-        const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
-        const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-        const itemQty = Number(item.qty || 0);
-        if (itemQty > 0) {
-          currentStats.kien += (itemQty / ratio);
-        }
-      });
-    }
-  }
-
-  // 2. Tính toán cho Kỳ trước (phục vụ tính % tăng trưởng)
+  // 1. TÍNH TOÁN KỲ TRƯỚC (Phục vụ % tăng trưởng)
   if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
     if (o.ngayCtu >= prevStart && o.ngayCtu <= prevEnd) {
       prevstats.don += 1;
@@ -5152,48 +5135,50 @@ orders.forEach(o => {
       }
     }
   }
+
+  // 2. BỘ LỌC THỜI GIAN (Bắt buộc đơn hàng phải nằm trong "Hôm Nay")
+  if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+
+  // 3. TÍNH TOÁN KỲ HIỆN TẠI (Gộp chung tính HUD và Bảng xếp hạng để không bị lặp)
+  let salesKey = o.salesCode || 'UNKNOWN';
+  if (!kpiMap.has(salesKey)) {
+    kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set(), skuMap: new Map() });
+  }
+  let sData = kpiMap.get(salesKey);
+
+  // Cộng dồn Đơn và Tiệm (Cho cả HUD trên cùng và Nhân viên)
+  sData.don += 1;
+  currentStats.don += 1;
+  
+  let storeIdentifier = o.maDTPNNo || o.storeId || o.maKh || o.makh;
+  sData.tiems.add(storeIdentifier);
+  currentStats.tiems.add(storeIdentifier);
+
+  if (o.items) {
+    o.items.forEach(item => {
+      const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
+      const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+      const itemQty = Number(item.qty || 0);
+      const unitName = item.dvt || pObj?.dvt || 'hộp';
+
+      if (itemQty > 0) {
+        const thungCount = itemQty / ratio;
+        
+        // Cộng dồn Sản lượng thùng (Cho cả HUD trên cùng và Nhân viên)
+        sData.kien += thungCount;
+        currentStats.kien += thungCount;
+
+        // Xử lý Top Hàng Bán Chạy
+        const skuKey = item.code;
+        if (!sData.skuMap.has(skuKey)) sData.skuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio });
+        sData.skuMap.get(skuKey).qty += itemQty;
+
+        if (!globalSkuMap.has(skuKey)) globalSkuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio, code: item.code });
+        globalSkuMap.get(skuKey).qty += itemQty;
+      }
+    });
+  }
 });
-        if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
-
-        let salesKey = o.salesCode || 'UNKNOWN';
-        if (!kpiMap.has(salesKey)) {
-          kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set(), skuMap: new Map() });
-        }
-        
-        let sData = kpiMap.get(salesKey);
-        sData.don += 1; currentStats.don += 1;
-        
-        let storeIdentifier = o.maDTPNNo || o.storeId;
-        sData.tiems.add(storeIdentifier);
-        currentStats.tiems.add(storeIdentifier);
-
-        if (o.items) {
-          o.items.forEach(item => {
-            const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
-            const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-            const itemQty = Number(item.qty || 0);
-            const unitName = item.dvt || pObj?.dvt || 'hộp';
-            
-           if (itemQty > 0) {
-          const thungCount = itemQty / ratio;
-          sData.kien += thungCount;
-          
-          // Bộ lọc thời gian: Chỉ cộng vào ô HUD nếu đơn hàng nằm trong "Hôm Nay"
-          const inCurrent = (!filterStart || (o.ngayCtu >= filterStart && o.ngayCtu <= filterEnd));
-          if (inCurrent) {
-            currentStats.kien += thungCount;
-          }
-
-          const skuKey = item.code;
-          if (!sData.skuMap.has(skuKey)) sData.skuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio });
-          sData.skuMap.get(skuKey).qty += itemQty;
-
-          if (!globalSkuMap.has(skuKey)) globalSkuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio, code: item.code });
-          globalSkuMap.get(skuKey).qty += itemQty;
-        }
-      });
-    }
-};
 
       const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
       const activeSalesCodes = Array.from(kpiMap.keys());
