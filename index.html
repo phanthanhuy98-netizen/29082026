@@ -5353,11 +5353,11 @@ else if (tab === 'kpi') {
                   </div>
                 </div>
 
-      <!-- CHI TIẾT SẢN PHẨM ĐÃ BÁN (LẤY TRỰC TIẾP TỪ SỔ GỐC) -->
+     <!-- CHI TIẾT SẢN PHẨM ĐÃ BÁN (QUY ĐỔI CHUẨN THÙNG) -->
                   <div id="${accId}" class="hidden" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:rgba(255,255,255,0.5);">
                     <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                       <span><i class="fa-solid fa-boxes-stacked"></i> CHI TIẾT SẢN PHẨM ĐÃ BÁN:</span>
-                      <span style="font-size:10px; color:var(--primary); font-weight:700;">(Đúng chuẩn Sổ Gốc)</span>
+                      <span style="font-size:10px; color:var(--primary); font-weight:700;">(Đúng chuẩn Thùng)</span>
                     </div>
                     <div style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto; padding-right:4px;">
                       ${(() => {
@@ -5370,12 +5370,16 @@ else if (tab === 'kpi') {
                               o.items.forEach(item => {
                                 let skuName = String(item.name || item.sku || 'Sản phẩm khác').trim();
                                 let q = Number(item.qty || item.soluong || 0);
-                                let unit = String(item.unit || 'Thùng').trim();
+                                
+                                // Tra cứu quy cách ratio chuẩn (mặc định 50 nếu không tìm thấy)
+                                let foundProd = typeof products !== 'undefined' ? products.find(p => String(p.name || '').trim().toLowerCase() === skuName.toLowerCase()) : null;
+                                let ratio = Number(item.ratio || foundProd?.ratio || foundProd?.quyCach || 50);
+                                if (ratio <= 0) ratio = 50;
 
                                 if (!repSkusMap[skuName]) {
-                                  repSkusMap[skuName] = { qty: 0, unit: unit };
+                                  repSkusMap[skuName] = { totalQty: 0, ratio: ratio };
                                 }
-                                repSkusMap[skuName].qty += q;
+                                repSkusMap[skuName].totalQty += q;
                               });
                             }
                           }
@@ -5383,17 +5387,25 @@ else if (tab === 'kpi') {
 
                         const sortedSkus = Object.keys(repSkusMap).map(sku => {
                           const data = repSkusMap[sku];
-                          return { name: sku, qty: data.qty, unit: data.unit };
-                        }).sort((a, b) => b.qty - a.qty);
+                          const sKien = Math.floor(data.totalQty / data.ratio);
+                          const sLe = data.totalQty % data.ratio;
+                          return { name: sku, kien: sKien, le: sLe, raw: data.totalQty };
+                        }).sort((a, b) => b.raw - a.raw);
 
                         if (sortedSkus.length === 0) return '<div style="font-size:10px; color:var(--text-muted); font-style:italic;">Chưa có phát sinh sản phẩm</div>';
 
                         return sortedSkus.map(skuObj => {
-                          const displayQty = skuObj.qty % 1 !== 0 ? skuObj.qty.toFixed(1) : skuObj.qty;
+                          let strQty = '';
+                          if (skuObj.kien > 0) {
+                            strQty = skuObj.le > 0 ? `${skuObj.kien} Thùng ${skuObj.le} gói` : `${skuObj.kien} Thùng`;
+                          } else {
+                            strQty = `${skuObj.le} gói`;
+                          }
+
                           return `
                             <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(0,0,0,0.03);">
                               <span style="color:var(--text-main); font-weight:700; max-width:70%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${skuObj.name}">• ${skuObj.name}</span>
-                              <span style="color:var(--primary); font-weight:800; white-space:nowrap;">${displayQty} ${skuObj.unit}</span>
+                              <span style="color:var(--primary); font-weight:800; white-space:nowrap;">${strQty}</span>
                             </div>
                           `;
                         }).join('');
