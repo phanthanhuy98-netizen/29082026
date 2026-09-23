@@ -356,6 +356,8 @@
       <div id="tabPane_routes" style="display:none;"></div>
       <!-- TAB COMPANY -->
       <div id="tabPane_company" style="display:none;"></div>
+      <!-- TAB KPI -->
+      <div id="tabPane_kpi" style="display:none;"></div>
       <!-- TAB USERS -->
       <div id="tabPane_users" style="display:none;"></div>
     </div>
@@ -429,7 +431,7 @@
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'users'];
+  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'kpi', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
@@ -4388,6 +4390,7 @@ soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultCol
     productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
     routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
     company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
+    kpi: { id: 'navKpi', label: 'Hiệu Suất', icon: 'fa-chart-pie', defaultColor: '#F43F5E', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') },
     users: { id: 'navusers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: (!currentUser || currentUser.role !== 'accountant') && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
   };
 
@@ -5070,6 +5073,135 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
               </div>
             </div>
           `).join('')}
+        </div>
+      `;
+    }
+    else if (tab === 'kpi') {
+      window._kpiDateFilter = window._kpiDateFilter || 'today';
+      window.changeKpiFilter = function(val) {
+        window._kpiDateFilter = val;
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
+
+      const today = new Date();
+      let filterStart = '';
+      let filterEnd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      
+      if (window._kpiDateFilter === 'today') {
+        filterStart = filterEnd;
+      } else if (window._kpiDateFilter === 'month') {
+        filterStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      }
+
+      // Xử lý gom nhóm dữ liệu theo từng Sales
+      let kpiMap = new Map();
+      let totalKienAll = 0, totalDonAll = 0, totalTiemAll = new Set();
+
+      orders.forEach(o => {
+        if (o.status === 'Đã hủy') return;
+        if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+
+        let salesKey = o.salesCode || 'UNKNOWN';
+        if (!kpiMap.has(salesKey)) {
+          kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set() });
+        }
+        
+        let sData = kpiMap.get(salesKey);
+        sData.don += 1;
+        totalDonAll += 1;
+        
+        let storeIdentifier = o.maDTPNNo || o.storeId;
+        sData.tiems.add(storeIdentifier);
+        totalTiemAll.add(storeIdentifier);
+
+        // Tính số thùng từ các items trong đơn
+        if (o.items) {
+          o.items.forEach(item => {
+            const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
+            const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+            const itemQty = Number(item.qty || 0);
+            if (ratio > 1 && itemQty > 0) {
+              const k = Math.floor(itemQty / ratio);
+              sData.kien += k;
+              totalKienAll += k;
+            }
+          });
+        }
+      });
+
+      // Chuyển sang mảng và xếp hạng theo Thùng
+      let leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.kien - a.kien);
+      const topKien = leaderboard.length > 0 ? leaderboard[0].kien : 1; // Để làm thanh Progress Bar
+
+      container.innerHTML = `
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-chart-pie" style="color:var(--rose);"></i> Bảng Xếp Hạng Hiệu Suất</h2>
+          <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:6px 12px; border-radius:8px; outline:none;">
+            <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>📅 Hôm Nay</option>
+            <option value="month" ${window._kpiDateFilter === 'month' ? 'selected' : ''}>📅 Tháng Này</option>
+            <option value="all" ${window._kpiDateFilter === 'all' ? 'selected' : ''}>📅 Tất Cả Lịch Sử</option>
+          </select>
+        </div>
+
+        <!-- TÓM TẮT TỔNG QUAN (HUD) -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:16px;">
+          <div style="background:var(--emerald-gradient); color:#fff; border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 8px 20px rgba(16, 185, 129, 0.2);">
+            <div style="font-size:11px; font-weight:700; opacity:0.9;">TỔNG THÙNG</div>
+            <div style="font-size:22px; font-weight:800; margin-top:4px;">${totalKienAll}</div>
+          </div>
+          <div style="background:var(--amber-gradient); color:#fff; border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 8px 20px rgba(245, 158, 11, 0.2);">
+            <div style="font-size:11px; font-weight:700; opacity:0.9;">TỔNG ĐƠN</div>
+            <div style="font-size:22px; font-weight:800; margin-top:4px;">${totalDonAll}</div>
+          </div>
+          <div style="background:var(--purple-gradient); color:#fff; border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 8px 20px rgba(139, 92, 246, 0.2);">
+            <div style="font-size:11px; font-weight:700; opacity:0.9;">SỐ TIỆM</div>
+            <div style="font-size:22px; font-weight:800; margin-top:4px;">${totalTiemAll.size}</div>
+          </div>
+        </div>
+
+        <!-- BẢNG XẾP HẠNG (LEADERBOARD) -->
+        <h3 style="font-size:14px; font-weight:800; color:var(--text-muted); margin-bottom:8px;"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> LEADERBOARD (Xếp theo số Thùng)</h3>
+        <div style="display:flex; flex-direction:column; gap:10px; padding-bottom:30px;">
+          ${leaderboard.length > 0 ? leaderboard.map((rep, index) => {
+            const rankColors = ['#F59E0B', '#94A3B8', '#D97706']; // Vàng, Bạc, Đồng
+            const medalCol = index < 3 ? rankColors[index] : 'var(--text-muted)';
+            const progressPercent = Math.max((rep.kien / topKien) * 100, 2);
+
+            return `
+              <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px; border-left:4px solid ${medalCol}; position:relative; overflow:hidden;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:28px; height:28px; border-radius:50%; background:${medalCol}; color:#fff; display:flex; justify-content:center; align-items:center; font-weight:900; font-size:14px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                      ${index + 1}
+                    </div>
+                    <div>
+                      <div style="font-size:15px; font-weight:800; color:var(--text-main);">${rep.name}</div>
+                      <div style="font-size:12px; font-weight:700; color:var(--text-muted);">Mã: ${rep.code}</div>
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:18px; font-weight:900; color:var(--emerald);">${rep.kien} <span style="font-size:12px;">Thùng</span></div>
+                  </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px;">
+                  <span>🛒 Đơn: ${rep.don}</span>
+                  <span>📍 Số tiệm: ${rep.tiems.size}</span>
+                </div>
+
+                <!-- Thanh đo tiến độ (Visual bar) -->
+                <div style="width:100%; height:6px; background:var(--card-border); border-radius:3px; margin-top:4px; overflow:hidden;">
+                  <div style="height:100%; width:${progressPercent}\%; background:${index === 0 ? 'var(--emerald-gradient)' : 'var(--primary)'}; border-radius:3px; transition:width 0.5s ease-out;"></div>
+                </div>
+              </div>
+            `;
+          }).join('') : `
+            <div style="text-align:center; padding:30px; background:var(--card-bg); border-radius:12px; border:1px solid var(--card-border);">
+              <i class="fa-solid fa-box-open fa-2x" style="color:var(--text-muted); margin-bottom:10px;"></i>
+              <div style="font-weight:800; color:var(--text-muted);">Chưa có dữ liệu bán hàng.</div>
+            </div>
+          `}
         </div>
       `;
     }
