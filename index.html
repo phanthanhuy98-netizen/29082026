@@ -5226,14 +5226,35 @@ else if (tab === 'kpi') {
             </div>
           </div>
 
-          <!-- Ô 3: TỔNG ĐƠN & DROP (Thay thế ô bị trùng) -->
-          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
-            <div style="font-size:11px; font-weight:800; color:var(--text-muted);">TỔNG SỐ ĐƠN</div>
-            <div style="font-size:20px; font-weight:900; color:var(--purple); margin:4px 0;">${currentStats.don} <span style="font-size:11px;">Đơn</span></div>
-            <div style="font-size:10px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:10px; padding:2px;">
-              Bình quân: ${currentStats.don > 0 ? (currentStats.kien / currentStats.don).toFixed(1) : 0} Th/Đơn
-            </div>
-          </div>
+        <!-- Ô 3: PHÂN LOẠI TẠI QUẦY / TỪ XA -->
+          ${(() => {
+            let taiQuayAll = 0, tuXaAll = 0;
+            orders.forEach(o => {
+              if (o.status === 'Đã hủy') return;
+              if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+              
+              const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
+              if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
+                const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                if (dist <= 20) taiQuayAll++;
+                else tuXaAll++;
+              } else {
+                tuXaAll++;
+              }
+            });
+
+            return `
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
+                <div style="font-size:11px; font-weight:800; color:var(--text-muted);">TẠI QUẦY / TỪ XA</div>
+                <div style="font-size:18px; font-weight:900; color:var(--purple); margin:4px 0;">
+                  <span style="color:var(--emerald);" title="Bán tại quầy (<=50m)">${taiQuayAll}</span> / <span style="color:var(--rose);" title="Bán từ xa (>50m)">${tuXaAll}</span>
+                </div>
+                <div style="font-size:10px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:10px; padding:2px;">
+                  Tổng: ${currentStats.don} đơn (Quầy/Xa)
+                </div>
+              </div>
+            `;
+          })()}
         </div>
 
         ${topGlobalSkus.length > 0 ? `
@@ -5281,6 +5302,22 @@ else if (tab === 'kpi') {
             const topSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 3);
             const accId = `kpi_acc_${rep.code}`;
 
+        // Tính số đơn tại quầy của riêng nhân viên này
+            let repTaiQuay = 0, repTuXa = 0;
+            orders.forEach(o => {
+              if (o.status === 'Đã hủy') return;
+              if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+              if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
+                const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
+                if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
+                  const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                  if (dist <= 50) repTaiQuay++;
+                  else repTuXa++;
+                } else {
+                  repTuXa++;
+                }
+              }
+            });
             return `
               <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:4px solid ${medalCol}; overflow:hidden;">
                 <div onclick="toggleOrderAccordion('${accId}')" style="padding:12px; display:flex; flex-direction:column; gap:6px; cursor:pointer;">
@@ -5297,10 +5334,10 @@ else if (tab === 'kpi') {
                     </div>
                   </div>
 
-                  <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.03); padding:6px; border-radius:6px; margin-top:4px;">
-                    <span>🛒 ${rep.don} Đơn</span>
+                 <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.03); padding:6px; border-radius:6px; margin-top:4px;">
+                    <span>🛒 ${rep.don} Đơn (<b style="color:var(--emerald);">${repTaiQuay}</b> quầy)</span>
                     <span>📍 ${rep.tiems.size} Tiệm</span>
-                    <span style="color:var(--primary);"><i class="fa-solid fa-arrow-trend-up"></i> Drop: ${(rep.kien / rep.don).toFixed(1)} Th/Đơn</span>
+                    <span style="color:var(--primary);"><i class="fa-solid fa-arrow-trend-up"></i> Drop: ${(rep.kien / rep.don).toFixed(1)} Th/Đ</span>
                   </div>
 
                   <div style="width:100%; height:4px; background:var(--card-border); border-radius:2px; margin-top:2px;">
