@@ -4424,8 +4424,8 @@ soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultCol
       if (!cfg || !cfg.perm || hiddenTabs.includes(tKey)) return '';
       const customCol = getComputedStyle(document.documentElement).getPropertyValue(`--tab-${tKey}-color`).trim() || cfg.defaultColor;
 
-      return `
-        <button id="${cfg.id}" class="btn btn-sm" style="background: ${customCol}; color: #FFFFFF; font-weight: 800;" onclick="switchTab('${tKey}')">
+    return `
+        <button id="${cfg.id}" class="btn btn-sm" style="background: ${customCol}; color: #FFFFFF; font-weight: 800; margin-right: 6px; flex-shrink: 0;" onclick="switchTab('${tKey}')">
           <i class="fa-solid ${cfg.icon}"></i> ${cfg.label}
         </button>
       `;
@@ -6076,10 +6076,11 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     closeStoreHistoryModal();
   }
 };
-  // ==========================================
-// TÍNH NĂNG GÓC SALES (FEEDBACK & CẨM NANG)
+ // ==========================================
+// TÍNH NĂNG GÓC SALES (FEEDBACK & CẨM NANG FMCG CHUYÊN SÂU)
 // ==========================================
-window._gocSalesSubTab = 'feedback'; // Mặc định mở tab Feedback
+window._gocSalesSubTab = 'feedback'; 
+let feedbacksList = [];
 
 window.switchGocSalesSubTab = function(tabName) {
   window._gocSalesSubTab = tabName;
@@ -6099,20 +6100,105 @@ window.toggleHandbookAccordion = function(id) {
   }
 };
 
+// 1. TÌM KIẾM KHÁCH HÀNG THÔNG MINH CHO FEEDBACK
+window.filterFbStores = function(val) {
+  const q = removeAccents(val.trim());
+  const container = document.getElementById('fbStoreResults');
+  if (!container) return;
+  
+  if (q === "") {
+    container.classList.add('hidden');
+    return;
+  }
+
+  const matched = stores.filter(s => {
+    const txt = removeAccents((s.code + " " + s.name)).toLowerCase();
+    return txt.includes(q);
+  }).slice(0, 15);
+
+  if (matched.length > 0) {
+    container.innerHTML = matched.map(s => `
+      <div onclick="selectFbStore('${s.id}', '${s.code}', '${s.name.replace(/'/g, "\\'")}')" style="padding:10px 12px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13.5px; background:var(--card-bg);">
+        <b style="color:var(--primary);">[${s.code}]</b> ${s.name}
+      </div>
+    `).join('');
+    container.classList.remove('hidden');
+  } else {
+    container.innerHTML = `<div style="padding:12px; color:var(--text-muted); font-size:13px; text-align:center; background:var(--card-bg);">Không tìm thấy khách hàng!</div>`;
+    container.classList.remove('hidden');
+  }
+};
+
+window.selectFbStore = function(id, code, name) {
+  document.getElementById('fbStoreSelectedId').value = id;
+  document.getElementById('fbStoreSearchInput').value = `[${code}] ${name}`;
+  document.getElementById('fbStoreResults').classList.add('hidden');
+};
+
+// 2. TẢI VÀ HIỂN THỊ LỊCH SỬ FEEDBACK TỪ FIREBASE
+window.loadFeedbacks = async function() {
+  try {
+    const q = query(collection(db, "feedbacks"), limit(50));
+    const snap = await getDocs(q);
+    feedbacksList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sắp xếp mới nhất lên đầu (xử lý offline để không bị lỗi Index Firebase)
+    feedbacksList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    renderFeedbackHistory();
+  } catch (err) {
+    console.error("Lỗi tải lịch sử feedback:", err);
+  }
+};
+
+window.renderFeedbackHistory = function() {
+  const container = document.getElementById('feedbackHistoryContainer');
+  if (!container) return;
+  
+  if (feedbacksList.length === 0) {
+    container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Chưa có phản hồi nào được ghi nhận gần đây.</div>`;
+    return;
+  }
+
+  container.innerHTML = feedbacksList.map(fb => {
+    let typeColor = '#3B82F6';
+    if (fb.type.includes('Đối thủ')) typeColor = '#E11D48';
+    if (fb.type.includes('Hàng lỗi')) typeColor = '#D97706';
+    if (fb.type.includes('mặt hàng mới')) typeColor = '#10B981';
+
+    const timeStr = new Date(fb.createdAt).toLocaleString('vi-VN', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit', year:'numeric'});
+
+    return `
+      <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left:4px solid ${typeColor}; border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <span style="font-size:12px; font-weight:800; color:${typeColor}; background:rgba(0,0,0,0.04); padding:2px 8px; border-radius:6px;">${fb.type}</span>
+          <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${timeStr}</span>
+        </div>
+        <div style="font-size:14px; font-weight:800; color:var(--text-main); margin-top:2px;">[${fb.storeCode}] ${fb.storeName}</div>
+        <div style="font-size:13px; color:var(--text-muted); line-height:1.5; padding:6px; background:rgba(0,0,0,0.02); border-radius:6px; border:1px dashed var(--card-border);">
+          "${fb.note}"
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); text-align:right; margin-top:2px;">
+          Gửi bởi: <b style="color:var(--text-main);">[${fb.salesCode}] ${fb.salesName}</b>
+        </div>
+      </div>
+    `;
+  }).join('');
+};
+
 window.submitSalesFeedback = async function(e) {
   e.preventDefault();
-  const storeId = document.getElementById('fbStoreSelect').value;
+  const storeId = document.getElementById('fbStoreSelectedId').value;
+  const storeInputVal = document.getElementById('fbStoreSearchInput').value;
   const fbType = document.getElementById('fbTypeSelect').value;
   const note = document.getElementById('fbNote').value.trim();
 
-  if (!storeId) return alert("Vui lòng chọn khách hàng cần phản hồi!");
+  if (!storeId || !storeInputVal) return alert("Vui lòng chọn khách hàng cần phản hồi từ danh sách tìm kiếm!");
   if (!note) return alert("Vui lòng nhập nội dung chi tiết!");
 
-  const targetStore = stores.find(s => String(s.id) === storeId);
-  const fbData = {
+  const targetStore = stores.find(s => String(s.id) === String(storeId));
+  const newFbData = {
     storeId: storeId,
-    storeCode: targetStore ? targetStore.code : '',
-    storeName: targetStore ? targetStore.name : '',
+    storeCode: targetStore ? targetStore.code : 'KH',
+    storeName: targetStore ? targetStore.name : storeInputVal,
     type: fbType,
     note: note,
     salesUid: currentUser.uid,
@@ -6129,11 +6215,16 @@ window.submitSalesFeedback = async function(e) {
     fbBtn.disabled = true;
     fbBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
     
-    // Ghi lên Firebase collection 'feedbacks'
-    await addDoc(collection(db, "feedbacks"), { ...fbData, serverTimestamp: serverTimestamp() });
+    const docRef = await addDoc(collection(db, "feedbacks"), { ...newFbData, serverTimestamp: serverTimestamp() });
     
-    alert("✅ Ghi nhận phản hồi thị trường thành công! Admin sẽ xử lý sớm.");
+    // Thêm ngay vào đầu danh sách local để hiển thị lập tức
+    feedbacksList.unshift({ id: docRef.id, ...newFbData });
+    renderFeedbackHistory();
+
+    alert("✅ Đã gửi phản hồi lên hệ thống thành công!");
     document.getElementById('fbNote').value = '';
+    document.getElementById('fbStoreSelectedId').value = '';
+    document.getElementById('fbStoreSearchInput').value = '';
     if (typeof triggerHaptic === 'function') triggerHaptic(30);
   } catch (err) {
     alert("Lỗi khi gửi phản hồi: " + err.message);
@@ -6148,55 +6239,53 @@ window.submitSalesFeedback = async function(e) {
 
 window.renderGocSalesTab = function(container) {
   const isFb = window._gocSalesSubTab === 'feedback';
-  
-  let storeOptions = `<option value="">-- Chọn quầy tạp hóa / Khách hàng --</option>`;
-  stores.forEach(s => {
-    const isSelected = activeVisitedStore && String(activeVisitedStore.id) === String(s.id) ? 'selected' : '';
-    storeOptions += `<option value="${s.id}" ${isSelected}>[${s.code}] ${s.name}</option>`;
-  });
+
+  // Khởi chạy tải lịch sử nếu mở tab feedback
+  if (isFb && feedbacksList.length === 0) {
+    setTimeout(() => loadFeedbacks(), 100);
+  }
 
   container.innerHTML = `
     <div class="tab-header-actions" style="margin-bottom:12px;">
       <h2 style="font-weight:800; font-size:18px; color:var(--text-main);"><i class="fa-solid fa-lightbulb" style="color:#0EA5E9;"></i> Góc Sales & Thị Trường</h2>
     </div>
 
-    <!-- Segmented Control (Thanh gạt giống iOS) -->
     <div style="display:flex; background:rgba(15, 23, 42, 0.05); border-radius:12px; padding:4px; margin-bottom:16px; border: 1px solid var(--card-border);">
       <div onclick="switchGocSalesSubTab('feedback')" style="flex:1; text-align:center; padding:10px 0; font-weight:800; font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.2s; ${isFb ? 'background:var(--card-bg); color:#0EA5E9; box-shadow:0 2px 8px rgba(0,0,0,0.1);' : 'color:var(--text-muted);'}">
-        <i class="fa-solid fa-comment-dots"></i> PHẢN HỒI
+        <i class="fa-solid fa-comment-dots"></i> PHẢN HỒI THỊ TRƯỜNG
       </div>
       <div onclick="switchGocSalesSubTab('handbook')" style="flex:1; text-align:center; padding:10px 0; font-weight:800; font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.2s; ${!isFb ? 'background:var(--card-bg); color:#F59E0B; box-shadow:0 2px 8px rgba(0,0,0,0.1);' : 'color:var(--text-muted);'}">
-        <i class="fa-solid fa-book-open"></i> CẨM NANG
+        <i class="fa-solid fa-book-journal-whills"></i> CẨM NANG NGHIỆP VỤ
       </div>
     </div>
 
     ${isFb ? `
-      <!-- UI LUỒNG 1: GHI NHẬN PHẢN HỒI -->
-      <div class="card" style="padding:16px;">
-        <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:12px;">Báo Cáo Tình Hình Tại Điểm Bán</h3>
+      <!-- UI LUỒNG 1: GHI NHẬN PHẢN HỒI (CÓ Ô TÌM KIẾM & LỊCH SỬ) -->
+      <div class="card" style="padding:16px; margin-bottom:16px;">
+        <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:12px;"><i class="fa-solid fa-pen-clip"></i> Báo Cáo Tình Hình Tại Điểm Bán</h3>
         <form onsubmit="submitSalesFeedback(event)" style="display:flex; flex-direction:column; gap:12px;">
           
-          <div>
-            <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Khách hàng / Quầy:</label>
-            <select id="fbStoreSelect" style="margin:0; padding:12px; font-weight:700; font-size:14px;" required>
-              ${storeOptions}
-            </select>
+          <div style="position:relative;">
+            <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Khách hàng / Quầy (Gõ để tìm):</label>
+            <input type="hidden" id="fbStoreSelectedId" required>
+            <input type="text" id="fbStoreSearchInput" placeholder="🔍 Gõ mã hoặc tên khách hàng..." oninput="filterFbStores(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
+            <div id="fbStoreResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:200px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; z-index:99; box-shadow:0 10px 25px rgba(0,0,0,0.2); margin-top:4px;"></div>
           </div>
 
           <div>
             <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Phân loại vấn đề:</label>
             <select id="fbTypeSelect" style="margin:0; padding:12px; font-weight:700; font-size:14px;">
-              <option value="Đối thủ KM giá tốt hơn">📉 Đối thủ đang có giá/KM tốt hơn</option>
-              <option value="Hàng lỗi / Móp méo / Cận date">📦 Hàng lỗi / Móp méo / Cận date</option>
-              <option value="Yêu cầu mặt hàng mới">✨ Tiệm hỏi nhập mặt hàng mới</option>
-              <option value="Thái độ Giao hàng / Đổi trả">🚚 Phàn nàn bộ phận Giao hàng/Đổi trả</option>
-              <option value="Khác">💡 Đề xuất / Góp ý khác</option>
+              <option value="📉 Đối thủ KM giá tốt hơn">📉 Đối thủ đang có giá/KM tốt hơn</option>
+              <option value="📦 Hàng lỗi / Cận date / Đổi trả">📦 Hàng lỗi / Cận date / Chờ đổi trả</option>
+              <option value="✨ Tiệm hỏi nhập mặt hàng mới">✨ Tiệm hỏi nhập mặt hàng mới</option>
+              <option value="🚚 Phàn nàn bộ phận Giao hàng">🚚 Phàn nàn bộ phận Giao hàng/Logistics</option>
+              <option value="💡 Đề xuất / Góp ý khác">💡 Đề xuất / Góp ý khác</option>
             </select>
           </div>
 
           <div>
             <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Chi tiết cụ thể:</label>
-            <textarea id="fbNote" rows="4" placeholder="Ví dụ: Bia Tiger đại lý X đang đổ buôn giá rẻ hơn mình 5k/thùng, chủ tiệm chê giá mình cao..." style="margin:0; padding:12px; font-size:14px; resize:none;" required></textarea>
+            <textarea id="fbNote" rows="3" placeholder="Ghi chú rõ ràng sự việc (VD: Đối thủ A đang chạy mua 10 tặng 1, chủ tiệm chê giá mình cao...)" style="margin:0; padding:12px; font-size:14px; resize:none; border-radius:10px;" required></textarea>
           </div>
 
           <button id="fbSubmitBtn" type="submit" class="btn btn-blue" style="justify-content:center; padding:14px; font-weight:800; font-size:14px; margin-top:4px; border-radius:12px; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);">
@@ -6204,53 +6293,107 @@ window.renderGocSalesTab = function(container) {
           </button>
         </form>
       </div>
+
+      <div class="card" style="padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="font-size:14px; font-weight:800; color:var(--text-main); margin:0;"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Phản Hồi</h3>
+          <button class="btn btn-sm" onclick="loadFeedbacks()" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+        </div>
+        <div id="feedbackHistoryContainer" style="display:flex; flex-direction:column; gap:10px;">
+          <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Đang tải dữ liệu...</div>
+        </div>
+      </div>
     ` : `
-      <!-- UI LUỒNG 2: CẨM NANG NGHIỆP VỤ FMCG (CODE CỨNG) -->
-      <div style="display:flex; flex-direction:column; gap:10px;">
+      <!-- UI LUỒNG 2: CẨM NANG NGHIỆP VỤ FMCG CHUYÊN SÂU -->
+      <div style="display:flex; flex-direction:column; gap:10px; padding-bottom: 30px;">
         
-        <!-- BÀI 1: QUY TRÌNH -->
+        <!-- BÀI 1: 8 BƯỚC VIẾNG THĂM CHUẨN (FMCG STANDARD) -->
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #38A169;">
           <div onclick="toggleHandbookAccordion('hb1')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-shoe-prints" style="color:#38A169;"></i> 6 Bước Chuẩn Chăm Sóc Quầy (FMCG)</div>
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-shoe-prints" style="color:#38A169;"></i> Bài 1: 8 Bước Viếng Thăm Chuẩn (FMCG)</div>
             <i id="icon_hb1" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="hb1" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
-            <b>1. Chuẩn bị & Chào hỏi:</b> Tươi cười, để xe gọn gàng. Chào tên chủ tiệm (VD: "Cháu chào cô Tư!").<br><br>
-            <b>2. Kiểm tra hàng & Tồn kho:</b> Xin phép ra kệ kiểm tra hàng nhà mình. Kéo hàng cũ ra ngoài (FIFO - Nhập trước xuất trước).<br><br>
-            <b>3. Vệ sinh & Trưng bày:</b> Phủi bụi, xếp mặt chữ sản phẩm quay ra ngoài, xếp ngang tầm mắt để dễ bán.<br><br>
-            <b>4. Gợi ý đơn hàng:</b> "Cô Tư ơi, mỳ Hảo Hảo nhà mình còn có 2 thùng, cháu lên luôn 5 thùng cho kịp bán cuối tuần nhé."<br><br>
-            <b>5. Thông báo Khuyến mãi:</b> Chào CTKM mới, hàng mới. Nhấn mạnh lợi ích: "Lấy đủ 10 thùng được tặng luôn 1 xách đó cô."<br><br>
-            <b>6. Chốt đơn & Tạm biệt:</b> Đọc lại đơn hàng để chốt. Cảm ơn và dọn dẹp khu vực trước khi đi.
+          <div id="hb1" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); font-size:13.5px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <div style="background:rgba(56, 161, 105, 0.1); padding:10px; border-radius:8px; margin-bottom:12px; font-weight:700; color:#047857;">Quy trình này giúp bạn không bỏ sót việc, chốt đơn nhanh và ghi điểm chuyên nghiệp với chủ quầy.</div>
+            <b>1. Chuẩn bị (Pre-call):</b> Cập nhật sổ gốc/đơn hàng cũ, kiểm tra tồn kho trên xe (nếu có bán dạo), chuẩn bị sổ sách, check-in GPS.<br><br>
+            <b>2. Chào hỏi tạo thiện cảm:</b> Tươi cười, để xe gọn gàng (không chắn lối đi của khách). Gọi đúng tên chủ quầy: <i>"Cháu chào Cô Tư! Hôm nay khách đông vui quá cô nhỉ!"</i><br><br>
+            <b>3. Kiểm tra Hàng Tồn & Date (Store Check):</b> Xin phép đi thẳng ra kệ trưng bày mặt hàng của công ty. Ghi nhận số lượng còn lại. Nguyên tắc: <b>FIFO (Vào trước xuất trước)</b> - Kéo hàng cũ ra ngoài, đẩy hàng mới vào trong.<br><br>
+            <b>4. Vệ sinh & Trưng bày (Merchandising):</b> Dùng khăn lau bụi sản phẩm. Sắp xếp lại ngay ngắn, <b>mặt chính của sản phẩm (Face) luôn quay ra ngoài</b>, ưu tiên vị trí ngang tầm mắt (Eye-level).<br><br>
+            <b>5. Gợi ý lên đơn (Order Generation):</b> Căn cứ vào tồn kho, mạnh dạn đề xuất: <i>"Cô Tư ơi, Mỳ hảo hảo nhà mình còn có 2 thùng lẻ, cuối tuần này bán sợ thiếu, cháu lên luôn 5 thùng cho cô nhé?"</i><br><br>
+            <b>6. Trình bày Khuyến mãi (Promotion):</b> Báo cáo các CTKM đang chạy: <i>"Đợt này nhập đủ 10 thùng dầu ăn được tặng 1 lốc nước mắm đó cô, cô lấy luôn để lấy KM nhé."</i><br><br>
+            <b>7. Chốt đơn & Bán chéo (Upsell/Cross-sell):</b> Đọc lại đơn để chốt. Mời thêm hàng mới: <i>"Cháu có loại bánh gạo mới ra, hợp với học sinh ăn vặt lắm, cháu bỏ thử 1 lốc cô bán thử nha."</i><br><br>
+            <b>8. Chào tạm biệt & Hành chính (Post-call):</b> Gửi hóa đơn (nếu có). Cảm ơn, hẹn ngày viếng thăm tiếp theo và dọn dẹp khu vực đứng.
           </div>
         </div>
 
-        <!-- BÀI 2: XỬ LÝ TỪ CHỐI - GIÁ -->
+        <!-- BÀI 2: KỸ NĂNG XỬ LÝ TỪ CHỐI VỀ GIÁ -->
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #E11D48;">
-          <div onclick="toggleHandbookAccordion('hb2')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-comments-dollar" style="color:#E11D48;"></i> Xử lý: "Giá bên em cao hơn đại lý X"</div>
+          <div onclick="toggleHolandbookAccordion('hb2')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-comments-dollar" style="color:#E11D48;"></i> Bài 2: Khách chê "Giá bên em đắt hơn đại lý"</div>
             <i id="icon_hb2" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="hb2" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
-            <span style="color:#E11D48; font-weight:800;">Sai lầm:</span> Tranh cãi hoặc tự ý hứa giảm giá khi chưa xin phép.<br><br>
-            <span style="color:#059669; font-weight:800;">Cách xử lý:</span> Lái câu chuyện sang "Giá trị cộng thêm" (Dịch vụ).<br>
-            <i>"Dạ cô ơi, đại lý X có thể rẻ hơn 2-3 ngàn/thùng, nhưng bên cháu <b>giao hàng tận nơi miễn phí, hàng cận date cháu hỗ trợ thu hồi đổi mới 100%</b>. Cô ôm hàng bên kia lỡ bán chậm cận date họ đâu cho đổi, tính ra lỗ hơn nhiều đó cô."</i><br><br>
-            Đồng thời ghi lại Feedback giá đối thủ vào tab Phản Hồi để báo Công ty.
+          <div id="hb2" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); font-size:13.5px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <div style="border-left:3px solid var(--rose); padding-left:10px; margin-bottom:12px;"><b>Sai lầm thường gặp:</b> Tranh cãi tay đôi, nói xấu đối thủ, hoặc vội vàng hứa tự cắt máu (giảm hoa hồng của mình) để bù giá.</div>
+            <span style="color:#059669; font-weight:800;">Tuyệt chiêu xử lý: Phương pháp "Chuyển hướng sang Giá trị Dịch vụ"</span><br><br>
+            <b>Bước 1: Đồng tình & Đồng cảm</b><br>
+            <i>"Dạ cháu hiểu, đi buôn thì một hai ngàn cũng quý. Đại lý X họ đổ buôn khối lượng lớn nên có thể giá sỉ của họ đang rẽ hơn bên cháu 2-3 ngàn/thùng."</i><br><br>
+            <b>Bước 2: Nêu bật Dịch vụ & Rủi ro khi mua hàng trôi nổi</b><br>
+            <i>"Nhưng cô ơi, lấy hàng trực tiếp từ bên cháu (NPP chính hãng) cô được:
+            <ul style="margin:4px 0 10px 20px; padding:0;">
+              <li><b>Giao tận nơi miễn phí</b>, cô không tốn tiền xăng hay thuê xe ba gác chở.</li>
+              <li><b>Bảo hành Date:</b> Hàng cận date, hư hỏng, móp méo bên cháu hỗ trợ thu hồi đổi mới 100%. Đại lý bán đứt đoạn thường không cho đổi trả. Tính ra ôm một thùng móp là lỗ luôn tiền lời mấy thùng khác đó cô.</li>
+              <li><b>Tham gia tích lũy điểm/Chương trình trưng bày:</b> Cuối năm được thưởng vàng, thưởng chuyến du lịch.</li>
+            </ul>"</i><br>
+            <b>Bước 3: Chốt hành động</b><br>
+            <i>"Cô cứ chia ra lấy, mặt hàng nào cô cần số lượng lớn ngay thì lấy đại lý, còn mặt hàng cần quay vòng vốn nhanh, cần an toàn về date thì cô nhập bên cháu cho yên tâm nhé. Đơn này cháu lên nhẹ 3 thùng trước nha?"</i><br><br>
+            <b>Hành động của Sales:</b> Mở tab <b>Phản hồi thị trường</b> ghi nhận mức giá phá của đối thủ để báo Cấp quản lý.
           </div>
         </div>
 
-        <!-- BÀI 3: XỬ LÝ TỪ CHỐI - HÀNG CHẬM -->
+        <!-- BÀI 3: KỸ NĂNG XỬ LÝ KHI KHÁCH KÊU "HÀNG BÁN CHẬM" -->
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #D97706;">
           <div onclick="toggleHandbookAccordion('hb3')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-box-open" style="color:#D97706;"></i> Xử lý: "Hàng này bán chậm lắm em ơi"</div>
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-box-open" style="color:#D97706;"></i> Bài 3: Khách từ chối vì "Hàng bán chậm lắm"</div>
             <i id="icon_hb3" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="hb3" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
-            <span style="color:#059669; font-weight:800;">Cách xử lý 1: Đảo kệ trưng bày</span><br>
-            "Dạ để cháu ra xếp lại hàng ra mặt ngoài cho dễ nhìn cô nhé. Khách họ chưa thấy nên chưa mua đó ạ."<br><br>
-            <span style="color:#059669; font-weight:800;">Cách xử lý 2: Kẹp bán chéo (Cross-sell)</span><br>
-            "Cô thử xếp mấy lon bia này cạnh chỗ bán bim bim, đậu phộng xem, chiều mấy chú đi làm về hay mua combo lắm."<br><br>
-            <span style="color:#059669; font-weight:800;">Cách xử lý 3: Xé lẻ để bán</span><br>
-            "Cô cắt thùng này ra bán lẻ từng gói/lốc đi, mặt hàng mới khách thích mua thử số lượng ít hơn."
+          <div id="hb3" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); font-size:13.5px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <div style="background:rgba(217, 119, 6, 0.1); padding:10px; border-radius:8px; margin-bottom:12px; font-weight:700; color:#B45309;">Hàng bán chậm không phải do sản phẩm dở, mà 80% do nằm khuất tầm nhìn hoặc tiệm chưa biết cách bán. Bạn phải là "Chuyên gia bán lẻ" tư vấn cho chủ tiệm.</div>
+            
+            <b>Cách xử lý 1: Đảo kệ trưng bày (Refresh)</b><br>
+            Kiểm tra ngay vị trí trưng bày. Nếu hàng nằm trong góc tối, kệ dưới cùng, hãy xin phép: <i>"Cô Tư ơi, hàng nằm tuốt dưới này khách họ đâu có thấy. Để cháu mang giẻ lau sạch rồi xếp lên ngang tầm mắt ngoài mặt tiền này nha. Tuần sau cô xem, đảm bảo đi vèo vèo."</i><br><br>
+            
+            <b>Cách xử lý 2: Kẹp bán chéo (Cross-merchandising)</b><br>
+            Tạo thói quen mua combo cho người tiêu dùng. <br>
+            <i>"Mấy bịch xúc xích/đậu phộng này cô đừng xếp chung với gia vị. Cháu treo nó ngay cạnh tủ làm lạnh bia, nước ngọt nhé. Chiều mấy chú thợ xây đi làm về mua bia là kiểu gì cũng tiện tay nhặt thêm đồ nhắm."</i><br><br>
+            
+            <b>Cách xử lý 3: Xé lẻ để bán (Sampling style)</b><br>
+            Đặc biệt hiệu quả với hàng mới ra.<br>
+            <i>"Bán nguyên lốc/thùng khách họ ngại thử. Cô cắt nilon ra, bày bán lẻ từng gói/từng chai trên quầy tính tiền đi. Khách vô trả tiền thối họ hay mua kẹp thêm lắm."</i><br><br>
+
+            <b>Cách xử lý 4: Gắn biển giá (Price Tag) rõ ràng</b><br>
+            Khách hàng thường ngại hỏi giá nếu không thấy bảng giá. Hãy dùng bút dạ ghi rõ giá bán lẻ và dán ở mép kệ.
+          </div>
+        </div>
+
+        <!-- BÀI 4: QUẢN LÝ TỒN KHO & DATE -->
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #8B5CF6;">
+          <div onclick="toggleHandbookAccordion('hb4')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-calendar-check" style="color:#8B5CF6;"></i> Bài 4: Quản trị Tồn kho & Xử lý Cận Date</div>
+            <i id="icon_hb4" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+          </div>
+          <div id="hb4" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); font-size:13.5px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <b>1. Nỗi sợ của chủ tiệm:</b> Sợ nhất là "ôm bom" hàng hết date, phải tự bỏ rác hoặc ăn cố. Đánh bay nỗi sợ này, bạn sẽ bán được mọi mặt hàng.<br><br>
+            
+            <b>2. Nguyên tắc FIFO & FEFO:</b><br>
+            - <b>FIFO (First In, First Out):</b> Nhập trước xuất trước.<br>
+            - <b>FEFO (First Expire, First Out):</b> Hết hạn trước xuất trước.<br>
+            => Khi giao hàng/ghé thăm, TỰ TAY kéo hàng cũ đang nằm bên trong ra ngoài mép kệ, xếp hàng mới vừa giao vào trong góc tường. Tuyệt đối không để chủ tiệm tự làm vì họ sẽ quên.<br><br>
+
+            <b>3. Xử lý hàng có nguy cơ cận date:</b><br>
+            Đừng đợi đến lúc hết date mới mang về công ty (sẽ bị phạt). Khi thấy hàng còn 1/3 vòng đời (Ví dụ HSD 6 tháng, mà đã trôi qua 4 tháng), hãy:<br>
+            - Xếp nó ra vị trí đắc địa nhất ngay cạnh máy tính tiền.<br>
+            - Khuyên chủ tiệm tự chạy "Cắt máu": <i>"Cô ơi lốc sữa này còn 2 tháng nữa hết hạn, thay vì bán 30k, cô gắn biển xả kho 25k/lốc đi cho nó đi nhanh thu hồi vốn."</i><br>
+            - Kéo qua tiệm khác: Xin phép rút hàng cận date của tiệm A (bán ế) mang qua tiệm B (gần cổng trường, bán cực kỳ chạy) để xoay vòng.
           </div>
         </div>
 
@@ -6258,10 +6401,9 @@ window.renderGocSalesTab = function(container) {
     `}
   `;
 };
-
-// Đừng quên gọi hàm render này trong hàm renderUI() chính của bạn!
-// Tại phần: else if (tab === 'company') { ... } 
-// Hãy chèn thêm luồng else if (tab === 'gocSales') { renderGocSalesTab(activePane); }
+// ==========================================
+// KẾT THÚC GÓC SALES
+// ==========================================
 </script>
 </body>
 </html>
