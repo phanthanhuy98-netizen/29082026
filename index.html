@@ -378,6 +378,8 @@
       <div id="tabPane_routes" style="display:none;"></div>
       <!-- TAB COMPANY -->
       <div id="tabPane_company" style="display:none;"></div>
+      <!-- TAB GÓC SALES -->
+      <div id="tabPane_gocSales" style="display:none;"></div>
       <!-- TAB KPI -->
       <div id="tabPane_kpi" style="display:none;"></div>
       <!-- TAB USERS -->
@@ -453,7 +455,7 @@
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'kpi', 'users'];
+  let defaultTabOrder = ['sales', 'soGocBH', 'customers', 'productsAdmin', 'routes', 'company', 'gocSales', 'kpi', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
@@ -4412,6 +4414,7 @@ soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultCol
     productsAdmin: { id: 'navProductsAdmin', label: 'Hàng', icon: 'fa-boxes-stacked', defaultColor: '#3B82F6', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
     routes: { id: 'navRoutes', label: 'Tuyến', icon: 'fa-route', defaultColor: '#8B5CF6', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
     company: { id: 'navCompany', label: 'Cty', icon: 'fa-building', defaultColor: '#DB2777', perm: (!currentUser || currentUser.role !== 'accountant') && (!currentUser || currentUser.role !== 'viewer') },
+    gocSales: { id: 'navGocSales', label: 'Góc Sales', icon: 'fa-lightbulb', defaultColor: '#0EA5E9', perm: (!currentUser || currentUser.role !== 'accountant') },
     kpi: { id: 'navKpi', label: 'Hiệu Suất', icon: 'fa-chart-pie', defaultColor: '#F43F5E', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') },
     users: { id: 'navusers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: (!currentUser || currentUser.role !== 'accountant') && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
   };
@@ -5001,6 +5004,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>
             ` : ''}
+            
           </div>
         </div>
 
@@ -5048,6 +5052,9 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
           }).join('')}
         </div>
       `;
+    }
+      else if (tab === 'gocSales') {
+      renderGocSalesTab(container);
     }
 
     else if (tab === 'users') {
@@ -6069,6 +6076,192 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     closeStoreHistoryModal();
   }
 };
+  // ==========================================
+// TÍNH NĂNG GÓC SALES (FEEDBACK & CẨM NANG)
+// ==========================================
+window._gocSalesSubTab = 'feedback'; // Mặc định mở tab Feedback
+
+window.switchGocSalesSubTab = function(tabName) {
+  window._gocSalesSubTab = tabName;
+  const activePane = document.getElementById('tabPane_gocSales');
+  if (activePane) renderGocSalesTab(activePane);
+};
+
+window.toggleHandbookAccordion = function(id) {
+  const el = document.getElementById(id);
+  const icon = document.getElementById('icon_' + id);
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    icon.style.transform = 'rotate(180deg)';
+  } else {
+    el.classList.add('hidden');
+    icon.style.transform = 'rotate(0deg)';
+  }
+};
+
+window.submitSalesFeedback = async function(e) {
+  e.preventDefault();
+  const storeId = document.getElementById('fbStoreSelect').value;
+  const fbType = document.getElementById('fbTypeSelect').value;
+  const note = document.getElementById('fbNote').value.trim();
+
+  if (!storeId) return alert("Vui lòng chọn khách hàng cần phản hồi!");
+  if (!note) return alert("Vui lòng nhập nội dung chi tiết!");
+
+  const targetStore = stores.find(s => String(s.id) === storeId);
+  const fbData = {
+    storeId: storeId,
+    storeCode: targetStore ? targetStore.code : '',
+    storeName: targetStore ? targetStore.name : '',
+    type: fbType,
+    note: note,
+    salesUid: currentUser.uid,
+    salesName: currentUser.name,
+    salesCode: currentUser.code,
+    lat: currentSalesGPS?.lat || 0,
+    lng: currentSalesGPS?.lng || 0,
+    status: 'Mới',
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const fbBtn = document.getElementById('fbSubmitBtn');
+    fbBtn.disabled = true;
+    fbBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+    
+    // Ghi lên Firebase collection 'feedbacks'
+    await addDoc(collection(db, "feedbacks"), { ...fbData, serverTimestamp: serverTimestamp() });
+    
+    alert("✅ Ghi nhận phản hồi thị trường thành công! Admin sẽ xử lý sớm.");
+    document.getElementById('fbNote').value = '';
+    if (typeof triggerHaptic === 'function') triggerHaptic(30);
+  } catch (err) {
+    alert("Lỗi khi gửi phản hồi: " + err.message);
+  } finally {
+    const fbBtn = document.getElementById('fbSubmitBtn');
+    if (fbBtn) {
+      fbBtn.disabled = false;
+      fbBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> GỬI PHẢN HỒI THỊ TRƯỜNG';
+    }
+  }
+};
+
+window.renderGocSalesTab = function(container) {
+  const isFb = window._gocSalesSubTab === 'feedback';
+  
+  let storeOptions = `<option value="">-- Chọn quầy tạp hóa / Khách hàng --</option>`;
+  stores.forEach(s => {
+    const isSelected = activeVisitedStore && String(activeVisitedStore.id) === String(s.id) ? 'selected' : '';
+    storeOptions += `<option value="${s.id}" ${isSelected}>[${s.code}] ${s.name}</option>`;
+  });
+
+  container.innerHTML = `
+    <div class="tab-header-actions" style="margin-bottom:12px;">
+      <h2 style="font-weight:800; font-size:18px; color:var(--text-main);"><i class="fa-solid fa-lightbulb" style="color:#0EA5E9;"></i> Góc Sales & Thị Trường</h2>
+    </div>
+
+    <!-- Segmented Control (Thanh gạt giống iOS) -->
+    <div style="display:flex; background:rgba(15, 23, 42, 0.05); border-radius:12px; padding:4px; margin-bottom:16px; border: 1px solid var(--card-border);">
+      <div onclick="switchGocSalesSubTab('feedback')" style="flex:1; text-align:center; padding:10px 0; font-weight:800; font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.2s; ${isFb ? 'background:var(--card-bg); color:#0EA5E9; box-shadow:0 2px 8px rgba(0,0,0,0.1);' : 'color:var(--text-muted);'}">
+        <i class="fa-solid fa-comment-dots"></i> PHẢN HỒI
+      </div>
+      <div onclick="switchGocSalesSubTab('handbook')" style="flex:1; text-align:center; padding:10px 0; font-weight:800; font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.2s; ${!isFb ? 'background:var(--card-bg); color:#F59E0B; box-shadow:0 2px 8px rgba(0,0,0,0.1);' : 'color:var(--text-muted);'}">
+        <i class="fa-solid fa-book-open"></i> CẨM NANG
+      </div>
+    </div>
+
+    ${isFb ? `
+      <!-- UI LUỒNG 1: GHI NHẬN PHẢN HỒI -->
+      <div class="card" style="padding:16px;">
+        <h3 style="font-size:14px; font-weight:800; color:var(--primary); margin-bottom:12px;">Báo Cáo Tình Hình Tại Điểm Bán</h3>
+        <form onsubmit="submitSalesFeedback(event)" style="display:flex; flex-direction:column; gap:12px;">
+          
+          <div>
+            <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Khách hàng / Quầy:</label>
+            <select id="fbStoreSelect" style="margin:0; padding:12px; font-weight:700; font-size:14px;" required>
+              ${storeOptions}
+            </select>
+          </div>
+
+          <div>
+            <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Phân loại vấn đề:</label>
+            <select id="fbTypeSelect" style="margin:0; padding:12px; font-weight:700; font-size:14px;">
+              <option value="Đối thủ KM giá tốt hơn">📉 Đối thủ đang có giá/KM tốt hơn</option>
+              <option value="Hàng lỗi / Móp méo / Cận date">📦 Hàng lỗi / Móp méo / Cận date</option>
+              <option value="Yêu cầu mặt hàng mới">✨ Tiệm hỏi nhập mặt hàng mới</option>
+              <option value="Thái độ Giao hàng / Đổi trả">🚚 Phàn nàn bộ phận Giao hàng/Đổi trả</option>
+              <option value="Khác">💡 Đề xuất / Góp ý khác</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px; display:block;">Chi tiết cụ thể:</label>
+            <textarea id="fbNote" rows="4" placeholder="Ví dụ: Bia Tiger đại lý X đang đổ buôn giá rẻ hơn mình 5k/thùng, chủ tiệm chê giá mình cao..." style="margin:0; padding:12px; font-size:14px; resize:none;" required></textarea>
+          </div>
+
+          <button id="fbSubmitBtn" type="submit" class="btn btn-blue" style="justify-content:center; padding:14px; font-weight:800; font-size:14px; margin-top:4px; border-radius:12px; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);">
+            <i class="fa-solid fa-paper-plane"></i> GỬI PHẢN HỒI THỊ TRƯỜNG
+          </button>
+        </form>
+      </div>
+    ` : `
+      <!-- UI LUỒNG 2: CẨM NANG NGHIỆP VỤ FMCG (CODE CỨNG) -->
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        
+        <!-- BÀI 1: QUY TRÌNH -->
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #38A169;">
+          <div onclick="toggleHandbookAccordion('hb1')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-shoe-prints" style="color:#38A169;"></i> 6 Bước Chuẩn Chăm Sóc Quầy (FMCG)</div>
+            <i id="icon_hb1" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+          </div>
+          <div id="hb1" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <b>1. Chuẩn bị & Chào hỏi:</b> Tươi cười, để xe gọn gàng. Chào tên chủ tiệm (VD: "Cháu chào cô Tư!").<br><br>
+            <b>2. Kiểm tra hàng & Tồn kho:</b> Xin phép ra kệ kiểm tra hàng nhà mình. Kéo hàng cũ ra ngoài (FIFO - Nhập trước xuất trước).<br><br>
+            <b>3. Vệ sinh & Trưng bày:</b> Phủi bụi, xếp mặt chữ sản phẩm quay ra ngoài, xếp ngang tầm mắt để dễ bán.<br><br>
+            <b>4. Gợi ý đơn hàng:</b> "Cô Tư ơi, mỳ Hảo Hảo nhà mình còn có 2 thùng, cháu lên luôn 5 thùng cho kịp bán cuối tuần nhé."<br><br>
+            <b>5. Thông báo Khuyến mãi:</b> Chào CTKM mới, hàng mới. Nhấn mạnh lợi ích: "Lấy đủ 10 thùng được tặng luôn 1 xách đó cô."<br><br>
+            <b>6. Chốt đơn & Tạm biệt:</b> Đọc lại đơn hàng để chốt. Cảm ơn và dọn dẹp khu vực trước khi đi.
+          </div>
+        </div>
+
+        <!-- BÀI 2: XỬ LÝ TỪ CHỐI - GIÁ -->
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #E11D48;">
+          <div onclick="toggleHandbookAccordion('hb2')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-comments-dollar" style="color:#E11D48;"></i> Xử lý: "Giá bên em cao hơn đại lý X"</div>
+            <i id="icon_hb2" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+          </div>
+          <div id="hb2" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <span style="color:#E11D48; font-weight:800;">Sai lầm:</span> Tranh cãi hoặc tự ý hứa giảm giá khi chưa xin phép.<br><br>
+            <span style="color:#059669; font-weight:800;">Cách xử lý:</span> Lái câu chuyện sang "Giá trị cộng thêm" (Dịch vụ).<br>
+            <i>"Dạ cô ơi, đại lý X có thể rẻ hơn 2-3 ngàn/thùng, nhưng bên cháu <b>giao hàng tận nơi miễn phí, hàng cận date cháu hỗ trợ thu hồi đổi mới 100%</b>. Cô ôm hàng bên kia lỡ bán chậm cận date họ đâu cho đổi, tính ra lỗ hơn nhiều đó cô."</i><br><br>
+            Đồng thời ghi lại Feedback giá đối thủ vào tab Phản Hồi để báo Công ty.
+          </div>
+        </div>
+
+        <!-- BÀI 3: XỬ LÝ TỪ CHỐI - HÀNG CHẬM -->
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid #D97706;">
+          <div onclick="toggleHandbookAccordion('hb3')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:14px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-box-open" style="color:#D97706;"></i> Xử lý: "Hàng này bán chậm lắm em ơi"</div>
+            <i id="icon_hb3" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+          </div>
+          <div id="hb3" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); font-size:13px; line-height:1.6; color:var(--text-main); background:var(--card-bg);">
+            <span style="color:#059669; font-weight:800;">Cách xử lý 1: Đảo kệ trưng bày</span><br>
+            "Dạ để cháu ra xếp lại hàng ra mặt ngoài cho dễ nhìn cô nhé. Khách họ chưa thấy nên chưa mua đó ạ."<br><br>
+            <span style="color:#059669; font-weight:800;">Cách xử lý 2: Kẹp bán chéo (Cross-sell)</span><br>
+            "Cô thử xếp mấy lon bia này cạnh chỗ bán bim bim, đậu phộng xem, chiều mấy chú đi làm về hay mua combo lắm."<br><br>
+            <span style="color:#059669; font-weight:800;">Cách xử lý 3: Xé lẻ để bán</span><br>
+            "Cô cắt thùng này ra bán lẻ từng gói/lốc đi, mặt hàng mới khách thích mua thử số lượng ít hơn."
+          </div>
+        </div>
+
+      </div>
+    `}
+  `;
+};
+
+// Đừng quên gọi hàm render này trong hàm renderUI() chính của bạn!
+// Tại phần: else if (tab === 'company') { ... } 
+// Hãy chèn thêm luồng else if (tab === 'gocSales') { renderGocSalesTab(activePane); }
 </script>
 </body>
 </html>
