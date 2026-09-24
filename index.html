@@ -5157,10 +5157,12 @@ else if (tab === 'kpi') {
         prevEnd = prevWeekEnd.toISOString().slice(0, 10);
       }
 
- let kpiMap = new Map();
+let kpiMap = new Map();
 let globalSkuMap = new Map();
+let globalStoreStatsMap = new Map(); 
+let globalCompanyStatsMap = new Map(); 
 let currentStats = { kien: 0, don: 0, tiems: new Set() };
-let prevStats = { kien: 0, don: 0 }; // BẮT BUỘC PHẢI CÓ DÒNG NÀY (Chú ý chữ "S" viết hoa)
+let prevStats = { kien: 0, don: 0 }; 
 
 orders.forEach(o => {
   if (o.status === 'Đã hủy') return;
@@ -5178,23 +5180,28 @@ orders.forEach(o => {
     }
   }
 
-  // 2. BỘ LỌC THỜI GIAN (Chỉ tính đơn hàng nằm trong "Hôm Nay")
+  // 2. BỘ LỌC THỜI GIAN (Chỉ tính đơn hàng nằm trong khung giờ chọn)
   if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
 
-  // 3. TÍNH TOÁN KỲ HIỆN TẠI (Gộp chung tính HUD và Bảng xếp hạng)
+  // 3. TÍNH TOÁN KỲ HIỆN TẠI
   let salesKey = o.salesCode || 'UNKNOWN';
   if (!kpiMap.has(salesKey)) {
     kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set(), skuMap: new Map() });
   }
   let sData = kpiMap.get(salesKey);
 
-  // Cộng dồn Đơn và Tiệm 
   sData.don += 1;
   currentStats.don += 1;
   
   let storeIdentifier = o.maDTPNNo || o.storeId || o.maKh || o.makh;
   sData.tiems.add(storeIdentifier);
   currentStats.tiems.add(storeIdentifier);
+
+  // Lưu trữ định danh khách hàng để tính Top Buyers
+  let storeNameDisplay = o.maKH || o.maDTPNNo || o.storeId;
+  if (!globalStoreStatsMap.has(storeIdentifier)) {
+    globalStoreStatsMap.set(storeIdentifier, { name: storeNameDisplay, qty: 0 });
+  }
 
   if (o.items) {
     o.items.forEach(item => {
@@ -5206,30 +5213,59 @@ orders.forEach(o => {
       if (itemQty > 0) {
         const thungCount = itemQty / ratio;
         
-        // Cộng dồn Sản lượng thùng
         sData.kien += thungCount;
         currentStats.kien += thungCount;
 
-        // Xử lý Top Hàng Bán Chạy
         const skuKey = item.code;
         if (!sData.skuMap.has(skuKey)) sData.skuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio });
         sData.skuMap.get(skuKey).qty += itemQty;
 
         if (!globalSkuMap.has(skuKey)) globalSkuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio, code: item.code });
         globalSkuMap.get(skuKey).qty += itemQty;
+
+        // Cộng dồn Sản lượng cho Khách Hàng
+        globalStoreStatsMap.get(storeIdentifier).qty += thungCount;
+
+        // Phân bổ Tỷ trọng theo Nhãn hàng / Công ty
+        let pCodeStr = String(item.code || '').toUpperCase();
+        let ctyKey = 'KHÁC';
+        if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) {
+            ctyKey = '11';
+        } else {
+            let match = pCodeStr.match(/^\[(.*?)\]/);
+            if (match) ctyKey = match[1].trim();
+            else {
+                let parts = pCodeStr.split(/[-_]/);
+                if (parts.length > 1) ctyKey = parts[0].trim();
+                else if (pCodeStr.length >= 2) ctyKey = pCodeStr.substring(0, 2);
+            }
+        }
+        let matchedComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey);
+        let compDisplayName = matchedComp && matchedComp.tenCtu ? matchedComp.tenCtu : (ctyKey !== 'KHÁC' ? `Công Ty ${ctyKey}` : 'Khác');
+        
+        if (!globalCompanyStatsMap.has(compDisplayName)) globalCompanyStatsMap.set(compDisplayName, { qty: 0 });
+        globalCompanyStatsMap.get(compDisplayName).qty += thungCount;
       }
     });
   }
 });
-      const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
-      const activeSalesCodes = Array.from(kpiMap.keys());
-      const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
 
-      let leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.kien - a.kien);
-      const topKien = leaderboard.length > 0 ? leaderboard[0].kien : 1;
+const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+const activeSalesCodes = Array.from(kpiMap.keys());
+const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
 
-      const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
-      const maxGlobalQty = topGlobalSkus.length > 0 ? topGlobalSkus[0].qty : 1;
+let leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.kien - a.kien);
+const topKien = leaderboard.length > 0 ? leaderboard[0].kien : 1;
+
+const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
+const maxGlobalQty = topGlobalSkus.length > 0 ? topGlobalSkus[0].qty : 1;
+
+// Xử lý dữ liệu hiển thị cho 2 khối biểu đồ mới
+const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
+const maxStoreQty = topStoresList.length > 0 ? topStoresList[0].qty : 1;
+
+const companyDistList = Array.from(globalCompanyStatsMap.entries()).map(([name, data]) => ({ name, qty: data.qty })).sort((a, b) => b.qty - a.qty);
+const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
 
   const calcGrowth = (curr, prev) => {
         if (prev === 0) return ''; // Không có dữ liệu kỳ trước thì ẩn luôn, không hiển thị dòng thừa
@@ -5344,6 +5380,56 @@ orders.forEach(o => {
         </div>
         ` : ''}
 
+${topStoresList.length > 0 ? `
+        <div class="card" style="padding:12px; margin-bottom:16px;">
+          <h3 style="font-size:13px; font-weight:800; color:var(--text-muted); margin-bottom:10px; display:flex; justify-content:space-between;">
+            <span><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG NỔI BẬT</span>
+          </h3>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${topStoresList.map((st, i) => {
+              const qtyStr = st.qty.toFixed(1) + ' Thùng';
+              const barWidth = Math.max((st.qty / maxStoreQty) * 100, 5);
+              let displayName = st.name;
+              if (displayName.includes(' - ')) displayName = displayName.split(' - ')[1];
+              return `
+                <div>
+                  <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+                    <span style="font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:8px;">${i+1}.${displayName}</span>
+                    <span style="font-weight:800; color:var(--emerald); flex-shrink:0;">${qtyStr}</span>
+                  </div>
+                  <div style="width:100%; height:4px; background:var(--card-border); border-radius:2px;">
+                    <div style="height:100%; width:${barWidth}%; background:var(--emerald-gradient); border-radius:2px;"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${companyDistList.length > 0 ? `
+        <div class="card" style="padding:12px; margin-bottom:16px;">
+          <h3 style="font-size:13px; font-weight:800; color:var(--text-muted); margin-bottom:10px; display:flex; justify-content:space-between;">
+            <span><i class="fa-solid fa-chart-pie" style="color:var(--purple);"></i> TỶ TRỌNG CÔNG TY / NHÃN HÀNG</span>
+          </h3>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${companyDistList.map((comp, i) => {
+              const pct = totalCompanyQty > 0 ? ((comp.qty / totalCompanyQty) * 100).toFixed(1) : 0;
+              return `
+                <div>
+                  <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+                    <span style="font-weight:700; color:var(--text-main);">${comp.name}</span>
+                    <span style="font-weight:800; color:var(--primary);">${pct}% <span style="font-size:10px; color:var(--text-muted);">(${comp.qty.toFixed(1)} Thùng)</span></span>
+                  </div>
+                  <div style="width:100%; height:6px; background:var(--card-border); border-radius:3px;">
+                    <div style="height:100%; width:${pct}%; background:var(--purple-gradient); border-radius:3px;"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        ` : ''}
         ${zeroSales.length > 0 ? `
           <div style="background:rgba(225, 29, 72, 0.05); border:1px dashed var(--rose); border-radius:12px; padding:12px; margin-bottom:16px;">
             <div style="font-size:12px; font-weight:800; color:var(--rose); margin-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: CHƯA NỔ ĐƠN (${zeroSales.length})</div>
