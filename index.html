@@ -7443,7 +7443,7 @@ window.deleteTargetSku = async function(skuCode) {
 };
 
 // Component thẻ tiến độ (Dùng chung cho cả Tab Tổng và Cá Nhân)
-function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
+function buildProgressCard(title, icon, colorTheme, target, actual, pct, targetSkus = 0, actualSkus = 0) {
     let statusColor = 'var(--rose)';
     let barGradient = 'var(--rose-gradient)';
     if(pct >= 100) { statusColor = 'var(--emerald)'; barGradient = 'var(--emerald-gradient)'; }
@@ -7457,11 +7457,11 @@ function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">TỔNG CHỈ TIÊU</div>
-                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(target)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
+                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(target)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng / ${targetSkus} SKUs</span></div>
             </div>
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">THỰC ĐẠT</div>
-                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(actual)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
+                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(actual)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng / ${actualSkus} SKUs</span></div>
             </div>
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">TỔNG TIẾN ĐỘ</div>
@@ -7543,6 +7543,7 @@ window.calculateAndRenderTargets = async function() {
   } catch (e) {}
 
   let actuals = {}; 
+  let globalActualMap = {}; 
   
   orders.forEach(o => {
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
@@ -7554,6 +7555,7 @@ window.calculateAndRenderTargets = async function() {
           
           if (allTargetsMap[`${o.salesCode}_${skuKey}`]) {
             globalActual += qtyThung;
+            globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
           }
           
           if (o.salesCode === window._chiTieuTargetSalesCode) {
@@ -7563,6 +7565,12 @@ window.calculateAndRenderTargets = async function() {
       }
     }
   });
+
+  let globalTargetSkusCount = Object.keys(allTargetsMap).length;
+  let globalActualSkusCount = Object.values(globalActualMap).filter(v => v > 0).length;
+
+  let personalTargetSkusCount = targetItems.length;
+  let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
 
   let grouped = {};
   targetItems.forEach(it => {
@@ -7586,9 +7594,6 @@ window.calculateAndRenderTargets = async function() {
 
   const container = document.getElementById('targetDashboardContainer');
   
-  // =========================================================================
-  // GOM CHUNG THÀNH 1 KHUNG VỚI 2 TAB CON: TỔNG QUAN & CÁ NHÂN
-  // =========================================================================
   const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
   
   let tabHeaderHtml = '';
@@ -7609,19 +7614,18 @@ window.calculateAndRenderTargets = async function() {
   if (!isAdminOrManager || isTongQuanTab) {
       if (isAdminOrManager) {
           const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
-          topCardHtml = buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct);
+          topCardHtml = buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct, globalTargetSkusCount, globalActualSkusCount);
       } else {
-          // Nếu là Sales, luôn hiển thị card cá nhân lên đầu
           const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
           const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
           const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-          topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+          topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct, personalTargetSkusCount, personalActualSkusCount);
       }
   } else {
       const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
       const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
       const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-      topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+      topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct, personalTargetSkusCount, personalActualSkusCount);
   }
 
   if (targetItems.length === 0 && (!isAdminOrManager || isTongQuanTab)) {
@@ -7640,6 +7644,8 @@ window.calculateAndRenderTargets = async function() {
   const detailHtml = Object.keys(grouped).map(compCode => {
     const g = grouped[compCode];
     const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : 0;
+    const compTargetSkusCount = g.skus.length;
+    const compActualSkusCount = g.skus.filter(s => s.actual > 0).length;
     
     let colorClass = 'var(--rose)';
     let barColor = 'var(--rose-gradient)';
@@ -7679,11 +7685,11 @@ window.calculateAndRenderTargets = async function() {
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
                     <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">CHỈ TIÊU</div>
-                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng / ${compTargetSkusCount} SKUs</span></div>
                 </div>
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
                     <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
-                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng / ${compActualSkusCount} SKUs</span></div>
                 </div>
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
                     <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ</div>
@@ -7746,7 +7752,6 @@ window.calculateAndRenderTargets = async function() {
     `;
   }).join('');
 
-  // Nếu đang ở tab Tổng quan toàn công ty thì chỉ hiện thẻ tổng quan, ẩn danh sách chi tiết công ty bên dưới cho gọn
   if (isAdminOrManager && isTongQuanTab) {
       container.innerHTML = tabHeaderHtml + topCardHtml;
   } else {
