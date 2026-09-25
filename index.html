@@ -6979,7 +6979,7 @@ window.renderGocSalesTab = function(container) {
   `;
 };
 // ==========================================
-// TÍNH NĂNG QUẢN TRỊ CHỈ TIÊU & PHÂN TUYẾN
+// TÍNH NĂNG QUẢN TRỊ CHỈ TIÊU & PHÂN TUYẾN (BẢN CHUẨN HOÀN THIỆN)
 // ==========================================
 window._chiTieuSubTab = 'phanTuyen';
 window._chiTieuTargetSalesCode = '';
@@ -7000,7 +7000,23 @@ function formatMonthVN(yyyy_mm) {
   return `Tháng ${Number(parts[1])} năm ${parts[0]}`;
 }
 
-// Hàm phụ trợ tự động lấy mã Công ty từ mã SP
+// Hàm format số gọn gàng: 10 -> "10", 10.5 -> "10.5" (Không hiện 10.0)
+function formatQtySmart(num) {
+  const val = Number(num || 0);
+  return Number.isInteger(val) ? val.toString() : val.toFixed(1);
+}
+
+// Chuyển tháng nhanh (Tiến/Lùi) cho máy tính và điện thoại
+window.changeChiTieuMonthStep = function(offset) {
+  const parts = window._chiTieuTargetMonth.split('-');
+  let y = parseInt(parts[0], 10);
+  let m = parseInt(parts[1], 10) + offset;
+  if (m > 12) { m = 1; y++; }
+  else if (m < 1) { m = 12; y--; }
+  window._chiTieuTargetMonth = `${y}-${String(m).padStart(2, '0')}`;
+  renderChiTieuTab(document.getElementById('tabPane_chiTieu'));
+};
+
 function getCompCodeFromProductCode(code) {
   let pCodeStr = String(code || '').toUpperCase();
   if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) return '11';
@@ -7119,18 +7135,25 @@ window.renderChiTieuTab = async function(container) {
     ` : `
       <!-- SUB-TAB 2: CHỈ TIÊU (KPI) -->
       <div style="display:flex; flex-direction:column; gap:16px;">
-        <!-- Filter Bar -->
-        <div style="display:flex; gap:10px; flex-wrap:wrap; background:var(--card-bg); padding:16px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border:1px solid var(--card-border);">
+        <!-- Thanh chọn tháng & Sales bấm cực nhạy trên mọi thiết bị -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; background:var(--card-bg); padding:16px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border:1px solid var(--card-border); align-items:center;">
           
-          <!-- Fix Date Picker: Sử dụng Label bọc Input để click mượt mà 100% -->
-          <label style="position:relative; flex:1; min-width:200px; display:block; margin:0; cursor:pointer;">
-            <div style="padding:12px; font-size:14px; font-weight:800; color:var(--rose); background:rgba(225, 29, 72, 0.05); border:1px solid rgba(225, 29, 72, 0.2); border-radius:10px; text-align:center; display:flex; align-items:center; justify-content:center; gap:8px;">
-              <i class="fa-regular fa-calendar-days"></i> <span>${formatMonthVN(window._chiTieuTargetMonth)}</span>
+          <!-- Hộp chọn tháng có nút bấm tiến lùi + click chọn lịch trực tiếp -->
+          <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:260px;">
+            <button class="btn btn-sm" onclick="changeChiTieuMonthStep(-1)" style="padding:10px 14px; border-radius:8px; font-weight:800;" title="Tháng trước">◀</button>
+            
+            <div style="position:relative; flex:1;">
+              <input type="month" id="chiTieuNativeMonthInput" value="${window._chiTieuTargetMonth}" 
+                     onchange="window._chiTieuTargetMonth = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));"
+                     style="position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; z-index:5;">
+              <div onclick="document.getElementById('chiTieuNativeMonthInput').showPicker?.()" 
+                   style="padding:12px; font-size:14px; font-weight:800; color:var(--rose); background:rgba(225, 29, 72, 0.05); border:1px solid rgba(225, 29, 72, 0.2); border-radius:10px; text-align:center; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
+                <i class="fa-regular fa-calendar-days"></i> <span>${formatMonthVN(window._chiTieuTargetMonth)}</span>
+              </div>
             </div>
-            <input type="month" value="${window._chiTieuTargetMonth}" 
-                   onchange="window._chiTieuTargetMonth = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" 
-                   style="position:absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer; padding:0; margin:0; box-sizing:border-box;">
-          </label>
+
+            <button class="btn btn-sm" onclick="changeChiTieuMonthStep(1)" style="padding:10px 14px; border-radius:8px; font-weight:800;" title="Tháng sau">▶</button>
+          </div>
 
           ${isAdminOrManager ? `
             <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; min-width:200px; margin:0; padding:12px; font-weight:800; font-size:14px; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); outline:none;">
@@ -7171,62 +7194,97 @@ window.openTargetModal = function() {
   if (!modalContainer) return;
   
   modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:99999;" onclick="if(event.target === this) closeTargetModal()">
-      <div class="modal-content" style="max-width: 750px; padding: 24px; border-radius: 20px; width:95%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(0,0,0,0.4);">
+    <div class="modal" style="display:flex; z-index:999999; padding:12px;" onclick="if(event.target === this) closeTargetModal()">
+      <div class="modal-content" style="max-width: 720px; padding: 20px; border-radius: 20px; width:100%; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 25px 60px rgba(0,0,0,0.4); margin:auto;">
         
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--card-border); padding-bottom:15px;">
-          <h3 style="font-size:18px; font-weight:900; color:var(--amber); margin:0; text-transform:uppercase;"><i class="fa-solid fa-bullseye"></i> Bảng Giao Chỉ Tiêu Trọng Tâm</h3>
-          <button class="btn btn-red btn-sm" style="border-radius:8px; padding:8px 16px; font-size:13px;" onclick="closeTargetModal()">Đóng</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+          <h3 style="font-size:17px; font-weight:900; color:var(--amber); margin:0; text-transform:uppercase;"><i class="fa-solid fa-bullseye"></i> Bảng Giao Chỉ Tiêu Trọng Tâm</h3>
+          <button type="button" class="btn btn-red btn-sm" style="border-radius:8px; padding:6px 14px; font-size:13px; font-weight:800; cursor:pointer;" onclick="closeTargetModal()">Đóng</button>
         </div>
         
-        <div style="overflow-y:auto; padding-right:8px; flex:1; display:flex; flex-direction:column; gap:16px;">
+        <div style="overflow-y:auto; padding-right:4px; flex:1; display:flex; flex-direction:column; gap:14px;">
           
           <!-- BƯỚC 1 -->
-          <div style="background:var(--card-bg); border:1px solid var(--primary); border-radius:14px; padding:18px; box-shadow:0 4px 10px rgba(37,99,235,0.05);">
-            <label style="font-size:13px; font-weight:900; color:var(--primary); display:block; margin-bottom:10px;"><i class="fa-solid fa-building"></i> 1. TÌM & CHỌN CÔNG TY MỤC TIÊU:</label>
+          <div style="background:var(--card-bg); border:1px solid var(--primary); border-radius:12px; padding:14px;">
+            <label style="font-size:12px; font-weight:900; color:var(--primary); display:block; margin-bottom:8px;"><i class="fa-solid fa-building"></i> 1. TÌM & CHỌN CÔNG TY MỤC TIÊU:</label>
             <div style="position: relative;">
               <input type="hidden" id="kpiCompSelectedCode">
-              <input type="text" id="kpiCompSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty..." oninput="filterKpiCompany(this.value)" autocomplete="off" style="width:100%; padding:14px; font-size:15px; font-weight:800; color:var(--primary); background:var(--bg-dark); border-radius:10px; border:1px solid var(--primary); margin:0; outline:none; transition:0.2s;">
-              <div id="kpiCompResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:250px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; z-index:100; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-top:4px;"></div>
+              <input type="text" id="kpiCompSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty..." oninput="filterKpiCompany(this.value)" autocomplete="off" style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; color:var(--primary); background:var(--bg-dark); border-radius:8px; border:1px solid var(--primary); margin:0; outline:none;">
+              <div id="kpiCompResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:220px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; z-index:100; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-top:4px;"></div>
             </div>
           </div>
 
           <!-- BƯỚC 2 -->
-          <div id="kpiSkuSearchBlock" style="background:var(--card-bg); border:1px dashed var(--card-border); border-radius:14px; padding:18px; opacity:0.5; pointer-events:none; transition:0.3s;">
-            <label style="font-size:13px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> 2. TÌM SP TRỌNG TÂM (CỦA CÔNG TY TRÊN):</label>
+          <div id="kpiSkuSearchBlock" style="background:var(--card-bg); border:1px dashed var(--card-border); border-radius:12px; padding:14px; opacity:0.5; pointer-events:none; transition:0.3s;">
+            <label style="font-size:12px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:8px;"><i class="fa-solid fa-box-open"></i> 2. TÌM SP TRỌNG TÂM (CỦA CÔNG TY TRÊN):</label>
             <div style="position: relative;">
-              <input type="text" id="kpiSkuSearch" placeholder="🔒 Vui lòng chọn Công Ty ở Bước 1 trước..." oninput="filterModalTargetSku(this.value)" autocomplete="off" style="width:100%; padding:14px; font-size:15px; font-weight:700; border-radius:10px; border:1px solid var(--card-border); margin:0; outline:none; transition:0.2s;">
-              <div id="kpiSkuResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:250px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; z-index:99; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-top:4px;"></div>
+              <input type="text" id="kpiSkuSearch" placeholder="🔒 Vui lòng chọn Công Ty ở Bước 1 trước..." oninput="filterModalTargetSku(this.value)" autocomplete="off" style="width:100%; padding:12px 14px; font-size:14px; font-weight:700; border-radius:8px; border:1px solid var(--card-border); margin:0; outline:none;">
+              <div id="kpiSkuResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:220px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; z-index:99; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-top:4px;"></div>
             </div>
           </div>
 
           <!-- BƯỚC 3 -->
-          <div id="kpiPendingSkusBlock" style="background:var(--card-bg); border:1px dashed var(--card-border); border-radius:14px; padding:18px; opacity:0.5; pointer-events:none; transition:0.3s;">
-            <label style="font-size:13px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:10px;"><i class="fa-solid fa-list-ol"></i> 3. NHẬP CHỈ TIÊU (SỐ THÙNG):</label>
-            <div id="kpiPendingSkusList" style="display:flex; flex-direction:column; gap:10px;">
-              <div style="text-align:center; padding:20px; color:var(--text-muted); font-style:italic; font-size:14px; border:1px dashed var(--card-border); border-radius:10px; background:var(--panel-bg);">Chưa chọn SP nào...</div>
+          <div id="kpiPendingSkusBlock" style="background:var(--card-bg); border:1px dashed var(--card-border); border-radius:12px; padding:14px; opacity:0.5; pointer-events:none; transition:0.3s;">
+            <label style="font-size:12px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:8px;"><i class="fa-solid fa-list-ol"></i> 3. NHẬP CHỈ TIÊU (SỐ THÙNG):</label>
+            <div id="kpiPendingSkusList" style="display:flex; flex-direction:column; gap:8px;">
+              <div style="text-align:center; padding:14px; color:var(--text-muted); font-style:italic; font-size:13px; border:1px dashed var(--card-border); border-radius:8px; background:var(--panel-bg);">Chưa chọn SP nào...</div>
             </div>
           </div>
           
         </div>
 
-        <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-size:16px; font-weight:900; box-shadow:0 6px 25px rgba(5,150,105,0.3); margin-top:20px; border-radius:12px;" onclick="saveTargetFromModal()">
-          <i class="fa-solid fa-floppy-disk"></i> LƯU CHỈ TIÊU TRỌNG TÂM CHO NHÂN VIÊN
-        </button>
+        <!-- Nút lưu có padding bottom và không bị cắt ngắn chân -->
+        <div style="padding-top:12px; border-top:1px solid var(--card-border); margin-top:10px;">
+          <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-size:15px; font-weight:900; box-shadow:0 6px 20px rgba(5,150,105,0.3); border-radius:10px; cursor:pointer;" onclick="saveTargetFromModal()">
+            <i class="fa-solid fa-floppy-disk"></i> LƯU CHỈ TIÊU TRỌNG TÂM CHO NHÂN VIÊN
+          </button>
+        </div>
       </div>
     </div>
   `;
   modalContainer.classList.remove('hidden');
 };
 
-// ... Các hàm filterKpiCompany để nguyên ...
+window.closeTargetModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
+};
+
+window.filterKpiCompany = function(keyword) {
+  const q = removeAccents(keyword.trim().toLowerCase());
+  const resContainer = document.getElementById('kpiCompResults');
+  if (!resContainer) return;
+  
+  if (q === '') {
+    resContainer.classList.add('hidden');
+    return;
+  }
+  
+  const matched = companyList.filter(c => removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase().includes(q)).slice(0, 15);
+  let html = matched.map(c => `
+    <div onclick="selectKpiCompany('${c.maCtu}', '${(c.tenCtu || '').replace(/'/g, "\\'")}')" style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13.5px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+      <b style="color:var(--amber);">[${c.maCtu}]</b> ${c.tenCtu || ''}
+    </div>
+  `).join('');
+  
+  if (html) {
+    resContainer.innerHTML = html;
+    resContainer.classList.remove('hidden');
+  } else {
+    resContainer.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:13px; font-weight:700;">Không tìm thấy công ty phù hợp.</div>';
+    resContainer.classList.remove('hidden');
+  }
+};
 
 window.selectKpiCompany = function(code, name) {
   document.getElementById('kpiCompSelectedCode').value = code;
   document.getElementById('kpiCompSearchInput').value = `[${code}] ${name}`;
   document.getElementById('kpiCompResults').classList.add('hidden');
   
-  // Mở khóa Giao diện Bước 2 & 3
+  // Mở khóa Bước 2 & 3
   const skuBlock = document.getElementById('kpiSkuSearchBlock');
   const pendingBlock = document.getElementById('kpiPendingSkusBlock');
   const skuSearchInput = document.getElementById('kpiSkuSearch');
@@ -7249,7 +7307,6 @@ window.selectKpiCompany = function(code, name) {
   window._chiTieuPendingSkus = [];
   renderModalSelectedSkus();
   
-  // Focus trực tiếp vào ô tìm kiếm SP cho thao tác nhanh gọn
   setTimeout(() => skuSearchInput.focus(), 100);
 };
 
@@ -7306,18 +7363,18 @@ window.removePendingTarget = function(skuCode) {
 window.renderModalSelectedSkus = function() {
   const container = document.getElementById('kpiPendingSkusList');
   if(window._chiTieuPendingSkus.length === 0) {
-    container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted); font-style:italic; font-size:13px; border:1px dashed var(--card-border); border-radius:10px; background:var(--panel-bg);">Chưa chọn SP nào...</div>';
+    container.innerHTML = '<div style="text-align:center; padding:14px; color:var(--text-muted); font-style:italic; font-size:13px; border:1px dashed var(--card-border); border-radius:8px; background:var(--panel-bg);">Chưa chọn SP nào...</div>';
     return;
   }
   
   container.innerHTML = window._chiTieuPendingSkus.map(s => `
-    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:12px; border-radius:10px; border:1px solid rgba(37,99,235,0.2); box-shadow:0 2px 8px rgba(0,0,0,0.02); gap:8px;">
-       <div style="flex:1; font-size:13.5px; font-weight:800; color:var(--text-main); line-height:1.4;">
+    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:10px 12px; border-radius:8px; border:1px solid rgba(37,99,235,0.2); gap:8px;">
+       <div style="flex:1; font-size:13px; font-weight:800; color:var(--text-main); line-height:1.4;">
          <span style="color:var(--primary);">[${s.code}]</span> ${s.name}
        </div>
        <div style="display:flex; align-items:center; gap:8px;">
-         <input type="number" min="1" value="${s.target}" placeholder="SL..." onchange="updatePendingTarget('${s.code}', this.value)" style="width:80px; padding:10px; margin:0; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:1px solid var(--card-border); color:var(--rose); outline:none;">
-         <button class="btn btn-red btn-sm" onclick="removePendingTarget('${s.code}')" style="padding:10px 12px; border-radius:8px;"><i class="fa-solid fa-trash"></i></button>
+         <input type="number" min="1" value="${s.target}" placeholder="Số thùng..." onchange="updatePendingTarget('${s.code}', this.value)" style="width:90px; padding:8px; margin:0; text-align:center; font-weight:900; font-size:14px; border-radius:6px; border:1px solid var(--card-border); color:var(--rose); outline:none;">
+         <button type="button" class="btn btn-red btn-sm" onclick="removePendingTarget('${s.code}')" style="padding:8px 10px; border-radius:6px;"><i class="fa-solid fa-trash"></i></button>
        </div>
     </div>
   `).join('');
@@ -7350,7 +7407,7 @@ window.saveTargetFromModal = async function() {
          compCode: compCode,
          compName: compName,
          target: newSku.target,
-         createdByUid: currentUser.uid, // Lưu lại dấu vân tay người tạo
+         createdByUid: currentUser.uid,
          createdByRole: currentUser.role
       });
     });
@@ -7385,7 +7442,7 @@ window.deleteTargetSku = async function(skuCode) {
   } catch(e) { alert("Lỗi xóa chỉ tiêu: " + e.message); }
 };
 
-// Hàm vẽ component Dashboard tiến độ
+// Component thẻ tiến độ tổng quan (Đã bỏ .0 thừa, ghi rõ Thùng)
 function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
     let statusColor = 'var(--rose)';
     let barGradient = 'var(--rose-gradient)';
@@ -7393,26 +7450,26 @@ function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
     else if (pct >= 70) { statusColor = 'var(--amber)'; barGradient = 'var(--amber-gradient)'; }
 
     return `
-    <div style="background:var(--card-bg); border:2px solid var(--${colorTheme}); border-radius:16px; padding:16px; margin-bottom:16px; box-shadow:0 6px 20px rgba(0,0,0,0.05);">
-        <div style="font-weight:900; color:var(--${colorTheme}); font-size:14px; margin-bottom:16px; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
+    <div style="background:var(--card-bg); border:2px solid var(--${colorTheme}); border-radius:16px; padding:16px; margin-bottom:16px; box-shadow:0 6px 20px rgba(0,0,0,0.04);">
+        <div style="font-weight:900; color:var(--${colorTheme}); font-size:14px; margin-bottom:14px; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
             <i class="fa-solid ${icon}"></i> ${title}
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:16px;">
-            <div style="text-align:center; background:var(--panel-bg); padding:12px 6px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:6px;">TỔNG CHỈ TIÊU</div>
-                <div style="font-size:20px; font-weight:900; color:var(--text-main);">${target.toFixed(1)} <span style="font-size:11px; color:var(--text-muted);">Thùng</span></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px;">
+            <div style="text-align:center; background:var(--panel-bg); padding:10px 4px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
+                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">TỔNG CHỈ TIÊU</div>
+                <div style="font-size:18px; font-weight:900; color:var(--text-main);">${formatQtySmart(target)} <span style="font-size:11px; color:var(--text-muted);">Thùng</span></div>
             </div>
-            <div style="text-align:center; background:var(--panel-bg); padding:12px 6px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:6px;">THỰC ĐẠT</div>
-                <div style="font-size:20px; font-weight:900; color:var(--text-main);">${actual.toFixed(1)} <span style="font-size:11px; color:var(--text-muted);">Thùng</span></div>
+            <div style="text-align:center; background:var(--panel-bg); padding:10px 4px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
+                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">THỰC ĐẠT</div>
+                <div style="font-size:18px; font-weight:900; color:var(--text-main);">${formatQtySmart(actual)} <span style="font-size:11px; color:var(--text-muted);">Thùng</span></div>
             </div>
-            <div style="text-align:center; background:var(--panel-bg); padding:12px 6px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:6px;">TỔNG TIẾN ĐỘ</div>
-                <div style="font-size:20px; font-weight:900; color:${statusColor};">${pct.toFixed(1)}%</div>
+            <div style="text-align:center; background:var(--panel-bg); padding:10px 4px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
+                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">TỔNG TIẾN ĐỘ</div>
+                <div style="font-size:18px; font-weight:900; color:${statusColor};">${formatQtySmart(pct)}%</div>
             </div>
         </div>
-        <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; position: relative;">
-            <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barGradient}; border-radius: 5px; transition: width 1s ease-in-out;"></div>
+        <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
+            <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barGradient}; border-radius: 4px; transition: width 0.8s ease-in-out;"></div>
         </div>
     </div>
     `;
@@ -7421,10 +7478,9 @@ function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
 window.calculateAndRenderTargets = async function() {
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
   
-  // 1. Quét dữ liệu CHỈ TIÊU (Toàn cầu và của Sales đang chọn)
   let globalTarget = 0;
   let salesTarget = 0;
-  let targetItems = []; // Danh sách chi tiết của Sales đang chọn
+  let targetItems = [];
 
   try {
     const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
@@ -7444,10 +7500,9 @@ window.calculateAndRenderTargets = async function() {
     });
   } catch (e) {}
 
-  // 2. Quét dữ liệu THỰC ĐẠT TỪ ĐƠN HÀNG
   let globalActual = 0;
   let salesActual = 0;
-  let actuals = {}; // Từ điển lưu chi tiết SKU của Sales đang chọn
+  let actuals = {};
   
   orders.forEach(o => {
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
@@ -7474,7 +7529,6 @@ window.calculateAndRenderTargets = async function() {
   const container = document.getElementById('targetDashboardContainer');
   let dashHtml = '';
 
-  // 3. RENDER DASHBOARD TỔNG QUAN
   if (isAdminOrManager) {
       const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
       dashHtml += buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct);
@@ -7484,17 +7538,16 @@ window.calculateAndRenderTargets = async function() {
   const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
   const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
   
-  dashHtml += buildProgressCard(`TIẾN ĐỘ CÁ NHÂN CỦA: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-chart', 'amber', salesTarget, salesActual, sPct);
+  dashHtml += buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
 
-  // 4. RENDER DANH SÁCH CHI TIẾT
   if (targetItems.length === 0) {
     dashHtml += `
       <div style="text-align:center; padding:40px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
-        <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
-          <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
+        <div style="width:60px; height:60px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+          <i class="fa-solid fa-box-open" style="font-size:26px; color:var(--text-muted);"></i>
         </div>
-        <div style="font-weight:800; font-size:15px; color:var(--text-main); margin-bottom:8px;">Chưa có chỉ tiêu chi tiết nào được giao</div>
-        <div style="font-weight:600; font-size:13px; color:var(--text-muted);">Nhân viên này chưa được gán mã hàng trọng tâm trong ${formatMonthVN(window._chiTieuTargetMonth).toLowerCase()}.</div>
+        <div style="font-weight:800; font-size:15px; color:var(--text-main); margin-bottom:6px;">Chưa có chỉ tiêu chi tiết nào được giao</div>
+        <div style="font-weight:600; font-size:13px; color:var(--text-muted);">Nhân viên này chưa được giao mã hàng trọng tâm trong ${formatMonthVN(window._chiTieuTargetMonth).toLowerCase()}.</div>
       </div>
     `;
     container.innerHTML = dashHtml;
@@ -7514,7 +7567,7 @@ window.calculateAndRenderTargets = async function() {
         name: it.skuName,
         target: it.target,
         actual: act,
-        createdByUid: it.createdByUid // Để kiểm tra quyền xóa
+        createdByUid: it.createdByUid
      });
   });
 
@@ -7539,50 +7592,51 @@ window.calculateAndRenderTargets = async function() {
     const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
     return `
-      <div style="background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.04); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:16px;">
+      <div style="background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.03); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:16px;">
         <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 16px; cursor: pointer; position: relative;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap:8px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap:8px;">
                 <div style="display: flex; align-items: flex-start; gap: 12px; flex:1;">
                     <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(37,99,235,0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink:0;">
                         <i class="fa-solid fa-building"></i>
                     </div>
                     <div>
-                        <div style="font-size: 16px; font-weight: 900; color: var(--text-main); line-height: 1.3; margin-bottom:2px;">${g.compName || 'Công Ty ' + compCode}</div>
-                        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); background:var(--bg-dark); padding:2px 8px; border-radius:6px; display:inline-block;">Mã: ${compCode}</div>
+                        <div style="font-size: 15px; font-weight: 900; color: var(--text-main); line-height: 1.3; margin-bottom:2px;">${g.compName || 'Công Ty ' + compCode}</div>
+                        <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); background:var(--bg-dark); padding:2px 8px; border-radius:6px; display:inline-block;">Mã: ${compCode}</div>
                     </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px; font-size:18px; background:rgba(0,0,0,0.03); padding:6px 10px; border-radius:10px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-size:16px; background:rgba(0,0,0,0.03); padding:6px 10px; border-radius:8px;">
                     ${iconHtml}
                     <i id="icon_${compAccordionId}" class="fa-solid fa-chevron-down" style="color: var(--text-muted); transition: 0.3s; font-size: 12px;"></i>
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;">
-                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">CHỈ TIÊU</div>
-                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${g.compTarget} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Thùng</span></div>
+            <!-- Các con số đã bỏ số .0 thừa, ghi rõ chữ Thùng -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+                <div style="background: var(--panel-bg); padding: 10px 4px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 4px;">CHỈ TIÊU</div>
+                    <div style="font-size: 16px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Thùng</span></div>
                 </div>
-                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
-                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${g.compActual.toFixed(1)} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Thùng</span></div>
+                <div style="background: var(--panel-bg); padding: 10px 4px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 4px;">THỰC HIỆN</div>
+                    <div style="font-size: 16px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Thùng</span></div>
                 </div>
-                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ</div>
-                    <div style="font-size: 18px; font-weight: 900; color: ${colorClass};">${pct.toFixed(1)}%</div>
+                <div style="background: var(--panel-bg); padding: 10px 4px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 4px;">TIẾN ĐỘ</div>
+                    <div style="font-size: 16px; font-weight: 900; color: ${colorClass};">${formatQtySmart(pct)}%</div>
                 </div>
             </div>
 
-            <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
-                <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+            <div style="width: 100%; height: 7px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
+                <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px; transition: width 0.8s ease-in-out;"></div>
             </div>
         </div>
 
-        <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 16px; border-top: 1px solid var(--card-border);">
-            <div style="font-size: 12px; font-weight: 900; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; text-transform:uppercase;">
+        <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 14px; border-top: 1px solid var(--card-border);">
+            <div style="font-size: 11px; font-weight: 900; color: var(--primary); margin-bottom: 12px; display: flex; justify-content: space-between; text-transform:uppercase;">
                 <span><i class="fa-solid fa-boxes-stacked"></i> MÃ HÀNG TRỌNG TÂM CHI TIẾT</span>
                 <span style="background:rgba(37,99,235,0.1); padding:2px 8px; border-radius:6px;">${g.skus.length} Mã Hàng</span>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
                 ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
                     const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
                     let sColor = 'var(--rose)';
@@ -7590,33 +7644,32 @@ window.calculateAndRenderTargets = async function() {
                     if (skuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; } 
                     else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
 
-                    // KIỂM TRA QUYỀN XÓA: Admin thì luôn được xóa. Manager thì chỉ xóa được món do chính mình giao.
                     const canDelete = currentUser.role === 'admin' || (currentUser.role === 'manager' && sku.createdByUid === currentUser.uid);
 
                     return `
-                        <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
-                            ${canDelete ? `<button class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 11px; border-radius: 8px;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
+                        <div style="background: var(--card-bg); padding: 12px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
+                            ${canDelete ? `<button type="button" class="btn btn-red btn-sm" style="position: absolute; top: 10px; right: 10px; padding: 5px 8px; font-size: 11px; border-radius: 6px; cursor:pointer;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
                             
-                            <div style="font-size: 14px; font-weight: 800; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
+                            <div style="font-size: 13.5px; font-weight: 800; color: var(--text-main); margin-bottom: 10px; padding-right: 36px; line-height: 1.4;">
                                 <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:11px; margin-right:4px;">${sku.code}</span>${sku.name}
                             </div>
                             
-                            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; font-weight: 700; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:8px 12px; border-radius:8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; font-weight: 700; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:8px 10px; border-radius:8px;">
                                 <div style="display:flex; flex-direction:column; gap:2px; text-align:center;">
                                   <span style="color: var(--text-muted); font-size:10px;">CHỈ TIÊU</span>
-                                  <b style="color: var(--text-main); font-size:14px;">${sku.target} <span style="font-size:10px; font-weight:normal;">Thùng</span></b>
+                                  <b style="color: var(--text-main); font-size:14px;">${formatQtySmart(sku.target)} <span style="font-size:10px; font-weight:normal;">Thùng</span></b>
                                 </div>
                                 <div style="display:flex; flex-direction:column; gap:2px; text-align:center;">
                                   <span style="color: var(--text-muted); font-size:10px;">THỰC HIỆN</span>
-                                  <b style="color: var(--text-main); font-size:14px;">${sku.actual.toFixed(1)} <span style="font-size:10px; font-weight:normal;">Thùng</span></b>
+                                  <b style="color: var(--text-main); font-size:14px;">${formatQtySmart(sku.actual)} <span style="font-size:10px; font-weight:normal;">Thùng</span></b>
                                 </div>
                                 <div style="display:flex; flex-direction:column; gap:2px; text-align:right;">
                                   <span style="color: var(--text-muted); font-size:10px;">TIẾN ĐỘ</span>
-                                  <b style="color: ${sColor}; font-weight: 900; font-size: 15px;">${skuPct.toFixed(1)}%</b>
+                                  <b style="color: ${sColor}; font-weight: 900; font-size: 14px;">${formatQtySmart(skuPct)}%</b>
                                 </div>
                             </div>
                             
-                            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
+                            <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
                                 <div style="height: 100%; width: ${Math.min(skuPct, 100)}\%; background:${sBar}; border-radius: 3px;"></div>
                             </div>
                         </div>
