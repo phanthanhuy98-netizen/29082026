@@ -6979,16 +6979,23 @@ window.renderGocSalesTab = function(container) {
   `;
 };
 // ==========================================
-// TÍNH NĂNG QUẢN TRỊ CHỈ TIÊU & PHÂN TUYẾN (BẢN CUỐI TỰ ĐỘNG KẾ THỪA)
+// TÍNH NĂNG QUẢN TRỊ CHỈ TIÊU & PHÂN TUYẾN (BẢN TỐI ƯU TAB CON)
 // ==========================================
 window._chiTieuSubTab = 'phanTuyen';
 window._chiTieuTargetSalesCode = '';
 window._chiTieuTargetSalesRouteCode = ''; 
 window._chiTieuTargetMonth = new Date().toISOString().slice(0, 7);
 window._chiTieuPendingSkus = []; 
+window._chiTieuDashboardSubTab = 'tongQuan'; // Tab con mặc định trong KPI: 'tongQuan' hoặc 'caNhan'
 
 window.switchChiTieuSubTab = function(tabName) {
   window._chiTieuSubTab = tabName;
+  const activePane = document.getElementById('tabPane_chiTieu');
+  if (activePane) renderChiTieuTab(activePane);
+};
+
+window.switchChiTieuDashboardTab = function(subTab) {
+  window._chiTieuDashboardSubTab = subTab;
   const activePane = document.getElementById('tabPane_chiTieu');
   if (activePane) renderChiTieuTab(activePane);
 };
@@ -7000,7 +7007,7 @@ function formatMonthVN(yyyy_mm) {
   return `Tháng ${Number(parts[1])} năm ${parts[0]}`;
 }
 
-// Hàm format số gọn gàng: 10 -> "10", 10.5 -> "10.5"
+// Hàm format số gọn gàng
 function formatQtySmart(num) {
   const val = Number(num || 0);
   return Number.isInteger(val) ? val.toString() : val.toFixed(1);
@@ -7078,7 +7085,7 @@ window.renderChiTieuTab = async function(container) {
     </div>
 
     ${isPhanTuyen ? `
-      <!-- SUB-TAB 1: PHÂN TUYẾN (Chữ số tăng 20%) -->
+      <!-- SUB-TAB 1: PHÂN TUYẾN -->
       <div class="card" style="padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
         <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng (Tối Ưu)</h3>
         ${isAdminOrManager ? `
@@ -7133,7 +7140,7 @@ window.renderChiTieuTab = async function(container) {
         `}
       </div>
     ` : `
-      <!-- SUB-TAB 2: CHỈ TIÊU (KPI) (Chữ số tăng 20%) -->
+      <!-- SUB-TAB 2: CHỈ TIÊU (KPI) -->
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div style="display:flex; gap:10px; flex-wrap:wrap; background:var(--card-bg); padding:16px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border:1px solid var(--card-border); align-items:center;">
           
@@ -7170,8 +7177,9 @@ window.renderChiTieuTab = async function(container) {
           </button>
         ` : ''}
 
+        <!-- KHUNG 2 TAB CON: TỔNG QUAN & CÁ NHÂN (GỌN GÀNG, CHUYÊN NGHIỆP) -->
         <div id="targetDashboardContainer" style="display:flex; flex-direction:column; gap:16px;">
-          <div style="text-align:center; color:var(--text-muted); font-weight:800; padding:45px; font-size:15px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tính toán dữ liệu báo cáo...</div>
+          <div style="text-align:center; color:var(--text-muted); font-weight:800; padding:45px; font-size:15px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tải dữ liệu báo cáo...</div>
         </div>
       </div>
     `}
@@ -7434,7 +7442,7 @@ window.deleteTargetSku = async function(skuCode) {
   } catch(e) { alert("Lỗi xóa chỉ tiêu: " + e.message); }
 };
 
-// Component thẻ tiến độ tổng quan (TĂNG 20% CỠ CHỮ VÀ SỐ)
+// Component thẻ tiến độ (Dùng chung cho cả Tab Tổng và Cá Nhân)
 function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
     let statusColor = 'var(--rose)';
     let barGradient = 'var(--rose-gradient)';
@@ -7442,7 +7450,7 @@ function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
     else if (pct >= 70) { statusColor = 'var(--amber)'; barGradient = 'var(--amber-gradient)'; }
 
     return `
-    <div style="background:var(--card-bg); border:2px solid var(--${colorTheme}); border-radius:18px; padding:18px; margin-bottom:16px; box-shadow:0 6px 20px rgba(0,0,0,0.04);">
+    <div style="background:var(--card-bg); border:2px solid var(--${colorTheme}); border-radius:18px; padding:18px; box-shadow:0 6px 20px rgba(0,0,0,0.04);">
         <div style="font-weight:900; color:var(--${colorTheme}); font-size:16px; margin-bottom:16px; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
             <i class="fa-solid ${icon}"></i> ${title}
         </div>
@@ -7482,7 +7490,6 @@ window.calculateAndRenderTargets = async function() {
     const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
     let targetDocFound = false;
     
-    // Kiểm tra xem tháng hiện tại đã có dữ liệu chỉ tiêu chưa
     targetsSnap.forEach(doc => {
       const data = doc.data();
       if(data.month === window._chiTieuTargetMonth) {
@@ -7502,11 +7509,8 @@ window.calculateAndRenderTargets = async function() {
       }
     });
 
-    // =========================================================================
-    // TÍNH NĂNG TỰ ĐỘNG KẾ THỪA THÁNG CŨ NẾU THÁNG MỚI CHƯA CÓ CHỈ TIÊU
-    // =========================================================================
+    // Tự động kế thừa tháng cũ nếu tháng mới chưa có
     if (!targetDocFound) {
-      // Tìm tháng có dữ liệu gần nhất trước tháng hiện tại
       let allMonths = [];
       targetsSnap.forEach(doc => {
         const d = doc.data();
@@ -7517,9 +7521,8 @@ window.calculateAndRenderTargets = async function() {
       
       if(allMonths.length > 0) {
         allMonths.sort();
-        let latestPastMonth = allMonths[allMonths.length - 1]; // Tháng gần nhất
+        let latestPastMonth = allMonths[allMonths.length - 1];
         
-        // Sao chép sang tháng mới trên Firestore để lưu vĩnh viễn
         targetsSnap.forEach(async docSnap => {
           const d = docSnap.data();
           if(d.month === latestPastMonth) {
@@ -7532,7 +7535,6 @@ window.calculateAndRenderTargets = async function() {
           }
         });
         
-        // Đệ quy gọi lại hàm để nạp dữ liệu vừa kế thừa xong
         setTimeout(() => calculateAndRenderTargets(), 300);
         return;
       }
@@ -7583,21 +7585,47 @@ window.calculateAndRenderTargets = async function() {
   });
 
   const container = document.getElementById('targetDashboardContainer');
-  let dashHtml = '';
-
+  
+  // =========================================================================
+  // GOM CHUNG THÀNH 1 KHUNG VỚI 2 TAB CON: TỔNG QUAN & CÁ NHÂN
+  // =========================================================================
+  const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
+  
+  let tabHeaderHtml = '';
   if (isAdminOrManager) {
-      const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
-      dashHtml += buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct); 
+      tabHeaderHtml = `
+        <div style="display:flex; background:rgba(0,0,0,0.04); border-radius:12px; padding:4px; margin-bottom:16px;">
+          <div onclick="switchChiTieuDashboardTab('tongQuan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${isTongQuanTab ? 'background:var(--card-bg); color:var(--primary); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+            <i class="fa-solid fa-globe"></i> 1. TỔNG QUAN TOÀN CÔNG TY
+          </div>
+          <div onclick="switchChiTieuDashboardTab('caNhan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${!isTongQuanTab ? 'background:var(--card-bg); color:var(--amber); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+            <i class="fa-solid fa-user-check"></i> 2. CHI TIẾT CÁ NHÂN
+          </div>
+        </div>
+      `;
   }
 
-  const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
-  const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
-  const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-  
-  dashHtml += buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+  let topCardHtml = '';
+  if (!isAdminOrManager || isTongQuanTab) {
+      if (isAdminOrManager) {
+          const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
+          topCardHtml = buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct);
+      } else {
+          // Nếu là Sales, luôn hiển thị card cá nhân lên đầu
+          const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
+          const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+          const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+          topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+      }
+  } else {
+      const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
+      const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+      const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+      topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+  }
 
-  if (targetItems.length === 0) {
-    dashHtml += `
+  if (targetItems.length === 0 && (!isAdminOrManager || isTongQuanTab)) {
+    container.innerHTML = tabHeaderHtml + topCardHtml + `
       <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
         <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
           <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
@@ -7606,7 +7634,6 @@ window.calculateAndRenderTargets = async function() {
         <div style="font-weight:700; font-size:14px; color:var(--text-muted);">Nhân viên này chưa được giao mã hàng trọng tâm trong ${formatMonthVN(window._chiTieuTargetMonth).toLowerCase()}.</div>
       </div>
     `;
-    container.innerHTML = dashHtml;
     return;
   }
 
@@ -7631,7 +7658,7 @@ window.calculateAndRenderTargets = async function() {
     const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
     return `
-      <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 6px 20px rgba(0,0,0,0.03); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:18px;">
+      <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 6px 20px rgba(0,0,0,0.03); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:16px;">
         <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 18px; cursor: pointer; position: relative;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap:8px;">
                 <div style="display: flex; align-items: flex-start; gap: 14px; flex:1;">
@@ -7692,7 +7719,7 @@ window.calculateAndRenderTargets = async function() {
                                 <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">${sku.code}</span>${sku.name}
                             </div>
                             
-                            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 10px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
                                 <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
                                   <span style="color: var(--text-muted); font-size:11px; font-weight:900;">CHỈ TIÊU</span>
                                   <b style="color: var(--text-main); font-size:15px;">${formatQtySmart(sku.target)} <span style="font-size:11px; font-weight:normal;">Thùng</span></b>
@@ -7707,7 +7734,7 @@ window.calculateAndRenderTargets = async function() {
                                 </div>
                             </div>
                             
-                            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
+                            <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
                                 <div style="height: 100%; width: ${Math.min(skuPct, 100)}\%; background:${sBar}; border-radius: 3px;"></div>
                             </div>
                         </div>
@@ -7719,7 +7746,12 @@ window.calculateAndRenderTargets = async function() {
     `;
   }).join('');
 
-  container.innerHTML = dashHtml + detailHtml;
+  // Nếu đang ở tab Tổng quan toàn công ty thì chỉ hiện thẻ tổng quan, ẩn danh sách chi tiết công ty bên dưới cho gọn
+  if (isAdminOrManager && isTongQuanTab) {
+      container.innerHTML = tabHeaderHtml + topCardHtml;
+  } else {
+      container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
+  }
 };
 </script>
 </body>
