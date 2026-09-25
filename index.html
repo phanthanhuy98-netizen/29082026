@@ -7500,18 +7500,14 @@ window.calculateAndRenderTargets = async function() {
     });
   } catch (e) {}
 
-  let globalActual = 0;
-  let salesActual = 0;
+  // Quét toàn bộ đơn hàng để lấy số lượng thực tế theo từng mã (SKU)
   let actuals = {};
-  
   orders.forEach(o => {
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
-      let orderTotalThung = 0;
       if (Array.isArray(o.items)) {
         o.items.forEach(item => {
           const ratio = item.tyLeQuyDoi || 50;
           const qtyThung = Number(item.qty || 0) / ratio;
-          orderTotalThung += qtyThung;
           
           if (o.salesCode === window._chiTieuTargetSalesCode) {
             const skuKey = String(item.code || '').toUpperCase();
@@ -7519,21 +7515,44 @@ window.calculateAndRenderTargets = async function() {
           }
         });
       }
-      globalActual += orderTotalThung;
-      if (o.salesCode === window._chiTieuTargetSalesCode) {
-        salesActual += orderTotalThung;
-      }
     }
+  });
+
+  // NHÓM DỮ LIỆU & TÍNH LẠI TỔNG THỰC ĐẠT CHUẨN XÁC
+  let grouped = {};
+  let salesActual = 0; // Đặt biến tính tổng thực đạt cá nhân ở đây
+
+  targetItems.forEach(it => {
+     if(!grouped[it.compCode]) {
+        grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [] };
+     }
+     
+     // Lấy số lượng thực tế của đúng mã SKU đang được giao chỉ tiêu
+     let act = actuals[it.skuCode] || 0;
+     
+     // CỘNG DỒN VÀO TỔNG THỰC ĐẠT CÁ NHÂN (Chỉ cộng hàng trọng tâm)
+     salesActual += act;
+
+     grouped[it.compCode].compTarget += it.target;
+     grouped[it.compCode].compActual += act;
+     grouped[it.compCode].skus.push({
+        code: it.skuCode,
+        name: it.skuName,
+        target: it.target,
+        actual: act,
+        createdByUid: it.createdByUid
+     });
   });
 
   const container = document.getElementById('targetDashboardContainer');
   let dashHtml = '';
 
   if (isAdminOrManager) {
-      const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
-      dashHtml += buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct);
+      // Tạm thời ẩn Global Actual để đồng bộ logic trọng tâm nếu cần, hoặc để nguyên tùy bạn.
+      dashHtml += buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, 0, 0); 
   }
 
+  // TÍNH TIẾN ĐỘ TỔNG TỪ SỐ LIỆU ĐÃ ĐƯỢC LỌC CHUẨN
   const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
   const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
   const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
@@ -7553,23 +7572,6 @@ window.calculateAndRenderTargets = async function() {
     container.innerHTML = dashHtml;
     return;
   }
-
-  let grouped = {};
-  targetItems.forEach(it => {
-     if(!grouped[it.compCode]) {
-        grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [] };
-     }
-     let act = actuals[it.skuCode] || 0;
-     grouped[it.compCode].compTarget += it.target;
-     grouped[it.compCode].compActual += act;
-     grouped[it.compCode].skus.push({
-        code: it.skuCode,
-        name: it.skuName,
-        target: it.target,
-        actual: act,
-        createdByUid: it.createdByUid
-     });
-  });
 
   const detailHtml = Object.keys(grouped).map(compCode => {
     const g = grouped[compCode];
@@ -7610,7 +7612,6 @@ window.calculateAndRenderTargets = async function() {
                 </div>
             </div>
 
-            <!-- Các con số đã bỏ số .0 thừa, ghi rõ chữ Thùng -->
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px;">
                 <div style="background: var(--panel-bg); padding: 10px 4px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
                     <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 4px;">CHỈ TIÊU</div>
