@@ -3404,6 +3404,89 @@ ${(() => {
     }
   };
 
+  window.updateCartItemNote = function(prdId, val) {
+   if (currentCart[prdId]) {
+     currentCart[prdId].note = val;
+     saveCartDraftToLocal();
+   }
+ };
+
+ window.openCurrentCartModal = function() {
+   let itemsList = [];
+
+   products.forEach(p => {
+     const keyId = p.id || p.code;
+     const c = currentCart[keyId];
+     if (c && c.qty > 0) { 
+       let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+       let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+       
+       let activeDvtList = [];
+       if (matchedComp && Array.isArray(matchedComp.dvtDetails)) {
+         activeDvtList = matchedComp.dvtDetails.filter(d => d.status !== 'Đóng').map(d => d.name);
+       }
+       if (activeDvtList.length === 0) {
+         if (matchedComp && matchedComp.customDvt) {
+           activeDvtList = matchedComp.customDvt.split(',').map(s => s.trim());
+         } else {
+           activeDvtList = [p.dvt || 'hộp'];
+         }
+       }
+       let activeDvtStr = activeDvtList.join(', ');
+
+       itemsList.push({
+         id: keyId,
+         code: p.code,
+         name: p.name,
+         dvt: activeDvtStr,
+         qty: c.qty,
+         kien: c.kien || 0,
+         le: c.le || 0,
+         note: c.note || '' // Đưa dữ liệu ghi chú vào mảng render
+       });
+     }
+   });
+
+   const modalContainer = document.getElementById('dynamicModalContainer');
+   if (!modalContainer) return;
+   modalContainer.innerHTML = `
+     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeCurrentCartModal()">
+       <div class="modal-content fullscreen-modal">
+         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+           <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-cart-shopping"></i> Giỏ Hàng: ${activeVisitedStore ? activeVisitedStore.name : ''}</h3>
+           <button class="btn btn-red" onclick="closeCurrentCartModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
+         </div>
+         <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+           ${itemsList.length > 0 ? itemsList.map(item => `
+            <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px;">
+             <div style="display:flex; justify-content:space-between; align-items:flex-start; font-weight:800; color:var(--text-main);">
+               <span style="font-size:16px; line-height:1.4;">[${item.code}] ${item.name}</span>${editingOrderId ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-weight:800; flex-shrink:0;" onclick="removeCartItemCompletely('${item.id}'); closeCurrentCartModal(); openCurrentCartModal();"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
+             </div>
+             <div style="display:flex; justify-content:space-between; align-items:center; color:var(--text-muted); font-size:15px; margin-bottom:4px;">
+               <span>SL: <b style="color:#2563EB; font-size:16px;">${item.qty}${item.dvt}</b> (Thùng: ${item.kien}, Lẻ: ${item.le})</span>
+             </div>
+             <!-- Ô nhập ghi chú chiết khấu/quà tặng -->
+             <div style="display:flex; align-items:center; gap:8px;">
+               <i class="fa-solid fa-pen-to-square" style="color:var(--amber);"></i>
+               <input type="text" placeholder="Ghi chú (CK 5%, Giảm 10k, Hàng tặng...)" value="${item.note}" onchange="updateCartItemNote('${item.id}', this.value)" style="margin:0; padding:8px 12px; font-size:13px; font-weight:700; width:100%; border-radius:8px; background:rgba(0,0,0,0.02); border:1px dashed var(--card-border);">
+             </div>
+           </div>
+           `).join('') : `
+             <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:700; font-size:15px;">Chưa có sản phẩm nào được chọn trong giỏ hàng hiện tại.</div>
+           `}
+         </div>
+         <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
+           ${itemsList.length > 0 ? `
+             <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:800; font-size:16px; border-radius:14px; box-shadow: 0 6px 20px rgba(5, 150, 105, 0.3);" onclick="closeCurrentCartModal(); submitOrder();">
+               <i class="fa-solid fa-paper-plane"></i> GỬI ĐƠN HÀNG NGAY
+             </button>
+           ` : ''}
+         </div>
+       </div>
+     </div>
+   `;
+   modalContainer.classList.remove('hidden');
+ };
   window.openCurrentCartModal = function() {
     let itemsList = [];
 
@@ -3601,6 +3684,7 @@ ${(() => {
             qty: c.qty, 
             kien: c.kien || 0, 
             le: c.le || 0 
+            note: c.note || ''
           });
         }
       });
@@ -4743,7 +4827,7 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
                 dist = calculateDistanceMeters(Number(globalCompanyGps.lat), Number(globalCompanyGps.lng), Number(matchedStore.lat), Number(matchedStore.lng)) / 1000;
               }
 
-              flatExcelRows.push({
+          flatExcelRows.push({
                 soCtu: o.soCtu || 1,
                 ngayCtu: o.ngayCtu || '2026-09-01',
                 ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
@@ -4755,7 +4839,8 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
                 tenHangHoa: finalTenHangHoa,
                 donViTinh: item.dvt || 'hộp',
                 soLuong: itemQty,
-                khoangCachKm: dist // TRƯỜNG KHOẢNG CÁCH MỚI
+                ghiChu: item.note || '', // <--- BỔ SUNG TRƯỜNG GHI CHÚ VÀO ĐÂY
+                khoangCachKm: dist 
               });
             }
           });
@@ -4896,7 +4981,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
           </div>
         ` : ''}
 
-        <div style="display:none;">
+       <div style="display:none;">
           <table id="soGocExportTable">
             <thead>
               <tr>
@@ -4910,7 +4995,8 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                 <th>Tên Hàng Hóa</th>
                 <th>Đơn Vị Tính</th>
                 <th>Số Lượng</th>
-                <th>Khoảng cách trụ sở(Km)</th>
+                <th>Ghi Chú SP</th> <!-- Đưa cột Ghi chú vào sát Số lượng -->
+                <th>Khoảng cách trụ sở(Km)</th> <!-- Đẩy Khoảng cách ra cuối -->
               </tr>
             </thead>
             <tbody>
@@ -4926,6 +5012,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                   <td>${r.tenHangHoa}</td>
                   <td>${r.donViTinh}</td>
                   <td>${r.soLuong}</td>
+                  <td>${r.ghiChu}</td> <!-- Đưa dữ liệu ghi chú ra -->
                   <td>${r.khoangCachKm === Infinity ? 'Chưa có GPS' : r.khoangCachKm.toFixed(2)}</td>
                 </tr>
               `).join('')}
