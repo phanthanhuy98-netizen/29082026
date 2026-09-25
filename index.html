@@ -6985,7 +6985,7 @@ window._chiTieuSubTab = 'phanTuyen';
 window._chiTieuTargetSalesCode = '';
 window._chiTieuTargetSalesRouteCode = ''; 
 window._chiTieuTargetMonth = new Date().toISOString().slice(0, 7);
-window._chiTieuPendingSkus = []; // Lưu trữ tạm thời các mã SP khi đang giao chỉ tiêu
+window._chiTieuPendingSkus = []; 
 
 window.switchChiTieuSubTab = function(tabName) {
   window._chiTieuSubTab = tabName;
@@ -7033,7 +7033,16 @@ window.saveRouteAssignment = async function(uid) {
 window.renderChiTieuTab = async function(container) {
   const isPhanTuyen = window._chiTieuSubTab === 'phanTuyen';
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-  const salesUsersList = users.filter(u => u.role === 'sales');
+
+  // LOGIC PHÂN QUYỀN HIỂN THỊ DANH SÁCH NHÂN VIÊN
+  let salesUsersList = [];
+  if (isAdminOrManager) {
+    salesUsersList = users.filter(u => u.role === 'sales');
+  } else {
+    salesUsersList = [{ uid: currentUser.uid, code: currentUser.code, name: currentUser.name }];
+    window._chiTieuTargetSalesCode = currentUser.code;
+    window._chiTieuTargetSalesRouteCode = currentUser.uid;
+  }
   
   if (window._chiTieuTargetSalesCode === '' && salesUsersList.length > 0) {
      window._chiTieuTargetSalesCode = salesUsersList[0].code;
@@ -7055,8 +7064,8 @@ window.renderChiTieuTab = async function(container) {
 
     ${isPhanTuyen ? `
       <!-- SUB-TAB 1: PHÂN TUYẾN -->
-      <div class="card" style="padding:16px;">
-        <h3 style="font-size:14px; font-weight:800; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Cố Định Cho Nhân Viên</h3>
+      <div class="card" style="padding:16px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
+        <h3 style="font-size:14px; font-weight:800; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng (Tối Ưu)</h3>
         ${isAdminOrManager ? `
           <div style="margin-bottom: 16px;">
             <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN NHÂN VIÊN SALES CẦN PHÂN TUYẾN:</label>
@@ -7074,7 +7083,7 @@ window.renderChiTieuTab = async function(container) {
               <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px dashed var(--card-border); padding-bottom:10px;">
                   <span style="font-weight:800; font-size:14px; color:var(--text-main);">2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span></span>
-                  <button class="btn btn-green" style="font-weight:800; padding:8px 16px; font-size:13px; box-shadow:0 4px 10px rgba(5,150,105,0.2);" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
+                  <button class="btn btn-green" style="font-weight:800; padding:8px 16px; font-size:13px; box-shadow:0 4px 10px rgba(5,150,105,0.2); border-radius:8px;" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
                 </div>
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:400px; overflow-y:auto;">
                   ${routeGroupsList.map(r => `
@@ -7096,7 +7105,7 @@ window.renderChiTieuTab = async function(container) {
           `}
         ` : `
           <div style="text-align:center; padding:20px; color:var(--rose); font-weight:800; background:rgba(225, 29, 72, 0.1); border-radius:10px;">
-            <i class="fa-solid fa-lock"></i> Chỉ Admin hoặc Manager mới có quyền phân tuyến.
+            <i class="fa-solid fa-lock"></i> Chỉ Admin hoặc Manager mới có quyền phân tuyến cho nhân viên khác.
           </div>
           <div style="margin-top:16px; font-weight:800; color:var(--text-main); font-size:14px;">Tuyến bạn đang phụ trách:</div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
@@ -7110,29 +7119,36 @@ window.renderChiTieuTab = async function(container) {
       </div>
     ` : `
       <!-- SUB-TAB 2: CHỈ TIÊU (KPI) -->
-      <div class="card" style="padding:16px;">
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
-          <!-- Ẩn thẻ input thật, chỉ hiển thị div format Tiếng Việt -->
-          <div style="position:relative; flex:1;">
-            <div style="padding:12px; font-size:14px; font-weight:800; color:var(--rose); background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; text-align:center; pointer-events:none;">
-              ${formatMonthVN(window._chiTieuTargetMonth)}
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Filter Bar -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; background:var(--card-bg); padding:16px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border:1px solid var(--card-border);">
+          <div style="position:relative; flex:1; min-width:200px;">
+            <div style="padding:12px; font-size:14px; font-weight:800; color:var(--rose); background:rgba(225, 29, 72, 0.05); border:1px solid rgba(225, 29, 72, 0.2); border-radius:10px; text-align:center; pointer-events:none; display:flex; align-items:center; justify-content:center; gap:8px;">
+              <i class="fa-regular fa-calendar-days"></i> ${formatMonthVN(window._chiTieuTargetMonth)}
             </div>
             <input type="month" value="${window._chiTieuTargetMonth}" onchange="window._chiTieuTargetMonth = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="position:absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer;">
           </div>
 
-          <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:12px; font-weight:800; font-size:14px; color:var(--primary); border-radius:8px; border:1px solid var(--card-border);" ${isAdminOrManager ? '' : 'disabled'}>
-            ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}] ${u.name}</option>`).join('')}
-          </select>
+          ${isAdminOrManager ? `
+            <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; min-width:200px; margin:0; padding:12px; font-weight:800; font-size:14px; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); outline:none;">
+              ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
+            </select>
+          ` : `
+            <div style="flex:1; min-width:200px; padding:12px; font-size:14px; font-weight:800; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); display:flex; align-items:center; justify-content:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <i class="fa-solid fa-user-tie" style="margin-right:8px;"></i> [${currentUser.code}] ${currentUser.name}
+            </div>
+          `}
         </div>
 
         ${isAdminOrManager ? `
-          <button class="btn btn-amber" style="width:100%; justify-content:center; font-weight:900; font-size:14px; padding:14px; margin-bottom:16px; border-radius:10px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
-            <i class="fa-solid fa-plus"></i> GIAO CHỈ TIÊU HÀNG TRỌNG TÂM
+          <button class="btn btn-amber" style="width:100%; justify-content:center; font-weight:900; font-size:14px; padding:14px; border-radius:12px; box-shadow:0 6px 20px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
+            <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP CHỈ TIÊU TRỌNG TÂM MỚI
           </button>
         ` : ''}
 
-        <div id="targetDashboardContainer">
-          <div style="text-align:center; color:var(--text-muted); font-weight:700;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tính toán dữ liệu thực tế...</div>
+        <!-- Dashboard Container -->
+        <div id="targetDashboardContainer" style="display:flex; flex-direction:column; gap:16px;">
+          <div style="text-align:center; color:var(--text-muted); font-weight:700; padding:40px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br>Đang tải dữ liệu báo cáo...</div>
         </div>
       </div>
     `}
@@ -7153,34 +7169,36 @@ window.openTargetModal = function() {
   
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:99999;" onclick="if(event.target === this) closeTargetModal()">
-      <div class="modal-content" style="max-width: 500px; padding: 20px; border-radius: 16px; width:95%; max-height:85vh; display:flex; flex-direction:column;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--card-border); padding-bottom:10px;">
-          <h3 style="font-size:16px; font-weight:900; color:var(--amber);"><i class="fa-solid fa-bullseye"></i> Giao Chỉ Tiêu Trọng Tâm</h3>
-          <button class="btn btn-red btn-sm" onclick="closeTargetModal()">Đóng</button>
+      <div class="modal-content" style="max-width: 500px; padding: 24px; border-radius: 20px; width:95%; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+          <h3 style="font-size:17px; font-weight:900; color:var(--amber); margin:0;"><i class="fa-solid fa-bullseye"></i> Giao Chỉ Tiêu Trọng Tâm</h3>
+          <button class="btn btn-red btn-sm" style="border-radius:8px;" onclick="closeTargetModal()">Đóng</button>
         </div>
         
         <div style="overflow-y:auto; padding-right:4px;">
-          <div style="margin-bottom: 12px;">
-            <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN CÔNG TY MỤC TIÊU:</label>
-            <select id="kpiCompSelect" onchange="onKpiCompanySelected(this.value)" style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; color:var(--primary); background:var(--bg-dark); border-radius:8px; border:1px solid var(--card-border); margin:0;">
-              <option value="" disabled selected>-- Bấm để chọn 1 Công ty --</option>
-              ${companyList.map(c => `<option value="${c.maCtu}">[${c.maCtu}]${c.tenCtu}</option>`).join('')}
-            </select>
+          <!-- TÌM KIẾM CÔNG TY THÔNG MINH -->
+          <div style="margin-bottom: 16px; position: relative;">
+            <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">1. TÌM & CHỌN CÔNG TY MỤC TIÊU:</label>
+            <input type="hidden" id="kpiCompSelectedCode">
+            <input type="text" id="kpiCompSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty..." oninput="filterKpiCompany(this.value)" autocomplete="off" style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; color:var(--primary); background:var(--bg-dark); border-radius:10px; border:1px solid var(--card-border); margin:0; outline:none; transition:0.2s;" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--card-border)'">
+            <div id="kpiCompResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:220px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; z-index:100; box-shadow:0 10px 25px rgba(0,0,0,0.2); margin-top:4px;"></div>
           </div>
 
-          <div id="kpiSkuSearchBlock" class="hidden" style="margin-bottom: 15px; position: relative;">
+          <!-- TÌM KIẾM SẢN PHẨM THÔNG MINH -->
+          <div id="kpiSkuSearchBlock" class="hidden" style="margin-bottom: 16px; position: relative;">
             <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">2. TÌM SP TRỌNG TÂM (CỦA CÔNG TY TRÊN):</label>
-            <input type="text" id="kpiSkuSearch" placeholder="🔍 Gõ mã hoặc tên SP..." oninput="filterModalTargetSku(this.value)" autocomplete="off" style="width:100%; padding:12px 14px; font-size:14px; border-radius:8px; border:1px solid var(--primary); margin:0;">
-            <div id="kpiSkuResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:200px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; z-index:99; box-shadow:0 10px 25px rgba(0,0,0,0.2); margin-top:4px;"></div>
+            <input type="text" id="kpiSkuSearch" placeholder="🔍 Gõ mã hoặc tên SP..." oninput="filterModalTargetSku(this.value)" autocomplete="off" style="width:100%; padding:12px 14px; font-size:14px; font-weight:700; border-radius:10px; border:1px solid var(--card-border); margin:0; outline:none; transition:0.2s;" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--card-border)'">
+            <div id="kpiSkuResults" class="hidden" style="position:absolute; top:100%; left:0; right:0; max-height:220px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; z-index:99; box-shadow:0 10px 25px rgba(0,0,0,0.2); margin-top:4px;"></div>
           </div>
 
+          <!-- DANH SÁCH SP ĐÃ CHỌN ĐỂ NHẬP SỐ LƯỢNG -->
           <div id="kpiPendingSkusBlock" class="hidden" style="margin-bottom: 16px;">
-            <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">3. NHẬP CHỈ TIÊU BẰNG THÙNG:</label>
-            <div id="kpiPendingSkusList" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">3. NHẬP CHỈ TIÊU (SỐ THÙNG):</label>
+            <div id="kpiPendingSkusList" style="display:flex; flex-direction:column; gap:10px;"></div>
           </div>
         </div>
 
-        <button class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-size:15px; font-weight:900; box-shadow:0 4px 15px rgba(5,150,105,0.3); margin-top:10px;" onclick="saveTargetFromModal()">
+        <button class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-size:15px; font-weight:900; box-shadow:0 6px 20px rgba(5,150,105,0.3); margin-top:12px; border-radius:12px;" onclick="saveTargetFromModal()">
           <i class="fa-solid fa-floppy-disk"></i> LƯU CHỈ TIÊU TRỌNG TÂM
         </button>
       </div>
@@ -7197,8 +7215,39 @@ window.closeTargetModal = function() {
   }
 };
 
-window.onKpiCompanySelected = function(compCode) {
-  if(!compCode) return;
+// HÀM LỌC TÌM CÔNG TY TRONG MODAL
+window.filterKpiCompany = function(keyword) {
+  const q = removeAccents(keyword.trim().toLowerCase());
+  const resContainer = document.getElementById('kpiCompResults');
+  if (!resContainer) return;
+  
+  if (q === '') {
+    resContainer.classList.add('hidden');
+    return;
+  }
+  
+  const matched = companyList.filter(c => removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase().includes(q)).slice(0, 15);
+  let html = matched.map(c => `
+    <div onclick="selectKpiCompany('${c.maCtu}', '${(c.tenCtu || '').replace(/'/g, "\\'")}')" style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13.5px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+      <b style="color:var(--amber);">[${c.maCtu}]</b> ${c.tenCtu || ''}
+    </div>
+  `).join('');
+  
+  if (html) {
+    resContainer.innerHTML = html;
+    resContainer.classList.remove('hidden');
+  } else {
+    resContainer.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:13px; font-weight:700;">Không tìm thấy công ty phù hợp.</div>';
+    resContainer.classList.remove('hidden');
+  }
+};
+
+window.selectKpiCompany = function(code, name) {
+  document.getElementById('kpiCompSelectedCode').value = code;
+  document.getElementById('kpiCompSearchInput').value = `[${code}] ${name}`;
+  document.getElementById('kpiCompResults').classList.add('hidden');
+  
+  // Mở block chọn SP
   document.getElementById('kpiSkuSearchBlock').classList.remove('hidden');
   document.getElementById('kpiPendingSkusBlock').classList.remove('hidden');
   document.getElementById('kpiSkuSearch').value = '';
@@ -7209,7 +7258,7 @@ window.onKpiCompanySelected = function(compCode) {
 };
 
 window.filterModalTargetSku = function(keyword) {
-  const compCode = document.getElementById('kpiCompSelect').value.toUpperCase();
+  const compCode = document.getElementById('kpiCompSelectedCode').value.toUpperCase();
   const q = removeAccents(keyword.trim().toLowerCase());
   const resultsContainer = document.getElementById('kpiSkuResults');
   
@@ -7218,7 +7267,6 @@ window.filterModalTargetSku = function(keyword) {
     return;
   }
 
-  // Lọc sản phẩm thỏa mãn: thuộc công ty đã chọn VÀ khớp từ khóa
   const matched = products.filter(p => {
     if(getCompCodeFromProductCode(p.code) !== compCode) return false;
     if(q && !removeAccents(`${p.code} ${p.name}`).toLowerCase().includes(q)) return false;
@@ -7226,7 +7274,7 @@ window.filterModalTargetSku = function(keyword) {
   }).slice(0, 30);
 
   let html = matched.map(p => `
-    <div onclick="addSkuToTarget('${p.code}', '${p.name.replace(/'/g, "\\'")}')" style="padding:12px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+    <div onclick="addSkuToTarget('${p.code}', '${p.name.replace(/'/g, "\\'")}')" style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13.5px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
       <b style="color:var(--primary);">[${p.code}]</b> ${p.name}
     </div>
   `).join('');
@@ -7235,7 +7283,7 @@ window.filterModalTargetSku = function(keyword) {
     resultsContainer.innerHTML = html;
     resultsContainer.classList.remove('hidden');
   } else {
-    resultsContainer.innerHTML = '<div style="padding:12px; text-align:center; color:var(--text-muted); font-size:13px; font-weight:700;">Không tìm thấy SP.</div>';
+    resultsContainer.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:13px; font-weight:700;">Không tìm thấy SP.</div>';
     resultsContainer.classList.remove('hidden');
   }
 };
@@ -7262,24 +7310,26 @@ window.removePendingTarget = function(skuCode) {
 window.renderModalSelectedSkus = function() {
   const container = document.getElementById('kpiPendingSkusList');
   if(window._chiTieuPendingSkus.length === 0) {
-    container.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-style:italic; font-size:12px;">Chưa chọn SP nào...</div>';
+    container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted); font-style:italic; font-size:13px; border:1px dashed var(--card-border); border-radius:10px; background:var(--panel-bg);">Chưa chọn SP nào...</div>';
     return;
   }
   
   container.innerHTML = window._chiTieuPendingSkus.map(s => `
-    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:10px; border-radius:8px; border:1px dashed var(--primary); gap:8px;">
-       <div style="flex:1; font-size:13px; font-weight:800; color:var(--text-main); line-height:1.3;">[${s.code}] ${s.name}</div>
-       <div style="display:flex; align-items:center; gap:6px;">
-         <input type="number" min="1" value="${s.target}" placeholder="SL..." onchange="updatePendingTarget('${s.code}', this.value)" style="width:70px; padding:6px; margin:0; text-align:center; font-weight:900; border-radius:6px; border:1px solid var(--card-border);">
-         <button class="btn btn-red btn-sm" onclick="removePendingTarget('${s.code}')" style="padding:6px 8px;"><i class="fa-solid fa-trash"></i></button>
+    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:12px; border-radius:10px; border:1px solid rgba(37,99,235,0.2); box-shadow:0 2px 8px rgba(0,0,0,0.02); gap:8px;">
+       <div style="flex:1; font-size:13.5px; font-weight:800; color:var(--text-main); line-height:1.4;">
+         <span style="color:var(--primary);">[${s.code}]</span> ${s.name}
+       </div>
+       <div style="display:flex; align-items:center; gap:8px;">
+         <input type="number" min="1" value="${s.target}" placeholder="SL..." onchange="updatePendingTarget('${s.code}', this.value)" style="width:80px; padding:10px; margin:0; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:1px solid var(--card-border); color:var(--rose); outline:none;">
+         <button class="btn btn-red btn-sm" onclick="removePendingTarget('${s.code}')" style="padding:10px 12px; border-radius:8px;"><i class="fa-solid fa-trash"></i></button>
        </div>
     </div>
   `).join('');
 };
 
 window.saveTargetFromModal = async function() {
-  const compCode = document.getElementById('kpiCompSelect').value;
-  if (!compCode) return alert("Vui lòng chọn Công Ty trước!");
+  const compCode = document.getElementById('kpiCompSelectedCode').value;
+  if (!compCode) return alert("Vui lòng tìm và chọn Công Ty ở Bước 1!");
 
   const compObj = companyList.find(c => c.maCtu === compCode);
   const compName = compObj ? compObj.tenCtu : '';
@@ -7289,7 +7339,7 @@ window.saveTargetFromModal = async function() {
 
   const targetDocId = `tgt_${window._chiTieuTargetSalesCode}_${window._chiTieuTargetMonth}`;
   const btn = document.querySelector('.modal-content .btn-green');
-  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG LƯU...';
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG LƯU DỮ LIỆU...';
 
   try {
     const docRef = doc(db, "monthlyTargets", targetDocId);
@@ -7315,7 +7365,7 @@ window.saveTargetFromModal = async function() {
     }, { merge: true });
 
     playSystemSound('success');
-    alert("✅ Đã thiết lập chỉ tiêu thành công!");
+    alert("✅ Đã thiết lập chỉ tiêu trọng tâm thành công!");
     closeTargetModal();
     calculateAndRenderTargets();
   } catch (e) { alert("Lỗi lưu chỉ tiêu: " + e.message); }
@@ -7346,7 +7396,6 @@ window.calculateAndRenderTargets = async function() {
     if (snap.exists()) targetItems = snap.data().items || [];
   } catch (e) {}
 
-  // Quét Đơn Hàng tính Thực Tế (Actual)
   let actuals = {};
   
   orders.forEach(o => {
@@ -7364,11 +7413,18 @@ window.calculateAndRenderTargets = async function() {
 
   const container = document.getElementById('targetDashboardContainer');
   if (targetItems.length === 0) {
-    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); background:var(--panel-bg); border-radius:12px; border:1px dashed var(--card-border); font-weight:700;">Chưa có chỉ tiêu trọng tâm nào được giao trong ${formatMonthVN(window._chiTieuTargetMonth).toLowerCase()}.</div>`;
+    container.innerHTML = `
+      <div style="text-align:center; padding:40px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
+          <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
+        </div>
+        <div style="font-weight:800; font-size:15px; color:var(--text-main); margin-bottom:8px;">Chưa có chỉ tiêu nào được giao</div>
+        <div style="font-weight:600; font-size:13px; color:var(--text-muted);">Nhân viên này chưa có dữ liệu báo cáo trong ${formatMonthVN(window._chiTieuTargetMonth).toLowerCase()}.</div>
+      </div>
+    `;
     return;
   }
 
-  // Nhóm theo Công ty
   let grouped = {};
   targetItems.forEach(it => {
      if(!grouped[it.compCode]) {
@@ -7387,74 +7443,112 @@ window.calculateAndRenderTargets = async function() {
 
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
-  // Hiển thị dạng Accordion tóm gọn theo Công Ty
   container.innerHTML = Object.keys(grouped).map(compCode => {
     const g = grouped[compCode];
     const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : 0;
     
     let colorClass = 'var(--rose)';
     let barColor = 'var(--rose-gradient)';
-    if (pct >= 100) { colorClass = 'var(--emerald)'; barColor = 'var(--emerald-gradient)'; } 
-    else if (pct >= 70) { colorClass = 'var(--amber)'; barColor = 'var(--amber-gradient)'; }
+    let iconHtml = '<i class="fa-solid fa-triangle-exclamation" style="color:var(--rose);"></i>';
+    
+    if (pct >= 100) { 
+        colorClass = 'var(--emerald)'; 
+        barColor = 'var(--emerald-gradient)'; 
+        iconHtml = '<i class="fa-solid fa-trophy" style="color:var(--emerald);"></i>';
+    } else if (pct >= 70) { 
+        colorClass = 'var(--amber)'; 
+        barColor = 'var(--amber-gradient)'; 
+        iconHtml = '<i class="fa-solid fa-person-running" style="color:var(--amber);"></i>';
+    }
 
     const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
     return `
-      <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; margin-bottom:14px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.03);">
-        
-        <!-- Header Của Công Ty -->
-        <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding:14px; cursor:pointer; display:flex; flex-direction:column; gap:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-             <span style="font-weight:900; font-size:15px; color:var(--primary);">
-                <i class="fa-solid fa-building" style="margin-right:4px;"></i> [${compCode}] ${g.compName}
-             </span>
-             <i id="icon_${compAccordionId}" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
-          </div>
-          
-          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:10px; border-radius:10px; border:1px solid rgba(0,0,0,0.05);">
-             <div style="text-align:center; flex:1; border-right:1px solid var(--card-border);">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">CHỈ TIÊU</div>
-                <div style="font-size:15px; font-weight:900; color:var(--text-main);">${g.compTarget} <span style="font-size:11px;">Th</span></div>
-             </div>
-             <div style="text-align:center; flex:1; border-right:1px solid var(--card-border);">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">THỰC HIỆN</div>
-                <div style="font-size:15px; font-weight:900; color:var(--text-main);">${g.compActual.toFixed(1)} <span style="font-size:11px;">Th</span></div>
-             </div>
-             <div style="text-align:center; flex:1;">
-                <div style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:4px;">TIẾN ĐỘ</div>
-                <div style="font-size:16px; font-weight:900; color:${colorClass};">${pct.toFixed(1)}%</div>
-             </div>
-          </div>
-          
-          <div style="width:100%; height:6px; background:var(--card-bg); border-radius:3px; overflow:hidden; border:1px inset rgba(0,0,0,0.1);">
-             <div style="height:100%; width:${Math.min(pct, 100)}%; background:${barColor}; transition:width 0.8s ease-in-out;"></div>
-          </div>
+      <div style="background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.04); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s;">
+        <!-- Header Công Ty -->
+        <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 16px; cursor: pointer; position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap:8px;">
+                <div style="display: flex; align-items: flex-start; gap: 12px; flex:1;">
+                    <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(37,99,235,0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink:0;">
+                        <i class="fa-solid fa-building"></i>
+                    </div>
+                    <div>
+                        <div style="font-size: 16px; font-weight: 900; color: var(--text-main); line-height: 1.3; margin-bottom:2px;">${g.compName || 'Công Ty ' + compCode}</div>
+                        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); background:var(--bg-dark); padding:2px 8px; border-radius:6px; display:inline-block;">Mã: ${compCode}</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; font-size:18px; background:rgba(0,0,0,0.03); padding:6px 10px; border-radius:10px;">
+                    ${iconHtml}
+                    <i id="icon_${compAccordionId}" class="fa-solid fa-chevron-down" style="color: var(--text-muted); transition: 0.3s; font-size: 12px;"></i>
+                </div>
+            </div>
+
+            <!-- Dashboard Numbers -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">CHỈ TIÊU</div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${g.compTarget} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Th</span></div>
+                </div>
+                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${g.compActual.toFixed(1)} <span style="font-size: 11px; font-weight:700; color:var(--text-muted);">Th</span></div>
+                </div>
+                <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
+                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ</div>
+                    <div style="font-size: 18px; font-weight: 900; color: ${colorClass};">${pct.toFixed(1)}%</div>
+                </div>
+            </div>
+
+            <!-- Main Progress Bar -->
+            <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
+                <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+            </div>
         </div>
 
         <!-- Các SKUs Trọng Tâm Xổ Xuống -->
-        <div id="${compAccordionId}" class="hidden" style="border-top:1px dashed var(--card-border); padding:12px; background:var(--card-bg);">
-           <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:8px;"><i class="fa-solid fa-list-check"></i> DANH SÁCH SẢN PHẨM:</div>
-           <div style="display:flex; flex-direction:column; gap:8px;">
-              ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
-                 const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
-                 let sColor = 'var(--rose)';
-                 if (skuPct >= 100) sColor = 'var(--emerald)'; 
-                 else if (skuPct >= 70) sColor = 'var(--amber)';
+        <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 16px; border-top: 1px solid var(--card-border);">
+            <div style="font-size: 12px; font-weight: 900; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; text-transform:uppercase;">
+                <span><i class="fa-solid fa-boxes-stacked"></i> MÃ HÀNG TRỌNG TÂM</span>
+                <span style="background:rgba(37,99,235,0.1); padding:2px 8px; border-radius:6px;">${g.skus.length} Mã Hàng</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
+                    const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
+                    let sColor = 'var(--rose)';
+                    let sBar = 'var(--rose-gradient)';
+                    if (skuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; } 
+                    else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
 
-                 return `
-                   <div style="display:flex; flex-direction:column; gap:6px; padding:10px; background:var(--panel-bg); border-radius:8px; border:1px solid rgba(0,0,0,0.04);">
-                      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                         <span style="font-size:13px; font-weight:800; color:var(--text-main); line-height:1.4; flex:1; margin-right:8px;">[${sku.code}] ${sku.name}</span>${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-size:10px;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
-                      </div>
-                      <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:800;">
-                         <span style="color:var(--text-muted);">CT: <b style="color:var(--text-main);">${sku.target}</b></span>
-                         <span style="color:var(--text-muted);">TH: <b style="color:var(--text-main);">${sku.actual.toFixed(1)}</b></span>
-                         <span style="color:${sColor};">${skuPct.toFixed(1)}%</span>
-                      </div>
-                   </div>
-                 `;
-              }).join('')}
-           </div>
+                    return `
+                        <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
+                            ${isAdminOrManager ? `<button class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 11px; border-radius: 8px;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
+                            
+                            <div style="font-size: 14px; font-weight: 800; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
+                                <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:11px; margin-right:4px;">${sku.code}</span>${sku.name}
+                            </div>
+                            
+                            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; font-weight: 700; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:8px 12px; border-radius:8px;">
+                                <div style="display:flex; flex-direction:column; gap:2px; text-align:center;">
+                                  <span style="color: var(--text-muted); font-size:10px;">CHỈ TIÊU</span>
+                                  <b style="color: var(--text-main); font-size:14px;">${sku.target}</b>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:2px; text-align:center;">
+                                  <span style="color: var(--text-muted); font-size:10px;">THỰC HIỆN</span>
+                                  <b style="color: var(--text-main); font-size:14px;">${sku.actual.toFixed(1)}</b>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:2px; text-align:right;">
+                                  <span style="color: var(--text-muted); font-size:10px;">TIẾN ĐỘ</span>
+                                  <b style="color: ${sColor}; font-weight: 900; font-size: 15px;">${skuPct.toFixed(1)}%</b>
+                                </div>
+                            </div>
+                            
+                            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
+                                <div style="height: 100%; width: ${Math.min(skuPct, 100)}\%; background:${sBar}; border-radius: 3px;"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
         </div>
       </div>
     `;
