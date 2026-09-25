@@ -3085,13 +3085,14 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
     }
   };
 
- window.editOrder = function(orderId) {
+  window.editOrder = function(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
   const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-  const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const isManagerOrAdmin = currentUser.role === 'admin' 
 
+  // Lấy chính xác ngày theo múi giờ Việt Nam (GMT+7)
   const vietnamTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" });
   const vnDate = new Date(vietnamTime);
   const yyyy = vnDate.getFullYear();
@@ -3131,16 +3132,10 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
         const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
         const le = ratio > 0 ? totalQty % ratio : totalQty;
 
-      let cleanNoteDb = item.note;
-        if (!cleanNoteDb || cleanNoteDb === 'undefined' || String(cleanNoteDb) === 'undefined') {
-            cleanNoteDb = '';
-        }
-
         currentCart[pKey] = {
           qty: totalQty,
           kien: kien,
-          le: le,
-          note: cleanNoteDb 
+          le: le
         };
       }
     });
@@ -3148,6 +3143,7 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
 
   switchTab('sales');
 };
+
   window.deleteSingleOrder = async function(orderId) {
     const order = orders.find(o => o.id === orderId);
     if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
@@ -3415,19 +3411,8 @@ ${(() => {
 
 window.updateCartItemNote = function(prdId, val) {
    if (currentCart[prdId]) {
-     // Lưu giá trị
      currentCart[prdId].note = val;
-     
-     // Dùng try-catch để chặn tuyệt đối lỗi văng app
-     try {
-       if (typeof saveCartDraftToLocal === 'function') {
-         saveCartDraftToLocal();
-       } else {
-         localStorage.setItem('dms_cart_draft', JSON.stringify(currentCart));
-       }
-     } catch (err) {
-       console.log("Đã lưu note ngầm!");
-     }
+     saveCartDraftToLocal();
    }
  };
 
@@ -3454,12 +3439,6 @@ window.updateCartItemNote = function(prdId, val) {
        }
        let activeDvtStr = activeDvtList.join(', ');
 
-       // Lọc sạch chữ undefined bằng mọi giá
-       let cleanNote = c.note;
-       if (!cleanNote || cleanNote === 'undefined' || String(cleanNote) === 'undefined') {
-           cleanNote = '';
-       }
-
        itemsList.push({
          id: keyId,
          code: p.code,
@@ -3468,7 +3447,7 @@ window.updateCartItemNote = function(prdId, val) {
          qty: c.qty,
          kien: c.kien || 0,
          le: c.le || 0,
-         note: cleanNote 
+         note: c.note || '' // Load lại dữ liệu ghi chú
        });
      }
    });
@@ -3483,41 +3462,23 @@ window.updateCartItemNote = function(prdId, val) {
            <button class="btn btn-red" onclick="closeCurrentCartModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
          </div>
          <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
-           ${itemsList.length > 0 ? itemsList.map(item => {
-             
-             const promoTemplates = ['Giảm ...k / Thùng', 'Tặng ... card ...k', 'Giảm tổng ...k', 'CK ...%'];
-             
-             const tagsHtml = promoTemplates.map(tag => 
-               `<span onclick="document.getElementById('note_input_${item.id}').value = '${tag}'; document.getElementById('note_input_${item.id}').focus(); updateCartItemNote('${item.id}', '${tag}')" style="background: rgba(16,185,129,0.1); color: var(--emerald); padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; border: 1px solid rgba(16,185,129,0.3);"><i class="fa-solid fa-plus"></i> ${tag}</span>`
-             ).join('');
-
-             return `
+           ${itemsList.length > 0 ? itemsList.map(item => `
             <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px;">
              <div style="display:flex; justify-content:space-between; align-items:flex-start; font-weight:800; color:var(--text-main);">
                <span style="font-size:16px; line-height:1.4;">[${item.code}] ${item.name}</span>${editingOrderId ? `<button class="btn btn-red btn-sm" style="padding:4px 8px; font-weight:800; flex-shrink:0;" onclick="removeCartItemCompletely('${item.id}'); closeCurrentCartModal(); openCurrentCartModal();"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
              </div>
-             <div style="display:flex; justify-content:space-between; align-items:center; color:var(--text-muted); font-size:15px;">
+             <div style="display:flex; justify-content:space-between; align-items:center; color:var(--text-muted); font-size:15px; margin-bottom:4px;">
                <span>SL: <b style="color:#2563EB; font-size:16px;">${item.qty}${item.dvt}</b> (Thùng: ${item.kien}, Lẻ: ${item.le})</span>
              </div>
              
-             <!-- KHỐI GHI CHÚ CHUẨN CÓ Ô INPUT VÀ NÚT BẤM -->
-             <div style="display:flex; flex-direction:column; gap:8px; background:rgba(0,0,0,0.02); padding:10px; border-radius:10px; border:1px dashed var(--card-border); margin-top:4px;">
-               <div style="font-size:12px; font-weight:900; color:var(--text-muted); text-transform:uppercase; display:flex; justify-content:space-between;">
-                 <span><i class="fa-solid fa-tags" style="color:var(--emerald);"></i> Deal / Giảm Giá:</span>
-               </div>
-               
-               <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch;">
-                 ${tagsHtml}
-               </div>
-               
-               <div style="display:flex; align-items:center;">
-                 <input type="text" id="note_input_${item.id}" placeholder="VD: Giảm 50k / Thùng, Tặng 5 card 50k..." value="${item.note}" onchange="updateCartItemNote('${item.id}', this.value)" onkeydown="if(event.key === 'Enter') event.preventDefault();" style="margin:0; padding:10px 12px; font-size:14.5px; font-weight:800; width:100%; border-radius:8px; background:#fff; border:1px solid var(--card-border); color:var(--rose); outline:none;">
-               </div>
+             <!-- ĐÂY CHÍNH LÀ Ô NHẬP GHI CHÚ BẠN ĐANG TÌM KIẾM -->
+             <div style="display:flex; align-items:center; gap:8px;">
+               <i class="fa-solid fa-pen-to-square" style="color:var(--amber);"></i>
+               <input type="text" placeholder="Ghi chú (CK 5%, Giảm 10k, Hàng tặng...)" value="${item.note}" onchange="updateCartItemNote('${item.id}', this.value)" style="margin:0; padding:8px 12px; font-size:13px; font-weight:700; width:100%; border-radius:8px; background:rgba(0,0,0,0.02); border:1px dashed var(--card-border);">
              </div>
              
            </div>
-           `;
-           }).join('') : `
+           `).join('') : `
              <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:700; font-size:15px;">Chưa có sản phẩm nào được chọn trong giỏ hàng hiện tại.</div>
            `}
          </div>
