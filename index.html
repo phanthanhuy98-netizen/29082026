@@ -5135,22 +5135,21 @@ else if (tab === 'kpi') {
         filterStart = todayStr; filterEnd = todayStr;
         let yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
         prevStart = prevEnd = yesterday.toISOString().slice(0, 10);
-     } else if (window._kpiDateFilter === 'yesterday') {
-    let targetDay = new Date(today);
-    targetDay.setDate(targetDay.getDate() - 1);
-    
-    let y_yyyy = targetDay.getFullYear();
-    let y_mm = String(targetDay.getMonth() + 1).padStart(2, '0');
-    let y_dd = String(targetDay.getDate()).padStart(2, '0');
-    let yesterdayStr = `${y_yyyy}-${y_mm}-${y_dd}`;
-    
-    filterStart = yesterdayStr;
-    filterEnd = yesterdayStr;
-    
-    // Tính ngày hôm kia để làm số liệu so sánh tăng trưởng kỳ trước (prevStats)
-    let dayBefore = new Date(targetDay);
-    dayBefore.setDate(dayBefore.getDate() - 1);
-    prevStart = prevEnd = dayBefore.toISOString().slice(0, 10);
+      } else if (window._kpiDateFilter === 'yesterday') {
+        let targetDay = new Date(today);
+        targetDay.setDate(targetDay.getDate() - 1);
+        
+        let y_yyyy = targetDay.getFullYear();
+        let y_mm = String(targetDay.getMonth() + 1).padStart(2, '0');
+        let y_dd = String(targetDay.getDate()).padStart(2, '0');
+        let yesterdayStr = `${y_yyyy}-${y_mm}-${y_dd}`;
+        
+        filterStart = yesterdayStr;
+        filterEnd = yesterdayStr;
+        
+        let dayBefore = new Date(targetDay);
+        dayBefore.setDate(dayBefore.getDate() - 1);
+        prevStart = prevEnd = dayBefore.toISOString().slice(0, 10);
       } else if (window._kpiDateFilter === 'month') {
         filterStart = `${yyyy}-${mm}-01`; filterEnd = todayStr;
         let lastMonth = new Date(today); lastMonth.setMonth(lastMonth.getMonth() - 1);
@@ -5168,124 +5167,118 @@ else if (tab === 'kpi') {
         prevEnd = prevWeekEnd.toISOString().slice(0, 10);
       }
 
-let kpiMap = new Map();
-let globalSkuMap = new Map();
-let globalStoreStatsMap = new Map(); 
-let globalCompanyStatsMap = new Map(); 
-let currentStats = { kien: 0, don: 0, tiems: new Set() };
-let prevStats = { kien: 0, don: 0 }; 
+      let kpiMap = new Map();
+      let globalSkuMap = new Map();
+      let globalStoreStatsMap = new Map(); 
+      let globalCompanyStatsMap = new Map(); 
+      let currentStats = { kien: 0, don: 0, tiems: new Set() };
+      let prevStats = { kien: 0, don: 0 }; 
 
-orders.forEach(o => {
-  if (o.status === 'Đã hủy') return;
+      orders.forEach(o => {
+        if (o.status === 'Đã hủy') return;
 
-  // 1. TÍNH TOÁN KỲ TRƯỚC (Phục vụ % tăng trưởng)
-  if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
-    if (o.ngayCtu >= prevStart && o.ngayCtu <= prevEnd) {
-      prevStats.don += 1;
-      if (o.items) {
-        o.items.forEach(item => {
-          const ratio = item.tyLeQuyDoi || item.ratio || 50;
-          prevStats.kien += (Number(item.qty || 0) / ratio);
-        });
-      }
-    }
-  }
-
-  // 2. BỘ LỌC THỜI GIAN (Chỉ tính đơn hàng nằm trong khung giờ chọn)
-  if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
-
-  // 3. TÍNH TOÁN KỲ HIỆN TẠI
-  let salesKey = o.salesCode || 'UNKNOWN';
-  if (!kpiMap.has(salesKey)) {
-kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set(), skuMap: new Map(), compSet: new Set() });  }
-  let sData = kpiMap.get(salesKey);
-
-  sData.don += 1;
-  currentStats.don += 1;
-  
-  let storeIdentifier = o.maDTPNNo || o.storeId || o.maKh || o.makh;
-  sData.tiems.add(storeIdentifier);
-  currentStats.tiems.add(storeIdentifier);
-
-  // Lưu trữ định danh khách hàng để tính Top Buyers
-  let storeNameDisplay = o.maKH || o.maDTPNNo || o.storeId;
-  if (!globalStoreStatsMap.has(storeIdentifier)) {
-    globalStoreStatsMap.set(storeIdentifier, { name: storeNameDisplay, qty: 0 });
-  }
-
-  if (o.items) {
-    o.items.forEach(item => {
-      const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
-      const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-      const itemQty = Number(item.qty || 0);
-      const unitName = item.dvt || pObj?.dvt || 'hộp';
-
-      if (itemQty > 0) {
-        const thungCount = itemQty / ratio;
-        
-        sData.kien += thungCount;
-        currentStats.kien += thungCount;
-
-        const skuKey = item.code;
-        if (!sData.skuMap.has(skuKey)) sData.skuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio });
-        sData.skuMap.get(skuKey).qty += itemQty;
-
-        if (!globalSkuMap.has(skuKey)) globalSkuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio, code: item.code });
-        globalSkuMap.get(skuKey).qty += itemQty;
-
-        // Cộng dồn Sản lượng cho Khách Hàng
-        globalStoreStatsMap.get(storeIdentifier).qty += thungCount;
-
-        // Phân bổ Tỷ trọng theo Nhãn hàng / Công ty
-        let pCodeStr = String(item.code || '').toUpperCase();
-        let ctyKey = 'KHÁC';
-        if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) {
-            ctyKey = '11';
-        } else {
-            let match = pCodeStr.match(/^\[(.*?)\]/);
-            if (match) ctyKey = match[1].trim();
-            else {
-                let parts = pCodeStr.split(/[-_]/);
-                if (parts.length > 1) ctyKey = parts[0].trim();
-                else if (pCodeStr.length >= 2) ctyKey = pCodeStr.substring(0, 2);
+        if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
+          if (o.ngayCtu >= prevStart && o.ngayCtu <= prevEnd) {
+            prevStats.don += 1;
+            if (o.items) {
+              o.items.forEach(item => {
+                const ratio = item.tyLeQuyDoi || item.ratio || 50;
+                prevStats.kien += (Number(item.qty || 0) / ratio);
+              });
             }
+          }
         }
-        let matchedComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey);
-        let compDisplayName = matchedComp && matchedComp.tenCtu ? matchedComp.tenCtu : (ctyKey !== 'KHÁC' ? `Công Ty ${ctyKey}` : 'Khác');
+
+        if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+
+        let salesKey = o.salesCode || 'UNKNOWN';
+        if (!kpiMap.has(salesKey)) {
+          kpiMap.set(salesKey, { name: o.salesName || 'Không xác định', code: salesKey, kien: 0, don: 0, tiems: new Set(), skuMap: new Map(), compSet: new Set() });  
+        }
+        let sData = kpiMap.get(salesKey);
+
+        sData.don += 1;
+        currentStats.don += 1;
         
-        if (!globalCompanyStatsMap.has(compDisplayName)) globalCompanyStatsMap.set(compDisplayName, { qty: 0 });
-        globalCompanyStatsMap.get(compDisplayName).qty += thungCount;
-        sData.compSet.add(compDisplayName);
-      }
-    });
-  }
-});
+        let storeIdentifier = o.maDTPNNo || o.storeId || o.maKh || o.makh;
+        sData.tiems.add(storeIdentifier);
+        currentStats.tiems.add(storeIdentifier);
 
-const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
-const activeSalesCodes = Array.from(kpiMap.keys());
-const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
+        let storeNameDisplay = o.maKH || o.maDTPNNo || o.storeId;
+        if (!globalStoreStatsMap.has(storeIdentifier)) {
+          globalStoreStatsMap.set(storeIdentifier, { name: storeNameDisplay, qty: 0 });
+        }
 
-let leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.kien - a.kien);
-const topKien = leaderboard.length > 0 ? leaderboard[0].kien : 1;
+        if (o.items) {
+          o.items.forEach(item => {
+            const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
+            const ratio = pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+            const itemQty = Number(item.qty || 0);
+            const unitName = item.dvt || pObj?.dvt || 'hộp';
 
-const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
-const maxGlobalQty = topGlobalSkus.length > 0 ? topGlobalSkus[0].qty : 1;
+            if (itemQty > 0) {
+              const thungCount = itemQty / ratio;
+              
+              sData.kien += thungCount;
+              currentStats.kien += thungCount;
 
-// Xử lý dữ liệu hiển thị cho 2 khối biểu đồ mới
-const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 30);
-const maxStoreQty = topStoresList.length > 0 ? topStoresList[0].qty : 1;
+              const skuKey = item.code;
+              if (!sData.skuMap.has(skuKey)) sData.skuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio });
+              sData.skuMap.get(skuKey).qty += itemQty;
 
-const companyDistList = Array.from(globalCompanyStatsMap.entries()).map(([name, data]) => ({ name, qty: data.qty })).sort((a, b) => b.qty - a.qty);
-const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
+              if (!globalSkuMap.has(skuKey)) globalSkuMap.set(skuKey, { name: item.name, qty: 0, unit: unitName, ratio: ratio, code: item.code });
+              globalSkuMap.get(skuKey).qty += itemQty;
 
-  const calcGrowth = (curr, prev) => {
-        if (prev === 0) return ''; // Không có dữ liệu kỳ trước thì ẩn luôn, không hiển thị dòng thừa
+              globalStoreStatsMap.get(storeIdentifier).qty += thungCount;
+
+              let pCodeStr = String(item.code || '').toUpperCase();
+              let ctyKey = 'KHÁC';
+              if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) {
+                  ctyKey = '11';
+              } else {
+                  let match = pCodeStr.match(/^\[(.*?)\]/);
+                  if (match) ctyKey = match[1].trim();
+                  else {
+                      let parts = pCodeStr.split(/[-_]/);
+                      if (parts.length > 1) ctyKey = parts[0].trim();
+                      else if (pCodeStr.length >= 2) ctyKey = pCodeStr.substring(0, 2);
+                  }
+              }
+              let matchedComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey);
+              let compDisplayName = matchedComp && matchedComp.tenCtu ? matchedComp.tenCtu : (ctyKey !== 'KHÁC' ? `Công Ty ${ctyKey}` : 'Khác');
+              
+              if (!globalCompanyStatsMap.has(compDisplayName)) globalCompanyStatsMap.set(compDisplayName, { qty: 0 });
+              globalCompanyStatsMap.get(compDisplayName).qty += thungCount;
+              sData.compSet.add(compDisplayName);
+            }
+          });
+        }
+      });
+
+      const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+      const activeSalesCodes = Array.from(kpiMap.keys());
+      const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
+
+      let leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.kien - a.kien);
+      const topKien = leaderboard.length > 0 ? leaderboard[0].kien : 1;
+
+      const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
+      const maxGlobalQty = topGlobalSkus.length > 0 ? topGlobalSkus[0].qty : 1;
+
+      const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 30);
+      const maxStoreQty = topStoresList.length > 0 ? topStoresList[0].qty : 1;
+
+      const companyDistList = Array.from(globalCompanyStatsMap.entries()).map(([name, data]) => ({ name, qty: data.qty })).sort((a, b) => b.qty - a.qty);
+      const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
+
+      const calcGrowth = (curr, prev) => {
+        if (prev === 0) return ''; 
         const pct = ((curr - prev) / prev) * 100;
-        if (pct > 0) return `<span style="color:#10B981; font-size:10px;"><i class="fa-solid fa-arrow-up"></i> ${pct.toFixed(1)}% so với kỳ trước</span>`;
-        if (pct < 0) return `<span style="color:#EF4444; font-size:10px;"><i class="fa-solid fa-arrow-down"></i> ${Math.abs(pct).toFixed(1)}% so với kỳ trước</span>`;
-        return `<span style="color:#94A3B8; font-size:10px;">— Ngang bằng kỳ trước</span>`;
+        if (pct > 0) return `<span style="color:#10B981; font-size:12px;"><i class="fa-solid fa-arrow-up"></i> ${pct.toFixed(1)}% so với kỳ trước</span>`;
+        if (pct < 0) return `<span style="color:#EF4444; font-size:12px;"><i class="fa-solid fa-arrow-down"></i> ${Math.abs(pct).toFixed(1)}% so với kỳ trước</span>`;
+        return `<span style="color:#94A3B8; font-size:12px;">— Ngang bằng kỳ trước</span>`;
       };
-// LỌC KHÁCH HÀNG THỰC TẾ (CÓ TUYẾN ĐI KÈM) ĐỂ TÍNH ĐỘ PHỦ CHUẨN
+
       let totalValidStores = 0;
       if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
         stores.forEach(s => {
@@ -5297,9 +5290,9 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
         totalValidStores = stores.length;
       }
       container.innerHTML = `
-        <div class="tab-header-actions" style="margin-bottom:12px;">
-          <h2 style="font-weight:800; font-size:18px;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
-          <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:6px 12px; border-radius:8px; outline:none; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+        <div class="tab-header-actions" style="margin-bottom:14px;">
+          <h2 style="font-weight:800; font-size:22px;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
+          <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:8px 14px; border-radius:10px; font-size:15px; outline:none; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
             <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>Hôm Nay</option>
             <option value="yesterday" ${window._kpiDateFilter === 'yesterday' ? 'selected' : ''}>Hôm Qua</option>
             <option value="week" ${window._kpiDateFilter === 'week' ? 'selected' : ''}>Tuần Này</option>
@@ -5308,31 +5301,31 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
           </select>
         </div>
 
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:16px;">
-    <!-- Ô 1: SẢN LƯỢNG -->
-          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
-            <div style="font-size:11px; font-weight:800; color:var(--text-muted);">SẢN LƯỢNG</div>
-            <div style="display:flex; flex-direction:column; align-items:center; gap:2px; margin:6px 0;">
-              <div style="font-size:20px; font-weight:900; color:var(--primary); line-height:1;">
-                ${currentStats.kien.toFixed(1)} <span style="font-size:12px;">Thùng</span>
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-bottom:20px;">
+          <!-- Ô 1: SẢN LƯỢNG -->
+          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
+            <div style="font-size:13px; font-weight:800; color:var(--text-muted);">SẢN LƯỢNG</div>
+            <div style="display:flex; flex-direction:column; align-items:center; gap:3px; margin:8px 0;">
+              <div style="font-size:24px; font-weight:900; color:var(--primary); line-height:1;">
+                ${currentStats.kien.toFixed(1)} <span style="font-size:14.5px;">Thùng</span>
               </div>
-              <div style="font-size:13px; font-weight:800; color:#D97706; line-height:1.2;">
-                ${globalCompanyStatsMap.size} <span style="font-size:10px; color:var(--text-muted);">Cty</span> - ${globalSkuMap.size} <span style="font-size:10px; color:var(--text-muted);">SKUs</span>
+              <div style="font-size:15.5px; font-weight:800; color:#D97706; line-height:1.2;">
+                ${globalCompanyStatsMap.size} <span style="font-size:12px; color:var(--text-muted);">Cty</span> - ${globalSkuMap.size} <span style="font-size:12px; color:var(--text-muted);">SKUs</span>
               </div>
             </div>
-            <div style="background:rgba(0,0,0,0.04); border-radius:10px; padding:2px;">${calcGrowth(currentStats.kien, prevStats.kien)}</div>
+            <div style="background:rgba(0,0,0,0.04); border-radius:10px; padding:4px;">${calcGrowth(currentStats.kien, prevStats.kien)}</div>
           </div>
           
           <!-- Ô 2: ĐỘ PHỦ -->
-          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
-            <div style="font-size:11px; font-weight:800; color:var(--text-muted);">ĐỘ PHỦ (HIT RATE)</div>
-            <div style="font-size:20px; font-weight:900; color:var(--emerald); margin:4px 0;">${currentStats.tiems.size} <span style="font-size:11px;">Tiệm</span></div>
-            <div style="font-size:10px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:10px; padding:2px;">
+          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
+            <div style="font-size:13px; font-weight:800; color:var(--text-muted);">ĐỘ PHỦ (HIT RATE)</div>
+            <div style="font-size:24px; font-weight:900; color:var(--emerald); margin:6px 0;">${currentStats.tiems.size} <span style="font-size:13px;">Tiệm</span></div>
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:10px; padding:4px;">
               ~ ${totalValidStores > 0 ? ((currentStats.tiems.size / totalValidStores) * 100).toFixed(1) : 0}% Tuyến thực tế
             </div>
           </div>
 
-        <!-- Ô 3: CHỈ SỐ TUÂN THỦ GPS (TẠI QUẦY / TỪ XA) -->
+          <!-- Ô 3: CHỈ SỐ TUÂN THỦ GPS (TẠI QUẦY / TỪ XA) -->
           ${(() => {
             let taiQuayAll = 0, tuXaAll = 0;
             orders.forEach(o => {
@@ -5354,18 +5347,18 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
             const badgeColor = complianceRate >= 80 ? 'var(--emerald)' : (complianceRate >= 50 ? 'var(--amber)' : 'var(--rose)');
 
             return `
-              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
-                <div style="font-size:11px; font-weight:800; color:var(--text-muted);">TUÂN THỦ GPS (QUẦY/XA)</div>
-                <div style="font-size:18px; font-weight:900; color:${badgeColor}; margin:4px 0;">
-                  ${complianceRate}% <span style="font-size:11px; font-weight:700; color:var(--text-main);">(${taiQuayAll}/${totalOrdersFiltered})</span>
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
+                <div style="font-size:13px; font-weight:800; color:var(--text-muted);">TUÂN THỦ GPS (QUẦY/XA)</div>
+                <div style="font-size:22px; font-weight:900; color:${badgeColor}; margin:6px 0;">
+                  ${complianceRate}% <span style="font-size:13px; font-weight:700; color:var(--text-main);">(${taiQuayAll}/${totalOrdersFiltered})</span>
                 </div>
-               <div style="display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:8px; padding:6px; margin-top:6px;">
-                <div style="display:flex; align-items:center; justify-content:center; gap:6px;">
-                  <span style="width:10px; height:10px; border-radius:50%; background:var(--emerald);"></span>
+               <div style="display:flex; flex-direction:column; gap:5px; font-size:13px; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:10px; padding:8px; margin-top:8px;">
+                <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
+                  <span style="width:12px; height:12px; border-radius:50%; background:var(--emerald);"></span>
                   <span><span style="color:var(--text-main);">${taiQuayAll}</span> tại quầy</span>
                 </div>
-                <div style="display:flex; align-items:center; justify-content:center; gap:6px;">
-                  <span style="width:10px; height:10px; border-radius:50%; background:var(--rose);"></span>
+                <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
+                  <span style="width:12px; height:12px; border-radius:50%; background:var(--rose);"></span>
                   <span><span style="color:var(--text-main);">${tuXaAll}</span> từ xa</span>
                 </div>
               </div>
@@ -5374,14 +5367,14 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
           })()}
         </div>
 
-   ${topGlobalSkus.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid var(--rose); margin-bottom:16px;">
-          <div onclick="toggleOrderAccordion('acc_top_products')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:13px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-fire" style="color:var(--rose);"></i> TOP HÀNG BÁN CHẠY</div>
+        ${topGlobalSkus.length > 0 ? `
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--rose); margin-bottom:20px;">
+          <div onclick="toggleOrderAccordion('acc_top_products')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-fire" style="color:var(--rose);"></i> TOP HÀNG BÁN CHẠY</div>
             <i id="icon_acc_top_products" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="acc_top_products" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="display:flex; flex-direction:column; gap:8px;">
+          <div id="acc_top_products" class="hidden" style="padding:20px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+            <div style="display:flex; flex-direction:column; gap:10px;">
               ${topGlobalSkus.map((sku, i) => {
                 const sKien = Math.floor(sku.qty / sku.ratio);
                 const sLe = sku.qty % sku.ratio;
@@ -5389,12 +5382,12 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
                 const barWidth = Math.max((sku.qty / maxGlobalQty) * 100, 5);
                 return `
                   <div>
-                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
-                      <span style="font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:8px;">${i+1}. [${sku.code}]${sku.name}</span>
+                    <div style="display:flex; justify-content:space-between; font-size:14.5px; margin-bottom:6px;">
+                      <span style="font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:10px;">${i+1}. [${sku.code}]${sku.name}</span>
                       <span style="font-weight:800; color:var(--rose); flex-shrink:0;">${qtyStr}</span>
                     </div>
-                    <div style="width:100%; height:4px; background:var(--card-border); border-radius:2px;">
-                      <div style="height:100%; width:${barWidth}%; background:var(--rose-gradient); border-radius:2px;"></div>
+                    <div style="width:100%; height:5px; background:var(--card-border); border-radius:3px;">
+                      <div style="height:100%; width:${barWidth}%; background:var(--rose-gradient); border-radius:3px;"></div>
                     </div>
                   </div>
                 `;
@@ -5405,13 +5398,13 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
         ` : ''}
 
         ${topStoresList.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid var(--amber); margin-bottom:16px;">
-          <div onclick="toggleOrderAccordion('acc_top_stores')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:13px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG NỔI BẬT</div>
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--amber); margin-bottom:20px;">
+          <div onclick="toggleOrderAccordion('acc_top_stores')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG NỔI BẬT</div>
             <i id="icon_acc_top_stores" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="acc_top_stores" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="display:flex; flex-direction:column; gap:8px;">
+          <div id="acc_top_stores" class="hidden" style="padding:20px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+            <div style="display:flex; flex-direction:column; gap:10px;">
               ${topStoresList.map((st, i) => {
                 const qtyStr = st.qty.toFixed(1) + ' Thùng';
                 const barWidth = Math.max((st.qty / maxStoreQty) * 100, 5);
@@ -5419,12 +5412,12 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
                 if (displayName.includes(' - ')) displayName = displayName.split(' - ')[1];
                 return `
                   <div>
-                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
-                      <span style="font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:8px;">${i+1}.${displayName}</span>
+                    <div style="display:flex; justify-content:space-between; font-size:14.5px; margin-bottom:6px;">
+                      <span style="font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:10px;">${i+1}.${displayName}</span>
                       <span style="font-weight:800; color:var(--emerald); flex-shrink:0;">${qtyStr}</span>
                     </div>
-                    <div style="width:100%; height:4px; background:var(--card-border); border-radius:2px;">
-                      <div style="height:100%; width:${barWidth}%; background:var(--emerald-gradient); border-radius:2px;"></div>
+                    <div style="width:100%; height:5px; background:var(--card-border); border-radius:3px;">
+                      <div style="height:100%; width:${barWidth}%; background:var(--emerald-gradient); border-radius:3px;"></div>
                     </div>
                   </div>
                 `;
@@ -5435,20 +5428,20 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
         ` : ''}
 
         ${companyDistList.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid var(--purple); margin-bottom:16px;">
-          <div onclick="toggleOrderAccordion('acc_top_companies')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:13px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-chart-pie" style="color:var(--purple);"></i> TỶ TRỌNG CÔNG TY / NHÃN HÀNG</div>
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--purple); margin-bottom:20px;">
+          <div onclick="toggleOrderAccordion('acc_top_companies')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-chart-pie" style="color:var(--purple);"></i> TỶ TRỌNG CÔNG TY / NHÃN HÀNG</div>
             <i id="icon_acc_top_companies" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="acc_top_companies" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="display:flex; flex-direction:column; gap:8px;">
+          <div id="acc_top_companies" class="hidden" style="padding:20px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+            <div style="display:flex; flex-direction:column; gap:10px;">
               ${companyDistList.map((comp, i) => {
                 const pct = totalCompanyQty > 0 ? ((comp.qty / totalCompanyQty) * 100).toFixed(1) : 0;
                 return `
                   <div>
-                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+                    <div style="display:flex; justify-content:space-between; font-size:14.5px; margin-bottom:6px;">
                       <span style="font-weight:700; color:var(--text-main);">${comp.name}</span>
-                      <span style="font-weight:800; color:var(--primary);">${pct}% <span style="font-size:10px; color:var(--text-muted);">(${comp.qty.toFixed(1)} Thùng)</span></span>
+                      <span style="font-weight:800; color:var(--primary);">${pct}% <span style="font-size:12px; color:var(--text-muted);">(${comp.qty.toFixed(1)} Thùng)</span></span>
                     </div>
                     <div style="width:100%; height:6px; background:var(--card-border); border-radius:3px;">
                       <div style="height:100%; width:${pct}%; background:var(--purple-gradient); border-radius:3px;"></div>
@@ -5460,19 +5453,19 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
           </div>
         </div>
         ` : ''}
-         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:4px solid var(--amber); margin-bottom:40px;">
-          <div onclick="toggleOrderAccordion('acc_leaderboard_main')" style="padding:14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:13px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> BẢNG XẾP HẠNG NHÂN VIÊN</div>
+         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--amber); margin-bottom:48px;">
+          <div onclick="toggleOrderAccordion('acc_leaderboard_main')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> BẢNG XẾP HẠNG NHÂN VIÊN</div>
             <i id="icon_acc_leaderboard_main" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
           </div>
-          <div id="acc_leaderboard_main" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
-            <div style="display:flex; flex-direction:column; gap:10px;">
+          <div id="acc_leaderboard_main" class="hidden" style="padding:20px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
+            <div style="display:flex; flex-direction:column; gap:12px;">
 
               ${zeroSales.length > 0 ? `
-                <div style="background:rgba(225, 29, 72, 0.05); border:1px dashed var(--rose); border-radius:12px; padding:12px; margin-bottom:6px;">
-                  <div style="font-size:12px; font-weight:800; color:var(--rose); margin-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: CHƯA NỔ ĐƠN (${zeroSales.length})</div>
-                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    ${zeroSales.map(u => `<span style="font-size:11px; font-weight:700; background:#fff; color:var(--text-main); border:1px solid var(--rose); padding:3px 8px; border-radius:12px;">[${u.code}]${u.name.split(' ').pop()}</span>`).join('')}
+                <div style="background:rgba(225, 29, 72, 0.05); border:1px dashed var(--rose); border-radius:14px; padding:14px; margin-bottom:8px;">
+                  <div style="font-size:14.5px; font-weight:800; color:var(--rose); margin-bottom:10px;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: CHƯA NỔ ĐƠN (${zeroSales.length})</div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    ${zeroSales.map(u => `<span style="font-size:13px; font-weight:700; background:#fff; color:var(--text-main); border:1px solid var(--rose); padding:4px 10px; border-radius:12px;">[${u.code}]${u.name.split(' ').pop()}</span>`).join('')}
                   </div>
                 </div>
               ` : ''}
@@ -5483,7 +5476,6 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
             const topSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 3);
             const accId = `kpi_acc_${rep.code}`;
 
-        // Tính số đơn tại quầy của riêng nhân viên này
             let repTaiQuay = 0, repTuXa = 0;
             orders.forEach(o => {
               if (o.status === 'Đã hủy') return;
@@ -5500,46 +5492,44 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
               }
             });
             return `
-              <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:4px solid ${medalCol}; overflow:hidden;">
-                <div onclick="toggleOrderAccordion('${accId}')" style="padding:12px; display:flex; flex-direction:column; gap:6px; cursor:pointer;">
+              <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:5px solid ${medalCol}; overflow:hidden;">
+                <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px; display:flex; flex-direction:column; gap:8px; cursor:pointer;">
                   <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                      <div style="width:24px; height:24px; border-radius:50%; background:${medalCol}; color:#fff; display:flex; justify-content:center; align-items:center; font-weight:900; font-size:12px;">${index + 1}</div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <div style="width:28px; height:28px; border-radius:50%; background:${medalCol}; color:#fff; display:flex; justify-content:center; align-items:center; font-weight:900; font-size:14.5px;">${index + 1}</div>
                       <div>
-                        <div style="font-size:14px; font-weight:800; color:var(--text-main);">${rep.name}</div>
-                        <div style="font-size:11px; font-weight:700; color:var(--text-muted);">Mã: ${rep.code}</div>
+                        <div style="font-size:17px; font-weight:800; color:var(--text-main);">${rep.name}</div>
+                        <div style="font-size:13px; font-weight:700; color:var(--text-muted);">Mã: ${rep.code}</div>
                       </div>
                     </div>
               <div style="text-align:right;">
-                      <div style="font-size:16px; font-weight:900; color:var(--emerald);">${rep.kien.toFixed(1)} <span style="font-size:11px;">Thùng</span></div>
-                     <div style="font-size:13px; font-weight:800; color:#D97706; margin-top:2px;">
-                   ${rep.compSet.size} <span style="font-size:10px; color:var(--text-muted);">Cty</span> - ${rep.skuMap.size} <span style="font-size:10px; color:var(--text-muted);">SKUs</span>
+                      <div style="font-size:19px; font-weight:900; color:var(--emerald);">${rep.kien.toFixed(1)} <span style="font-size:13px;">Thùng</span></div>
+                     <div style="font-size:15.5px; font-weight:800; color:#D97706; margin-top:3px;">
+                   ${rep.compSet.size} <span style="font-size:12px; color:var(--text-muted);">Cty</span> - ${rep.skuMap.size} <span style="font-size:12px; color:var(--text-muted);">SKUs</span>
                 </div>                   
                  </div>
                   </div>
 
-                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.03); padding:6px 8px; border-radius:6px; margin-top:4px;">
+                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.03); padding:8px 10px; border-radius:8px; margin-top:6px;">
                     <span>🛒 <b>${rep.don}</b> Đơn</span>
                     <span>📍 <b>${rep.tiems.size}</b> Tiệm</span>
-                    <!-- Huy hiệu GPS chuyên nghiệp -->
-                    <span style="background:${(repTaiQuay / rep.don) >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(225, 29, 72, 0.1)'}; color:${(repTaiQuay / rep.don) >= 0.8 ? 'var(--emerald)' : 'var(--rose)'}; padding:2px 6px; border-radius:6px; font-weight:800;">
+                    <span style="background:${(repTaiQuay / rep.don) >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(225, 29, 72, 0.1)'}; color:${(repTaiQuay / rep.don) >= 0.8 ? 'var(--emerald)' : 'var(--rose)'}; padding:4px 8px; border-radius:8px; font-weight:800;">
                       <i class="fa-solid fa-location-dot"></i> ${repTaiQuay}/${rep.don} tại quầy
                     </span>
                     <span style="color:var(--primary);">Drop: ${(rep.kien / rep.don).toFixed(1)} Th/Đ</span>
                   </div>
 
-                  <div style="width:100%; height:4px; background:var(--card-border); border-radius:2px; margin-top:2px;">
-                    <div style="height:100%; width:${progressPercent}%; background:${index === 0 ? 'var(--emerald-gradient)' : 'var(--primary)'}; border-radius:2px;"></div>
+                  <div style="width:100%; height:5px; background:var(--card-border); border-radius:3px; margin-top:3px;">
+                    <div style="height:100%; width:${progressPercent}\%; background:${index === 0 ? 'var(--emerald-gradient)' : 'var(--primary)'}; border-radius:3px;"></div>
                   </div>
                 </div>
 
-     <!-- CHI TIẾT SẢN PHẨM ĐÃ BÁN (QUY ĐỔI CHUẨN THÙNG) -->
-                  <div id="${accId}" class="hidden" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:rgba(255,255,255,0.5);">
-                    <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                  <div id="${accId}" class="hidden" style="padding:12px 14px; border-top:1px dashed var(--card-border); background:rgba(255,255,255,0.5);">
+                    <div style="font-size:13px; font-weight:800; color:var(--text-muted); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                       <span><i class="fa-solid fa-boxes-stacked"></i> CHI TIẾT SẢN PHẨM ĐÃ BÁN:</span>
-                      <span style="font-size:10px; color:var(--primary); font-weight:700;">(Đúng chuẩn Thùng)</span>
+                      <span style="font-size:12px; color:var(--primary); font-weight:700;">(Đúng chuẩn Thùng)</span>
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto; padding-right:4px;">
+                    <div style="display:flex; flex-direction:column; gap:5px; max-height:160px; overflow-y:auto; padding-right:6px;">
                       ${(() => {
                         const repSkusMap = {};
                         orders.forEach(o => {
@@ -5551,7 +5541,6 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
                                 let skuName = String(item.name || item.sku || 'Sản phẩm khác').trim();
                                 let q = Number(item.qty || item.soluong || 0);
                                 
-                                // Tra cứu quy cách ratio chuẩn (mặc định 50 nếu không tìm thấy)
                                 let foundProd = typeof products !== 'undefined' ? products.find(p => String(p.name || '').trim().toLowerCase() === skuName.toLowerCase()) : null;
                                 let ratio = Number(item.ratio || foundProd?.ratio || foundProd?.quyCach || 50);
                                 if (ratio <= 0) ratio = 50;
@@ -5572,7 +5561,7 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
                           return { name: sku, kien: sKien, le: sLe, raw: data.totalQty };
                         }).sort((a, b) => b.raw - a.raw);
 
-                        if (sortedSkus.length === 0) return '<div style="font-size:10px; color:var(--text-muted); font-style:italic;">Chưa có phát sinh sản phẩm</div>';
+                        if (sortedSkus.length === 0) return '<div style="font-size:12px; color:var(--text-muted); font-style:italic;">Chưa có phát sinh sản phẩm</div>';
 
                         return sortedSkus.map(skuObj => {
                           let strQty = '';
@@ -5583,7 +5572,7 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
                           }
 
                           return `
-                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(0,0,0,0.03);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:5px 0; border-bottom:1px solid rgba(0,0,0,0.03);">
                               <span style="color:var(--text-main); font-weight:700; max-width:70%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${skuObj.name}">• ${skuObj.name}</span>
                               <span style="color:var(--primary); font-weight:800; white-space:nowrap;">${strQty}</span>
                             </div>
@@ -5605,7 +5594,6 @@ const totalCompanyQty = companyDistList.reduce((sum, c) => sum + c.qty, 0);
         </div>
       `;
     }
-  }
   // Biến lưu trạng thái tab trong Modal Lịch sử ('top' hoặc 'diary')
 window._historyModalTab = 'top';
 
