@@ -7442,8 +7442,8 @@ window.deleteTargetSku = async function(skuCode) {
   } catch(e) { alert("Lỗi xóa chỉ tiêu: " + e.message); }
 };
 
-// Component thẻ tiến độ tổng quan (Đã bổ sung hiển thị thêm số lượng SKUs)
-function buildProgressCard(title, icon, colorTheme, target, actual, pct, skuCount) {
+// Component thẻ tiến độ (Dùng chung cho cả Tab Tổng và Cá Nhân)
+function buildProgressCard(title, icon, colorTheme, target, actual, pct) {
     let statusColor = 'var(--rose)';
     let barGradient = 'var(--rose-gradient)';
     if(pct >= 100) { statusColor = 'var(--emerald)'; barGradient = 'var(--emerald-gradient)'; }
@@ -7457,18 +7457,15 @@ function buildProgressCard(title, icon, colorTheme, target, actual, pct, skuCoun
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">TỔNG CHỈ TIÊU</div>
-                <div style="font-size:20px; font-weight:900; color:var(--text-main);">${formatQtySmart(target)} <span style="font-size:12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
-                <div style="font-size:11px; font-weight:800; color:var(--primary); margin-top:2px;">(${skuCount} SKUs)</div>
+                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(target)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
             </div>
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">THỰC ĐẠT</div>
-                <div style="font-size:20px; font-weight:900; color:var(--text-main);">${formatQtySmart(actual)} <span style="font-size:12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
-                <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-top:2px;">(Thực hiện)</div>
+                <div style="font-size:22px; font-weight:900; color:var(--text-main);">${formatQtySmart(actual)} <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
             </div>
             <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
                 <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">TỔNG TIẾN ĐỘ</div>
-                <div style="font-size:20px; font-weight:900; color:${statusColor};">${formatQtySmart(pct)}%</div>
-                <div style="font-size:11px; font-weight:800; color:var(--text-muted); margin-top:2px;">(Hoàn thành)</div>
+                <div style="font-size:22px; font-weight:900; color:${statusColor};">${formatQtySmart(pct)}%</div>
             </div>
         </div>
         <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; position: relative;">
@@ -7486,49 +7483,37 @@ window.calculateAndRenderTargets = async function() {
   let salesTarget = 0;
   let salesActual = 0;
   let targetItems = [];
+
   let allTargetsMap = {}; 
 
   try {
     const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
     let targetDocFound = false;
     
-    targetsSnap.forEach(docSnap => {
-      const data = docSnap.data();
+    targetsSnap.forEach(doc => {
+      const data = doc.data();
       if(data.month === window._chiTieuTargetMonth) {
         targetDocFound = true;
         const items = data.items || [];
         const sCode = data.salesCode;
         
         items.forEach(it => {
-          // Chuẩn hóa dữ liệu để tương thích cả cấu trúc cũ và mới
           const t = Number(it.target || 0);
-          const sCodeKey = it.skuCode || it.code;
-          
-          if (sCodeKey) {
-            globalTarget += t;
-            allTargetsMap[`${sCode}_${String(sCodeKey).toUpperCase()}`] = true;
-            
-            if (sCode === window._chiTieuTargetSalesCode) {
-               salesTarget += t;
-               targetItems.push({
-                  skuCode: sCodeKey,
-                  skuName: it.skuName || it.name || sCodeKey,
-                  compCode: it.compCode || getCompCodeFromProductCode(sCodeKey),
-                  compName: it.compName || 'Công ty ' + (it.compCode || getCompCodeFromProductCode(sCodeKey)),
-                  target: t,
-                  createdByUid: it.createdByUid
-               });
-            }
+          globalTarget += t;
+          allTargetsMap[`${sCode}_${it.skuCode}`] = true;
+          if (sCode === window._chiTieuTargetSalesCode) {
+             salesTarget += t;
+             targetItems.push(it);
           }
         });
       }
     });
 
-    // Tự động kế thừa tháng cũ nếu tháng mới chưa có dữ liệu
+    // Tự động kế thừa tháng cũ nếu tháng mới chưa có
     if (!targetDocFound) {
       let allMonths = [];
-      targetsSnap.forEach(docSnap => {
-        const d = docSnap.data();
+      targetsSnap.forEach(doc => {
+        const d = doc.data();
         if(d.month && d.month < window._chiTieuTargetMonth) {
           if(!allMonths.includes(d.month)) allMonths.push(d.month);
         }
@@ -7550,50 +7535,47 @@ window.calculateAndRenderTargets = async function() {
           }
         });
         
-        setTimeout(() => calculateAndRenderTargets(), 400);
+        setTimeout(() => calculateAndRenderTargets(), 300);
         return;
       }
     }
-  } catch (e) {
-    console.error("Lỗi tải chỉ tiêu:", e);
-  }
+
+  } catch (e) {}
 
   let actuals = {}; 
-  try {
-    orders.forEach(o => {
-      if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
-        if (Array.isArray(o.items)) {
-          o.items.forEach(item => {
-            const ratio = item.tyLeQuyDoi || 50;
-            const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
-            const skuKey = String(item.code || '').toUpperCase();
-            
-            if (allTargetsMap[`${o.salesCode}_${skuKey}`]) {
-              globalActual += qtyThung;
-            }
-            
-            if (o.salesCode === window._chiTieuTargetSalesCode) {
-              actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-            }
-          });
-        }
+  
+  orders.forEach(o => {
+    if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
+      if (Array.isArray(o.items)) {
+        o.items.forEach(item => {
+          const ratio = item.tyLeQuyDoi || 50;
+          const qtyThung = Number(item.qty || 0) / ratio;
+          const skuKey = String(item.code || '').toUpperCase();
+          
+          if (allTargetsMap[`${o.salesCode}_${skuKey}`]) {
+            globalActual += qtyThung;
+          }
+          
+          if (o.salesCode === window._chiTieuTargetSalesCode) {
+            actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
+          }
+        });
       }
-    });
-  } catch(e) {}
+    }
+  });
 
   let grouped = {};
   targetItems.forEach(it => {
-     const cCode = it.compCode || 'KHAC';
-     if(!grouped[cCode]) {
-        grouped[cCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [] };
+     if(!grouped[it.compCode]) {
+        grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [] };
      }
      
-     let act = actuals[String(it.skuCode).toUpperCase()] || 0;
+     let act = actuals[it.skuCode] || 0;
      salesActual += act; 
 
-     grouped[cCode].compTarget += it.target;
-     grouped[cCode].compActual += act;
-     grouped[cCode].skus.push({
+     grouped[it.compCode].compTarget += it.target;
+     grouped[it.compCode].compActual += act;
+     grouped[it.compCode].skus.push({
         code: it.skuCode,
         name: it.skuName,
         target: it.target,
@@ -7603,23 +7585,47 @@ window.calculateAndRenderTargets = async function() {
   });
 
   const container = document.getElementById('targetDashboardContainer');
-  if(!container) return;
-
-  let dashHtml = '';
-
+  
+  // =========================================================================
+  // GOM CHUNG THÀNH 1 KHUNG VỚI 2 TAB CON: TỔNG QUAN & CÁ NHÂN
+  // =========================================================================
+  const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
+  
+  let tabHeaderHtml = '';
   if (isAdminOrManager) {
-      const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
-      dashHtml += buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct, targetItems.length); 
+      tabHeaderHtml = `
+        <div style="display:flex; background:rgba(0,0,0,0.04); border-radius:12px; padding:4px; margin-bottom:16px;">
+          <div onclick="switchChiTieuDashboardTab('tongQuan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${isTongQuanTab ? 'background:var(--card-bg); color:var(--primary); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+            <i class="fa-solid fa-globe"></i> 1. TỔNG QUAN TOÀN CÔNG TY
+          </div>
+          <div onclick="switchChiTieuDashboardTab('caNhan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${!isTongQuanTab ? 'background:var(--card-bg); color:var(--amber); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+            <i class="fa-solid fa-user-check"></i> 2. CHI TIẾT CÁ NHÂN
+          </div>
+        </div>
+      `;
   }
 
-  const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
-  const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
-  const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-  
-  dashHtml += buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct, targetItems.length);
+  let topCardHtml = '';
+  if (!isAdminOrManager || isTongQuanTab) {
+      if (isAdminOrManager) {
+          const gPct = globalTarget > 0 ? (globalActual / globalTarget) * 100 : 0;
+          topCardHtml = buildProgressCard('TỔNG TIẾN ĐỘ TOÀN CÔNG TY (TẤT CẢ SALES)', 'fa-globe', 'primary', globalTarget, globalActual, gPct);
+      } else {
+          // Nếu là Sales, luôn hiển thị card cá nhân lên đầu
+          const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
+          const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+          const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+          topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+      }
+  } else {
+      const sPct = salesTarget > 0 ? (salesActual / salesTarget) * 100 : 0;
+      const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+      const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+      topCardHtml = buildProgressCard(`TIẾN ĐỘ CÁ NHÂN: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'amber', salesTarget, salesActual, sPct);
+  }
 
-  if (targetItems.length === 0) {
-    container.innerHTML = dashHtml + `
+  if (targetItems.length === 0 && (!isAdminOrManager || isTongQuanTab)) {
+    container.innerHTML = tabHeaderHtml + topCardHtml + `
       <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
         <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
           <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
@@ -7672,19 +7678,16 @@ window.calculateAndRenderTargets = async function() {
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 4px;">CHỈ TIÊU</div>
-                    <div style="font-size: 16px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 11px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
-                    <div style="font-size: 10px; font-weight: 800; color: var(--primary); margin-top: 2px;">(${g.skus.length} SKUs)</div>
+                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">CHỈ TIÊU</div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
                 </div>
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 4px;">THỰC HIỆN</div>
-                    <div style="font-size: 16px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 11px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
-                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-top: 2px;">(Thực hiện)</div>
+                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
+                    <div style="font-size: 18px; font-weight: 900; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 12px; font-weight:800; color:var(--text-muted);">Thùng</span></div>
                 </div>
                 <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04);">
-                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 4px;">TIẾN ĐỘ</div>
-                    <div style="font-size: 16px; font-weight: 900; color: ${colorClass};">${formatQtySmart(pct)}%</div>
-                    <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-top: 2px;">(Hoàn thành)</div>
+                    <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ</div>
+                    <div style="font-size: 18px; font-weight: 900; color: ${colorClass};">${formatQtySmart(pct)}%</div>
                 </div>
             </div>
 
@@ -7743,12 +7746,11 @@ window.calculateAndRenderTargets = async function() {
     `;
   }).join('');
 
-  if (isAdminOrManager && !isTongQuanTab) {
-      container.innerHTML = dashHtml + detailHtml;
-  } else if (isAdminOrManager && isTongQuanTab) {
+  // Nếu đang ở tab Tổng quan toàn công ty thì chỉ hiện thẻ tổng quan, ẩn danh sách chi tiết công ty bên dưới cho gọn
+  if (isAdminOrManager && isTongQuanTab) {
       container.innerHTML = tabHeaderHtml + topCardHtml;
   } else {
-      container.innerHTML = topCardHtml + detailHtml;
+      container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
   }
 };
 </script>
