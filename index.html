@@ -6983,6 +6983,7 @@ window.renderGocSalesTab = function(container) {
 // ==========================================
 window._chiTieuSubTab = 'phanTuyen';
 window._chiTieuTargetSalesCode = '';
+window._chiTieuTargetSalesRouteCode = ''; // Biến lưu trạng thái đang chọn NV nào để phân tuyến
 window._chiTieuTargetMonth = new Date().toISOString().slice(0, 7); // Mặc định tháng hiện tại YYYY-MM
 let globalMonthlyTargets = [];
 
@@ -7003,7 +7004,9 @@ window.saveRouteAssignment = async function(uid) {
     const userIndex = users.findIndex(u => u.uid === uid);
     if (userIndex > -1) users[userIndex].assignedRoutes = selectedRoutes;
     if (currentUser.uid === uid) currentUser.assignedRoutes = selectedRoutes; // Cập nhật luôn nếu tự phân cho mình
-    alert("✅ Phân tuyến thành công!");
+    
+    playSystemSound('success');
+    alert("✅ Cập nhật phân tuyến thành công!");
   } catch (e) {
     alert("Lỗi phân tuyến: " + e.message);
   }
@@ -7014,11 +7017,11 @@ window.renderChiTieuTab = async function(container) {
   const isPhanTuyen = window._chiTieuSubTab === 'phanTuyen';
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
-  // Lấy dữ liệu Sales để hiển thị
-  const salesUsersList = users.filter(u => u.role === 'sales' || u.role === 'admin' || u.role === 'manager');
+  // CHỈ LẤY NHÂN VIÊN SALES ĐỂ PHÂN TUYẾN (Bỏ qua Admin, Manager)
+  const salesUsersList = users.filter(u => u.role === 'sales');
   
-  if (window._chiTieuTargetSalesCode === '') {
-     window._chiTieuTargetSalesCode = currentUser.code;
+  if (window._chiTieuTargetSalesCode === '' && salesUsersList.length > 0) {
+     window._chiTieuTargetSalesCode = salesUsersList[0].code;
   }
 
   container.innerHTML = `
@@ -7038,36 +7041,51 @@ window.renderChiTieuTab = async function(container) {
     ${isPhanTuyen ? `
       <!-- SUB-TAB 1: PHÂN TUYẾN -->
       <div class="card" style="padding:16px;">
-        <h3 style="font-size:14px; font-weight:800; color:var(--text-main); margin-bottom:12px;"><i class="fa-solid fa-user-check"></i> Phân Tuyến Cố Định Cho Nhân Viên</h3>
+        <h3 style="font-size:14px; font-weight:800; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng (Tối Ưu)</h3>
         ${isAdminOrManager ? `
-          <div style="display:flex; flex-direction:column; gap:12px;">
-            ${salesUsersList.map(u => {
-              const assigned = u.assignedRoutes || [];
-              return `
-                <div style="border:1px solid var(--card-border); border-radius:10px; padding:12px; background:var(--panel-bg);">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-weight:800; font-size:15px; color:var(--primary);">[${u.code}]${u.name}</div>
-                    <button class="btn btn-green btn-sm" onclick="saveRouteAssignment('${u.uid}')"><i class="fa-solid fa-floppy-disk"></i> Lưu Tuyến</button>
-                  </div>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap; background:var(--card-bg); padding:10px; border-radius:8px;">
-                    ${routeGroupsList.map(r => `
-                      <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:700; background:rgba(0,0,0,0.03); padding:4px 8px; border-radius:6px; cursor:pointer;">
-                        <input type="checkbox" class="route-checkbox-${u.uid}" value="${r.nhomDoiTuong}" ${assigned.includes(String(r.nhomDoiTuong)) ? 'checked' : ''}>
-                        Tuyến ${r.nhomDoiTuong}
-                      </label>
-                    `).join('')}
-                  </div>
-                </div>
-              `;
-            }).join('')}
+          
+          <div style="margin-bottom: 16px;">
+            <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN NHÂN VIÊN SALES CẦN PHÂN TUYẾN:</label>
+            <select onchange="window._chiTieuTargetSalesRouteCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; color:var(--primary); background:var(--bg-dark); border-radius:10px; border:1px solid var(--card-border);">
+              ${!window._chiTieuTargetSalesRouteCode ? '<option value="" disabled selected>-- Bấm để chọn 1 nhân viên Sales --</option>' : ''}
+              ${salesUsersList.map(u => `<option value="${u.uid}" ${window._chiTieuTargetSalesRouteCode === u.uid ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
+            </select>
           </div>
+
+          ${window._chiTieuTargetSalesRouteCode ? (() => {
+            const targetUser = salesUsersList.find(u => u.uid === window._chiTieuTargetSalesRouteCode);
+            if (!targetUser) return '';
+            const assigned = targetUser.assignedRoutes || [];
+            return `
+              <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px dashed var(--card-border); padding-bottom:10px;">
+                  <span style="font-weight:800; font-size:14px; color:var(--text-main);">2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span></span>
+                  <button class="btn btn-green" style="font-weight:800; padding:8px 16px; font-size:13px; box-shadow:0 4px 10px rgba(5,150,105,0.2);" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
+                </div>
+                
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:10px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:350px; overflow-y:auto;">
+                  ${routeGroupsList.map(r => `
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:14px; font-weight:700; color:var(--text-main); padding:8px 10px; background:rgba(0,0,0,0.02); border-radius:8px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='rgba(0,0,0,0.02)'">
+                      <input type="checkbox" class="route-checkbox-${targetUser.uid}" value="${r.nhomDoiTuong}" ${assigned.includes(String(r.nhomDoiTuong)) ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer; margin:0; padding:0; flex-shrink:0; appearance:auto; -webkit-appearance:auto; accent-color:var(--primary);">
+                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.noiDung ? r.noiDung : 'Tuyến ' + r.nhomDoiTuong}">Tuyến ${r.nhomDoiTuong}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          })() : `
+            <div style="text-align:center; padding:30px; color:var(--text-muted); background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:12px; font-weight:700; font-size:14px;">
+              <i class="fa-solid fa-arrow-up" style="margin-bottom:8px; font-size:20px; color:var(--card-border);"></i><br>
+              Vui lòng chọn 1 nhân viên Sales ở trên để bắt đầu giao tuyến.
+            </div>
+          `}
         ` : `
           <div style="text-align:center; padding:20px; color:var(--rose); font-weight:800; background:rgba(225, 29, 72, 0.1); border-radius:10px;">
             <i class="fa-solid fa-lock"></i> Chỉ Admin hoặc Manager mới có quyền phân tuyến.
           </div>
-          <div style="margin-top:12px; font-weight:700; color:var(--text-main);">Tuyến bạn đang phụ trách:</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-            ${currentUser.assignedRoutes && currentUser.assignedRoutes.length > 0 ? currentUser.assignedRoutes.map(r => `<span style="background:var(--primary); color:#fff; padding:6px 12px; border-radius:8px; font-weight:800; font-size:13px;">Tuyến ${r}</span>`).join('') : '<span style="color:var(--text-muted);">Chưa được phân tuyến nào.</span>'}
+          <div style="margin-top:16px; font-weight:800; color:var(--text-main); font-size:14px;">Tuyến bạn đang phụ trách:</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+            ${currentUser.assignedRoutes && currentUser.assignedRoutes.length > 0 ? currentUser.assignedRoutes.map(r => `<span style="background:var(--primary); color:#fff; padding:6px 14px; border-radius:8px; font-weight:800; font-size:13px; box-shadow:0 2px 6px rgba(37,99,235,0.2);">Tuyến ${r}</span>`).join('') : '<span style="color:var(--text-muted); font-size:13px; font-weight:700; background:var(--card-bg); padding:8px 12px; border-radius:8px;">Bạn chưa được phân tuyến nào.</span>'}
           </div>
         `}
       </div>
@@ -7075,8 +7093,8 @@ window.renderChiTieuTab = async function(container) {
       <!-- SUB-TAB 2: CHỈ TIÊU (KPI THÙNG) -->
       <div class="card" style="padding:16px;">
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-          <input type="month" value="${window._chiTieuTargetMonth}" onchange="window._chiTieuTargetMonth = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:10px; font-weight:800; color:var(--rose);">
-          <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:10px; font-weight:800; color:var(--primary);" ${isAdminOrManager ? '' : 'disabled'}>
+          <input type="month" value="${window._chiTieuTargetMonth}" onchange="window._chiTieuTargetMonth = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:10px; font-weight:800; color:var(--rose); border-radius:8px; border:1px solid var(--card-border);">
+          <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:10px; font-weight:800; color:var(--primary); border-radius:8px; border:1px solid var(--card-border);" ${isAdminOrManager ? '' : 'disabled'}>
             ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}] ${u.name}</option>`).join('')}
           </select>
         </div>
@@ -7095,7 +7113,6 @@ window.renderChiTieuTab = async function(container) {
     `}
   `;
 
-  // Tính toán Tiến độ nếu đang ở Tab Chỉ Tiêu
   if (!isPhanTuyen) {
     calculateAndRenderTargets();
   }
@@ -7175,7 +7192,7 @@ window.calculateAndRenderTargets = async function() {
 
   const container = document.getElementById('targetDashboardContainer');
   if (targetItems.length === 0) {
-    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Chưa có chỉ tiêu nào được thiết lập cho nhân viên này trong tháng ${window._chiTieuTargetMonth}.</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); background:var(--panel-bg); border-radius:12px; border:1px dashed var(--card-border); font-weight:700;">Chưa có chỉ tiêu nào được thiết lập cho nhân viên này trong tháng ${window._chiTieuTargetMonth}.</div>`;
     return;
   }
 
@@ -7201,25 +7218,25 @@ window.calculateAndRenderTargets = async function() {
     }
 
     return `
-      <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:10px; padding:12px; margin-bottom:10px;">
+      <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:10px; padding:14px; margin-bottom:10px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div style="font-weight:800; font-size:14px; color:var(--text-main);">
-            <span style="background:${isComp ? '#DB2777' : '#3B82F6'}; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; margin-right:4px;">${isComp ? 'CÔNG TY' : 'MÃ SP'}</span>
+          <div style="font-weight:900; font-size:15px; color:var(--text-main);">
+            <span style="background:${isComp ? '#DB2777' : '#3B82F6'}; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; margin-right:6px;">${isComp ? 'CÔNG TY' : 'MÃ SP'}</span>
             ${tgt.code}
           </div>
           ${alertHtml}
         </div>
         
-        <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-muted); margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-muted); margin-bottom:8px;">
           <span>Chỉ tiêu: <b style="color:var(--text-main);">${target} Thùng</b></span>
           <span>Thực đạt: <b style="color:var(--text-main);">${actual.toFixed(1)} Thùng</b></span>
         </div>
 
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div style="flex:1; height:8px; background:var(--card-bg); border-radius:4px; overflow:hidden; border:1px solid rgba(0,0,0,0.05);">
-            <div style="height:100%; width:${Math.min(pct, 100)}%; background:${barColor}; border-radius:4px; transition:width 0.5s;"></div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="flex:1; height:10px; background:var(--card-bg); border-radius:5px; overflow:hidden; border:1px inset rgba(0,0,0,0.1);">
+            <div style="height:100%; width:${Math.min(pct, 100)}%; background:${barColor}; border-radius:5px; transition:width 0.8s ease-in-out;"></div>
           </div>
-          <span style="font-weight:900; font-size:14px; color:${pct>=100 ? 'var(--emerald)' : 'var(--text-main)'}">${pct.toFixed(1)}%</span>
+          <span style="font-weight:900; font-size:15px; color:${pct>=100 ? 'var(--emerald)' : 'var(--text-main)'}; min-width:45px; text-align:right;">${pct.toFixed(1)}%</span>
         </div>
       </div>
     `;
