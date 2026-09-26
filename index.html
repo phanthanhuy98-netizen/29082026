@@ -5095,10 +5095,16 @@ else if (tab === 'ctkm') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
       window._ctkmSearchKey = window._ctkmSearchKey || '';
+      let ctkmSearchTimer = null;
 
-      window.filterCtkm = function(keyword) {
-        window._ctkmSearchKey = keyword;
-        drawCtkmUI();
+      // Hàm tìm kiếm mượt mà có cơ chế chống giật lag (debounce)
+      window.debounceFilterCtkm = function(keyword) {
+        const inputVal = keyword;
+        clearTimeout(ctkmSearchTimer);
+        ctkmSearchTimer = setTimeout(() => {
+          window._ctkmSearchKey = inputVal;
+          drawCtkmUI();
+        }, 200); // Độ trễ 200ms giúp gõ chữ cực kỳ mượt, không bị đơ giật
       };
 
       const drawCtkmUI = () => {
@@ -5120,13 +5126,16 @@ else if (tab === 'ctkm') {
             groupedPromos[ctuKey].push(km);
         });
 
-        // Sắp xếp các key MaCtu
         const sortedCtus = Object.keys(groupedPromos).sort();
 
         let groupHtmlArr = sortedCtus.map(ctu => {
             const prods = groupedPromos[ctu];
             const accId = `acc_ctkm_ctu_${ctu.replace(/[^a-zA-Z0-9]/g, '_')}`;
             
+            // Tự động tra cứu tên công ty từ danh mục companyList
+            let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctu);
+            let compDisplayName = foundComp && foundComp.tenCtu ? `${ctu} - ${foundComp.tenCtu}` : `MaCtu: ${ctu}`;
+
             let listHtml = prods.map(km => {
               const isAppliedForAllCust = !km.khachHang || km.khachHang.trim() === '';
               return `
@@ -5153,7 +5162,7 @@ else if (tab === 'ctkm') {
               <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:12px; flex-shrink:0;">
                 <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(37, 99, 235, 0.05);">
                   <div style="display:flex; gap:10px; align-items:center; flex:1;">
-                    <span style="font-size:15px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-layer-group"></i> MaCtu: ${ctu}</span>
+                    <span style="font-size:15px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-building"></i> ${compDisplayName}</span>
                     <span style="font-size:12px; font-weight:700; background:var(--primary); color:#fff; padding:2px 8px; border-radius:10px;">${prods.length} CTKM</span>
                   </div>
                   <i class="fa-solid fa-chevron-down" id="icon_${accId}" style="font-size:14px; color:var(--primary); transition:transform 0.2s;"></i>
@@ -5178,7 +5187,8 @@ else if (tab === 'ctkm') {
           </div>
 
           <div class="card" style="margin-bottom:12px; padding:12px;">
-            <input type="text" placeholder="🔍 Gõ Mã KM, Nội dung, Mã Hàng, MaCtu..." value="${window._ctkmSearchKey}" oninput="filterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
+            <!-- Dùng hàm debounceFilterCtkm giúp gõ phím cực kỳ mượt mà, không bị giật lag -->
+            <input type="text" id="ctkmSearchInput" placeholder="🔍 Gõ Mã KM, Nội dung, Mã Hàng, MaCtu..." value="${window._ctkmSearchKey}" oninput="debounceFilterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
           </div>
 
           <div style="display:flex; flex-direction:column; gap:4px;">
