@@ -5753,7 +5753,7 @@ else if (tab === 'kpi') {
        }
        }
 // ==========================================
-// KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (SẮP XẾP TỔNG CỘNG THEO MÃ CÔNG TY)
+// KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (GỘP THEO 2 KÝ TỰ ĐẦU MÃ SẢN PHẨM)
 // ==========================================
 window._historyModalTab = 'top';
 window._historyDateFrom = '';
@@ -5946,32 +5946,21 @@ window._renderHistoryResultsOnly = function() {
 
       let groupedByCompany = {};
       topProductsList.forEach(tp => {
-        let ctyKey = 'KHÁC';
-        const codeStr = (tp.code || '').toUpperCase();
-        if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
-        else {
-          const match = codeStr.match(/^\[(.*?)\]/);
-          if (match) { ctyKey = match[1].trim(); } 
-          else {
-            const parts = codeStr.split(/[-_]/);
-            if (parts.length > 1) ctyKey = parts[0].trim();
-            else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
-          }
-        }
+        let cleanCode = String(tp.code || '').trim();
+        let ctyKey = cleanCode.length >= 2 ? cleanCode.substring(0, 2).toUpperCase() : 'KHAC';
+        
         if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
         groupedByCompany[ctyKey].push(tp);
       });
 
       let groupHtmlArr = [];
-      Object.keys(groupedByCompany).forEach(ctyCode => {
+      Object.keys(groupedByCompany).sort().forEach(ctyCode => {
         const prods = groupedByCompany[ctyCode];
         let displayName = `Công Ty ${ctyCode}`;
-        if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
-        else {
-          const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(ctyCode).toUpperCase());
-          if (found && found.tenCtu) { displayName = found.tenCtu; }
-        }
-        const groupAccordionId = `acc_company_${ctyCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
+        if (found && found.tenCtu) { displayName = found.tenCtu; }
+
+        const groupAccordionId = `acc_company_${ctyCode}`;
 
         let prodListHtml = prods.map(tp => {
           const ratio = Number(tp.tyleQuyDoi || 50);
@@ -6057,53 +6046,13 @@ window._renderHistoryResultsOnly = function() {
         });
 
         let consolidatedList = Array.from(aggregatedItems.values());
-        
-        // SẮP XẾP SẢN PHẨM TRONG TỔNG CỘNG THEO MÃ CÔNG TY
-        consolidatedList.sort((a, b) => {
-          let ctyA = 'KHÁC', ctyB = 'KHÁC';
-          const codeA = (a.code || '').toUpperCase();
-          const codeB = (b.code || '').toUpperCase();
-          
-          if (codeA.startsWith('11') || codeA.includes('TLSG')) ctyA = '11';
-          else {
-            const m = codeA.match(/^\[(.*?)\]/);
-            if (m) ctyA = m[1].trim();
-            else {
-              const p = codeA.split(/[-_]/);
-              if (p.length > 1) ctyA = p[0].trim();
-              else if (codeA.length >= 2) ctyA = codeA.substring(0, 2);
-            }
-          }
 
-          if (codeB.startsWith('11') || codeB.includes('TLSG')) ctyB = '11';
-          else {
-            const m = codeB.match(/^\[(.*?)\]/);
-            if (m) ctyB = m[1].trim();
-            else {
-              const p = codeB.split(/[-_]/);
-              if (p.length > 1) ctyB = p[0].trim();
-              else if (codeB.length >= 2) ctyB = codeB.substring(0, 2);
-            }
-          }
-
-          if (ctyA !== ctyB) return ctyA.localeCompare(ctyB);
-          return b.qty - a.qty; // Cùng công ty thì sắp xếp theo số lượng giảm dần
-        });
-
+        // GOM NHÓM VÀ SẮP XẾP DỰA TRÊN 2 KÝ TỰ ĐẦU CỦA MÃ SẢN PHẨM
         let groupedByCompany = {};
         consolidatedList.forEach(item => {
-          let ctyKey = 'KHÁC';
-          const codeStr = (item.code || '').toUpperCase();
-          if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
-          else {
-            const match = codeStr.match(/^\[(.*?)\]/);
-            if (match) { ctyKey = match[1].trim(); } 
-            else {
-              const parts = codeStr.split(/[-_]/);
-              if (parts.length > 1) ctyKey = parts[0].trim();
-              else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
-            }
-          }
+          let cleanCode = String(item.code || '').trim();
+          let ctyKey = cleanCode.length >= 2 ? cleanCode.substring(0, 2).toUpperCase() : 'KHAC';
+
           if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
           groupedByCompany[ctyKey].push(item);
         });
@@ -6111,14 +6060,13 @@ window._renderHistoryResultsOnly = function() {
         let summaryGroupsHtml = '';
         let globalIdx = 1;
 
-        Object.keys(groupedByCompany).forEach(ctyCode => {
-          const prods = groupedByCompany[ctyCode];
+        Object.keys(groupedByCompany).sort().forEach(ctyCode => {
+          let prods = groupedByCompany[ctyCode];
+          prods.sort((a, b) => b.qty - a.qty); // Sắp xếp sản phẩm theo số lượng giảm dần trong từng nhóm
+
           let displayName = `Công Ty ${ctyCode}`;
-          if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
-          else {
-            const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(ctyCode).toUpperCase());
-            if (found && found.tenCtu) { displayName = found.tenCtu; }
-          }
+          const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
+          if (found && found.tenCtu) { displayName = found.tenCtu; }
 
           let prodsHtml = prods.map(item => {
             const kien = item.ratio > 0 ? Math.floor(item.qty / item.ratio) : 0;
