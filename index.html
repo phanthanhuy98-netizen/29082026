@@ -5761,7 +5761,15 @@ window.openStoreHistoryModal = function() {
   if (!activeVisitedStore) {
     return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
-  // Reset lại trạng thái mỗi lần mở Modal
+ // Biến lưu trạng thái tab và bộ lọc ngày trong Modal Lịch sử
+window._historyModalTab = 'top';
+window._historyDateFrom = '';
+window._historyDateTo = '';
+
+window.openStoreHistoryModal = function() {
+  if (!activeVisitedStore) {
+    return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
+  }
   window._historyModalTab = 'top';
   window._historyDateFrom = '';
   window._historyDateTo = '';
@@ -5787,7 +5795,6 @@ window._renderStoreHistoryContent = function() {
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-  // Lấy toàn bộ đơn hàng của khách hiện tại
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
     let inferredCode = o.maDTPNNo || '';
@@ -5801,9 +5808,6 @@ window._renderStoreHistoryContent = function() {
   customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
   const recentOrders = customerOrders.slice(0, 20);
 
-  // ==========================================
-  // 1. TÍNH TOÁN CHO TAB "TOP SẢN PHẨM"
-  // ==========================================
   let productStatsMap = new Map();
   recentOrders.forEach(o => {
     if (o.items && Array.isArray(o.items)) {
@@ -5837,9 +5841,6 @@ window._renderStoreHistoryContent = function() {
   let topProductsList = Array.from(productStatsMap.values());
   topProductsList.sort((a, b) => b.totalQty - a.totalQty);
 
-  // ==========================================
-  // 2. TÍNH TOÁN CHO TAB "TỔNG HỢP NGÀY" (GỘP ĐƠN)
-  // ==========================================
   let filteredSummaryOrders = customerOrders;
   if (window._historyDateFrom && window._historyDateTo) {
     filteredSummaryOrders = customerOrders.filter(o => o.ngayCtu >= window._historyDateFrom && o.ngayCtu <= window._historyDateTo);
@@ -5874,21 +5875,17 @@ window._renderStoreHistoryContent = function() {
     }
   });
   let summaryList = Array.from(summaryProductMap.values());
-  summaryList.sort((a, b) => b.totalQty - a.totalQty); // Xếp sản phẩm mua nhiều lên đầu
+  summaryList.sort((a, b) => b.totalQty - a.totalQty);
 
-  // Xác định Tab đang mở
   const isTopTab = window._historyModalTab === 'top';
   const isDiaryTab = window._historyModalTab === 'diary';
   const isSummaryTab = window._historyModalTab === 'summary';
 
-  // ==========================================
-  // TẠO HTML RIÊNG CHO TỪNG TAB (TRÁNH LỖI CÚ PHÁP)
-  // ==========================================
   let tabContentHtml = '';
 
   if (isTopTab) {
     if (!topProductsList || topProductsList.length === 0) {
-      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>`;
+      tabContentHtml = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>';
     } else {
       const groupedByCompany = {};
       topProductsList.forEach(tp => {
@@ -5959,7 +5956,7 @@ window._renderStoreHistoryContent = function() {
     }
   } else if (isSummaryTab) {
     if (summaryList.length === 0) {
-      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có dữ liệu mua hàng nào trong khoảng thời gian đã chọn.</div>`;
+      tabContentHtml = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có dữ liệu mua hàng nào trong khoảng thời gian đã chọn.</div>';
     } else {
       const totalSummaryQty = summaryList.reduce((sum, i) => sum + i.totalQty, 0);
       
@@ -5968,11 +5965,11 @@ window._renderStoreHistoryContent = function() {
         const le = item.ratio > 0 ? item.totalQty % item.ratio : item.totalQty;
         let qtyText = '';
         if (kien > 0 && le > 0) {
-          qtyText = `<span style="font-size:15px;">${kien}</span> Thùng <span style="font-size:15px;">${le}</span> ${item.dvt}`;
+          qtyText = '<span style="font-size:15px;">' + kien + '</span> Thùng <span style="font-size:15px;">' + le + '</span> ' + item.dvt;
         } else if (kien > 0) {
-          qtyText = `<span style="font-size:15px;">${kien}</span> Thùng`;
+          qtyText = '<span style="font-size:15px;">' + kien + '</span> Thùng';
         } else {
-          qtyText = `<span style="font-size:15px;">${item.totalQty}</span> ${item.dvt}`;
+          qtyText = '<span style="font-size:15px;">' + item.totalQty + '</span> ' + item.dvt;
         }
         return `
           <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
@@ -5989,7 +5986,7 @@ window._renderStoreHistoryContent = function() {
             <span style="font-size:12px; font-weight:800; background:rgba(5, 150, 105, 0.1); color:var(--emerald); padding:4px 8px; border-radius:6px;">Tổng: ${totalSummaryQty} SP</span>
           </div>
           <div style="font-size:12.5px; color:var(--text-muted); line-height: 1.4;">
-            Đã lọc <b>${filteredSummaryOrders.length}</b> đơn hàng từ ngày <b>${window._historyDateFrom ? formatDateDDMMYYYY(window._historyDateFrom) : 'đầu tiên'}</b> đến <b>${window._historyDateTo ? formatDateDDMMYYYY(window._historyDateTo) : 'hôm nay'}</b>.
+            Đã lọc <b>${filteredSummaryOrders.length}</b> đơn hàng.
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
             ${summaryItemsHtml}
@@ -5997,9 +5994,9 @@ window._renderStoreHistoryContent = function() {
         </div>
       `;
     }
-  } else { // isDiaryTab
+  } else { 
     if (recentOrders.length === 0) {
-      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào.</div>`;
+      tabContentHtml = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào.</div>';
     } else {
       tabContentHtml = recentOrders.map(o => {
         const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
@@ -6034,7 +6031,7 @@ window._renderStoreHistoryContent = function() {
             <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
               <div style="display:flex; gap:8px; align-items:center;">
                 <span style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:6px;">#${o.soCtu}</span>
-                <span style="font-size:13px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+                <span style="font-size:13px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)}</span>
               </div>
               <div style="display:flex; gap:8px; align-items:center;">
                 <span style="font-size:13px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
@@ -6052,9 +6049,6 @@ window._renderStoreHistoryContent = function() {
     }
   }
 
-  // ==========================================
-  // IN GIAO DIỆN RA MÀN HÌNH
-  // ==========================================
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
@@ -6107,360 +6101,17 @@ window.closeStoreHistoryModal = function() {
     modalContainer.classList.add('hidden');
   }
 };
-window.deleteAllAndImportProductsExcel = async function(e) {
-  if (!currentUser || currentUser.role !== 'admin') {
-    return alert("Chỉ tài khoản Admin mới có quyền thực hiện tính năng này!");
-  }
 
-  const confirmed = await window.showCustomConfirm(
-    "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ (HÀNG)", 
-    "Hành động này sẽ XÓA SẠCH toàn bộ danh mục vật tư cũ trên hệ thống và ghi đè hoàn toàn bằng danh sách mới từ file Excel. Bạn có chắc chắn muốn tiếp tục?", 
-    "fa-triangle-exclamation", 
-    "Đồng ý Xóa & Tải Mới", 
-    "Hủy"
-  );
-  if (!confirmed) return;
-
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx, .xls';
-  fileInput.onchange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-        if (!jsonData || jsonData.length === 0) {
-          return alert("File Excel không có dữ liệu!");
-        }
-
-        alert(`Đang tiến hành xóa danh mục cũ và tải lên ${jsonData.length} vật tư mới...`);
-
-        // 1. Xóa toàn bộ dữ liệu collection 'products' trên Firestore
-        const prodSnap = await getDocs(collection(db, "products"));
-        let batches = [];
-        let currentBatch = writeBatch(db);
-        let operationCount = 0;
-
-        prodSnap.forEach((docSnap) => {
-          currentBatch.delete(docSnap.ref);
-          operationCount++;
-          if (operationCount >= 400) {
-            batches.push(currentBatch.commit());
-            currentBatch = writeBatch(db);
-            operationCount = 0;
-          }
-        });
-        if (operationCount > 0) {
-          batches.push(currentBatch.commit());
-        }
-        await Promise.all(batches);
-
-        // 2. Thêm mới dữ liệu vật tư từ Excel
-        const newProductsList = jsonData.map((item, idx) => ({
-          id: String(item.id || item.code || ('pr_' + Date.now() + '_' + idx)),
-          code: String(item.code || item.maVT || '').trim(),
-          name: String(item.name || item.tenVT || '').trim(),
-          dvt: String(item.dvt || item.donViTinh || 'hộp').trim(),
-          tyLeQuyDoi: Number(item.tyLeQuyDoi || item.quyDoi || 50)
-        }));
-
-        let uploadBatches = [];
-        let uploadBatch = writeBatch(db);
-        let upCount = 0;
-
-        newProductsList.forEach(p => {
-          const docRef = doc(collection(db, "products"), p.id);
-          uploadBatch.set(docRef, p);
-          upCount++;
-          if (upCount >= 400) {
-            uploadBatches.push(uploadBatch.commit());
-            uploadBatch = writeBatch(db);
-            upCount = 0;
-          }
-        });
-        if (upCount > 0) {
-          uploadBatches.push(uploadBatch.commit());
-        }
-        await Promise.all(uploadBatches);
-
-        // Cập nhật biến toàn cục và bộ nhớ cục bộ
-        products = newProductsList;
-        await saveProductsToLocalCache(products);
-        buildProductIndex();
-
-        playSystemSound('success');
-        alert("Đã xóa toàn bộ vật tư cũ và tải mới thành công!");
-        renderUI();
-      } catch (err) {
-        alert("Lỗi khi xử lý file Excel: " + err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-  fileInput.click();
-};
-  // Thêm nút mới giao diện tab Hàng:
-// <button class="btn btn-red btn-sm" onclick="deleteAllAndImportProductsExcel(event)"><i class="fa-solid fa-triangle-exclamation"></i> Xóa & Tải Mới Hàng</button>
-
-window.deleteAllAndImportCustomersExcel = async function(e) {
-  if (!currentUser || currentUser.role !== 'admin') {
-    return alert("Chỉ tài khoản Admin mới có quyền thực hiện tính năng này!");
-  }
-
-  const confirmed = await window.showCustomConfirm(
-    "XÁC NHẬN XÓA TOÀN BỘ KHÁCH HÀNG", 
-    "Hành động này sẽ XÓA SẠCH toàn bộ danh sách khách hàng cũ và ghi đè bằng danh sách mới từ Excel. Bạn có chắc chắn muốn tiếp tục?", 
-    "fa-triangle-exclamation", 
-    "Đồng ý Xóa & Tải Mới", 
-    "Hủy"
-  );
-  if (!confirmed) return;
-
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx, .xls';
-  fileInput.onchange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-        if (!jsonData || jsonData.length === 0) {
-          return alert("File Excel không có dữ liệu!");
-        }
-
-        alert(`Đang tiến hành xóa dữ liệu cũ và tải lên ${jsonData.length} khách hàng mới...`);
-
-        // Xóa toàn bộ dữ liệu cũ trên Firestore
-        const storeSnap = await getDocs(collection(db, "stores"));
-        const batches = [];
-        let currentBatch = writeBatch(db);
-        let operationCount = 0;
-
-        storeSnap.forEach((docSnap) => {
-          currentBatch.delete(docSnap.ref);
-          operationCount++;
-          if (operationCount >= 400) {
-            batches.push(currentBatch.commit());
-            currentBatch = writeBatch(db);
-            operationCount = 0;
-          }
-        });
-        if (operationCount > 0) {
-          batches.push(currentBatch.commit());
-        }
-        await Promise.all(batches);
-
-        // Thêm mới dữ liệu từ file Excel
-        const newStoresList = jsonData.map((item, idx) => ({
-          id: String(item.id || item.maKH || ('kh_' + Date.now() + '_' + idx)),
-          code: String(item.code || item.maKH || '').trim(),
-          name: String(item.name || item.tenKH || '').trim(),
-          address: String(item.address || item.diaChi || '').trim(),
-          phone: String(item.phone || item.sdt || '').trim(),
-          lat: Number(item.lat || 0),
-          lng: Number(item.lng || 0)
-        }));
-
-        let uploadBatches = [];
-        let uploadBatch = writeBatch(db);
-        let upCount = 0;
-
-        newStoresList.forEach(s => {
-          const docRef = doc(collection(db, "stores"), s.id);
-          uploadBatch.set(docRef, s);
-          upCount++;
-          if (upCount >= 400) {
-            uploadBatches.push(uploadBatch.commit());
-            uploadBatch = writeBatch(db);
-            upCount = 0;
-          }
-        });
-        if (upCount > 0) {
-          uploadBatches.push(uploadBatch.commit());
-        }
-        await Promise.all(uploadBatches);
-
-        stores = newStoresList;
-        await saveStoresToLocalCache(stores);
-        buildStoreIndex();
-
-        playSystemSound('success');
-        alert("Đã xóa toàn bộ khách hàng cũ và tải mới thành công!");
-        renderUI();
-      } catch (err) {
-        alert("Lỗi khi xử lý file Excel: " + err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-  fileInput.click();
-};
-
-window.deleteAllAndImportProductsExcel = async function(e) {
-  if (!currentUser || currentUser.role !== 'admin') {
-    return alert("Chỉ tài khoản Admin mới có quyền thực hiện tính năng này!");
-  }
-
-  const confirmed = await window.showCustomConfirm(
-    "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ", 
-    "Hành động này sẽ XÓA SẠCH toàn bộ vật tư cũ và ghi đè bằng danh sách mới từ Excel. Bạn có chắc chắn muốn tiếp tục?", 
-    "fa-triangle-exclamation", 
-    "Đồng ý Xóa & Tải Mới", 
-    "Hủy"
-  );
-  if (!confirmed) return;
-
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx, .xls';
-  fileInput.onchange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-        if (!jsonData || jsonData.length === 0) {
-          return alert("File Excel không có dữ liệu!");
-        }
-
-        alert(`Đang tiến hành xóa danh mục cũ và tải lên ${jsonData.length} vật tư mới...`);
-
-        const prodSnap = await getDocs(collection(db, "products"));
-        let batches = [];
-        let currentBatch = writeBatch(db);
-        let operationCount = 0;
-
-        prodSnap.forEach((docSnap) => {
-          currentBatch.delete(docSnap.ref);
-          operationCount++;
-          if (operationCount >= 400) {
-            batches.push(currentBatch.commit());
-            currentBatch = writeBatch(db);
-            operationCount = 0;
-          }
-        });
-        if (operationCount > 0) {
-          batches.push(currentBatch.commit());
-        }
-        await Promise.all(batches);
-
-        const newProductsList = jsonData.map((item, idx) => ({
-          id: String(item.id || item.code || ('pr_' + Date.now() + '_' + idx)),
-          code: String(item.code || item.maVT || '').trim(),
-          name: String(item.name || item.tenVT || '').trim(),
-          dvt: String(item.dvt || item.donViTinh || 'hộp').trim(),
-          tyLeQuyDoi: Number(item.tyLeQuyDoi || item.quyDoi || 50)
-        }));
-
-        let uploadBatches = [];
-        let uploadBatch = writeBatch(db);
-        let upCount = 0;
-
-        newProductsList.forEach(p => {
-          const docRef = doc(collection(db, "products"), p.id);
-          uploadBatch.set(docRef, p);
-          upCount++;
-          if (upCount >= 400) {
-            uploadBatches.push(uploadBatch.commit());
-            uploadBatch = writeBatch(db);
-            upCount = 0;
-          }
-        });
-        if (upCount > 0) {
-          uploadBatches.push(uploadBatch.commit());
-        }
-        await Promise.all(uploadBatches);
-
-        products = newProductsList;
-        await saveProductsToLocalCache(products);
-        buildProductIndex();
-
-        playSystemSound('success');
-        alert("Đã xóa toàn bộ vật tư cũ và tải mới thành công!");
-        renderUI();
-      } catch (err) {
-        alert("Lỗi khi xử lý file Excel: " + err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-  fileInput.click();
-};
-  window.cloneOrderToCart = function(orderId) {
-  const order = orders.find(o => o.id === orderId);
-  if (!order || !order.items) return alert("Không tìm thấy dữ liệu đơn!");
-
-  let addedCount = 0;
-  order.items.forEach(item => {
-    const pKey = item.id || item.code;
-    const qty = Number(item.qty || 0);
-    
-    if (qty > 0) {
-      const p = products.find(x => x.id === pKey || x.code === pKey);
-      const ratio = p?.tyLeQuyDoi || 50;
-      
-      if (!currentCart[pKey]) currentCart[pKey] = { qty: 0, kien: 0, le: 0 };
-      
-      // Cộng dồn vào giỏ hiện tại
-      currentCart[pKey].qty += qty;
-      currentCart[pKey].kien = ratio > 0 ? Math.floor(currentCart[pKey].qty / ratio) : 0;
-      currentCart[pKey].le = ratio > 0 ? currentCart[pKey].qty % ratio : currentCart[pKey].qty;
-      addedCount++;
-    }
-  });
-
-  if (addedCount > 0) {
-    saveCartDraftToLocal();
-    updateCartTotalsUI();
-    filterSalesProducts(productSearchKeyword); // Render lại tab hàng
-    alert(`✅ Đã bốc thành công ${addedCount} mã hàng từ đơn cũ vào giỏ!`);
-    closeStoreHistoryModal();
-  }
-};
- // ==========================================
-// TÍNH NĂNG GÓC SALES (FEEDBACK & CẨM NANG FMCG CHUYÊN SÂU)
-// ==========================================
-window._gocSalesSubTab = 'feedback'; 
-let feedbacksList = [];
-
-window.switchGocSalesSubTab = function(tabName) {
-  window._gocSalesSubTab = tabName;
-  const activePane = document.getElementById('tabPane_gocSales');
-  if (activePane) renderGocSalesTab(activePane);
-};
-
-window.toggleHandbookAccordion = function(id) {
-  const el = document.getElementById(id);
-  const icon = document.getElementById('icon_' + id);
+window.toggleOrderAccordion = function(accId) {
+  const el = document.getElementById(accId);
+  const iconEl = document.getElementById('icon_' + accId);
+  if (!el) return;
   if (el.classList.contains('hidden')) {
     el.classList.remove('hidden');
-    icon.style.transform = 'rotate(180deg)';
+    if (iconEl) iconEl.style.transform = 'rotate(180deg)';
   } else {
     el.classList.add('hidden');
-    icon.style.transform = 'rotate(0deg)';
+    if (iconEl) iconEl.style.transform = 'rotate(0deg)';
   }
 };
 
