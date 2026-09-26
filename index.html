@@ -5753,10 +5753,7 @@ else if (tab === 'kpi') {
        }
        }
 // ==========================================
-// KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (ĐÃ TỐI ƯU CHỐNG LAG & LOGIC GỘP ĐƠN)
-// ==========================================
-// ==========================================
-// KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (CHUẨN CÚ PHÁP ĐỘC LẬP)
+// KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (SẮP XẾP TỔNG CỘNG THEO MÃ CÔNG TY)
 // ==========================================
 window._historyModalTab = 'top';
 window._historyDateFrom = '';
@@ -6060,23 +6057,95 @@ window._renderHistoryResultsOnly = function() {
         });
 
         let consolidatedList = Array.from(aggregatedItems.values());
-        consolidatedList.sort((a, b) => b.qty - a.qty);
+        
+        // SẮP XẾP SẢN PHẨM TRONG TỔNG CỘNG THEO MÃ CÔNG TY
+        consolidatedList.sort((a, b) => {
+          let ctyA = 'KHÁC', ctyB = 'KHÁC';
+          const codeA = (a.code || '').toUpperCase();
+          const codeB = (b.code || '').toUpperCase();
+          
+          if (codeA.startsWith('11') || codeA.includes('TLSG')) ctyA = '11';
+          else {
+            const m = codeA.match(/^\[(.*?)\]/);
+            if (m) ctyA = m[1].trim();
+            else {
+              const p = codeA.split(/[-_]/);
+              if (p.length > 1) ctyA = p[0].trim();
+              else if (codeA.length >= 2) ctyA = codeA.substring(0, 2);
+            }
+          }
 
-        let consolidatedItemsHtml = consolidatedList.map((item, idx) => {
-          const kien = item.ratio > 0 ? Math.floor(item.qty / item.ratio) : 0;
-          const le = item.ratio > 0 ? item.qty % item.ratio : item.qty;
-          let qtyText = '';
-          if (kien > 0 && le > 0) qtyText = `${kien} Thùng ${le} ${item.dvt}`;
-          else if (kien > 0) qtyText = `${kien} Thùng`;
-          else qtyText = `${item.qty} ${item.dvt}`;
+          if (codeB.startsWith('11') || codeB.includes('TLSG')) ctyB = '11';
+          else {
+            const m = codeB.match(/^\[(.*?)\]/);
+            if (m) ctyB = m[1].trim();
+            else {
+              const p = codeB.split(/[-_]/);
+              if (p.length > 1) ctyB = p[0].trim();
+              else if (codeB.length >= 2) ctyB = codeB.substring(0, 2);
+            }
+          }
 
-          return `
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:14.5px; border-bottom:1px dashed rgba(16, 185, 129, 0.3); padding:8px 0; flex-shrink:0;">
-                <span style="font-weight:700; color:var(--text-main); padding-right:8px; line-height:1.4;">${idx + 1}. [${item.code}] ${item.name}</span>
-                <span style="font-weight:900; color:var(--emerald); white-space:nowrap; flex-shrink:0;">${qtyText}</span>
+          if (ctyA !== ctyB) return ctyA.localeCompare(ctyB);
+          return b.qty - a.qty; // Cùng công ty thì sắp xếp theo số lượng giảm dần
+        });
+
+        let groupedByCompany = {};
+        consolidatedList.forEach(item => {
+          let ctyKey = 'KHÁC';
+          const codeStr = (item.code || '').toUpperCase();
+          if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
+          else {
+            const match = codeStr.match(/^\[(.*?)\]/);
+            if (match) { ctyKey = match[1].trim(); } 
+            else {
+              const parts = codeStr.split(/[-_]/);
+              if (parts.length > 1) ctyKey = parts[0].trim();
+              else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
+            }
+          }
+          if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
+          groupedByCompany[ctyKey].push(item);
+        });
+
+        let summaryGroupsHtml = '';
+        let globalIdx = 1;
+
+        Object.keys(groupedByCompany).forEach(ctyCode => {
+          const prods = groupedByCompany[ctyCode];
+          let displayName = `Công Ty ${ctyCode}`;
+          if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
+          else {
+            const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(ctyCode).toUpperCase());
+            if (found && found.tenCtu) { displayName = found.tenCtu; }
+          }
+
+          let prodsHtml = prods.map(item => {
+            const kien = item.ratio > 0 ? Math.floor(item.qty / item.ratio) : 0;
+            const le = item.ratio > 0 ? item.qty % item.ratio : item.qty;
+            let qtyText = '';
+            if (kien > 0 && le > 0) qtyText = `${kien} Thùng ${le} ${item.dvt}`;
+            else if (kien > 0) qtyText = `${kien} Thùng`;
+            else qtyText = `${item.qty} ${item.dvt}`;
+
+            const curIdx = globalIdx++;
+            return `
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:14px; border-bottom:1px dashed rgba(16, 185, 129, 0.2); padding:6px 0; flex-shrink:0;">
+                  <span style="font-weight:700; color:var(--text-main); padding-right:8px; line-height:1.4;">${curIdx}. [${item.code}] ${item.name}</span>
+                  <span style="font-weight:900; color:var(--emerald); white-space:nowrap; flex-shrink:0;">${qtyText}</span>
+              </div>
+            `;
+          }).join('');
+
+          summaryGroupsHtml += `
+            <div style="margin-bottom: 10px;">
+              <div style="font-size: 13px; font-weight: 900; color: var(--primary); margin-bottom: 4px; border-bottom: 1px solid var(--card-border); padding-bottom: 2px;">
+                <i class="fa-solid fa-building"></i> ${displayName} (${prods.length} SP)
+              </div>
+              ${prodsHtml}
             </div>
           `;
-        }).join('');
+        });
 
         htmlOutput = `
           <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 12px; flex-shrink:0;">
@@ -6086,7 +6155,7 @@ window._renderHistoryResultsOnly = function() {
                   </div>
               </div>
               <div style="padding: 12px 14px; display:flex; flex-direction:column; gap:4px;">
-                  ${consolidatedItemsHtml}
+                  ${summaryGroupsHtml}
               </div>
           </div>
         `;
