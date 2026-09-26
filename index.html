@@ -5094,49 +5094,103 @@ else if (tab === 'ctkm') {
       if (!window.promotionsList) window.promotionsList = [];
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
+      window._ctkmSearchKey = window._ctkmSearchKey || '';
+
+      window.filterCtkm = function(keyword) {
+        window._ctkmSearchKey = keyword;
+        drawCtkmUI();
+      };
+
       const drawCtkmUI = () => {
+        let filteredPromos = window.promotionsList;
+
+        if (window._ctkmSearchKey.trim() !== '') {
+          const q = removeAccents(window._ctkmSearchKey.trim());
+          filteredPromos = filteredPromos.filter(p => {
+             const text = removeAccents(`${p.maKM} ${p.noiDung} ${p.hangHoa} ${p.khachHang} ${p.maCtu}`);
+             return text.includes(q);
+          });
+        }
+
+        // GOM NHÓM THEO MÃ CÔNG TY (MaCtu)
+        let groupedPromos = {};
+        filteredPromos.forEach(km => {
+            let ctuKey = (km.maCtu || 'KHÁC').toUpperCase();
+            if (!groupedPromos[ctuKey]) groupedPromos[ctuKey] = [];
+            groupedPromos[ctuKey].push(km);
+        });
+
+        // Sắp xếp các key MaCtu
+        const sortedCtus = Object.keys(groupedPromos).sort();
+
+        let groupHtmlArr = sortedCtus.map(ctu => {
+            const prods = groupedPromos[ctu];
+            const accId = `acc_ctkm_ctu_${ctu.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            
+            let listHtml = prods.map(km => {
+              const isAppliedForAllCust = !km.khachHang || km.khachHang.trim() === '';
+              return `
+                <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:12px; margin-bottom:8px; flex-shrink:0;">
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                    <span style="background:var(--prod-code-bg); color:var(--primary); padding:3px 8px; border-radius:6px; font-size:13px; font-weight:900;">${km.maKM}</span>
+                    <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay} - <b style="color:var(--rose);">${km.denNgay}</b></span>
+                  </div>
+                  <div style="font-weight:900; color:var(--text-main); font-size:14.5px; margin-bottom:8px; line-height:1.4;">${km.noiDung}</div>
+                  <div style="font-size:12.5px; color:var(--text-muted);">
+                    <div style="margin-bottom:4px;"><i class="fa-solid fa-box-open" style="color:var(--amber);"></i> Hàng Hóa: <b style="color:var(--primary); word-break: break-all;">${km.hangHoa || 'Tất cả'}</b></div>
+                    <div><i class="fa-solid fa-users" style="color:var(--purple);"></i> Khách Hàng: <b style="color:var(--text-main); word-break: break-all;">${isAppliedForAllCust ? 'Tất cả' : km.khachHang}</b></div>
+                  </div>
+                  ${isAdminOrManager ? `
+                    <div style="text-align:right; margin-top:8px;">
+                      <button class="btn btn-red btn-sm" onclick="deleteCtkm('${km.id}')" style="padding:4px 10px; font-weight:800;"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    </div>
+                  ` : ''}
+                </div>
+              `;
+            }).join('');
+
+            return `
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:12px; flex-shrink:0;">
+                <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(37, 99, 235, 0.05);">
+                  <div style="display:flex; gap:10px; align-items:center; flex:1;">
+                    <span style="font-size:15px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-layer-group"></i> MaCtu: ${ctu}</span>
+                    <span style="font-size:12px; font-weight:700; background:var(--primary); color:#fff; padding:2px 8px; border-radius:10px;">${prods.length} CTKM</span>
+                  </div>
+                  <i class="fa-solid fa-chevron-down" id="icon_${accId}" style="font-size:14px; color:var(--primary); transition:transform 0.2s;"></i>
+                </div>
+                <div id="${accId}" class="hidden" style="padding:10px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; background:var(--card-bg);">
+                  ${listHtml}
+                </div>
+              </div>
+            `;
+        });
+
         container.innerHTML = `
           <div class="tab-header-actions">
-            <h2 style="font-weight:800;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Chương Trình Khuyến Mãi</h2>
+            <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM (${window.promotionsList.length})</h2>
             <div class="excel-group-btns">
               ${isAdminOrManager ? `
                 <button class="btn btn-green btn-sm" onclick="exportCtkmExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-                <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCtkmExcel(event)" style="display:none;"></label>
+                <button class="btn btn-amber btn-sm" onclick="triggerImportCtkmExcel()"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel Lên</button>
+                <input type="file" id="ctkmFileInput" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleImportCtkmExcel(event)">
               ` : ''}
             </div>
           </div>
 
-          <div class="card" style="margin-bottom:10px; padding:16px;">
-            <h3 style="font-size:15px; font-weight:900; color:var(--primary); margin-bottom:12px;">Các chương trình đang diễn ra</h3>
-            
-            <div style="display:flex; flex-direction:column; gap:10px;">
-              ${window.promotionsList.length > 0 ? window.promotionsList.map(km => `
-                <div style="background:var(--panel-bg); border:1px dashed var(--rose); padding:14px; border-radius:12px; position:relative;">
-                  ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteCtkm('${km.id}')" style="position:absolute; top:12px; right:12px; padding:4px 8px; font-size:11px;" title="Xóa CTKM này"><i class="fa-solid fa-trash"></i></button>` : ''}
-                  
-                  <div style="font-weight:900; color:var(--rose); font-size:14px; margin-bottom:6px; padding-right:30px;">
-                    <i class="fa-solid fa-layer-group"></i> [${km.maKM}]${km.tenKM}
-                  </div>
-                  <div style="font-size:13.5px; color:var(--text-main); line-height:1.5;">
-                    ${km.noiDung}<br>
-                    <i style="color:var(--text-muted); font-size:12px;">* ${km.ghiChu || 'Không có ghi chú'}</i>
-                  </div>
-                </div>
-              `).join('') : '<div style="text-align:center; color:var(--text-muted); font-size:13px; padding:20px 0;">Chưa có dữ liệu khuyến mãi. Vui lòng tải file Excel lên.</div>'}
-              
-              <div style="background:rgba(225, 29, 72, 0.05); padding:12px; border-radius:12px; color:var(--text-muted); font-size: 13px; text-align: center; margin-top:8px;">
-                <i>Vui lòng bấm vào nút [🎁 KM] ở từng sản phẩm trong mục <b>Bán Hàng</b> để xem CTKM Mua/Tặng riêng lẻ của mã đó.</i>
-              </div>
-            </div>
+          <div class="card" style="margin-bottom:12px; padding:12px;">
+            <input type="text" placeholder="🔍 Gõ Mã KM, Nội dung, Mã Hàng, MaCtu..." value="${window._ctkmSearchKey}" oninput="filterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            ${groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào.</div>'}
           </div>
         `;
       };
 
-      // Tự động tải dữ liệu từ Firebase khi mở tab lần đầu
       if (!window.promotionsLoaded) {
-        container.innerHTML = `<div style="padding:30px; text-align:center; font-weight:800; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu CTKM...</div>`;
+        container.innerHTML = `<div style="padding:40px; text-align:center; font-weight:800; color:var(--primary);"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tải dữ liệu CTKM...</div>`;
         getDocs(collection(db, "promotions")).then(snap => {
-          window.promotionsList = snap.docs.map(d => d.data());
+          window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
           window.promotionsLoaded = true;
           drawCtkmUI();
         }).catch(e => {
@@ -8195,6 +8249,208 @@ window.closePromoModal = function() {
   if (modalContainer) {
     modalContainer.innerHTML = '';
     modalContainer.classList.add('hidden');
+  }
+};
+  // ==========================================
+// CÁC HÀM XỬ LÝ CHO TAB CTKM (EXCEL & MODAL 2 CHẾ ĐỘ)
+// ==========================================
+
+window.deleteCtkm = async function(id) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  const confirmDel = await window.showCustomConfirm("Xóa CTKM", "Bạn có chắc chắn muốn xóa chương trình này?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+
+  try {
+    await deleteDoc(doc(db, "promotions", id));
+    window.promotionsList = window.promotionsList.filter(p => p.id !== id);
+    window.filterCtkm(window._ctkmSearchKey);
+  } catch (err) {
+    alert("Lỗi xóa CTKM: " + err.message);
+  }
+};
+
+window.exportCtkmExcel = function() {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  if (!window.promotionsList || window.promotionsList.length === 0) return alert("Không có dữ liệu CTKM!");
+
+  // Mapping đúng 100% với header trong ảnh
+  const dataToExport = window.promotionsList.map(p => ({
+    "Từ ngày": p.tuNgay || '',
+    "Đến ngày": p.denNgay || '',
+    "MaKM": p.maKM || '',
+    "Nội dung": p.noiDung || '',
+    "HangHoa": p.hangHoa || '',
+    "KhachHang": p.khachHang || '',
+    "MaCtu": p.maCtu || ''
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "KhuyenMai");
+  XLSX.writeFile(workbook, `CTKM_XuatRa_${new Date().toISOString().slice(0, 10)}.xlsx`);
+};
+
+window.triggerImportCtkmExcel = function() {
+  document.getElementById('ctkmFileInput').click();
+};
+
+window.handleImportCtkmExcel = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Đọc dạng mảng để né rác phía trên
+
+      if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
+
+      // Tự động quét tìm dòng chứa tiêu đề "MaKM" để bỏ qua các dòng rác gạch chéo ở trên
+      let headerIdx = -1;
+      for (let i = 0; i < 20; i++) {
+         if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('MaKM'))) {
+             headerIdx = i; break;
+         }
+      }
+
+      if (headerIdx === -1) {
+          return alert("Lỗi: Không tìm thấy dòng tiêu đề chứa chữ 'MaKM' trong file!");
+      }
+
+      const headers = jsonRows[headerIdx];
+      const colMap = {};
+      headers.forEach((h, i) => { if (h) colMap[String(h).trim()] = i; });
+
+      let newPromos = [];
+      let importedCtus = new Set();
+
+      // Bắt đầu đọc từ dòng dưới dòng tiêu đề
+      for (let i = headerIdx + 1; i < jsonRows.length; i++) {
+          const row = jsonRows[i];
+          if (!row || row.length === 0 || !row[colMap['MaKM']]) continue;
+          
+          const ctu = row[colMap['MaCtu']] ? String(row[colMap['MaCtu']]).trim() : 'KHÁC';
+          importedCtus.add(ctu);
+
+          newPromos.push({
+             id: 'km_' + Date.now() + '_' + i,
+             tuNgay: row[colMap['Từ ngày']] ? String(row[colMap['Từ ngày']]).trim() : '',
+             denNgay: row[colMap['Đến ngày']] ? String(row[colMap['Đến ngày']]).trim() : '',
+             maKM: String(row[colMap['MaKM']]).trim(),
+             noiDung: row[colMap['Nội dung']] ? String(row[colMap['Nội dung']]).trim() : '',
+             hangHoa: row[colMap['HangHoa']] ? String(row[colMap['HangHoa']]).trim() : '',
+             khachHang: row[colMap['KhachHang']] ? String(row[colMap['KhachHang']]).trim() : '',
+             maCtu: ctu,
+             createdAt: new Date().toISOString()
+          });
+      }
+
+      if (newPromos.length === 0) return alert("Không đọc được dòng dữ liệu hợp lệ nào!");
+
+      // Hiển thị Modal để hỏi Chế độ nhập (Lưu vào biến tạm)
+      window._tempImportedPromos = newPromos;
+      window._tempImportedCtus = Array.from(importedCtus);
+      
+      const modalContainer = document.getElementById('dynamicModalContainer');
+      modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;">
+          <div class="modal-content" style="max-width: 450px; padding: 24px; border-radius: 18px; text-align:center;">
+            <div style="font-size:36px; color:var(--amber); margin-bottom:16px;"><i class="fa-solid fa-file-import"></i></div>
+            <h3 style="font-size:18px; font-weight:900; color:var(--text-main); margin-bottom:8px;">Tải Lên ${newPromos.length} Chương Trình</h3>
+            <p style="font-size:14px; color:var(--text-muted); margin-bottom:20px; line-height:1.5;">Hệ thống phát hiện các mã Công ty (MaCtu): <b style="color:var(--primary);">${window._tempImportedCtus.join(', ')}</b>. Bạn muốn lưu dữ liệu theo chế độ nào?</p>
+            
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <button class="btn btn-amber" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_ctu')">
+                <i class="fa-solid fa-object-group"></i> 1. CHỈ GHI ĐÈ CÁC CÔNG TY TRONG FILE
+              </button>
+              <button class="btn btn-red" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_all')">
+                <i class="fa-solid fa-dumpster-fire"></i> 2. XÓA TOÀN BỘ CŨ & THAY MỚI 100%
+              </button>
+              <button class="btn" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px; margin-top:8px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')">
+                HỦY BỎ
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      modalContainer.classList.remove('hidden');
+      
+      // Reset input file để chọn lại file cũ vẫn ăn event
+      document.getElementById('ctkmFileInput').value = '';
+    } catch (err) {
+      alert("Lỗi khi đọc file Excel: " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+window.executeImportCtkm = async function(mode) {
+  const newPromos = window._tempImportedPromos;
+  const targetCtus = window._tempImportedCtus;
+  
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang đồng bộ lên máy chủ...</div></div>`;
+
+  try {
+    const promoSnap = await getDocs(collection(db, "promotions"));
+    let batches = [];
+    let currentBatch = writeBatch(db);
+    let count = 0;
+
+    promoSnap.forEach((docSnap) => {
+      const data = docSnap.data();
+      // Nếu chế độ 2 (Chỉ ghi đè công ty) -> Kiểm tra maCtu có nằm trong file Excel không
+      if (mode === 'replace_all' || (mode === 'replace_ctu' && targetCtus.includes(data.maCtu))) {
+         currentBatch.delete(docSnap.ref);
+         count++;
+      }
+      if (count >= 400) {
+        batches.push(currentBatch.commit());
+        currentBatch = writeBatch(db);
+        count = 0;
+      }
+    });
+    if (count > 0) batches.push(currentBatch.commit());
+    await Promise.all(batches);
+
+    // Đẩy danh sách mới lên
+    let uploadBatches = [];
+    let uploadBatch = writeBatch(db);
+    let upCount = 0;
+
+    newPromos.forEach(p => {
+      const docRef = doc(collection(db, "promotions"), p.id);
+      uploadBatch.set(docRef, p);
+      upCount++;
+      if (upCount >= 400) {
+        uploadBatches.push(uploadBatch.commit());
+        uploadBatch = writeBatch(db);
+        upCount = 0;
+      }
+    });
+    if (upCount > 0) uploadBatches.push(uploadBatch.commit());
+    await Promise.all(uploadBatches);
+
+    // Cập nhật Local UI
+    if (mode === 'replace_all') {
+       window.promotionsList = newPromos;
+    } else {
+       // Xóa các mảng của MaCtu bị ghi đè, giữ lại cái không liên quan, sau đó gộp mảng mới
+       window.promotionsList = window.promotionsList.filter(p => !targetCtus.includes(p.maCtu));
+       window.promotionsList = [...window.promotionsList, ...newPromos];
+    }
+
+    modalContainer.classList.add('hidden');
+    window.filterCtkm('');
+    playSystemSound('success');
+    alert("✅ Tải dữ liệu Khuyến Mãi thành công!");
+
+  } catch(e) {
+    modalContainer.classList.add('hidden');
+    alert("Lỗi khi tải dữ liệu lên Firebase: " + e.message);
   }
 };
 </script>
