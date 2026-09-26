@@ -5772,6 +5772,7 @@ window._renderStoreHistoryContent = function() {
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
+  // 1. Lấy toàn bộ đơn hàng của khách hàng này
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
     let inferredCode = o.maDTPNNo || '';
@@ -5783,30 +5784,27 @@ window._renderStoreHistoryContent = function() {
   });
 
   customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
-  const recentOrders = customerOrders.slice(0, 20);
-
-let productStatsMap = new Map();
-recentOrders.forEach(o => {
+  
+  // 2. Logic cho Tab 1 (Top SP)
+  let productStatsMap = new Map();
+  customerOrders.forEach(o => {
     if (o.items && Array.isArray(o.items)) {
         o.items.forEach(item => {
             const itemQty = Number(item.qty || 0);
             if (itemQty > 0) {
                 const pKey = String(item.id || item.code || '').trim();
                 if (!productStatsMap.has(pKey)) {
-                    // Dò tìm hệ số quy cách từ mọi ngóc ngách có thể có trong item hoặc tên sản phẩm
                     let qc = Number(item['Q/c'] || item.quyCach || item.tyleQuyDoi || item.qc || 0);
                     if (qc <= 1 && item.name) {
                         const match = item.name.match(/\*(\d+)/);
                         if (match) qc = Number(match[1]);
                     }
-                    // Nếu vẫn không tìm thấy thì tạm gán mặc định là 50 cho các mã cây/thùng phía trên, hoặc 1
                     if (qc <= 1) qc = 50; 
-
                     productStatsMap.set(pKey, {
                         code: item.code || item.id || '',
                         name: item.name || '',
                         dvt: item.dvt || 'cây',
-                        tyleQuyDoi: qc, // Lưu thẳng hệ số vào đây
+                        tyleQuyDoi: qc,
                         totalQty: 0,
                         orderCount: 0
                     });
@@ -5817,9 +5815,46 @@ recentOrders.forEach(o => {
             }
         });
     }
-});
+  });
   let topProductsList = Array.from(productStatsMap.values());
   topProductsList.sort((a, b) => b.totalQty - a.totalQty);
+
+  // 3. Logic cho Tab 2 (Nhật ký - Lọc theo ngày & Cộng dồn)
+  let diaryOrders = [...customerOrders];
+  if (window._historyDateFrom) {
+      diaryOrders = diaryOrders.filter(o => o.ngayCtu >= window._historyDateFrom);
+  }
+  if (window._historyDateTo) {
+      diaryOrders = diaryOrders.filter(o => o.ngayCtu <= window._historyDateTo);
+  }
+
+  // Cộng dồn SP cho các đơn đã lọc
+  let aggregatedItems = new Map();
+  diaryOrders.forEach(o => {
+      if (o.items && Array.isArray(o.items)) {
+          o.items.forEach(item => {
+              let qty = Number(item.qty || 0);
+              if (qty > 0) {
+                  let pKey = item.code || item.id;
+                  if (!aggregatedItems.has(pKey)) {
+                       const productObj = products.find(p => p.id === pKey || p.code === pKey);
+                       const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+                       aggregatedItems.set(pKey, {
+                           code: item.code,
+                           name: item.name,
+                           qty: 0,
+                           dvt: item.dvt || 'gói',
+                           ratio: ratio
+                       });
+                  }
+                  aggregatedItems.get(pKey).qty += qty;
+              }
+          });
+      }
+  });
+  let consolidatedList = Array.from(aggregatedItems.values());
+  consolidatedList.sort((a, b) => b.qty - a.qty);
+
 
   const isTopTab = window._historyModalTab === 'top';
   const modalContainer = document.getElementById('dynamicModalContainer');
@@ -5838,12 +5873,13 @@ recentOrders.forEach(o => {
             🔥 Top sản phẩm hay mua
           </button>
           <button class="btn ${!isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('diary')">
-            📖 Nhật ký đơn cũ (${recentOrders.length})
+            📖 Nhật ký đơn (${customerOrders.length})
           </button>
         </div>
 
         <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
 ${isTopTab ? (() => {
+  // === RENDER TAB 1 (GIỮ NGUYÊN NHƯ CODE CŨ CỦA BẠN) ===
   if (!topProductsList || topProductsList.length === 0) {
     return `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>`;
   }
@@ -5851,152 +5887,179 @@ ${isTopTab ? (() => {
   topProductsList.forEach(tp => {
     let ctyKey = 'KHÁC';
     const codeStr = (tp.code || '').toUpperCase();
-
-    if (codeStr.startsWith('11') || codeStr.includes('TLSG')) {
-      ctyKey = '11';
-    } else {
+    if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
+    else {
       const match = codeStr.match(/^\[(.*?)\]/);
-      if (match) {
-        ctyKey = match[1].trim();
-      } else {
+      if (match) { ctyKey = match[1].trim(); } 
+      else {
         const parts = codeStr.split(/[-_]/);
         if (parts.length > 1) ctyKey = parts[0].trim();
         else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
       }
     }
-
     if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
     groupedByCompany[ctyKey].push(tp);
   });
 
  return Object.keys(groupedByCompany).map(ctyCode => {
     const prods = groupedByCompany[ctyCode];
-    let displayName = `Công Ty ${ctyCode}`;
-
-    if (ctyCode === 'KHÁC') {
-      displayName = 'Các sản phẩm khác';
-    } else {
-      // Sử dụng trực tiếp biến companyList của hệ thống để tra cứu
+    let displayName = \`Công Ty \${ctyCode}\`;
+    if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
+    else {
       const found = companyList.find(c => {
         if (!c || !c.maCtu) return false;
-        const cMa = String(c.maCtu).trim().toUpperCase();
-        return cMa === String(ctyCode).toUpperCase();
+        return String(c.maCtu).trim().toUpperCase() === String(ctyCode).toUpperCase();
       });
-
-      if (found && found.tenCtu) {
-        displayName = found.tenCtu; // Lấy thẳng tên công ty (VD: Thuốc Lá Sài Gòn)
-      }
+      if (found && found.tenCtu) { displayName = found.tenCtu; }
     }
+    const groupAccordionId = \`acc_company_\${ctyCode.replace(/[^a-zA-Z0-9]/g, '_')}\`;
 
-    const groupAccordionId = `acc_company_${ctyCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-    return `
+    return \`
       <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0; will-change:transform; contain:content;">
-        <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+        <div onclick="toggleOrderAccordion('\${groupAccordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
         <div style="display:flex; gap:10px; align-items:center; flex:1;">
             <span style="font-size:15px; font-weight:800; color:var(--primary); flex-shrink:0;"><i class="fa-solid fa-building"></i></span>
-            <span style="font-size:15px; font-weight:800; color:var(--primary); white-space:normal; word-break:break-word; line-height:1.4; flex:1;">${displayName}</span>
-            <span style="font-size:12px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:10px; white-space:nowrap; flex-shrink:0;">${prods.length} SP</span>
+            <span style="font-size:15px; font-weight:800; color:var(--primary); white-space:normal; word-break:break-word; line-height:1.4; flex:1;">\${displayName}</span>
+            <span style="font-size:12px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:10px; white-space:nowrap; flex-shrink:0;">\${prods.length} SP</span>
           </div>
-          <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s; flex-shrink:0;"></i>
+          <i class="fa-solid fa-chevron-down" id="icon_\${groupAccordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s; flex-shrink:0;"></i>
         </div>
 
-        <div id="${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
-${prods.map(tp => {
+        <div id="\${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
+\${prods.map(tp => {
     const ratio = Number(tp.tyleQuyDoi || 50);
     const totalQty = Number(tp.totalQty || 0);
     const unitName = tp.dvt || 'cây';
     let qtyText = '';
-
     if (ratio > 1) {
         const kien = Math.floor(totalQty / ratio);
         const le = totalQty % ratio;
-        if (kien > 0 && le > 0) {
-            qtyText = `${kien} Thùng ${le} ${unitName}`;
-        } else if (kien > 0) {
-            qtyText = `${kien} Thùng`;
-        } else {
-            qtyText = `${totalQty} ${unitName}`;
-        }
-    } else {
-        qtyText = `${totalQty} ${unitName}`;
-    }
+        if (kien > 0 && le > 0) { qtyText = \`\${kien} Thùng \${le} \${unitName}\`; } 
+        else if (kien > 0) { qtyText = \`\${kien} Thùng\`; } 
+        else { qtyText = \`\${totalQty} \${unitName}\`; }
+    } else { qtyText = \`\${totalQty} \${unitName}\`; }
 
-    return `
+    return \`
     <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
         <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:8px;">
-            <span style="font-size:13px; font-weight:800; color:var(--primary);">[${tp.code}] ${tp.name}</span>
-            <span style="font-size:12px; color:var(--text-muted);">Tổng mua: <b style="color:var(--emerald);">${qtyText}</b> (${tp.orderCount} lần đơn)</span>
+            <span style="font-size:13px; font-weight:800; color:var(--primary);">[\${tp.code}] \${tp.name}</span>
+            <span style="font-size:12px; color:var(--text-muted);">Tổng mua: <b style="color:var(--emerald);">\${qtyText}</b> (\${tp.orderCount} lần đơn)</span>
         </div>
     </div>
-    `;
+    \`;
 }).join('')}
         </div>
       </div>
-    `;
+    \`;
   }).join('');
-})() : `
-     ${recentOrders.length > 0 ? recentOrders.map(o => {
-            const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
-            const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
-            const accordionId = `acc_order_${o.id}`;
+})() : (() => {
+  // === RENDER TAB 2 (NHẬT KÝ ĐƠN - CÓ BỘ LỌC NGÀY VÀ CỘNG DỒN) ===
+  
+  // Phần giao diện bộ lọc ngày
+  const filterUI = \`
+      <div style="display:flex; gap:8px; margin-bottom: 12px; background: var(--card-bg); padding: 10px; border-radius: 12px; border: 1px solid var(--card-border); align-items:center;">
+          <div style="flex:1;">
+              <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
+              <input type="date" value="\${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+          </div>
+          <div style="flex:1;">
+              <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
+              <input type="date" value="\${window._historyDateTo}" onchange="setHistoryDateTo(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+          </div>
+      </div>
+  \`;
 
-            return `
-              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; flex-shrink: 0;">
-                <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-                  <div style="display:flex; gap:10px; align-items:center;">
-                    <span style="font-size:15px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px;">#${o.soCtu}</span>
-                    <span style="font-size:14px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+  // Phần giao diện Tổng Quan Cộng Dồn
+  let summaryUI = '';
+  if (consolidatedList.length > 0) {
+      summaryUI = \`
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 16px;">
+              <div onclick="toggleOrderAccordion('acc_consolidated_view')" style="padding: 12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(16, 185, 129, 0.15);">
+                  <div style="font-size: 14px; font-weight: 800; color: var(--emerald);">
+                      <i class="fa-solid fa-layer-group"></i> TỔNG CỘNG TRONG KỲ (\${diaryOrders.length} Đơn)
                   </div>
-                  <div style="display:flex; gap:10px; align-items:center;">
-  <span style="font-size:15px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
-  
- <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('${o.id}')" style="padding:4px 8px; font-size:11px;">Bốc Đơn</button>
+                  <i id="icon_acc_consolidated_view" class="fa-solid fa-chevron-down" style="color:var(--emerald); transition:0.3s; transform: rotate(180deg);"></i>
+              </div>
+              
+              <div id="acc_consolidated_view" style="padding: 12px; display:flex; flex-direction:column; gap:6px; max-height: 250px; overflow-y: auto;">
+                  \${consolidatedList.map((item, idx) => {
+                      const kien = item.ratio > 0 ? Math.floor(item.qty / item.ratio) : 0;
+                      const le = item.ratio > 0 ? item.qty % item.ratio : item.qty;
+                      let qtyText = '';
+                      if (kien > 0 && le > 0) qtyText = \`\${kien} Thùng \${le} \${item.dvt}\`;
+                      else if (kien > 0) qtyText = \`\${kien} Thùng\`;
+                      else qtyText = \`\${item.qty} \${item.dvt}\`;
 
-  <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s;"></i>
-</div>
-                </div>
-
-                <div id="${accordionId}" class="hidden" style="padding:12px 16px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
-                  <div style="font-size:13px; color:var(--text-muted); margin-bottom:2px;">Nhân viên lập: <b style="color:var(--text-main);">[${o.salesCode || ''}] ${o.salesName || ''}</b></div>
-               ${validItems.map(item => {
-  const productObj = products.find(p => p.id === item.id || p.code === item.code);
-  const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-  
-  const totalQty = Number(item.qty || 0);
-  const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-  const le = ratio > 0 ? totalQty % ratio : totalQty;
-  const unitName = item.dvt || 'gói';
-
-  let qtyText = '';
-  if (kien > 0 && le > 0) {
-    qtyText = `${kien} Thùng ${le} ${unitName}`;
-  } else if (kien > 0) {
-    qtyText = `${kien} Thùng`;
+                      return \`
+                          <div style="display:flex; justify-content:space-between; font-size:13.5px; border-bottom:1px dashed rgba(16, 185, 129, 0.3); padding-bottom:6px; margin-bottom:2px;">
+                              <span style="font-weight:700; color:var(--text-main); padding-right:8px;">\${idx + 1}. [\${item.code}] \${item.name}</span>
+                              <span style="font-weight:900; color:var(--emerald); white-space:nowrap;">\${qtyText}</span>
+                          </div>
+                      \`;
+                  }).join('')}
+              </div>
+          </div>
+      \`;
   } else {
-    qtyText = `${totalQty} ${unitName}`;
+      summaryUI = \`<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:13px; font-weight:700;">Không có đơn hàng nào trong khoảng thời gian này.</div>\`;
   }
 
- return `
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:14px; border-bottom:1px dashed var(--card-border); padding:6px 0; color:var(--prod-code-color);">
-      <span style="font-weight:700; color:#2563EB; flex:1; word-break:break-word; line-height:1.35;">[${item.code || ''}] ${item.name || ''}</span>
-      <span style="font-weight:800; color:#2563EB; white-space:nowrap; flex-shrink:0; text-align:right;">${qtyText}</span>
-    </div>
-  `;
-}).join('')}
-                
-                </div>
-              </div>
-            `;
-          }).join('') : `<div style="text-align:center; padding:30px; font-size:14px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào gần đây.</div>`}
-          `}
+  // Phần giao diện danh sách từng đơn (như cũ)
+  const ordersUI = diaryOrders.length > 0 ? diaryOrders.map(o => {
+      const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
+      const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
+      const accordionId = \`acc_order_\${o.id}\`;
+
+      return \`
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; flex-shrink: 0; margin-bottom:8px;">
+          <div onclick="toggleOrderAccordion('\${accordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="display:flex; gap:10px; align-items:center;">
+              <span style="font-size:15px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px;">#\${o.soCtu}</span>
+              <span style="font-size:14px; font-weight:700; color:var(--text-muted);">\${formatDateDDMMYYYY(o.ngayCtu)} \${formatOrderTime(o.createdAt)}</span>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <span style="font-size:15px; font-weight:800; color:var(--emerald);">SL: \${totalSL}</span>
+                <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('\${o.id}')" style="padding:4px 8px; font-size:11px;">Bốc Đơn</button>
+                <i class="fa-solid fa-chevron-down" id="icon_\${accordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s;"></i>
+            </div>
+          </div>
+
+          <div id="\${accordionId}" class="hidden" style="padding:12px 16px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
+            <div style="font-size:13px; color:var(--text-muted); margin-bottom:2px;">Nhân viên lập: <b style="color:var(--text-main);">[\${o.salesCode || ''}] \${o.salesName || ''}</b></div>
+         \${validItems.map(item => {
+                const productObj = products.find(p => p.id === item.id || p.code === item.code);
+                const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+                const totalQty = Number(item.qty || 0);
+                const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+                const le = ratio > 0 ? totalQty % ratio : totalQty;
+                const unitName = item.dvt || 'gói';
+
+                let qtyText = '';
+                if (kien > 0 && le > 0) qtyText = \`\${kien} Thùng \${le} \${unitName}\`;
+                else if (kien > 0) qtyText = \`\${kien} Thùng\`;
+                else qtyText = \`\${totalQty} \${unitName}\`;
+
+                return \`
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:14px; border-bottom:1px dashed var(--card-border); padding:6px 0; color:var(--prod-code-color);">
+                    <span style="font-weight:700; color:#2563EB; flex:1; word-break:break-word; line-height:1.35;">[\${item.code || ''}] \${item.name || ''}</span>
+                    <span style="font-weight:800; color:#2563EB; white-space:nowrap; flex-shrink:0; text-align:right;">\${qtyText}</span>
+                  </div>
+                \`;
+            }).join('')}
+          </div>
+        </div>
+      \`;
+  }).join('') : '';
+
+  return filterUI + summaryUI + ordersUI;
+
+})()}
         </div>
       </div>
     </div>
   `;
   modalContainer.classList.remove('hidden');
 };
-
 window.closeStoreHistoryModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (modalContainer) {
