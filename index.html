@@ -5205,8 +5205,30 @@ ${users.map(u => `
     }
 else if (tab === 'kpi') {
       window._kpiDateFilter = window._kpiDateFilter || 'today';
+      window._kpiDateFrom = window._kpiDateFrom || '';
+      window._kpiDateTo = window._kpiDateTo || '';
+
+      window.setKpiDateFrom = function(val) {
+        window._kpiDateFrom = val;
+        window._kpiDateFilter = 'custom';
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
+
+      window.setKpiDateTo = function(val) {
+        window._kpiDateTo = val;
+        window._kpiDateFilter = 'custom';
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
+
       window.changeKpiFilter = function(val) {
         window._kpiDateFilter = val;
+        // Nếu không phải chế độ tùy chỉnh thì xóa dữ liệu ngày đã chọn
+        if (val !== 'custom') {
+            window._kpiDateFrom = '';
+            window._kpiDateTo = '';
+        }
         const activePane = document.getElementById('tabPane_kpi');
         if (activePane) renderTabContent('kpi', activePane);
       };
@@ -5254,6 +5276,26 @@ else if (tab === 'kpi') {
         let prevWeekEnd = new Date(firstDay); prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
         prevStart = prevWeekStart.toISOString().slice(0, 10);
         prevEnd = prevWeekEnd.toISOString().slice(0, 10);
+      } else if (window._kpiDateFilter === 'custom') {
+        // Xử lý tìm kiếm thông minh từ ngày đến ngày
+        filterStart = window._kpiDateFrom;
+        filterEnd = window._kpiDateTo || todayStr;
+
+        // Tính toán lùi ngày để so sánh tăng trưởng với kỳ trước tương đương
+        if (filterStart && filterEnd) {
+            const sDate = new Date(filterStart);
+            const eDate = new Date(filterEnd);
+            const diffTime = Math.abs(eDate - sDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            let pEnd = new Date(sDate);
+            pEnd.setDate(pEnd.getDate() - 1);
+            let pStart = new Date(pEnd);
+            pStart.setDate(pStart.getDate() - diffDays);
+
+            prevEnd = pEnd.toISOString().slice(0, 10);
+            prevStart = pStart.toISOString().slice(0, 10);
+        }
       }
 
       let kpiMap = new Map();
@@ -5379,15 +5421,41 @@ else if (tab === 'kpi') {
         totalValidStores = stores.length;
       }
       container.innerHTML = `
-        <div class="tab-header-actions" style="margin-bottom:14px;">
-          <h2 style="font-weight:800; font-size:22px;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
-          <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:8px 14px; border-radius:10px; font-size:15px; outline:none; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-            <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>Hôm Nay</option>
-            <option value="yesterday" ${window._kpiDateFilter === 'yesterday' ? 'selected' : ''}>Hôm Qua</option>
-            <option value="week" ${window._kpiDateFilter === 'week' ? 'selected' : ''}>Tuần Này</option>
-            <option value="month" ${window._kpiDateFilter === 'month' ? 'selected' : ''}>Tháng Này</option>
-            <option value="all" ${window._kpiDateFilter === 'all' ? 'selected' : ''}>Tất Cả</option>
-          </select>
+        <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
+            <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:8px 14px; border-radius:10px; font-size:14px; outline:none; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+              <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>Hôm Nay</option>
+              <option value="yesterday" ${window._kpiDateFilter === 'yesterday' ? 'selected' : ''}>Hôm Qua</option>
+              <option value="week" ${window._kpiDateFilter === 'week' ? 'selected' : ''}>Tuần Này</option>
+              <option value="month" ${window._kpiDateFilter === 'month' ? 'selected' : ''}>Tháng Này</option>
+              <option value="all" ${window._kpiDateFilter === 'all' ? 'selected' : ''}>Tất Cả</option>
+              <option value="custom" ${window._kpiDateFilter === 'custom' ? 'selected' : ''}>Tùy chỉnh ngày...</option>
+            </select>
+          </div>
+          
+          <!-- Hàng chọn ngày ẩn/hiện tùy theo lựa chọn "Tùy chỉnh..." -->
+          <div style="display:${window._kpiDateFilter === 'custom' ? 'flex' : 'none'}; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--card-border);">
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+              <span style="font-size:14px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ:</span>
+              <input type="text" id="kpiDateFrom" 
+                     value="${window._kpiDateFrom && window._kpiDateFrom.includes('-') ? window._kpiDateFrom.split('-').reverse().join('/') : (window._kpiDateFrom || '')}" 
+                     onfocus="this.type='date';" 
+                     onblur="this.type='text'; setTimeout(() => { if(this.value.includes('-')) this.value = this.value.split('-').reverse().join('/'); }, 50);" 
+                     onchange="setKpiDateFrom(this.value); this.type='text'; setTimeout(() => { if(this.value.includes('-')) this.value = this.value.split('-').reverse().join('/'); }, 50);" 
+                     style="margin:0; padding:8px 4px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border); box-sizing:border-box;">
+            </div>
+            
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+              <span style="font-size:14px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến:</span>
+              <input type="text" id="kpiDateTo" 
+                     value="${window._kpiDateTo && window._kpiDateTo.includes('-') ? window._kpiDateTo.split('-').reverse().join('/') : (window._kpiDateTo || '')}" 
+                     onfocus="this.type='date';" 
+                     onblur="this.type='text'; setTimeout(() => { if(this.value.includes('-')) this.value = this.value.split('-').reverse().join('/'); }, 50);" 
+                     onchange="setKpiDateTo(this.value); this.type='text'; setTimeout(() => { if(this.value.includes('-')) this.value = this.value.split('-').reverse().join('/'); }, 50);" 
+                     style="margin:0; padding:8px 4px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border); box-sizing:border-box;">
+            </div>
+          </div>
         </div>
 
       <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-bottom:20px;">
