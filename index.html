@@ -8256,7 +8256,7 @@ window.handleImportCtkmExcel = function(event) {
 
       if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
 
-      // Tự động quét tìm dòng chứa tiêu đề "MaKM" để bỏ qua các dòng rác gạch chéo ở trên
+      // Tự động quét tìm dòng chứa tiêu đề "MaKM" để xác định header
       let headerIdx = -1;
       for (let i = 0; i < 20; i++) {
          if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('MaKM'))) {
@@ -8272,27 +8272,40 @@ window.handleImportCtkmExcel = function(event) {
       const colMap = {};
       headers.forEach((h, i) => { if (h) colMap[String(h).trim()] = i; });
 
-      // HÀM DỊCH SỐ SERIAL CỦA EXCEL SANG NGÀY THÁNG CHUẨN (DD/MM/YYYY)
+      // HÀM XỬ LÝ NGÀY THÁNG LINH HOẠT TỐI ƯU
       const parseExcelDate = (excelValue) => {
           if (!excelValue) return '';
-          if (typeof excelValue === 'string') return excelValue.trim();
-          if (typeof excelValue === 'number') {
-              // Công thức lùi về hệ ngày chuẩn của Javascript
-              const date = new Date(Math.round((excelValue - 25569) * 86400 * 1000));
-              const d = String(date.getDate()).padStart(2, '0');
-              const m = String(date.getMonth() + 1).padStart(2, '0');
-              const y = date.getFullYear();
-              return `${d}/${m}/${y}`;
+          
+          // Trường hợp 1: Excel vốn đã lưu là Text (chuỗi chữ) thì cứ thế trả về (Ví dụ: "01/08/2026")
+          if (typeof excelValue === 'string') {
+              // Xóa khoảng trắng thừa 2 đầu
+              return excelValue.trim();
           }
+          
+          // Trường hợp 2: Excel tự động ép sang định dạng số Serial Date (Ví dụ: 46240)
+          if (typeof excelValue === 'number') {
+              // Kiểm tra xem đây có phải là con số giống như kiểu ngày tháng (thường lớn hơn 30000)
+              if (excelValue > 20000) {
+                 const date = new Date(Math.round((excelValue - 25569) * 86400 * 1000));
+                 const d = String(date.getDate()).padStart(2, '0');
+                 const m = String(date.getMonth() + 1).padStart(2, '0');
+                 const y = date.getFullYear();
+                 return `${d}/${m}/${y}`;
+              } else {
+                 return String(excelValue);
+              }
+          }
+          
           return String(excelValue);
       };
 
       let newPromos = [];
       let importedCtus = new Set();
 
-      // Bắt đầu đọc từ dòng dưới dòng tiêu đề
+      // Bắt đầu đọc dữ liệu từ dòng dưới tiêu đề
       for (let i = headerIdx + 1; i < jsonRows.length; i++) {
           const row = jsonRows[i];
+          // Bỏ qua dòng trống hoặc không có Mã KM
           if (!row || row.length === 0 || !row[colMap['MaKM']]) continue;
           
           const ctu = row[colMap['MaCtu']] ? String(row[colMap['MaCtu']]).trim() : 'KHÁC';
@@ -8300,8 +8313,8 @@ window.handleImportCtkmExcel = function(event) {
 
           newPromos.push({
              id: 'km_' + Date.now() + '_' + i,
-             tuNgay: parseExcelDate(row[colMap['Từ ngày']]), // Đã áp dụng bộ dịch ngày
-             denNgay: parseExcelDate(row[colMap['Đến ngày']]), // Đã áp dụng bộ dịch ngày
+             tuNgay: parseExcelDate(row[colMap['Từ ngày']]),
+             denNgay: parseExcelDate(row[colMap['Đến ngày']]),
              maKM: String(row[colMap['MaKM']]).trim(),
              noiDung: row[colMap['Nội dung']] ? String(row[colMap['Nội dung']]).trim() : '',
              hangHoa: row[colMap['HangHoa']] ? String(row[colMap['HangHoa']]).trim() : '',
