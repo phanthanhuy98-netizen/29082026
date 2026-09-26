@@ -5752,19 +5752,26 @@ else if (tab === 'kpi') {
       `;
        }
        }
-// Khai báo biến lưu trạng thái Modal Lịch sử
 window._historyModalTab = 'top';
 window._historyDateFrom = '';
 window._historyDateTo = '';
 
 window.setHistoryDateFrom = function(val) {
   window._historyDateFrom = val;
-  window._renderStoreHistoryContent();
+  // Cập nhật riêng phần nội dung kết quả bên dưới để không làm mất focus ô input ngày
+  const contentEl = document.getElementById('historyScrollContent');
+  if (contentEl) {
+    contentEl.innerHTML = window._getStoreHistoryContentHtml();
+  }
 };
 
 window.setHistoryDateTo = function(val) {
   window._historyDateTo = val;
-  window._renderStoreHistoryContent();
+  // Cập nhật riêng phần nội dung kết quả bên dưới để không làm mất focus ô input ngày
+  const contentEl = document.getElementById('historyScrollContent');
+  if (contentEl) {
+    contentEl.innerHTML = window._getStoreHistoryContentHtml();
+  }
 };
 
 window.openStoreHistoryModal = function() {
@@ -5772,21 +5779,16 @@ window.openStoreHistoryModal = function() {
     return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
   window._historyModalTab = 'top';
-  window._historyDateFrom = ''; // Xóa bộ lọc ngày khi mở lại
+  window._historyDateFrom = ''; 
   window._historyDateTo = '';
-  window._renderStoreHistoryContent();
-};
+  
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return;
 
-window.switchHistoryTab = function(tabName) {
-  window._historyModalTab = tabName;
-  window._renderStoreHistoryContent();
-};
-
-window._renderStoreHistoryContent = function() {
+  const isTopTab = window._historyModalTab === 'top';
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-  // 1. Lọc toàn bộ đơn hàng của khách hàng này
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
     let inferredCode = o.maDTPNNo || '';
@@ -5796,81 +5798,275 @@ window._renderStoreHistoryContent = function() {
     const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
     return (matchId || matchCode) && o.status !== 'Đã hủy';
   });
-
   customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeStoreHistoryModal()">
+      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; max-width:600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:10px; flex-shrink:0;">
+          <h3 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử: ${activeVisitedStore.name}</h3>
+          <button class="btn btn-red btn-sm" onclick="closeStoreHistoryModal()">Đóng</button>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-shrink:0;">
+          <button id="histTabTopBtn" class="btn ${isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('top')">
+            🔥 Top sản phẩm hay mua
+          </button>
+          <button id="histTabDiaryBtn" class="btn ${!isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('diary')">
+            📖 Nhật ký đơn (${customerOrders.length})
+          </button>
+        </div>
+
+        <!-- Thêm min-height:0 và flex-shrink:0 giúp cuộn mượt mà trong Flexbox -->
+        <div id="historyScrollContent" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+            ${window._getStoreHistoryContentHtml()}
+        </div>
+      </div>
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+};
+
+window.switchHistoryTab = function(tabName) {
+  window._historyModalTab = tabName;
+  const isTop = tabName === 'top';
   
-  // 2. Logic cho Tab 1: Top Sản Phẩm
-  let productStatsMap = new Map();
-  customerOrders.forEach(o => {
-    if (o.items && Array.isArray(o.items)) {
-        o.items.forEach(item => {
-            const itemQty = Number(item.qty || 0);
-            if (itemQty > 0) {
-                const pKey = String(item.id || item.code || '').trim();
-                if (!productStatsMap.has(pKey)) {
-                    let qc = Number(item['Q/c'] || item.quyCach || item.tyleQuyDoi || item.qc || 0);
-                    if (qc <= 1 && item.name) {
-                        const match = item.name.match(/\*(\d+)/);
-                        if (match) qc = Number(match[1]);
-                    }
-                    if (qc <= 1) qc = 50; 
-                    productStatsMap.set(pKey, {
-                        code: item.code || item.id || '',
-                        name: item.name || '',
-                        dvt: item.dvt || 'cây',
-                        tyleQuyDoi: qc,
-                        totalQty: 0,
-                        orderCount: 0
-                    });
-                }
-                let stats = productStatsMap.get(pKey);
-                stats.totalQty += itemQty;
-                stats.orderCount += 1;
-            }
-        });
+  // Cập nhật trạng thái active của nút tab
+  const btnTop = document.getElementById('histTabTopBtn');
+  const btnDiary = document.getElementById('histTabDiaryBtn');
+  if(btnTop && btnDiary) {
+    btnTop.className = `btn ${isTop ? 'btn-amber' : 'btn-sm'}`;
+    btnTop.style.cssText = "flex:1; font-weight:800; padding:10px;";
+    btnDiary.className = `btn ${!isTop ? 'btn-amber' : 'btn-sm'}`;
+    btnDiary.style.cssText = "flex:1; font-weight:800; padding:10px;";
+  }
+
+  const contentEl = document.getElementById('historyScrollContent');
+  if (contentEl) {
+    contentEl.innerHTML = window._getStoreHistoryContentHtml();
+  }
+};
+
+// Hàm phụ trợ tạo nội dung HTML bên trong khung cuộn
+window._getStoreHistoryContentHtml = function() {
+  if (!activeVisitedStore) return '';
+  const storeIdStr = String(activeVisitedStore.id);
+  const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+  let customerOrders = orders.filter(o => {
+    const matchId = String(o.storeId || '') === storeIdStr;
+    let inferredCode = o.maDTPNNo || '';
+    if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+      inferredCode = o.maKH.split(' - ')[0].trim();
     }
+    const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+    return (matchId || matchCode) && o.status !== 'Đã hủy';
   });
-  let topProductsList = Array.from(productStatsMap.values());
-  topProductsList.sort((a, b) => b.totalQty - a.totalQty);
+  customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
-  // 3. Logic cho Tab 2: Nhật ký đơn & Tổng cộng dồn
-  let diaryOrders = [...customerOrders];
-  const hasDateFilter = window._historyDateFrom !== '' || window._historyDateTo !== '';
+  const isTopTab = window._historyModalTab === 'top';
 
-  if (window._historyDateFrom) {
-      diaryOrders = diaryOrders.filter(o => o.ngayCtu >= window._historyDateFrom);
-  }
-  if (window._historyDateTo) {
-      diaryOrders = diaryOrders.filter(o => o.ngayCtu <= window._historyDateTo);
-  }
-
-  // Cộng dồn Sản phẩm
-  let aggregatedItems = new Map();
-  diaryOrders.forEach(o => {
+  if (isTopTab) {
+    let productStatsMap = new Map();
+    customerOrders.forEach(o => {
       if (o.items && Array.isArray(o.items)) {
-          o.items.forEach(item => {
-              let qty = Number(item.qty || 0);
-              if (qty > 0) {
-                  let pKey = item.code || item.id;
-                  if (!aggregatedItems.has(pKey)) {
-                       const productObj = products.find(p => p.id === pKey || p.code === pKey);
-                       const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-                       aggregatedItems.set(pKey, {
-                           code: item.code,
-                           name: item.name,
-                           qty: 0,
-                           dvt: item.dvt || 'gói',
-                           ratio: ratio
-                       });
-                  }
-                  aggregatedItems.get(pKey).qty += qty;
+        o.items.forEach(item => {
+          const itemQty = Number(item.qty || 0);
+          if (itemQty > 0) {
+            const pKey = String(item.id || item.code || '').trim();
+            if (!productStatsMap.has(pKey)) {
+              let qc = Number(item['Q/c'] || item.quyCach || item.tyleQuyDoi || item.qc || 0);
+              if (qc <= 1 && item.name) {
+                const match = item.name.match(/\*(\d+)/);
+                if (match) qc = Number(match[1]);
               }
-          });
+              if (qc <= 1) qc = 50; 
+              productStatsMap.set(pKey, {
+                code: item.code || item.id || '',
+                name: item.name || '',
+                dvt: item.dvt || 'cây',
+                tyleQuyDoi: qc,
+                totalQty: 0,
+                orderCount: 0
+              });
+            }
+            let stats = productStatsMap.get(pKey);
+            stats.totalQty += itemQty;
+            stats.orderCount += 1;
+          }
+        });
       }
-  });
-  let consolidatedList = Array.from(aggregatedItems.values());
-  consolidatedList.sort((a, b) => b.qty - a.qty);
+    });
 
+    let topProductsList = Array.from(productStatsMap.values());
+    topProductsList.sort((a, b) => b.totalQty - a.totalQty);
+
+    if (topProductsList.length === 0) {
+      return `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700; flex-shrink:0;">Khách hàng chưa có lịch sử mua hàng.</div>`;
+    }
+
+    let groupedByCompany = {};
+    topProductsList.forEach(tp => {
+      let ctyKey = 'KHÁC';
+      const codeStr = (tp.code || '').toUpperCase();
+      if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
+      else {
+        const match = codeStr.match(/^\[(.*?)\]/);
+        if (match) { ctyKey = match[1].trim(); } 
+        else {
+          const parts = codeStr.split(/[-_]/);
+          if (parts.length > 1) ctyKey = parts[0].trim();
+          else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
+        }
+      }
+      if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
+      groupedByCompany[ctyKey].push(tp);
+    });
+
+    let groupHtmlArr = [];
+    Object.keys(groupedByCompany).forEach(ctyCode => {
+      const prods = groupedByCompany[ctyCode];
+      let displayName = `Công Ty ${ctyCode}`;
+      if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
+      else {
+        const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(ctyCode).toUpperCase());
+        if (found && found.tenCtu) { displayName = found.tenCtu; }
+      }
+      const groupAccordionId = `acc_company_${ctyCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+      let prodListHtml = prods.map(tp => {
+        const ratio = Number(tp.tyleQuyDoi || 50);
+        const totalQty = Number(tp.totalQty || 0);
+        const unitName = tp.dvt || 'cây';
+        let qtyText = '';
+        if (ratio > 1) {
+          const kien = Math.floor(totalQty / ratio);
+          const le = totalQty % ratio;
+          if (kien > 0 && le > 0) { qtyText = `${kien} Thùng ${le} ${unitName}`; } 
+          else if (kien > 0) { qtyText = `${kien} Thùng`; } 
+          else { qtyText = `${totalQty} ${unitName}`; }
+        } else { qtyText = `${totalQty} ${unitName}`; }
+
+        return `
+          <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:8px;">
+              <span style="font-size:13px; font-weight:800; color:var(--primary);">[${tp.code}] ${tp.name}</span>
+              <span style="font-size:12px; color:var(--text-muted);">Tổng mua: <b style="color:var(--emerald);">${qtyText}</b> (${tp.orderCount} lần đơn)</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      groupHtmlArr.push(`
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0;">
+          <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="display:flex; gap:10px; align-items:center; flex:1;">
+              <span style="font-size:15px; font-weight:800; color:var(--primary); flex-shrink:0;"><i class="fa-solid fa-building"></i></span>
+              <span style="font-size:15px; font-weight:800; color:var(--primary); word-break:break-word; flex:1;">${displayName}</span>
+              <span style="font-size:12px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:10px; flex-shrink:0;">${prods.length} SP</span>
+            </div>
+            <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s; flex-shrink:0;"></i>
+          </div>
+          <div id="${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
+            ${prodListHtml}
+          </div>
+        </div>
+      `);
+    });
+    return groupHtmlArr.join('');
+  } else {
+    const filterUI = `
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 12px; background: var(--card-bg); padding: 12px; border-radius: 12px; border: 1px solid var(--card-border); flex-shrink:0;">
+          <div style="display:flex; gap:8px; align-items:center;">
+              <div style="flex:1;">
+                  <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
+                  <input type="date" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+              </div>
+              <div style="flex:1;">
+                  <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
+                  <input type="date" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+              </div>
+          </div>
+          ${(window._historyDateFrom !== '' || window._historyDateTo !== '') ? `
+              <button class="btn btn-red btn-sm" onclick="setHistoryDateFrom(''); setHistoryDateTo('');" style="width:100%; justify-content:center; padding:8px; font-weight:800; margin-top:4px;">
+                  <i class="fa-solid fa-xmark"></i> Hủy bộ lọc ngày
+              </button>
+          ` : ''}
+      </div>
+    `;
+
+    let diaryOrders = [...customerOrders];
+    if (window._historyDateFrom) {
+      diaryOrders = diaryOrders.filter(o => o.ngayCtu >= window._historyDateFrom);
+    }
+    if (window._historyDateTo) {
+      diaryOrders = diaryOrders.filter(o => o.ngayCtu <= window._historyDateTo);
+    }
+
+    let aggregatedItems = new Map();
+    diaryOrders.forEach(o => {
+      if (o.items && Array.isArray(o.items)) {
+        o.items.forEach(item => {
+          let qty = Number(item.qty || 0);
+          if (qty > 0) {
+            let pKey = item.code || item.id;
+            if (!aggregatedItems.has(pKey)) {
+              const productObj = products.find(p => p.id === pKey || p.code === pKey);
+              const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+              aggregatedItems.set(pKey, {
+                code: item.code,
+                name: item.name,
+                qty: 0,
+                dvt: item.dvt || 'gói',
+                ratio: ratio
+              });
+            }
+            aggregatedItems.get(pKey).qty += qty;
+          }
+        });
+      }
+    });
+
+    let consolidatedList = Array.from(aggregatedItems.values());
+    consolidatedList.sort((a, b) => b.qty - a.qty);
+
+    let summaryUI = '';
+    if (consolidatedList.length > 0) {
+      let consolidatedItemsHtml = consolidatedList.map((item, idx) => {
+        const kien = item.ratio > 0 ? Math.floor(item.qty / item.ratio) : 0;
+        const le = item.ratio > 0 ? item.qty % item.ratio : item.qty;
+        let qtyText = '';
+        if (kien > 0 && le > 0) qtyText = `${kien} Thùng ${le} ${item.dvt}`;
+        else if (kien > 0) qtyText = `${kien} Thùng`;
+        else qtyText = `${item.qty} ${item.dvt}`;
+
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:14.5px; border-bottom:1px dashed rgba(16, 185, 129, 0.3); padding:8px 0; flex-shrink:0;">
+              <span style="font-weight:700; color:var(--text-main); padding-right:8px; line-height:1.4;">${idx + 1}. [${item.code}] ${item.name}</span>
+              <span style="font-weight:900; color:var(--emerald); white-space:nowrap; flex-shrink:0;">${qtyText}</span>
+          </div>
+        `;
+      }).join('');
+
+      summaryUI = `
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 12px; flex-shrink:0;">
+            <div style="padding: 12px 14px; display:flex; justify-content:space-between; align-items:center; background:rgba(16, 185, 129, 0.15);">
+                <div style="font-size: 14px; font-weight: 800; color: var(--emerald);">
+                    <i class="fa-solid fa-layer-group"></i> TỔNG CỘNG TRONG KỲ (${diaryOrders.length} Đơn)
+                </div>
+            </div>
+            <div style="padding: 12px 14px; display:flex; flex-direction:column; gap:4px;">
+                ${consolidatedItemsHtml}
+            </div>
+        </div>
+      `;
+    } else {
+      summaryUI = `<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:13px; font-weight:700; flex-shrink:0;">Không có đơn hàng nào trong khoảng thời gian này.</div>`;
+    }
+
+    return filterUI + summaryUI;
+  }
+};
   const isTopTab = window._historyModalTab === 'top';
   
   // =========================================================
