@@ -5065,33 +5065,34 @@ else if (tab === 'ctkm') {
       window._ctkmSearchKey = window._ctkmSearchKey || '';
       let ctkmSearchTimer = null;
 
-      // HÀM TÌM KIẾM MƯỢT MÀ: Giữ nguyên ô input, chỉ cập nhật danh sách kết quả bên dưới
+      // HÀM TÌM KIẾM MƯỢT MÀ
       window.debounceFilterCtkm = function(keyword) {
         clearTimeout(ctkmSearchTimer);
         ctkmSearchTimer = setTimeout(() => {
           window._ctkmSearchKey = keyword;
-          drawCtkmResultsOnly(); // CHỈ VẼ LẠI KẾT QUẢ, KHÔNG CHẠM VÀO Ô TÌM KIẾM
+          drawCtkmResultsOnly(); 
         }, 200);
       };
 
-      // HÀM TẢI MỚI DỮ LIỆU TỪ FIREBASE (Chỉ gọi khi bấm nút "Làm Mới")
+      // HÀM LÀM MỚI TỪ CLOUD
       window.forceRefreshCtkmFromCloud = async function() {
         const resContainer = document.getElementById('ctkmResultsContainer');
         if (resContainer) resContainer.innerHTML = `<div style="padding:40px; text-align:center; font-weight:800; color:var(--primary);"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tải dữ liệu CTKM từ máy chủ...</div>`;
-        
         try {
           const snap = await getDocs(collection(db, "promotions"));
           window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-          await savePromotionsToLocalCache(window.promotionsList);
+          if (typeof savePromotionsToLocalCache === 'function') {
+            await savePromotionsToLocalCache(window.promotionsList);
+          }
           drawCtkmResultsOnly();
-          triggerHaptic(20);
+          if (typeof triggerHaptic === 'function') triggerHaptic(20);
         } catch (e) {
           alert("Lỗi tải dữ liệu: " + e.message);
           drawCtkmResultsOnly();
         }
       };
 
-      // HÀM CHỈ VẼ RA DANH SÁCH KẾT QUẢ BÊN DƯỚI
+      // HÀM VẼ KẾT QUẢ DANH SÁCH (KHÔNG VẼ LẠI Ô TÌM KIẾM)
       const drawCtkmResultsOnly = () => {
         const container = document.getElementById('ctkmResultsContainer');
         if (!container) return;
@@ -5106,10 +5107,11 @@ else if (tab === 'ctkm') {
           });
         }
 
-        // GOM NHÓM THEO MÃ CÔNG TY (MaCtu)
+        // Gom nhóm theo mã công ty
         let groupedPromos = {};
         filteredPromos.forEach(km => {
-            let ctuKey = (km.maCtu || 'KHÁC').toUpperCase();
+            let cleanCode = String(km.maCtu || '').trim();
+            let ctuKey = cleanCode.length >= 2 ? cleanCode.substring(0, 2).toUpperCase() : (cleanCode.toUpperCase() || 'KHÁC');
             if (!groupedPromos[ctuKey]) groupedPromos[ctuKey] = [];
             groupedPromos[ctuKey].push(km);
         });
@@ -5164,12 +5166,11 @@ else if (tab === 'ctkm') {
         container.innerHTML = groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào.</div>';
       };
 
-      // VẼ KHUNG GIAO DIỆN CHÍNH (Chỉ vẽ 1 lần khi mở tab)
+      // VẼ GIAO DIỆN CHÍNH
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM</h2>
           <div class="excel-group-btns">
-            <!-- NÚT LÀM MỚI TÍCH HỢP -->
             <button class="btn btn-amber btn-sm" onclick="forceRefreshCtkmFromCloud()" style="font-weight:800;"><i class="fa-solid fa-rotate"></i> Làm Mới</button>
             ${isAdminOrManager ? `
               <button class="btn btn-green btn-sm" onclick="exportCtkmExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
@@ -5178,43 +5179,37 @@ else if (tab === 'ctkm') {
             ` : ''}
           </div>
         </div>
-
         <div class="card" style="margin-bottom:12px; padding:12px;">
-          <!-- Ô TÌM KIẾM CỐ ĐỊNH, KHÔNG BAO GIỜ BỊ RE-RENDER -->
           <input type="text" id="ctkmSearchInput" placeholder="🔍 Gõ Mã KM, Nội dung, Mã Hàng, MaCtu..." value="${window._ctkmSearchKey}" oninput="debounceFilterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
         </div>
-
-        <!-- KHUNG CHỨA KẾT QUẢ DANH SÁCH CTKM BÊN DƯỚI -->
-        <div id="ctkmResultsContainer" style="display:flex; flex-direction:column; gap:4px;">
-        </div>
+        <div id="ctkmResultsContainer" style="display:flex; flex-direction:column; gap:4px;"></div>
       `;
 
-      // LOGIC TẢI DỮ LIỆU: Cache -> Nếu không có thì Firebase
+      // KHỞI TẠO TẢI DỮ LIỆU BỘ NHỚ ĐỆM
       const initializeCtkmData = async () => {
         const resContainer = document.getElementById('ctkmResultsContainer');
-        
-        // 1. Kiểm tra biến RAM
         if (window.promotionsList && window.promotionsList.length > 0) {
            drawCtkmResultsOnly();
            return;
         }
-
-        // 2. Thử tải từ Cache nội bộ
         try {
-           const cachedPromos = await loadPromotionsFromLocalCache();
-           if (cachedPromos && cachedPromos.length > 0) {
-               window.promotionsList = cachedPromos;
-               drawCtkmResultsOnly();
-               return;
+           if (typeof loadPromotionsFromLocalCache === 'function') {
+               const cachedPromos = await loadPromotionsFromLocalCache();
+               if (cachedPromos && cachedPromos.length > 0) {
+                   window.promotionsList = cachedPromos;
+                   drawCtkmResultsOnly();
+                   return;
+               }
            }
         } catch (e) {}
 
-        // 3. Nếu rỗng hoàn toàn, tự động gọi Firebase lần đầu
         if (resContainer) resContainer.innerHTML = `<div style="padding:40px; text-align:center; font-weight:800; color:var(--primary);"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tải dữ liệu CTKM từ máy chủ...</div>`;
         try {
           const snap = await getDocs(collection(db, "promotions"));
           window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-          await savePromotionsToLocalCache(window.promotionsList);
+          if (typeof savePromotionsToLocalCache === 'function') {
+             await savePromotionsToLocalCache(window.promotionsList);
+          }
           drawCtkmResultsOnly();
         } catch (e) {
           if (resContainer) resContainer.innerHTML = `<div style="text-align:center; color:var(--rose);">Lỗi mạng. Vui lòng bấm Làm mới.</div>`;
