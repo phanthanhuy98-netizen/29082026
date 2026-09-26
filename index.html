@@ -5752,7 +5752,7 @@ else if (tab === 'kpi') {
       `;
        }
        }
- // Biến lưu trạng thái tab và bộ lọc ngày trong Modal Lịch sử
+// Biến lưu trạng thái tab và bộ lọc ngày trong Modal Lịch sử
 window._historyModalTab = 'top';
 window._historyDateFrom = '';
 window._historyDateTo = '';
@@ -5881,6 +5881,180 @@ window._renderStoreHistoryContent = function() {
   const isDiaryTab = window._historyModalTab === 'diary';
   const isSummaryTab = window._historyModalTab === 'summary';
 
+  // ==========================================
+  // TẠO HTML RIÊNG CHO TỪNG TAB (TRÁNH LỖI CÚ PHÁP)
+  // ==========================================
+  let tabContentHtml = '';
+
+  if (isTopTab) {
+    if (!topProductsList || topProductsList.length === 0) {
+      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>`;
+    } else {
+      const groupedByCompany = {};
+      topProductsList.forEach(tp => {
+        let ctyKey = 'KHÁC';
+        const codeStr = (tp.code || '').toUpperCase();
+        if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
+        else {
+          const match = codeStr.match(/^\[(.*?)\]/);
+          if (match) { ctyKey = match[1].trim(); } 
+          else {
+            const parts = codeStr.split(/[-_]/);
+            if (parts.length > 1) ctyKey = parts[0].trim();
+            else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
+          }
+        }
+        if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
+        groupedByCompany[ctyKey].push(tp);
+      });
+
+      tabContentHtml = Object.keys(groupedByCompany).map(ctyCode => {
+        const prods = groupedByCompany[ctyCode];
+        let displayName = "Công Ty " + ctyCode;
+        if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
+        else {
+          const found = companyList.find(c => c && String(c.maCtu || '').trim().toUpperCase() === String(ctyCode).toUpperCase());
+          if (found && found.tenCtu) displayName = found.tenCtu;
+        }
+        const groupAccordionId = "acc_company_" + ctyCode.replace(/[^a-zA-Z0-9]/g, '_');
+        
+        const prodsHtml = prods.map(tp => {
+          const ratio = Number(tp.tyleQuyDoi || 50);
+          const totalQty = Number(tp.totalQty || 0);
+          const unitName = tp.dvt || 'cây';
+          let qtyText = '';
+          if (ratio > 1) {
+            const kien = Math.floor(totalQty / ratio);
+            const le = totalQty % ratio;
+            qtyText = (kien > 0 && le > 0) ? (kien + " Thùng " + le + " " + unitName) : (kien > 0 ? (kien + " Thùng") : (totalQty + " " + unitName));
+          } else {
+            qtyText = totalQty + " " + unitName;
+          }
+          return `
+            <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:6px; padding:6px 8px; display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:6px;">
+                <span style="font-size:12.5px; font-weight:800; color:var(--primary);">[${tp.code}] ${tp.name}</span>
+                <span style="font-size:11.5px; color:var(--text-muted);">Tổng mua: <b style="color:var(--emerald);">${qtyText}</b> (${tp.orderCount} lần)</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:8px;">
+            <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                <span style="font-size:14px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-building"></i></span>
+                <span style="font-size:14px; font-weight:800; color:var(--primary); flex:1;">${displayName}</span>
+                <span style="font-size:11px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:8px;">${prods.length} SP</span>
+              </div>
+              <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:12px; color:var(--text-muted); transition:transform 0.2s;"></i>
+            </div>
+            <div id="${groupAccordionId}" class="hidden" style="padding:8px 10px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px;">
+              ${prodsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  } else if (isSummaryTab) {
+    if (summaryList.length === 0) {
+      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có dữ liệu mua hàng nào trong khoảng thời gian đã chọn.</div>`;
+    } else {
+      const totalSummaryQty = summaryList.reduce((sum, i) => sum + i.totalQty, 0);
+      
+      const summaryItemsHtml = summaryList.map(item => {
+        const kien = item.ratio > 0 ? Math.floor(item.totalQty / item.ratio) : 0;
+        const le = item.ratio > 0 ? item.totalQty % item.ratio : item.totalQty;
+        let qtyText = '';
+        if (kien > 0 && le > 0) {
+          qtyText = `<span style="font-size:15px;">${kien}</span> Thùng <span style="font-size:15px;">${le}</span> ${item.dvt}`;
+        } else if (kien > 0) {
+          qtyText = `<span style="font-size:15px;">${kien}</span> Thùng`;
+        } else {
+          qtyText = `<span style="font-size:15px;">${item.totalQty}</span> ${item.dvt}`;
+        }
+        return `
+          <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <span style="font-weight:800; color:var(--text-main); font-size:13px; flex:1; line-height:1.35;">[${item.code}] ${item.name}</span>
+            <span style="font-weight:800; color:var(--emerald); font-size:12px; white-space:nowrap; text-align:right;">${qtyText}</span>
+          </div>
+        `;
+      }).join('');
+
+      tabContentHtml = `
+        <div style="background:var(--card-bg); border:2px solid var(--emerald); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--card-border); padding-bottom:8px;">
+            <span style="font-weight:900; font-size:14px; color:var(--emerald); text-transform:uppercase;"><i class="fa-solid fa-file-invoice"></i> Danh sách SP đã gộp</span>
+            <span style="font-size:12px; font-weight:800; background:rgba(5, 150, 105, 0.1); color:var(--emerald); padding:4px 8px; border-radius:6px;">Tổng: ${totalSummaryQty} SP</span>
+          </div>
+          <div style="font-size:12.5px; color:var(--text-muted); line-height: 1.4;">
+            Đã lọc <b>${filteredSummaryOrders.length}</b> đơn hàng từ ngày <b>${window._historyDateFrom ? formatDateDDMMYYYY(window._historyDateFrom) : 'đầu tiên'}</b> đến <b>${window._historyDateTo ? formatDateDDMMYYYY(window._historyDateTo) : 'hôm nay'}</b>.
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+            ${summaryItemsHtml}
+          </div>
+        </div>
+      `;
+    }
+  } else { // isDiaryTab
+    if (recentOrders.length === 0) {
+      tabContentHtml = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào.</div>`;
+    } else {
+      tabContentHtml = recentOrders.map(o => {
+        const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
+        const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
+        const accordionId = "acc_order_" + o.id;
+        
+        const itemsHtml = validItems.map(item => {
+          const productObj = products.find(p => p.id === item.id || p.code === item.code);
+          const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+          const totalQty = Number(item.qty || 0);
+          const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+          const le = ratio > 0 ? totalQty % ratio : totalQty;
+          const unitName = item.dvt || 'gói';
+          let qtyText = '';
+          if (kien > 0 && le > 0) {
+            qtyText = kien + " Thùng " + le + " " + unitName;
+          } else if (kien > 0) {
+            qtyText = kien + " Thùng";
+          } else {
+            qtyText = totalQty + " " + unitName;
+          }
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; border-bottom:1px dashed var(--card-border); padding:4px 0; color:var(--prod-code-color);">
+              <span style="font-weight:700; color:#2563EB; flex:1;">[${item.code || ''}] ${item.name || ''}</span>
+              <span style="font-weight:800; color:#2563EB; white-space:nowrap;">${qtyText}</span>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:8px;">
+            <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:6px;">#${o.soCtu}</span>
+                <span style="font-size:13px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span style="font-size:13px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
+                <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('${o.id}')" style="padding:3px 6px; font-size:10.5px;">Bốc Đơn</button>
+                <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:12px; color:var(--text-muted); transition:transform 0.2s;"></i>
+              </div>
+            </div>
+            <div id="${accordionId}" class="hidden" style="padding:10px 14px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px;">
+              <div style="font-size:12px; color:var(--text-muted); margin-bottom:2px;">Nhân viên: <b style="color:var(--text-main);">[${o.salesCode || ''}] ${o.salesName || ''}</b></div>
+              ${itemsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // ==========================================
+  // IN GIAO DIỆN RA MÀN HÌNH
+  // ==========================================
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
@@ -5892,7 +6066,6 @@ window._renderStoreHistoryContent = function() {
           <button class="btn btn-red btn-sm" onclick="closeStoreHistoryModal()">Đóng</button>
         </div>
 
-        <!-- 3 NÚT CHỌN TAB -->
         <div style="display:flex; gap:6px; margin-bottom:12px;">
           <button class="btn ${isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px 4px; font-size:12px;" onclick="switchHistoryTab('top')">
             🔥 Top hay mua
@@ -5906,7 +6079,6 @@ window._renderStoreHistoryContent = function() {
         </div>
 
         ${isSummaryTab ? `
-          <!-- GIAO DIỆN BỘ LỌC NGÀY CHỈ HIỆN KHI Ở TAB TỔNG HỢP -->
           <div style="background:var(--card-bg); border:1px solid var(--primary); border-radius:10px; padding:12px; margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:130px;">
               <span style="font-size:13px; font-weight:800; color:var(--text-muted);">Từ:</span>
@@ -5921,168 +6093,11 @@ window._renderStoreHistoryContent = function() {
         ` : ''}
 
         <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-          ${isTopTab ? (() => {
-            // ... (Phần logic render Tab Top Sản Phẩm giữ nguyên y như code cũ của bạn)
-            if (!topProductsList || topProductsList.length === 0) {
-              return `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Khách hàng chưa có lịch sử mua hàng.</div>`;
-            }
-            const groupedByCompany = {};
-            topProductsList.forEach(tp => {
-              let ctyKey = 'KHÁC';
-              const codeStr = (tp.code || '').toUpperCase();
-              if (codeStr.startsWith('11') || codeStr.includes('TLSG')) { ctyKey = '11'; } 
-              else {
-                const match = codeStr.match(/^\[(.*?)\]/);
-                if (match) { ctyKey = match[1].trim(); } 
-                else {
-                  const parts = codeStr.split(/[-_]/);
-                  if (parts.length > 1) ctyKey = parts[0].trim();
-                  else if (codeStr.length >= 2) ctyKey = codeStr.substring(0, 2);
-                }
-              }
-              if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
-              groupedByCompany[ctyKey].push(tp);
-            });
-
-            return Object.keys(groupedByCompany).map(ctyCode => {
-              const prods = groupedByCompany[ctyCode];
-              let displayName = `Công Ty ${ctyCode}`;
-              if (ctyCode === 'KHÁC') { displayName = 'Các sản phẩm khác'; } 
-              else {
-                const found = companyList.find(c => c && String(c.maCtu || '').trim().toUpperCase() === String(ctyCode).toUpperCase());
-                if (found && found.tenCtu) displayName = found.tenCtu;
-              }
-              const groupAccordionId = `acc_company_${ctyCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
-              return `
-                <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:8px;">
-                  <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-                    <div style="display:flex; gap:8px; align-items:center; flex:1;">
-                      <span style="font-size:14px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-building"></i></span>
-                      <span style="font-size:14px; font-weight:800; color:var(--primary); flex:1;">${displayName}</span>
-                      <span style="font-size:11px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:8px;">${prods.length} SP</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:12px; color:var(--text-muted); transition:transform 0.2s;"></i>
-                  </div>
-                  <div id="${groupAccordionId}" class="hidden" style="padding:8px 10px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px;">
-                    ${prods.map(tp => {
-                      const ratio = Number(tp.tyleQuyDoi || 50);
-                      const totalQty = Number(tp.totalQty || 0);
-                      const unitName = tp.dvt || 'cây';
-                      let qtyText = '';
-                      if (ratio > 1) {
-                        const kien = Math.floor(totalQty / ratio);
-                        const le = totalQty % ratio;
-                        qtyText = (kien > 0 && le > 0) ? `${kien} Thùng ${le} ${unitName}` : (kien > 0 ? `${kien} Thùng` : `${totalQty} ${unitName}`);
-                      } else {
-                        qtyText = `${totalQty} ${unitName}`;
-                      }
-                      return `
-                        <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:6px; padding:6px 8px; display:flex; justify-content:space-between; align-items:center;">
-                          <div style="display:flex; flex-direction:column; gap:2px; flex:1; padding-right:6px;">
-                            <span style="font-size:12.5px; font-weight:800; color:var(--primary);">[${tp.code}] ${tp.name}</span>
-                            <span style="font-size:11.5px; color:var(--text-muted);">Tổng mua: <b style="color:var(--emerald);">${qtyText}</b> (${tp.orderCount} lần)</span>
-                          </div>
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </div>
-              `;
-            }).join('');
-          })() 
-          
-          : isSummaryTab ? (() => {
-            // ==========================================
-            // HIỂN THỊ TAB MỚI: TỔNG HỢP GỘP ĐƠN
-            // ==========================================
-            if (summaryList.length === 0) {
-              return `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có dữ liệu mua hàng nào trong khoảng thời gian đã chọn.</div>`;
-            }
-            const totalSummaryQty = summaryList.reduce((sum, i) => sum + i.totalQty, 0);
-
-            return `
-              <div style="background:var(--card-bg); border:2px solid var(--emerald); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed var(--card-border); padding-bottom:8px;">
-                  <span style="font-weight:900; font-size:14px; color:var(--emerald); text-transform:uppercase;"><i class="fa-solid fa-file-invoice"></i> Danh sách SP đã gộp</span>
-                  <span style="font-size:12px; font-weight:800; background:rgba(5, 150, 105, 0.1); color:var(--emerald); padding:4px 8px; border-radius:6px;">Tổng: ${totalSummaryQty} SP</span>
-                </div>
-                <div style="font-size:12.5px; color:var(--text-muted); line-height: 1.4;">
-                  Đã lọc <b>${filteredSummaryOrders.length}</b> đơn hàng từ ngày <b>${window._historyDateFrom ? formatDateDDMMYYYY(window._historyDateFrom) : 'đầu tiên'}</b> đến <b>${window._historyDateTo ? formatDateDDMMYYYY(window._historyDateTo) : 'hôm nay'}</b>.
-                </div>
-                <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
-                  ${summaryList.map(item => {
-                    const kien = item.ratio > 0 ? Math.floor(item.totalQty / item.ratio) : 0;
-                    const le = item.ratio > 0 ? item.totalQty % item.ratio : item.totalQty;
-                    let qtyText = '';
-                    if (kien > 0 && le > 0) {
-                      qtyText = `<span style="font-size:15px;">${kien}</span> Thùng <span style="font-size:15px;">${le}</span> ${item.dvt}`;
-                    } else if (kien > 0) {
-                      qtyText = `<span style="font-size:15px;">${kien}</span> Thùng`;
-                    } else {
-                      qtyText = `<span style="font-size:15px;">${item.totalQty}</span> ${item.dvt}`;
-                    }
-                    return `
-                      <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                        <span style="font-weight:800; color:var(--text-main); font-size:13px; flex:1; line-height:1.35;">[${item.code}] ${item.name}</span>
-                        <span style="font-weight:800; color:var(--emerald); font-size:12px; white-space:nowrap; text-align:right;">${qtyText}</span>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-            `;
-          })() 
-          
-          : (() => {
-            // ==========================================
-            // HIỂN THỊ TAB: NHẬT KÝ ĐƠN HÀNG (CŨ)
-            // ==========================================
-            if (recentOrders.length === 0) {
-              return `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700;">Không có đơn hàng cũ nào.</div>`;
-            }
-            return recentOrders.map(o => {
-              const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
-              const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
-              const accordionId = `acc_order_${o.id}`;
-              return `
-                <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden;">
-                  <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-                    <div style="display:flex; gap:8px; align-items:center;">
-                      <span style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:6px;">#${o.soCtu}</span>
-                      <span style="font-size:13px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)}${formatOrderTime(o.createdAt)}</span>
-                    </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                      <span style="font-size:13px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
-                      <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('${o.id}')" style="padding:3px 6px; font-size:10.5px;">Bốc Đơn</button>
-                      <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:12px; color:var(--text-muted); transition:transform 0.2s;"></i>
-                    </div>
-                  </div>
-                  <div id="${accordionId}" class="hidden" style="padding:10px 14px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px;">
-                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:2px;">Nhân viên: <b style="color:var(--text-main);">[${o.salesCode || ''}] ${o.salesName \vert{}\vert{} ''}</b></div>${validItems.map(item => {
-                      const productObj = products.find(p => p.id === item.id || p.code === item.code);
-                      const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-                      const totalQty = Number(item.qty || 0);
-                      const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-                      const le = ratio > 0 ? totalQty % ratio : totalQty;
-                      const unitName = item.dvt || 'gói';
-                      let qtyText = (kien > 0 && le > 0) ? `${kien} Thùng ${le} ${unitName}` : (kien > 0 ? `${kien} Thùng` : `${totalQty} ${unitName}`);
-                      return `
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; border-bottom:1px dashed var(--card-border); padding:4px 0; color:var(--prod-code-color);">
-                          <span style="font-weight:700; color:#2563EB; flex:1;">[${item.code || ''}] ${item.name || ''}</span>
-                          <span style="font-weight:800; color:#2563EB; white-space:nowrap;">${qtyText}</span>
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </div>
-              `;
-            }).join('');
-          })()}
+          ${tabContentHtml}
         </div>
       </div>
     </div>
   `;
-  modalContainer.classList.remove('hidden');
 };
 
 window.closeStoreHistoryModal = function() {
