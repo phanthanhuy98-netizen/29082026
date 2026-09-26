@@ -5752,14 +5752,28 @@ else if (tab === 'kpi') {
       `;
        }
        }
-  // Biến lưu trạng thái tab trong Modal Lịch sử ('top' hoặc 'diary')
+// Khai báo biến lưu trạng thái Modal Lịch sử
 window._historyModalTab = 'top';
+window._historyDateFrom = '';
+window._historyDateTo = '';
+
+window.setHistoryDateFrom = function(val) {
+  window._historyDateFrom = val;
+  window._renderStoreHistoryContent();
+};
+
+window.setHistoryDateTo = function(val) {
+  window._historyDateTo = val;
+  window._renderStoreHistoryContent();
+};
 
 window.openStoreHistoryModal = function() {
   if (!activeVisitedStore) {
     return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
   window._historyModalTab = 'top';
+  window._historyDateFrom = ''; // Xóa bộ lọc ngày khi mở lại
+  window._historyDateTo = '';
   window._renderStoreHistoryContent();
 };
 
@@ -5819,8 +5833,10 @@ window._renderStoreHistoryContent = function() {
   let topProductsList = Array.from(productStatsMap.values());
   topProductsList.sort((a, b) => b.totalQty - a.totalQty);
 
-  // 3. Logic cho Tab 2: Nhật ký đơn & Tổng cộng dồn theo ngày
+  // 3. Logic cho Tab 2: Nhật ký đơn & Tổng cộng dồn
   let diaryOrders = [...customerOrders];
+  const hasDateFilter = window._historyDateFrom !== '' || window._historyDateTo !== '';
+
   if (window._historyDateFrom) {
       diaryOrders = diaryOrders.filter(o => o.ngayCtu >= window._historyDateFrom);
   }
@@ -5858,7 +5874,7 @@ window._renderStoreHistoryContent = function() {
   const isTopTab = window._historyModalTab === 'top';
   
   // =========================================================
-  // XÂY DỰNG GIAO DIỆN HTML (ĐÃ TÁCH BIẾN ĐỂ KHÔNG BỊ LỖI CÚ PHÁP)
+  // XÂY DỰNG GIAO DIỆN HTML
   // =========================================================
   let contentHtml = '';
 
@@ -5940,16 +5956,24 @@ window._renderStoreHistoryContent = function() {
           contentHtml = groupHtmlArr.join('');
       }
   } else {
+      // Giao diện Khung chọn ngày + Nút Hủy Lọc
       const filterUI = `
-          <div style="display:flex; gap:8px; margin-bottom: 12px; background: var(--card-bg); padding: 10px; border-radius: 12px; border: 1px solid var(--card-border); align-items:center;">
-              <div style="flex:1;">
-                  <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
-                  <input type="date" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 12px; background: var(--card-bg); padding: 12px; border-radius: 12px; border: 1px solid var(--card-border);">
+              <div style="display:flex; gap:8px; align-items:center;">
+                  <div style="flex:1;">
+                      <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
+                      <input type="date" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                  </div>
+                  <div style="flex:1;">
+                      <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
+                      <input type="date" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                  </div>
               </div>
-              <div style="flex:1;">
-                  <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
-                  <input type="date" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
-              </div>
+              ${hasDateFilter ? `
+                  <button class="btn btn-red btn-sm" onclick="setHistoryDateFrom(''); setHistoryDateTo('');" style="width:100%; justify-content:center; padding:8px; font-weight:800; margin-top:4px;">
+                      <i class="fa-solid fa-xmark"></i> Hủy bộ lọc để xem chi tiết từng đơn
+                  </button>
+              ` : ''}
           </div>
       `;
 
@@ -5964,32 +5988,51 @@ window._renderStoreHistoryContent = function() {
               else qtyText = `${item.qty} ${item.dvt}`;
 
               return `
-                  <div style="display:flex; justify-content:space-between; font-size:13.5px; border-bottom:1px dashed rgba(16, 185, 129, 0.3); padding-bottom:6px; margin-bottom:2px;">
-                      <span style="font-weight:700; color:var(--text-main); padding-right:8px;">${idx + 1}. [${item.code}] ${item.name}</span>
-                      <span style="font-weight:900; color:var(--emerald); white-space:nowrap;">${qtyText}</span>
+                  <div style="display:flex; justify-content:space-between; align-items:center; font-size:14.5px; border-bottom:1px dashed rgba(16, 185, 129, 0.3); padding:10px 0; margin-bottom:2px;">
+                      <span style="font-weight:700; color:var(--text-main); padding-right:8px; line-height:1.4;">${idx + 1}. [${item.code}] ${item.name}</span>
+                      <span style="font-weight:900; color:var(--emerald); white-space:nowrap; flex-shrink:0;">${qtyText}</span>
                   </div>
               `;
           }).join('');
 
-          summaryUI = `
-              <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 16px;">
-                  <div onclick="toggleOrderAccordion('acc_consolidated_view')" style="padding: 12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(16, 185, 129, 0.15);">
-                      <div style="font-size: 14px; font-weight: 800; color: var(--emerald);">
-                          <i class="fa-solid fa-layer-group"></i> TỔNG CỘNG TRONG KỲ (${diaryOrders.length} Đơn)
+          if (hasDateFilter) {
+              // BUNG FULL MÀN HÌNH NẾU ĐÃ LỌC NGÀY (Không có max-height, trượt mượt mà)
+              summaryUI = `
+                  <div style="background: var(--card-bg); border: 2px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 16px;">
+                      <div style="padding: 14px; background:rgba(16, 185, 129, 0.15); display:flex; justify-content:space-between; align-items:center;">
+                          <div style="font-size: 15px; font-weight: 900; color: var(--emerald);">
+                              <i class="fa-solid fa-layer-group"></i> TỔNG CỘNG TRONG KỲ
+                          </div>
+                          <span style="background:var(--emerald); color:#fff; font-size:12px; font-weight:800; padding:3px 8px; border-radius:6px;">${diaryOrders.length} Đơn</span>
                       </div>
-                      <i id="icon_acc_consolidated_view" class="fa-solid fa-chevron-down" style="color:var(--emerald); transition:0.3s; transform: rotate(180deg);"></i>
+                      <div style="padding: 12px 14px; display:flex; flex-direction:column; gap:4px;">
+                          ${consolidatedItemsHtml}
+                      </div>
                   </div>
-                  <div id="acc_consolidated_view" style="padding: 12px; display:flex; flex-direction:column; gap:6px; max-height: 250px; overflow-y: auto;">
-                      ${consolidatedItemsHtml}
+              `;
+          } else {
+              // THU GỌN LÀM ACCORDION NẾU CHƯA LỌC NGÀY
+              summaryUI = `
+                  <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--emerald); border-radius: 12px; overflow:hidden; margin-bottom: 16px;">
+                      <div onclick="toggleOrderAccordion('acc_consolidated_view')" style="padding: 12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(16, 185, 129, 0.15);">
+                          <div style="font-size: 14px; font-weight: 800; color: var(--emerald);">
+                              <i class="fa-solid fa-layer-group"></i> TỔNG CỘNG TẤT CẢ LỊCH SỬ (${diaryOrders.length} Đơn)
+                          </div>
+                          <i id="icon_acc_consolidated_view" class="fa-solid fa-chevron-down" style="color:var(--emerald); transition:0.3s; transform: rotate(0deg);"></i>
+                      </div>
+                      <div id="acc_consolidated_view" class="hidden" style="padding: 12px; display:flex; flex-direction:column; gap:6px; max-height: 250px; overflow-y: auto;">
+                          ${consolidatedItemsHtml}
+                      </div>
                   </div>
-              </div>
-          `;
+              `;
+          }
       } else {
-          summaryUI = `<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:13px; font-weight:700;">Không có đơn hàng nào trong khoảng thời gian này.</div>`;
+          summaryUI = `<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:13px; font-weight:700;">Không có đơn hàng nào.</div>`;
       }
 
+      // Xử lý hiển thị danh sách đơn lẻ
       let ordersUI = '';
-      if (diaryOrders.length > 0) {
+      if (!hasDateFilter && diaryOrders.length > 0) {
           ordersUI = diaryOrders.map(o => {
               const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
               const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
@@ -6029,7 +6072,6 @@ window._renderStoreHistoryContent = function() {
                         <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s;"></i>
                     </div>
                   </div>
-
                   <div id="${accordionId}" class="hidden" style="padding:12px 16px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
                     <div style="font-size:13px; color:var(--text-muted); margin-bottom:2px;">Nhân viên lập: <b style="color:var(--text-main);">[${o.salesCode || ''}] ${o.salesName || ''}</b></div>
                     ${validItemsHtml}
