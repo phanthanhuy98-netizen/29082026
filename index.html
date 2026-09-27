@@ -7738,7 +7738,12 @@ window.renderChiTieuTab = async function(container) {
     ${isPhanTuyen ? `
       <!-- SUB-TAB 1: PHÂN TUYẾN -->
       <div class="card" style="padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
-        <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng (Tối Ưu)</h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin:0;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng</h3>
+        <button class="btn btn-sm" style="background:#0D9488; color:white; font-weight:800;" onclick="openRouteMatrixModal()">
+          <i class="fa-solid fa-table-cells"></i> Xem Ma Trận Phân Tuyến
+        </button>
+      </div>
         ${isAdminOrManager ? `
           <div style="margin-bottom: 16px;">
             <label style="font-size:14px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN NHÂN VIÊN SALES CẦN PHÂN TUYẾN:</label>
@@ -9519,6 +9524,119 @@ window.exportKpiExcel = async function() {
             btn.innerHTML = '<i class="fa-solid fa-file-excel"></i> XUẤT EXCEL';
         }
     }
+};
+  window.openRouteMatrixModal = function() {
+    // 1. Quét dữ liệu khách hàng và đếm số lượng tiệm trên từng tuyến
+    let routesMap = {};
+    const allCustomers = window.customers || []; // Lấy mảng khách hàng hiện tại
+    
+    allCustomers.forEach(c => {
+        let tuyen = c.maTuyen || 'Chưa rõ';
+        if (!routesMap[tuyen]) routesMap[tuyen] = { count: 0, sales: [] };
+        routesMap[tuyen].count++;
+    });
+
+    // 2. Quét danh sách Sales xem ai đang giữ tuyến nào
+    const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+    salesUsers.forEach(su => {
+        let sRoutes = su.assignedRoutes || [];
+        sRoutes.forEach(sr => {
+            if (!routesMap[sr]) routesMap[sr] = { count: 0, sales: [] };
+            routesMap[sr].sales.push(`[${su.code}] ${su.name}`);
+        });
+    });
+
+    // 3. Tạo bảng HTML Ma trận
+    let tableRows = Object.keys(routesMap).sort().map(tuyen => {
+        const data = routesMap[tuyen];
+        const salesCount = data.sales.length;
+        
+        // Cảnh báo thông minh: Đỏ nếu không có ai chăm sóc, Vàng nếu > 1 người cùng chăm sóc, Cam nếu tuyến quá đông khách (>100)
+        let rowStyle = '';
+        let statusBadge = '<span style="background:var(--emerald); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;">Bình thường</span>';
+        
+        if (salesCount === 0) {
+            rowStyle = 'background: rgba(225, 29, 72, 0.1);';
+            statusBadge = '<span style="background:var(--rose); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-triangle-exclamation"></i> Bỏ sót</span>';
+        } else if (salesCount > 1) {
+            rowStyle = 'background: rgba(245, 158, 11, 0.1);';
+            statusBadge = '<span style="background:var(--amber); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-copy"></i> Trùng lặp</span>';
+        } else if (data.count > 100) {
+            statusBadge = '<span style="background:#ea580c; color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-weight-hanging"></i> Quá tải</span>';
+        }
+
+        return `
+            <tr style="${rowStyle} border-bottom: 1px solid var(--card-border);">
+                <td style="padding: 12px; font-weight: 800;">${tuyen}</td>
+                <td style="padding: 12px; text-align: center; font-weight: 900; color: #0284C7;">${data.count} tiệm</td>
+                <td style="padding: 12px;">${data.sales.length > 0 ? data.sales.join('<br>') : '<i style="color:var(--text-muted);">Chưa giao cho ai</i>'}</td>
+                <td style="padding: 12px; text-align: center;">${statusBadge}</td>
+            </tr>
+        `;
+    }).join('');
+
+    // 4. In ra giao diện Modal
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
+        <div class="modal-content" style="max-width: 800px; width: 95%;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-map-location-dot"></i> BẢNG MA TRẬN PHÂN TUYẾN TOÀN CÔNG TY</h3>
+            <button class="btn btn-red" onclick="closeOrderDetailsModal()"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          
+          <div style="max-height: 60vh; overflow-y: auto;">
+              <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
+                  <thead style="background: var(--panel-bg); position: sticky; top: 0;">
+                      <tr>
+                          <th style="padding: 12px; border-bottom: 2px solid var(--primary);">Tên Tuyến</th>
+                          <th style="padding: 12px; border-bottom: 2px solid var(--primary); text-align: center;">SL Khách Hàng</th>
+                          <th style="padding: 12px; border-bottom: 2px solid var(--primary);">Nhân Viên Phụ Trách</th>
+                          <th style="padding: 12px; border-bottom: 2px solid var(--primary); text-align: center;">Trạng Thái</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      ${tableRows}
+                  </tbody>
+              </table>
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+};
+  window.autoAllocateKPI = function() {
+    let totalTargetString = prompt("🎯 NHẬP TỔNG MỤC TIÊU DOANH SỐ CẦN PHÂN BỔ (VNĐ):\n(Ví dụ: Nhập 50000000 cho 50 triệu)", "50000000");
+    if (!totalTargetString) return;
+    
+    let totalTarget = Number(totalTargetString.replace(/,/g, '').replace(/\./g, ''));
+    if (isNaN(totalTarget) || totalTarget <= 0) return alert("⛔ Vui lòng nhập số tiền hợp lệ!");
+
+    // Tìm tất cả các ô input nhập chỉ tiêu (thùng) đang hiển thị trên Modal
+    const inputFields = document.querySelectorAll('.kpi-target-input');
+    if (inputFields.length === 0) return alert("⛔ Không tìm thấy ô nhập liệu sản phẩm nào!");
+
+    // Chia đều tổng tiền cho số lượng sản phẩm
+    let budgetPerSKU = totalTarget / inputFields.length;
+
+    // Chạy vòng lặp tính ngược từ Tiền -> Thùng
+    let count = 0;
+    inputFields.forEach(input => {
+        let price = Number(input.getAttribute('data-price') || 0);
+        let ratio = Number(input.getAttribute('data-ratio') || 50); // Tỷ lệ quy đổi
+        
+        if (price > 0 && ratio > 0) {
+            let pricePerThung = price * ratio;
+            let targetThung = budgetPerSKU / pricePerThung;
+            
+            // Làm tròn đến 2 chữ số thập phân và điền vào ô
+            input.value = targetThung.toFixed(2);
+            count++;
+        }
+    });
+
+    playSystemSound('success');
+    alert(`✅ Đã phân bổ tự động xong cho ${count} sản phẩm!\nVui lòng kiểm tra lại số liệu và bấm LƯU.`);
 };
 </script>
 </body>
