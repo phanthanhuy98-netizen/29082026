@@ -8183,11 +8183,27 @@ window.calculateAndRenderTargets = async function() {
         const sCode = data.salesCode;
         
         items.forEach(it => {
-          const t = Number(it.target || 0);
+          const t = Number(it.target || 0); // Số thùng mục tiêu
           globalTarget += t;
           allTargetsMap[`${sCode}_${it.skuCode}`] = true;
+          
+          // ==========================================
+          // LOGIC MỚI: TỰ ĐỘNG TÍNH TIỀN TỪ SỐ THÙNG MỤC TIÊU
+          // ==========================================
+          // 1. Tìm thông tin sản phẩm trong hệ thống để lấy giá và quy cách
+          const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
+          const ratio = Number(pObj?.tyLeQuyDoi || 50); // Quy cách (mặc định 50 nếu không có)
+          const itemPrice = Number(pObj?.price || 0);  // Đơn giá
+          
+          // 2. Tính ra số tiền mục tiêu: Thùng * Quy Cách * Giá
+          const calculatedTargetRev = t * ratio * itemPrice; 
+          
+          // 3. Cộng dồn số tiền này vào TỔNG CHỈ TIÊU VNĐ
+          globalRevTarget += calculatedTargetRev; 
+
           if (sCode === window._chiTieuTargetSalesCode) {
              salesTarget += t;
+             salesRevTarget += calculatedTargetRev; // Cộng dồn cho cá nhân
              targetItems.push(it);
           }
         });
@@ -8287,15 +8303,27 @@ window.calculateAndRenderTargets = async function() {
   let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
 
   let grouped = {};
-  targetItems.forEach(it => {
+ targetItems.forEach(it => {
      if(!grouped[it.compCode]) {
         grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
      }
      let act = actuals[it.skuCode] || 0;
      grouped[it.compCode].compTarget += it.target;
      grouped[it.compCode].compActual += act;
+     
+     // BỔ SUNG LOGIC: Lấy Đơn giá và Quy cách để tính thành Tiền cho từng SKU
+     const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
+     const ratio = Number(pObj?.tyLeQuyDoi || 50);
+     const itemPrice = Number(pObj?.price || 0);
+
      grouped[it.compCode].skus.push({
-        code: it.skuCode, name: it.skuName, target: it.target, actual: act, createdByUid: it.createdByUid
+        code: it.skuCode, 
+        name: it.skuName, 
+        target: it.target, 
+        actual: act, 
+        createdByUid: it.createdByUid,
+        targetRev: (it.target * ratio * itemPrice), // Tính mục tiêu VNĐ
+        actualRev: (act * ratio * itemPrice)        // Tính thực đạt VNĐ
      });
   });
 
