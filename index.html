@@ -8204,6 +8204,23 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
     </div>
     `;
 }
+function findProductObj(skuCode) {
+  if (!skuCode) return null;
+  let clean = String(skuCode).trim().toUpperCase();
+  let found = products.find(p => String(p.code || '').trim().toUpperCase() === clean || String(p.id || '').trim().toUpperCase() === clean);
+  if (found) return found;
+  
+  let noDash = clean.replace(/[-_]/g, '');
+  found = products.find(p => String(p.code || '').trim().toUpperCase().replace(/[-_]/g, '') === noDash);
+  if (found) return found;
+
+  found = products.find(p => {
+      let pC = String(p.code || '').trim().toUpperCase();
+      return clean.endsWith(pC) || pC.endsWith(clean);
+  });
+  return found || null;
+}
+
 window.calculateAndRenderTargets = async function() {
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
   
@@ -8217,9 +8234,6 @@ window.calculateAndRenderTargets = async function() {
   let companyRevenuesMap = {}; 
 
   let allTargetsMap = {}; 
-  let allCompRevTargetsMap = {}; 
-
-  // Biến lưu trữ toàn cục gom nhóm cho TOÀN CÔNG TY (Tổng quan)
   let globalGroupedData = {};
 
   try {
@@ -8239,14 +8253,13 @@ window.calculateAndRenderTargets = async function() {
           globalTarget += t;
           allTargetsMap[`${sCode}_${it.skuCode}`] = true;
           
-          const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
+          const pObj = findProductObj(it.skuCode);
           const ratio = Number(pObj?.tyLeQuyDoi || 50);
           const itemPrice = Number(pObj?.price || 0);
           const calculatedTargetRev = t * ratio * itemPrice; 
           
           globalRevTarget += calculatedTargetRev; 
 
-          // Gom nhóm toàn công ty
           if (!globalGroupedData[it.compCode]) {
               globalGroupedData[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
           }
@@ -8269,7 +8282,6 @@ window.calculateAndRenderTargets = async function() {
         Object.keys(revenues).forEach(cCode => {
             const rt = Number(revenues[cCode].target || 0);
             globalRevTarget += rt;
-            allCompRevTargetsMap[`${sCode}_${cCode}`] = rt;
 
             if (!globalGroupedData[cCode]) {
                 globalGroupedData[cCode] = { compName: revenues[cCode].compName, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
@@ -8315,53 +8327,61 @@ window.calculateAndRenderTargets = async function() {
 
   let actuals = {}; 
   let globalActualMap = {}; 
-  let compActualRevenues = {}; 
   
   orders.forEach(o => {
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
       if (Array.isArray(o.items)) {
-        let orderRevByComp = {};
-
         o.items.forEach(item => {
-          const ratio = item.tyLeQuyDoi || 50;
+          const pObj = findProductObj(item.code || item.id);
+          const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
           const qtyThung = Number(item.qty || 0) / ratio;
-          const skuKey = String(item.code || '').toUpperCase();
+          const skuKey = String(item.code || item.id || '').toUpperCase();
 
-          const pObj = products.find(p => p.id === skuKey || p.code === skuKey);
           const itemPrice = Number(item.price || pObj?.price || 0);
           const itemRev = Number(item.qty || 0) * itemPrice;
           
           const compCode = getCompCodeFromProductCode(skuKey);
-          orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
           
           globalActual += qtyThung;
+          globalRevActual += itemRev; 
+          
           globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
 
-          // Cộng dồn thực đạt toàn cty
           if (globalGroupedData[compCode]) {
               globalGroupedData[compCode].compActual += qtyThung;
               globalGroupedData[compCode].revActual += itemRev;
               if (globalGroupedData[compCode].skusMap[skuKey]) {
                   globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
                   globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
+              } else {
+                  globalGroupedData[compCode].skusMap[skuKey] = {
+                      code: skuKey,
+                      name: item.name || skuKey,
+                      target: 0,
+                      actual: qtyThung,
+                      targetRev: 0,
+                      actualRev: itemRev
+                  };
               }
+          } else {
+              let foundComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode);
+              globalGroupedData[compCode] = {
+                  compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
+                  compTarget: 0,
+                  compActual: qtyThung,
+                  skusMap: {
+                      [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
+                  },
+                  revTarget: 0,
+                  revActual: itemRev
+              };
           }
           
           if (o.salesCode === window._chiTieuTargetSalesCode) {
             actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
             salesActual += qtyThung;
+            salesRevActual += itemRev; 
           }
-        });
-
-        Object.keys(orderRevByComp).forEach(cCode => {
-           const rev = orderRevByComp[cCode];
-           if (allCompRevTargetsMap[`${o.salesCode}_${cCode}`]) {
-               globalRevActual += rev;
-           }
-           if (o.salesCode === window._chiTieuTargetSalesCode) {
-               compActualRevenues[cCode] = (compActualRevenues[cCode] || 0) + rev;
-               salesRevActual += rev;
-           }
         });
       }
     }
@@ -8382,7 +8402,7 @@ window.calculateAndRenderTargets = async function() {
       grouped[it.compCode].compTarget += it.target;
       grouped[it.compCode].compActual += act;
       
-      const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
+      const pObj = findProductObj(it.skuCode);
       const ratio = Number(pObj?.tyLeQuyDoi || 50);
       const itemPrice = Number(pObj?.price || 0);
 
@@ -8405,7 +8425,6 @@ window.calculateAndRenderTargets = async function() {
       grouped[cCode].revActual = compActualRevenues[cCode] || 0;
   });
 
-  // Nếu là Tổng quan toàn cty, chuyển đổi cấu trúc globalGroupedData thành định dạng chuẩn của grouped
   let activeGrouped = grouped;
   if (isAdminOrManager && window._chiTieuDashboardSubTab === 'tongQuan') {
       activeGrouped = {};
@@ -8481,7 +8500,6 @@ window.calculateAndRenderTargets = async function() {
     return;
   }
 
-  // Sắp xếp các khối công ty theo tên công ty (Alphabet A-Z)
   const sortedCompCodes = Object.keys(activeGrouped).sort((a, b) => {
       let nameA = (activeGrouped[a].compName || a).toLowerCase();
       let nameB = (activeGrouped[b].compName || b).toLowerCase();
@@ -8622,7 +8640,6 @@ window.calculateAndRenderTargets = async function() {
     `;
   }).join('');
 
-  // Hiển thị đầy đủ cả thẻ tổng tiến độ lẫn danh sách chi tiết các công ty được sắp xếp theo A-Z ở cả 2 tab
   container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
 };
   // 1. Mở Modal Khuyến Mãi Tổng Công Ty
