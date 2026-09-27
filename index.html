@@ -8261,22 +8261,40 @@ window.calculateAndRenderTargets = async function() {
     let allTargetsMap = {}; 
     let globalGroupedData = {};
     let assignedSalesCodes = new Set(); 
-
-    const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
     let targetDocFound = false;
-    
-    targetsSnap.forEach(doc => {
-      const data = doc.data();
-      if(data && data.month === window._chiTieuTargetMonth) {
-        targetDocFound = true;
-        const items = data.items || [];
-        const revenues = data.companyRevenues || {};
-        const sCode = data.salesCode;
+
+    // Lưu toàn bộ dữ liệu chỉ tiêu trên hệ thống
+    let allTargetDocs = [];
+    targetsSnap.forEach(doc => allTargetDocs.push(doc.data()));
+
+    // Hàm tìm chỉ tiêu: Tự động kế thừa tháng cũ nếu tháng mới chưa thiết lập
+    function getEffectiveTarget(sCode, targetMonth) {
+        let exactMatch = allTargetDocs.find(d => d.salesCode === sCode && d.month === targetMonth);
+        if (exactMatch) return exactMatch; // Nếu tháng này ĐÃ CÓ chỉ tiêu mới -> Ưu tiên dùng
         
-        const hasItems = items && items.length > 0;
-        const hasRevenues = revenues && Object.keys(revenues).length > 0;
-        if (sCode && (hasItems || hasRevenues)) {
-            assignedSalesCodes.add(sCode);
+        // Nếu chưa có -> Tìm về quá khứ lấy chỉ tiêu của tháng gần nhất
+        let previousTargets = allTargetDocs.filter(d => d.salesCode === sCode && d.month < targetMonth);
+        if (previousTargets.length > 0) {
+            previousTargets.sort((a, b) => b.month.localeCompare(a.month)); // Xếp giảm dần
+            return previousTargets[0]; // Kế thừa chỉ tiêu của tháng liền kề trước đó
+        }
+        return null;
+    }
+
+    let effectiveTargets = [];
+    let uniqueSalesCodes = [...new Set(allTargetDocs.map(d => d.salesCode))];
+    uniqueSalesCodes.forEach(sCode => {
+        let eff = getEffectiveTarget(sCode, window._chiTieuTargetMonth);
+        if (eff) effectiveTargets.push(eff);
+    });
+
+    // Sử dụng danh sách chỉ tiêu đã được tính toán kế thừa
+    effectiveTargets.forEach(data => {
+      targetDocFound = true;
+      const items = data.items || [];
+      const revenues = data.companyRevenues || {};
+      const sCode = data.salesCode;
         }
         
         items.forEach(it => {
