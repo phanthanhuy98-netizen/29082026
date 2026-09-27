@@ -8222,28 +8222,31 @@ function findProductObj(skuCode) {
 }
 
 window.calculateAndRenderTargets = async function() {
-  const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-  
-  let globalTarget = 0; let globalActual = 0; 
-  let salesTarget = 0; let salesActual = 0; 
-
-  let globalRevTarget = 0; let globalRevActual = 0;
-  let salesRevTarget = 0; let salesRevActual = 0;
-
-  let targetItems = [];
-  let companyRevenuesMap = {}; 
-
-  let allTargetsMap = {}; 
-  let globalGroupedData = {};
-  let assignedSalesCodes = new Set(); // Lưu danh sách các nhân viên thực sự được giao chỉ tiêu trong tháng
+  const container = document.getElementById('targetDashboardContainer');
+  if (!container) return;
 
   try {
+    const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+    
+    let globalTarget = 0; let globalActual = 0; 
+    let salesTarget = 0; let salesActual = 0; 
+
+    let globalRevTarget = 0; let globalRevActual = 0;
+    let salesRevTarget = 0; let salesRevActual = 0;
+
+    let targetItems = [];
+    let companyRevenuesMap = {}; 
+
+    let allTargetsMap = {}; 
+    let globalGroupedData = {};
+    let assignedSalesCodes = new Set(); 
+
     const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
     let targetDocFound = false;
     
     targetsSnap.forEach(doc => {
       const data = doc.data();
-      if(data.month === window._chiTieuTargetMonth) {
+      if(data && data.month === window._chiTieuTargetMonth) {
         targetDocFound = true;
         const items = data.items || [];
         const revenues = data.companyRevenues || {};
@@ -8252,10 +8255,11 @@ window.calculateAndRenderTargets = async function() {
         const hasItems = items && items.length > 0;
         const hasRevenues = revenues && Object.keys(revenues).length > 0;
         if (sCode && (hasItems || hasRevenues)) {
-            assignedSalesCodes.add(sCode); // Đánh dấu nhân viên này có chỉ tiêu
+            assignedSalesCodes.add(sCode);
         }
         
         items.forEach(it => {
+          if (!it) return;
           const t = Number(it.target || 0);
           globalTarget += t;
           allTargetsMap[`${sCode}_${it.skuCode}`] = true;
@@ -8267,17 +8271,18 @@ window.calculateAndRenderTargets = async function() {
           
           globalRevTarget += calculatedTargetRev; 
 
-          if (!globalGroupedData[it.compCode]) {
-              globalGroupedData[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
+          const cCode = it.compCode || 'KHAC';
+          if (!globalGroupedData[cCode]) {
+              globalGroupedData[cCode] = { compName: it.compName || cCode, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
           }
-          globalGroupedData[it.compCode].compTarget += t;
-          globalGroupedData[it.compCode].revTarget += calculatedTargetRev;
+          globalGroupedData[cCode].compTarget += t;
+          globalGroupedData[cCode].revTarget += calculatedTargetRev;
 
-          if (!globalGroupedData[it.compCode].skusMap[it.skuCode]) {
-              globalGroupedData[it.compCode].skusMap[it.skuCode] = { code: it.skuCode, name: it.skuName, target: 0, actual: 0, targetRev: 0, actualRev: 0 };
+          if (!globalGroupedData[cCode].skusMap[it.skuCode]) {
+              globalGroupedData[cCode].skusMap[it.skuCode] = { code: it.skuCode, name: it.skuName || it.skuCode, target: 0, actual: 0, targetRev: 0, actualRev: 0 };
           }
-          globalGroupedData[it.compCode].skusMap[it.skuCode].target += t;
-          globalGroupedData[it.compCode].skusMap[it.skuCode].targetRev += calculatedTargetRev;
+          globalGroupedData[cCode].skusMap[it.skuCode].target += t;
+          globalGroupedData[cCode].skusMap[it.skuCode].targetRev += calculatedTargetRev;
 
           if (sCode === window._chiTieuTargetSalesCode) {
              salesTarget += t;
@@ -8291,7 +8296,7 @@ window.calculateAndRenderTargets = async function() {
             globalRevTarget += rt;
 
             if (!globalGroupedData[cCode]) {
-                globalGroupedData[cCode] = { compName: revenues[cCode].compName, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
+                globalGroupedData[cCode] = { compName: revenues[cCode].compName || cCode, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
             }
             globalGroupedData[cCode].revTarget += rt;
 
@@ -8303,354 +8308,332 @@ window.calculateAndRenderTargets = async function() {
       }
     });
 
-    if (!targetDocFound) {
-      let allMonths = [];
-      targetsSnap.forEach(doc => {
-        const d = doc.data();
-        if(d.month && d.month < window._chiTieuTargetMonth) {
-          if(!allMonths.includes(d.month)) allMonths.push(d.month);
-        }
-      });
-      if(allMonths.length > 0) {
-        allMonths.sort();
-        let latestPastMonth = allMonths[allMonths.length - 1];
-        targetsSnap.forEach(async docSnap => {
-          const d = docSnap.data();
-          if(d.month === latestPastMonth) {
-            const newDocId = `tgt_${d.salesCode}_${window._chiTieuTargetMonth}`;
-            await setDoc(doc(db, "monthlyTargets", newDocId), {
-              salesCode: d.salesCode,
-              month: window._chiTieuTargetMonth,
-              items: d.items || [],
-              companyRevenues: d.companyRevenues || {}
-            });
-          }
-        });
-        setTimeout(() => calculateAndRenderTargets(), 300);
-        return;
-      }
-    }
-  } catch (e) {}
+    let actuals = {}; 
+    let globalActualMap = {}; 
+    
+    if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+      orders.forEach(o => {
+        if (o && o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
+          if (assignedSalesCodes.has(o.salesCode)) {
+            if (Array.isArray(o.items)) {
+              o.items.forEach(item => {
+                if (!item) return;
+                const pObj = findProductObj(item.code || item.id);
+                const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+                const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
+                const skuKey = String(item.code || item.id || '').toUpperCase();
 
-  let actuals = {}; 
-  let globalActualMap = {}; 
-  
-  orders.forEach(o => {
-    // Chỉ tính thực đạt đối với các đơn hàng của nhân viên thực sự được giao chỉ tiêu trong tháng đó
-    if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
-      if (assignedSalesCodes.has(o.salesCode)) {
-        if (Array.isArray(o.items)) {
-          o.items.forEach(item => {
-            const pObj = findProductObj(item.code || item.id);
-            const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
-            const qtyThung = Number(item.qty || 0) / ratio;
-            const skuKey = String(item.code || item.id || '').toUpperCase();
+                const itemPrice = Number(item.price || pObj?.price || 0);
+                const itemRev = Number(item.qty || 0) * itemPrice;
+                
+                const compCode = getCompCodeFromProductCode(skuKey);
+                
+                globalActual += qtyThung;
+                globalRevActual += itemRev; 
+                
+                globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
 
-            const itemPrice = Number(item.price || pObj?.price || 0);
-            const itemRev = Number(item.qty || 0) * itemPrice;
-            
-            const compCode = getCompCodeFromProductCode(skuKey);
-            
-            globalActual += qtyThung;
-            globalRevActual += itemRev; 
-            
-            globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
-
-            if (globalGroupedData[compCode]) {
-                globalGroupedData[compCode].compActual += qtyThung;
-                globalGroupedData[compCode].revActual += itemRev;
-                if (globalGroupedData[compCode].skusMap[skuKey]) {
-                    globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
-                    globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
+                if (globalGroupedData[compCode]) {
+                    globalGroupedData[compCode].compActual += qtyThung;
+                    globalGroupedData[compCode].revActual += itemRev;
+                    if (globalGroupedData[compCode].skusMap[skuKey]) {
+                        globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
+                        globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
+                    } else {
+                        globalGroupedData[compCode].skusMap[skuKey] = {
+                            code: skuKey,
+                            name: item.name || skuKey,
+                            target: 0,
+                            actual: qtyThung,
+                            targetRev: 0,
+                            actualRev: itemRev
+                        };
+                    }
                 } else {
-                    globalGroupedData[compCode].skusMap[skuKey] = {
-                        code: skuKey,
-                        name: item.name || skuKey,
-                        target: 0,
-                        actual: qtyThung,
-                        targetRev: 0,
-                        actualRev: itemRev
+                    let foundComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode) : null;
+                    globalGroupedData[compCode] = {
+                        compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
+                        compTarget: 0,
+                        compActual: qtyThung,
+                        skusMap: {
+                            [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
+                        },
+                        revTarget: 0,
+                        revActual: itemRev
                     };
                 }
-            } else {
-                let foundComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode);
-                globalGroupedData[compCode] = {
-                    compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
-                    compTarget: 0,
-                    compActual: qtyThung,
-                    skusMap: {
-                        [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
-                    },
-                    revTarget: 0,
-                    revActual: itemRev
-                };
+                
+                if (o.salesCode === window._chiTieuTargetSalesCode) {
+                  actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
+                  salesActual += qtyThung;
+                  salesRevActual += itemRev; 
+                }
+              });
             }
-            
-            if (o.salesCode === window._chiTieuTargetSalesCode) {
-              actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-              salesActual += qtyThung;
-              salesRevActual += itemRev; 
-            }
-          });
+          }
         }
-      }
+      });
     }
-  });
 
-  let globalTargetSkusCount = Object.keys(allTargetsMap).length;
-  let globalActualSkusCount = Object.values(globalActualMap).filter(v => v > 0).length;
+    let globalTargetSkusCount = Object.keys(allTargetsMap).length;
+    let globalActualSkusCount = Object.values(globalActualMap).filter(v => v > 0).length;
 
-  let personalTargetSkusCount = targetItems.length;
-  let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
+    let personalTargetSkusCount = targetItems.length;
+    let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
 
-  let grouped = {};
-  targetItems.forEach(it => {
-      if(!grouped[it.compCode]) {
-         grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
-      }
-      let act = actuals[it.skuCode] || 0;
-      grouped[it.compCode].compTarget += it.target;
-      grouped[it.compCode].compActual += act;
-      
-      const pObj = findProductObj(it.skuCode);
-      const ratio = Number(pObj?.tyLeQuyDoi || 50);
-      const itemPrice = Number(pObj?.price || 0);
+    let grouped = {};
+    targetItems.forEach(it => {
+        if (!it) return;
+        if(!grouped[it.compCode]) {
+           grouped[it.compCode] = { compName: it.compName || it.compCode, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
+        }
+        let act = actuals[it.skuCode] || 0;
+        grouped[it.compCode].compTarget += it.target;
+        grouped[it.compCode].compActual += act;
+        
+        const pObj = findProductObj(it.skuCode);
+        const ratio = Number(pObj?.tyLeQuyDoi || 50);
+        const itemPrice = Number(pObj?.price || 0);
 
-      grouped[it.compCode].skus.push({
-        code: it.skuCode, 
-        name: it.skuName, 
-        target: it.target, 
-        actual: act, 
-        createdByUid: it.createdByUid,
-        targetRev: (it.target * ratio * itemPrice),
-        actualRev: (act * ratio * itemPrice) 
-      });
-  });
+        grouped[it.compCode].skus.push({
+          code: it.skuCode, 
+          name: it.skuName || it.skuCode, 
+          target: it.target, 
+          actual: act, 
+          createdByUid: it.createdByUid,
+          targetRev: (it.target * ratio * itemPrice),
+          actualRev: (act * ratio * itemPrice) 
+        });
+    });
 
-  Object.keys(companyRevenuesMap).forEach(cCode => {
-      if(!grouped[cCode]) {
-          grouped[cCode] = { compName: companyRevenuesMap[cCode].compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
-      }
-      grouped[cCode].revTarget = companyRevenuesMap[cCode].target;
-      grouped[cCode].revActual = compActualRevenues[cCode] || 0;
-  });
+    Object.keys(companyRevenuesMap).forEach(cCode => {
+        if(!grouped[cCode]) {
+            grouped[cCode] = { compName: companyRevenuesMap[cCode].compName || cCode, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
+        }
+        grouped[cCode].revTarget = companyRevenuesMap[cCode].target;
+        grouped[cCode].revActual = compActualRevenues[cCode] || 0;
+    });
 
-  let activeGrouped = grouped;
-  if (isAdminOrManager && window._chiTieuDashboardSubTab === 'tongQuan') {
-      activeGrouped = {};
-      Object.keys(globalGroupedData).forEach(cCode => {
-          const item = globalGroupedData[cCode];
-          activeGrouped[cCode] = {
-              compName: item.compName,
-              compTarget: item.compTarget,
-              compActual: item.compActual,
-              revTarget: item.revTarget,
-              revActual: item.revActual,
-              skus: Object.values(item.skusMap)
-          };
-      });
-  }
+    let activeGrouped = grouped;
+    if (isAdminOrManager && window._chiTieuDashboardSubTab === 'tongQuan') {
+        activeGrouped = {};
+        Object.keys(globalGroupedData).forEach(cCode => {
+            const item = globalGroupedData[cCode];
+            activeGrouped[cCode] = {
+                compName: item.compName,
+                compTarget: item.compTarget,
+                compActual: item.compActual,
+                revTarget: item.revTarget,
+                revActual: item.revActual,
+                skus: Object.values(item.skusMap)
+            };
+        });
+    }
 
-  const container = document.getElementById('targetDashboardContainer');
-  const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
-  
-  let tabHeaderHtml = '';
-  if (isAdminOrManager) {
-      tabHeaderHtml = `
-        <div style="display:flex; background:rgba(0,0,0,0.04); border-radius:12px; padding:4px; margin-bottom:16px;">
-          <div onclick="switchChiTieuDashboardTab('tongQuan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${isTongQuanTab ? 'background:var(--card-bg); color:var(--primary); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
-            <i class="fa-solid fa-globe"></i> 1. TỔNG QUAN TOÀN CÔNG TY
+    const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
+    
+    let tabHeaderHtml = '';
+    if (isAdminOrManager) {
+        tabHeaderHtml = `
+          <div style="display:flex; background:rgba(0,0,0,0.04); border-radius:12px; padding:4px; margin-bottom:16px;">
+            <div onclick="switchChiTieuDashboardTab('tongQuan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${isTongQuanTab ? 'background:var(--card-bg); color:var(--primary); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+              <i class="fa-solid fa-globe"></i> 1. TỔNG QUAN TOÀN CÔNG TY
+            </div>
+            <div onclick="switchChiTieuDashboardTab('caNhan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${!isTongQuanTab ? 'background:var(--card-bg); color:var(--amber); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
+              <i class="fa-solid fa-user-check"></i> 2. CHI TIẾT CÁ NHÂN
+            </div>
           </div>
-          <div onclick="switchChiTieuDashboardTab('caNhan')" style="flex:1; text-align:center; padding:10px 0; font-weight:900; font-size:14px; border-radius:9px; cursor:pointer; transition:0.2s; ${!isTongQuanTab ? 'background:var(--card-bg); color:var(--amber); box-shadow:0 2px 8px rgba(0,0,0,0.08);' : 'color:var(--text-muted);'}">
-            <i class="fa-solid fa-user-check"></i> 2. CHI TIẾT CÁ NHÂN
+        `;
+    }
+
+    let topCardHtml = '';
+    if (!isAdminOrManager || isTongQuanTab) {
+        if (isAdminOrManager) {
+            topCardHtml = buildProgressCard(
+                'TỔNG TIẾN ĐỘ CHỈ TIÊU TOÀN CTY', 'fa-globe', 'primary', 
+                globalTarget, globalActual, 
+                globalRevTarget, globalRevActual, 
+                globalTargetSkusCount, globalActualSkusCount
+            );
+        } else {
+            const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+            const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+            topCardHtml = buildProgressCard(
+                `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
+                salesTarget, salesActual, 
+                salesRevTarget, salesRevActual, 
+                personalTargetSkusCount, personalActualSkusCount
+            );
+        }
+    } else {
+        const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
+        const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
+        topCardHtml = buildProgressCard(
+            `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
+            salesTarget, salesActual, 
+            salesRevTarget, salesRevActual, 
+            personalTargetSkusCount, personalActualSkusCount
+        );
+    }
+
+    if (Object.keys(activeGrouped).length === 0) {
+      container.innerHTML = tabHeaderHtml + topCardHtml + `
+        <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
+          <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
+            <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
           </div>
+          <div style="font-weight:900; font-size:16px; color:var(--text-main); margin-bottom:6px;">Chưa có chỉ tiêu nào được giao</div>
         </div>
       `;
-  }
+      return;
+    }
 
-  let topCardHtml = '';
-  if (!isAdminOrManager || isTongQuanTab) {
-      if (isAdminOrManager) {
-          topCardHtml = buildProgressCard(
-              'TỔNG TIẾN ĐỘ CHỈ TIÊU TOÀN CTY', 'fa-globe', 'primary', 
-              globalTarget, globalActual, 
-              globalRevTarget, globalRevActual, 
-              globalTargetSkusCount, globalActualSkusCount
-          );
-      } else {
-          const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
-          const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-          topCardHtml = buildProgressCard(
-              `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
-              salesTarget, salesActual, 
-              salesRevTarget, salesRevActual, 
-              personalTargetSkusCount, personalActualSkusCount
-          );
-      }
-  } else {
-      const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
-      const targetSalesName = targetSalesObj ? targetSalesObj.name : window._chiTieuTargetSalesCode;
-      topCardHtml = buildProgressCard(
-          `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
-          salesTarget, salesActual, 
-          salesRevTarget, salesRevActual, 
-          personalTargetSkusCount, personalActualSkusCount
-      );
-  }
+    const sortedCompCodes = Object.keys(activeGrouped).sort((a, b) => {
+        let nameA = (activeGrouped[a].compName || a).toLowerCase();
+        let nameB = (activeGrouped[b].compName || b).toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
 
-  if (Object.keys(activeGrouped).length === 0) {
-    container.innerHTML = tabHeaderHtml + topCardHtml + `
-      <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
-        <div style="width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.03); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
-          <i class="fa-solid fa-box-open" style="font-size:28px; color:var(--text-muted);"></i>
-        </div>
-        <div style="font-weight:900; font-size:16px; color:var(--text-main); margin-bottom:6px;">Chưa có chỉ tiêu nào được giao</div>
-      </div>
-    `;
-    return;
-  }
+    const detailHtml = sortedCompCodes.map(compCode => {
+      const g = activeGrouped[compCode];
+      
+      const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : 0;
+      let colorClass = 'var(--rose)'; let barColor = 'var(--rose-gradient)'; let iconHtml = '<i class="fa-solid fa-triangle-exclamation" style="color:var(--rose);"></i>';
+      if (pct >= 100) { colorClass = 'var(--emerald)'; barColor = 'var(--emerald-gradient)'; iconHtml = '<i class="fa-solid fa-trophy" style="color:var(--emerald);"></i>'; } 
+      else if (pct >= 70) { colorClass = 'var(--amber)'; barColor = 'var(--amber-gradient)'; iconHtml = '<i class="fa-solid fa-person-running" style="color:var(--amber);"></i>'; }
 
-  const sortedCompCodes = Object.keys(activeGrouped).sort((a, b) => {
-      let nameA = (activeGrouped[a].compName || a).toLowerCase();
-      let nameB = (activeGrouped[b].compName || b).toLowerCase();
-      return nameA.localeCompare(nameB);
-  });
+      const revPct = g.revTarget > 0 ? (g.revActual / g.revTarget) * 100 : 0;
+      let revColor = 'var(--rose)'; let revBar = 'var(--rose-gradient)';
+      if(revPct >= 100) { revColor = 'var(--emerald)'; revBar = 'var(--emerald-gradient)'; }
+      else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient)'; }
 
-  const detailHtml = sortedCompCodes.map(compCode => {
-    const g = activeGrouped[compCode];
-    
-    const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : 0;
-    let colorClass = 'var(--rose)'; let barColor = 'var(--rose-gradient)'; let iconHtml = '<i class="fa-solid fa-triangle-exclamation" style="color:var(--rose);"></i>';
-    if (pct >= 100) { colorClass = 'var(--emerald)'; barColor = 'var(--emerald-gradient)'; iconHtml = '<i class="fa-solid fa-trophy" style="color:var(--emerald);"></i>'; } 
-    else if (pct >= 70) { colorClass = 'var(--amber)'; barColor = 'var(--amber-gradient)'; iconHtml = '<i class="fa-solid fa-person-running" style="color:var(--amber);"></i>'; }
+      const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
-    const revPct = g.revTarget > 0 ? (g.revActual / g.revTarget) * 100 : 0;
-    let revColor = 'var(--rose)'; let revBar = 'var(--rose-gradient)';
-    if(revPct >= 100) { revColor = 'var(--emerald)'; revBar = 'var(--emerald-gradient)'; }
-    else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient)'; }
-
-    const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-    return `
-      <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 6px 20px rgba(0,0,0,0.03); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:16px;">
-        <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 18px; cursor: pointer; position: relative;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap:8px;">
-                <div style="display: flex; align-items: flex-start; gap: 14px; flex:1;">
-                    <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(37,99,235,0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink:0;">
-                        <i class="fa-solid fa-building"></i>
-                    </div>
-                    <div>
-                        <div style="font-size: 16px; font-weight: 900; color: var(--text-main); line-height: 1.3; margin-bottom:3px;">${g.compName || 'Công Ty ' + compCode}</div>
-                        <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); background:var(--bg-dark); padding:3px 8px; border-radius:6px; display:inline-block;">Mã: ${compCode}</div>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px; font-size:16px; background:rgba(0,0,0,0.03); padding:8px 12px; border-radius:10px;">
-                    ${iconHtml}
-                    <i id="icon_${compAccordionId}" class="fa-solid fa-chevron-down" style="color: var(--text-muted); transition: 0.3s; font-size: 13px;"></i>
-                </div>
-            </div>
-
-            ${g.revTarget > 0 ? `
-              <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; margin-bottom: 12px;">
-                   <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:900; margin-bottom:6px; color:var(--text-muted);">
-                      <span>💰 MỤC TIÊU DOANH SỐ</span> <span>${formatQtySmart(revPct)}%</span>
-                   </div>
-                   <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:900; margin-bottom:8px;">
-                      <span style="color:var(--text-main);">${(g.revActual/1000).toLocaleString('vi-VN')}</span>
-                      <span style="color:var(--amber);">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}</span>
-                   </div>
-                   <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden; position: relative;">
-                      <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}\%; background:${revBar}; border-radius: 3px;"></div>
-                   </div>
+      return `
+        <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 6px 20px rgba(0,0,0,0.03); border: 1px solid var(--card-border); overflow: hidden; transition: transform 0.2s; margin-bottom:16px;">
+          <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 18px; cursor: pointer; position: relative;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap:8px;">
+                  <div style="display: flex; align-items: flex-start; gap: 14px; flex:1;">
+                      <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(37,99,235,0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink:0;">
+                          <i class="fa-solid fa-building"></i>
+                      </div>
+                      <div>
+                          <div style="font-size: 16px; font-weight: 900; color: var(--text-main); line-height: 1.3; margin-bottom:3px;">${g.compName || 'Công Ty ' + compCode}</div>
+                          <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); background:var(--bg-dark); padding:3px 8px; border-radius:6px; display:inline-block;">Mã: ${compCode}</div>
+                      </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; font-size:16px; background:rgba(0,0,0,0.03); padding:8px 12px; border-radius:10px;">
+                      ${iconHtml}
+                      <i id="icon_${compAccordionId}" class="fa-solid fa-chevron-down" style="color: var(--text-muted); transition: 0.3s; font-size: 13px;"></i>
+                  </div>
               </div>
-            ` : ''}
 
-        ${g.compTarget > 0 ? `
-            ${(() => {
-                const totalCompTargetRev = g.skus.reduce((sum, sku) => sum + (sku.targetRev || 0), 0);
-                const totalCompActualRev = g.skus.reduce((sum, sku) => sum + (sku.actualRev || 0), 0);
-                const formatCompRev = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
-
-                return `
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
-                    <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">MỤC TIÊU</div>
-                        <div style="font-size: 16px; font-weight: 900; color: var(--rose); margin-bottom: 2px;">${formatCompRev(totalCompTargetRev)}k</div>
-                        <div style="font-size: 13px; font-weight: 800; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Thùng</span></div>
-                    </div>
-                    <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
-                        <div style="font-size: 16px; font-weight: 900; color: var(--emerald); margin-bottom: 2px;">${formatCompRev(totalCompActualRev)}k</div>
-                        <div style="font-size: 13px; font-weight: 800; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Thùng</span></div>
-                    </div>
-                    <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ CHUNG</div>
-                        <div style="font-size: 20px; font-weight: 900; color: ${colorClass};">${formatQtySmart(pct)}%</div>
-                    </div>
+              ${g.revTarget > 0 ? `
+                <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; margin-bottom: 12px;">
+                     <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:900; margin-bottom:6px; color:var(--text-muted);">
+                        <span>💰 MỤC TIÊU DOANH SỐ</span> <span>${formatQtySmart(revPct)}%</span>
+                     </div>
+                     <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:900; margin-bottom:8px;">
+                        <span style="color:var(--text-main);">${(g.revActual/1000).toLocaleString('vi-VN')}</span>
+                        <span style="color:var(--amber);">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}</span>
+                     </div>
+                     <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden; position: relative;">
+                        <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}\%; background:${revBar}; border-radius: 3px;"></div>
+                     </div>
                 </div>
-                <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
-                    <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px;"></div>
-                </div>
-                `;
-            })()}
-            ` : ''}
+              ` : ''}
+
+          ${g.compTarget > 0 ? `
+              ${(() => {
+                  const totalCompTargetRev = g.skus.reduce((sum, sku) => sum + (sku.targetRev || 0), 0);
+                  const totalCompActualRev = g.skus.reduce((sum, sku) => sum + (sku.actualRev || 0), 0);
+                  const formatCompRev = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
+
+                  return `
+                  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+                      <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
+                          <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">MỤC TIÊU</div>
+                          <div style="font-size: 16px; font-weight: 900; color: var(--rose); margin-bottom: 2px;">${formatCompRev(totalCompTargetRev)}k</div>
+                          <div style="font-size: 13px; font-weight: 800; color: var(--text-main);">${formatQtySmart(g.compTarget)} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Thùng</span></div>
+                      </div>
+                      <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
+                          <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">THỰC HIỆN</div>
+                          <div style="font-size: 16px; font-weight: 900; color: var(--emerald); margin-bottom: 2px;">${formatCompRev(totalCompActualRev)}k</div>
+                          <div style="font-size: 13px; font-weight: 800; color: var(--text-main);">${formatQtySmart(g.compActual)} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Thùng</span></div>
+                      </div>
+                      <div style="background: var(--panel-bg); padding: 12px 6px; border-radius: 12px; text-align: center; border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: center;">
+                          <div style="font-size: 11px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px;">TIẾN ĐỘ CHUNG</div>
+                          <div style="font-size: 20px; font-weight: 900; color: ${colorClass};">${formatQtySmart(pct)}%</div>
+                      </div>
+                  </div>
+                  <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
+                      <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px;"></div>
+                  </div>
+                  `;
+              })()}
+              ` : ''}
+          </div>
+
+          ${g.skus.length > 0 ? `
+          <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 16px; border-top: 1px solid var(--card-border);">
+              <div style="font-size: 12px; font-weight: 900; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; text-transform:uppercase;">
+                  <span><i class="fa-solid fa-boxes-stacked"></i> SP TRỌNG TÂM CHI TIẾT</span>
+                  <span style="background:rgba(37,99,235,0.1); padding:2px 8px; border-radius:6px;">${g.skus.length} Mã</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                  ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
+                      const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
+                      let sColor = 'var(--rose)'; let sBar = 'var(--rose-gradient)';
+                      if (skuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; } 
+                      else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
+
+                      const canDelete = isAdminOrManager && !isTongQuanTab;
+                      const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
+
+                      return `
+                      <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
+                          ${canDelete ? `<button type="button" class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 12px; border-radius: 8px; cursor:pointer;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
+                          
+                          <div style="font-size: 14.5px; font-weight: 900; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
+                              <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">${sku.code}</span>${sku.name}
+                          </div>
+                          
+                          <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
+                              <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
+                                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">MỤC TIÊU</span>
+                                <b style="color: var(--rose); font-size:15px;">${formatRevSku(sku.targetRev)}k</b>
+                                <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.target)} Thùng</span>
+                              </div>
+                              <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
+                                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">THỰC HIỆN</span>
+                                <b style="color: var(--emerald); font-size:15px;">${formatRevSku(sku.actualRev)}k</b>
+                                <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.actual)} Thùng</span>
+                              </div>
+                              <div style="display:flex; flex-direction:column; gap:3px; text-align:right;">
+                                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">TIẾN ĐỘ</span>
+                                <b style="color: ${sColor}; font-weight: 900; font-size: 16px;">${formatQtySmart(skuPct)}%</b>
+                              </div>
+                          </div>
+                          
+                          <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
+                              <div style="height: 100%; width: ${Math.min(skuPct, 100)}%; background:${sBar}; border-radius: 3px;"></div>
+                          </div>
+                      </div>
+                      `;
+                  }).join('')}
+              </div>
+          </div>
+          ` : ''}
         </div>
+      `;
+    }).join('');
 
-        ${g.skus.length > 0 ? `
-        <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 16px; border-top: 1px solid var(--card-border);">
-            <div style="font-size: 12px; font-weight: 900; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; text-transform:uppercase;">
-                <span><i class="fa-solid fa-boxes-stacked"></i> SP TRỌNG TÂM CHI TIẾT</span>
-                <span style="background:rgba(37,99,235,0.1); padding:2px 8px; border-radius:6px;">${g.skus.length} Mã</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
-                    const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
-                    let sColor = 'var(--rose)'; let sBar = 'var(--rose-gradient)';
-                    if (skuPct >= 100) { sColor = 'var(--emerald);'; sBar = 'var(--emerald-gradient)'; } 
-                    else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
+    container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
 
-                    const canDelete = isAdminOrManager && !isTongQuanTab;
-                    const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
-
-                    return `
-                    <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
-                        ${canDelete ? `<button type="button" class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 12px; border-radius: 8px; cursor:pointer;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
-                        
-                        <div style="font-size: 14.5px; font-weight: 900; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
-                            <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">${sku.code}</span>${sku.name}
-                        </div>
-                        
-                        <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
-                            <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
-                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">MỤC TIÊU</span>
-                              <b style="color: var(--rose); font-size:15px;">${formatRevSku(sku.targetRev)}k</b>
-                              <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.target)} Thùng</span>
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
-                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">THỰC HIỆN</span>
-                              <b style="color: var(--emerald); font-size:15px;">${formatRevSku(sku.actualRev)}k</b>
-                              <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.actual)} Thùng</span>
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:3px; text-align:right;">
-                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">TIẾN ĐỘ</span>
-                              <b style="color: ${sColor}; font-weight: 900; font-size: 16px;">${formatQtySmart(skuPct)}%</b>
-                            </div>
-                        </div>
-                        
-                        <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
-                            <div style="height: 100%; width: ${Math.min(skuPct, 100)}%; background:${sBar}; border-radius: 3px;"></div>
-                        </div>
-                    </div>
-                    `;
-                }).join('')}
-            </div>
-        </div>
-        ` : ''}
-      </div>
-    `;
-  }).join('');
-
-  container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
+  } catch (err) {
+    console.error("Lỗi tính toán chỉ tiêu:", err);
+    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose); font-weight:900;">Lỗi hiển thị báo cáo: ${err.message}</div>`;
+  }
 };
   // 1. Mở Modal Khuyến Mãi Tổng Công Ty
 window.openAllPromosModal = function() {
