@@ -2889,16 +2889,19 @@ window.filterTabProducts = function(val) {
     }
     let activeDvtStr = activeDvtList.join(', ');
 
-    return `
-      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
-          <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvtStr}_Q/C: ${p.tyLeQuyDoi || 50}</span>
-        </div>
-        <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
-        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">Quy cách: <b>${p.tyLeQuyDoi || 50}</b></div>
-      </div>
-    `;
+  return `
+          <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${p.code}</span>
+              <span class="badge" style="background:var(--prod-qc-bg); color:var(--prod-qc-color); border:1px solid var(--card-border); font-size:var(--font-size-sub-meta);">${activeDvtStr}_Q/C: ${p.tyLeQuyDoi || 50}</span>
+            </div>
+            <div style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; word-break: break-word;" title="${p.name}">${p.name}</div>
+            <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
+              <span>Quy cách: <b>${p.tyLeQuyDoi || 50}</b></span>
+              <span style="color:var(--rose); font-weight:800;">Giá: ${Number(p.price || 0).toLocaleString('vi-VN')} đ</span>
+            </div>
+          </div>
+        `;
   }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy vật tư phù hợp.</div>`;
 
   if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
@@ -3907,7 +3910,7 @@ window.deleteAllAndImportProductsExcel = async function(e) {
 
   const confirmed = await window.showCustomConfirm(
     "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ", 
-    "Hành động này sẽ XÓA SẠCH toàn bộ vật tư cũ và ghi đè bằng danh sách mới. Bạn có chắc chắn muốn tiếp tục?", 
+    "Hành động này sẽ xóa toàn bộ vật tư cũ trên mây và nạp mới danh sách từ Excel. Tiếp tục?", 
     "fa-triangle-exclamation", 
     "Đồng ý Xóa & Tải Mới", 
     "Hủy"
@@ -3929,7 +3932,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-        // TỰ ĐỘNG DÒ TÌM CỘT CHUẨN XÁC 100%
         let headerIdx = -1, cCode = -1, cName = -1, cDvt = -1, cPrice = -1, cRatio = -1;
         for (let i = 0; i < Math.min(jsonRows.length, 20); i++) {
             const row = jsonRows[i];
@@ -3974,50 +3976,30 @@ window.deleteAllAndImportProductsExcel = async function(e) {
         const newProductsList = Array.from(uniqueMap.values());
         if (newProductsList.length === 0) return alert("Lỗi: Không đọc được dữ liệu vật tư nào!");
 
-        alert(`Đang tiến hành xóa danh mục cũ và tải lên ${newProductsList.length} vật tư mới...`);
+        alert(`⏳ Đang tiến hành đồng bộ ${newProductsList.length} vật tư lên hệ thống. Vui lòng chờ...`);
 
-        // XÓA TẬN GỐC DATA CŨ
-        const prodSnap = await getDocs(collection(db, "products"));
-        let batches = [];
-        let currentBatch = writeBatch(db);
-        let operationCount = 0;
+        // Đẩy lên Firebase theo từng nhóm 300 sản phẩm để không bị nghẽn mạng
+        const chunkSize = 300;
+        for (let i = 0; i < newProductsList.length; i += chunkSize) {
+          const chunk = newProductsList.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach(p => {
+            const docRef = doc(db, "products", String(p.code));
+            batch.set(docRef, p);
+          });
+          await batch.commit();
+        }
 
-        prodSnap.forEach((docSnap) => {
-          currentBatch.delete(docSnap.ref);
-          operationCount++;
-          if (operationCount >= 400) {
-            batches.push(currentBatch.commit());
-            currentBatch = writeBatch(db);
-            operationCount = 0;
-          }
-        });
-        if (operationCount > 0) batches.push(currentBatch.commit());
-        await Promise.all(batches);
-
-        // THÊM DATA MỚI
-        let uploadBatches = [];
-        let uploadBatch = writeBatch(db);
-        let upCount = 0;
-
-        newProductsList.forEach(p => {
-          const docRef = doc(collection(db, "products"), p.id);
-          uploadBatch.set(docRef, p);
-          upCount++;
-          if (upCount >= 400) {
-            uploadBatches.push(uploadBatch.commit());
-            uploadBatch = writeBatch(db);
-            upCount = 0;
-          }
-        });
-        if (upCount > 0) uploadBatches.push(uploadBatch.commit());
-        await Promise.all(uploadBatches);
+        const newVersion = Date.now();
+        localStorage.setItem("productsVersion", newVersion);
+        await setDoc(doc(db, "systemMeta", "version"), { productsVersion: newVersion }, { merge: true });
 
         products = newProductsList;
         await saveProductsToLocalCache(products);
         buildProductIndex();
 
         playSystemSound('success');
-        alert(`✅ Đã dọn dẹp sạch sẽ mã rác và nạp mới thành công ${products.length} mã hàng chuẩn!`);
+        alert(`✅ Đã nạp thành công ${products.length} mã hàng và cập nhật giá bán đầy đủ!`);
         
         if (typeof filterTabProducts === 'function') filterTabProducts('');
       } catch (err) {
@@ -4028,7 +4010,6 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   };
   fileInput.click();
 };
-
   window.importCustomersExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
