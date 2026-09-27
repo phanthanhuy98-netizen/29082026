@@ -8235,6 +8235,7 @@ window.calculateAndRenderTargets = async function() {
 
   let allTargetsMap = {}; 
   let globalGroupedData = {};
+  let assignedSalesCodes = new Set(); // Lưu danh sách các nhân viên thực sự được giao chỉ tiêu trong tháng
 
   try {
     const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
@@ -8247,6 +8248,12 @@ window.calculateAndRenderTargets = async function() {
         const items = data.items || [];
         const revenues = data.companyRevenues || {};
         const sCode = data.salesCode;
+        
+        const hasItems = items && items.length > 0;
+        const hasRevenues = revenues && Object.keys(revenues).length > 0;
+        if (sCode && (hasItems || hasRevenues)) {
+            assignedSalesCodes.add(sCode); // Đánh dấu nhân viên này có chỉ tiêu
+        }
         
         items.forEach(it => {
           const t = Number(it.target || 0);
@@ -8329,60 +8336,63 @@ window.calculateAndRenderTargets = async function() {
   let globalActualMap = {}; 
   
   orders.forEach(o => {
+    // Chỉ tính thực đạt đối với các đơn hàng của nhân viên thực sự được giao chỉ tiêu trong tháng đó
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
-      if (Array.isArray(o.items)) {
-        o.items.forEach(item => {
-          const pObj = findProductObj(item.code || item.id);
-          const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
-          const qtyThung = Number(item.qty || 0) / ratio;
-          const skuKey = String(item.code || item.id || '').toUpperCase();
+      if (assignedSalesCodes.has(o.salesCode)) {
+        if (Array.isArray(o.items)) {
+          o.items.forEach(item => {
+            const pObj = findProductObj(item.code || item.id);
+            const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+            const qtyThung = Number(item.qty || 0) / ratio;
+            const skuKey = String(item.code || item.id || '').toUpperCase();
 
-          const itemPrice = Number(item.price || pObj?.price || 0);
-          const itemRev = Number(item.qty || 0) * itemPrice;
-          
-          const compCode = getCompCodeFromProductCode(skuKey);
-          
-          globalActual += qtyThung;
-          globalRevActual += itemRev; 
-          
-          globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
+            const itemPrice = Number(item.price || pObj?.price || 0);
+            const itemRev = Number(item.qty || 0) * itemPrice;
+            
+            const compCode = getCompCodeFromProductCode(skuKey);
+            
+            globalActual += qtyThung;
+            globalRevActual += itemRev; 
+            
+            globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
 
-          if (globalGroupedData[compCode]) {
-              globalGroupedData[compCode].compActual += qtyThung;
-              globalGroupedData[compCode].revActual += itemRev;
-              if (globalGroupedData[compCode].skusMap[skuKey]) {
-                  globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
-                  globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
-              } else {
-                  globalGroupedData[compCode].skusMap[skuKey] = {
-                      code: skuKey,
-                      name: item.name || skuKey,
-                      target: 0,
-                      actual: qtyThung,
-                      targetRev: 0,
-                      actualRev: itemRev
-                  };
-              }
-          } else {
-              let foundComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode);
-              globalGroupedData[compCode] = {
-                  compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
-                  compTarget: 0,
-                  compActual: qtyThung,
-                  skusMap: {
-                      [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
-                  },
-                  revTarget: 0,
-                  revActual: itemRev
-              };
-          }
-          
-          if (o.salesCode === window._chiTieuTargetSalesCode) {
-            actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-            salesActual += qtyThung;
-            salesRevActual += itemRev; 
-          }
-        });
+            if (globalGroupedData[compCode]) {
+                globalGroupedData[compCode].compActual += qtyThung;
+                globalGroupedData[compCode].revActual += itemRev;
+                if (globalGroupedData[compCode].skusMap[skuKey]) {
+                    globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
+                    globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
+                } else {
+                    globalGroupedData[compCode].skusMap[skuKey] = {
+                        code: skuKey,
+                        name: item.name || skuKey,
+                        target: 0,
+                        actual: qtyThung,
+                        targetRev: 0,
+                        actualRev: itemRev
+                    };
+                }
+            } else {
+                let foundComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode);
+                globalGroupedData[compCode] = {
+                    compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
+                    compTarget: 0,
+                    compActual: qtyThung,
+                    skusMap: {
+                        [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
+                    },
+                    revTarget: 0,
+                    revActual: itemRev
+                };
+            }
+            
+            if (o.salesCode === window._chiTieuTargetSalesCode) {
+              actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
+              salesActual += qtyThung;
+              salesRevActual += itemRev; 
+            }
+          });
+        }
       }
     }
   });
@@ -8596,7 +8606,7 @@ window.calculateAndRenderTargets = async function() {
                 ${g.skus.sort((a,b)=>b.target-a.target).map(sku => {
                     const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : 0;
                     let sColor = 'var(--rose)'; let sBar = 'var(--rose-gradient)';
-                    if (skuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; } 
+                    if (skuPct >= 100) { sColor = 'var(--emerald);'; sBar = 'var(--emerald-gradient)'; } 
                     else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
 
                     const canDelete = isAdminOrManager && !isTongQuanTab;
