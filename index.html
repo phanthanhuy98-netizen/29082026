@@ -7803,16 +7803,18 @@ window.renderChiTieuTab = async function(container) {
         </div>
 
       ${isAdminOrManager ? `
-  <div style="display:flex; gap:10px; margin-bottom:12px;">
-      <button class="btn btn-amber" style="flex:1; justify-content:center; font-weight:900; font-size:15px; padding:14px; border-radius:14px; box-shadow:0 6px 20px rgba(245, 158, 11, 0.3); cursor:pointer;" onclick="openTargetModal()">
+  <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+      <button class="btn btn-amber" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
           <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP MỚI
       </button>
-      <button class="btn btn-blue" style="flex:1; justify-content:center; font-weight:900; font-size:15px; padding:14px; border-radius:14px; box-shadow:0 6px 20px rgba(37, 99, 235, 0.3); cursor:pointer;" onclick="openCloneTargetModal()">
-          <i class="fa-solid fa-copy"></i> 📋 NHÂN BẢN
+      <button class="btn btn-blue" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openCloneTargetModal()">
+          <i class="fa-solid fa-copy"></i> NHÂN BẢN
+      </button>
+      <button class="btn btn-green" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
+          <i class="fa-solid fa-file-excel"></i> XUẤT EXCEL
       </button>
   </div>
 ` : ''}
-
         <!-- KHUNG 2 TAB CON: TỔNG QUAN & CÁ NHÂN (GỌN GÀNG, CHUYÊN NGHIỆP) -->
         <div id="targetDashboardContainer" style="display:flex; flex-direction:column; gap:16px;">
           <div style="text-align:center; color:var(--text-muted); font-weight:800; padding:45px; font-size:15px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Đang tải dữ liệu báo cáo...</div>
@@ -7824,6 +7826,7 @@ window.renderChiTieuTab = async function(container) {
   if (!isPhanTuyen) {
     calculateAndRenderTargets();
   }
+  
 };
 
 // =========================================
@@ -8574,7 +8577,7 @@ window.calculateAndRenderTargets = async function() {
       `;
       return;
     }
-
+window._activeGroupedKPI = activeGrouped;
     const sortedCompCodes = Object.keys(activeGrouped).sort((a, b) => {
         let nameA = (activeGrouped[a].compName || a).toLowerCase();
         let nameB = (activeGrouped[b].compName || b).toLowerCase();
@@ -9261,6 +9264,51 @@ window.executeAdvancedClone = async function() {
     btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN';
     alert("Lỗi khi nhân bản: " + e.message);
   }
+};
+  window.exportKpiExcel = function() {
+    if (!window._activeGroupedKPI || Object.keys(window._activeGroupedKPI).length === 0) {
+        return alert("⛔ Không có dữ liệu KPI nào để xuất!");
+    }
+
+    let exportData = [];
+    const targetSales = window._chiTieuTargetSalesCode === 'ALL' || !window._chiTieuTargetSalesCode ? "Toàn Công Ty" : window._chiTieuTargetSalesCode;
+    const targetMonth = window._chiTieuTargetMonth;
+
+    Object.keys(window._activeGroupedKPI).forEach(compCode => {
+        const comp = window._activeGroupedKPI[compCode];
+        
+        // Xuất dữ liệu từng mã SKU
+        if (comp.skus && comp.skus.length > 0) {
+            comp.skus.forEach(sku => {
+                const pct = sku.target > 0 ? ((sku.actual / sku.target) * 100).toFixed(1) + '%' : (sku.actual > 0 ? '100%' : '0%');
+                exportData.push({
+                    "Nhân viên": targetSales,
+                    "Tháng KPI": targetMonth,
+                    "Tên Công Ty": comp.compName || compCode,
+                    "Mã Sản Phẩm": sku.code,
+                    "Tên Sản Phẩm": sku.name,
+                    "Chỉ Tiêu (Thùng)": sku.target || 0,
+                    "Thực Đạt (Thùng)": sku.actual || 0,
+                    "Tiến Độ (%)": pct,
+                    "Chỉ Tiêu (VNĐ)": sku.targetRev || 0,
+                    "Thực Đạt (VNĐ)": sku.actualRev || 0
+                });
+            });
+        }
+    });
+
+    if (exportData.length === 0) {
+        return alert("⛔ Không có chi tiết sản phẩm nào để xuất báo cáo!");
+    }
+
+    // Sử dụng thư viện XLSX đã có sẵn
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKPI");
+    
+    // Tải file xuống
+    XLSX.writeFile(workbook, `BaoCao_KPI_${targetSales}_Thang_${targetMonth}.xlsx`);
+    playSystemSound('success');
 };
 </script>
 </body>
