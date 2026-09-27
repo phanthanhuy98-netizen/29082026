@@ -7665,8 +7665,31 @@ function getCompCodeFromProductCode(code) {
   if (pCodeStr.length >= 2) return pCodeStr.substring(0, 2);
   return 'KHAC';
 }
+  window.deleteCurrentMonthTarget = async function() {
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+    const confirmDel = await window.showCustomConfirm(
+        "Làm Sạch Chỉ Tiêu Tháng", 
+        `Bạn có chắc chắn muốn xóa bản ghi chỉ tiêu của [${window._chiTieuTargetSalesCode}] trong ${formatMonthVN(window._chiTieuTargetMonth)}?\n\nSau khi xóa, hệ thống sẽ tự động khôi phục kế thừa chỉ tiêu từ tháng gần nhất trước đó.`, 
+        "fa-trash", "Xóa & Kế Thừa Lại", "Hủy"
+    );
+    if (!confirmDel) return;
 
-// 1. Lưu thay đổi Phân Tuyến cho Sales
+    const targetDocId = `tgt_${window._chiTieuTargetSalesCode}_${window._chiTieuTargetMonth}`;
+    try {
+        await deleteDoc(doc(db, "monthlyTargets", targetDocId));
+        playSystemSound('success');
+        alert("✅ Đã dọn dẹp chỉ tiêu tháng này thành công!");
+        
+        // Tải lại dữ liệu mới nhất từ Firebase sau khi xóa
+        const newSnap = await getDocs(collection(db, "monthlyTargets"));
+        allTargetDocs = [];
+        newSnap.forEach(doc => allTargetDocs.push(doc.data()));
+        
+        calculateAndRenderTargets(); // Render lại để hệ thống tự động kế thừa tháng cũ
+    } catch(e) {
+        alert("Lỗi: " + e.message);
+    }
+};
 window.saveRouteAssignment = async function(uid) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
   const checkboxes = document.querySelectorAll(`.route-checkbox-${uid}:checked`);
@@ -7802,13 +7825,16 @@ window.renderChiTieuTab = async function(container) {
           `}
         </div>
 
-      ${isAdminOrManager ? `
-  <div style="display:flex; gap:10px; margin-bottom:12px;">
-      <button class="btn btn-amber" style="flex:1; justify-content:center; font-weight:900; font-size:15px; padding:14px; border-radius:14px; box-shadow:0 6px 20px rgba(245, 158, 11, 0.3); cursor:pointer;" onclick="openTargetModal()">
-          <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP MỚI
+    ${isAdminOrManager ? `
+  <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+      <button class="btn btn-amber" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:14px; border-radius:12px; box-shadow:0 6px 20px rgba(245, 158, 11, 0.3); cursor:pointer;" onclick="openTargetModal()">
+          <i class="fa-solid fa-plus-circle"></i> LẬP MỚI
       </button>
-      <button class="btn btn-blue" style="flex:1; justify-content:center; font-weight:900; font-size:15px; padding:14px; border-radius:14px; box-shadow:0 6px 20px rgba(37, 99, 235, 0.3); cursor:pointer;" onclick="openCloneTargetModal()">
-          <i class="fa-solid fa-copy"></i> 📋 NHÂN BẢN
+      <button class="btn btn-blue" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:14px; border-radius:12px; box-shadow:0 6px 20px rgba(37, 99, 235, 0.3); cursor:pointer;" onclick="openCloneTargetModal()">
+          <i class="fa-solid fa-copy"></i> NHÂN BẢN
+      </button>
+      <button class="btn btn-red" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:14px; border-radius:12px; box-shadow:0 6px 20px rgba(225, 29, 72, 0.3); cursor:pointer;" onclick="deleteCurrentMonthTarget()">
+          <i class="fa-solid fa-trash-can"></i> LÀM SẠCH THÁNG
       </button>
   </div>
 ` : ''}
