@@ -5226,7 +5226,6 @@ else if (tab === 'ctkm') {
     window._ctkmSearchKey = window._ctkmSearchKey || '';
     let ctkmSearchTimer = null;
 
-    // Cơ chế Debounce: Chờ 200ms sau khi ngừng gõ phím mới render lại DOM để tránh giật lag
     window.debounceFilterCtkm = function(keyword) {
         window._ctkmSearchKey = keyword;
         clearTimeout(ctkmSearchTimer);
@@ -5235,38 +5234,36 @@ else if (tab === 'ctkm') {
         }, 200); 
     };
 
- const drawCtkmUI = () => {
+    const drawCtkmUI = () => {
         const container = document.getElementById('ctkmDynamicContentArea');
         if (!container) return;
 
         let filteredPromos = window.promotionsList;
         const rawSearchKey = window._ctkmSearchKey.trim();
 
-        if (rawSearchKey !== '') {
-            const q = removeAccents(rawSearchKey);
-            
-            // CHỈ LỌC THEO: Mã Công Ty (maCtu), Tên Công Ty (compFullName), hoặc Mã KM (maKM).
-            // TUYỆT ĐỐI KHÔNG QUÉT VÀO `noiDung` HAY `hangHoa`.
-            filteredPromos = filteredPromos.filter(p => {
-               let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(p.maCtu || '').trim().toUpperCase());
-               let compFullName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : '';
-
-               const maCtuNorm = removeAccents(String(p.maCtu || ''));
-               const maKMNorm = removeAccents(String(p.maKM || ''));
-               const compFullNorm = removeAccents(compFullName);
-
-               // Nếu gõ dạng số (ví dụ: 61), ưu tiên khớp chính xác hoặc nằm ở đầu mã công ty hoặc mã KM
-               if (/^\d+$/.test(rawSearchKey)) {
-                   return maCtuNorm.startsWith(q) || maKMNorm.startsWith(q);
-               }
-
-               // Nếu gõ dạng chữ (ví dụ: hải hà), kiểm tra trên Tên công ty hoặc Mã công ty / Mã KM
-               const textToSearch = `${maCtuNorm} ${maKMNorm} ${compFullNorm}`;
-               return textToSearch.includes(q);
-            });
+        // NẾU CHƯA GÕ TÌM KIẾM -> ẨN BỚT HOẶC YÊU CẦU NHẬP TỪ KHÓA ĐỂ TỐI ƯU TỐC ĐỘ (GIỐNG SỔ GỐC)
+        if (rawSearchKey === '') {
+            container.innerHTML = `<div style="text-align:center; padding:35px; color:var(--text-muted); font-size:14px; font-weight:800; background:var(--card-bg); border-radius:12px; border:1px solid var(--card-border);">Vui lòng gõ tên công ty, mã công ty hoặc bấm nút "Làm mới" để hiển thị danh sách CTKM.</div>`;
+            return;
         }
 
-        // GOM NHÓM THEO MÃ CÔNG TY (MaCtu)
+        const q = removeAccents(rawSearchKey);
+        filteredPromos = filteredPromos.filter(p => {
+            let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(p.maCtu || '').trim().toUpperCase());
+            let compFullName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : '';
+
+            const maCtuNorm = removeAccents(String(p.maCtu || ''));
+            const maKMNorm = removeAccents(String(p.maKM || ''));
+            const compFullNorm = removeAccents(compFullName);
+
+            if (/^\d+$/.test(rawSearchKey)) {
+                return maCtuNorm.startsWith(q) || maKMNorm.startsWith(q);
+            }
+
+            const textToSearch = `${maCtuNorm} ${maKMNorm} ${compFullNorm}`;
+            return textToSearch.includes(q);
+        });
+
         let groupedPromos = {};
         filteredPromos.forEach(km => {
             let ctuKey = (km.maCtu || 'KHÁC').toUpperCase();
@@ -5323,39 +5320,52 @@ else if (tab === 'ctkm') {
 
         container.innerHTML = groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào phù hợp.</div>';
     };
-    // Khởi tạo cấu trúc tĩnh khung ban đầu để tối ưu hiệu suất DOM
+
+    // Hàm làm mới dữ liệu thủ công từ nút bấm
+    window.reloadCtkmDataManually = async function() {
+        try {
+            alert("⏳ Đang tải dữ liệu CTKM mới nhất từ máy chủ...");
+            const snap = await getDocs(collection(db, "promotions"));
+            window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+            window.promotionsLoaded = true;
+            drawCtkmUI();
+            alert("✅ Đã làm mới dữ liệu CTKM thành công!");
+        } catch (e) {
+            alert("Lỗi tải lại CTKM: " + e.message);
+        }
+    };
+
     container.innerHTML = `
         <div class="tab-header-actions">
-            <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM (${window.promotionsList.length})</h2>
+            <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM</h2>
             <div class="excel-group-btns">
-              ${isAdminOrManager ? `
-                <button class="btn btn-green btn-sm" onclick="exportCtkmExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-                <button class="btn btn-amber btn-sm" onclick="triggerImportCtkmExcel()"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel Lên</button>
-                <input type="file" id="ctkmFileInput" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleImportCtkmExcel(event)">
-              ` : ''}
+                <button class="btn btn-amber" style="padding: 6px 14px; font-size: 14px; font-weight:800;" onclick="reloadCtkmDataManually()"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+                ${isAdminOrManager ? `
+                  <button class="btn btn-green btn-sm" onclick="exportCtkmExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+                  <button class="btn btn-amber btn-sm" onclick="triggerImportCtkmExcel()"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel Lên</button>
+                  <input type="file" id="ctkmFileInput" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleImportCtkmExcel(event)">
+                ` : ''}
             </div>
         </div>
 
         <div class="card" style="margin-bottom:12px; padding:12px;">
-            <input type="text" id="ctkmSearchInput" placeholder="🔍 Gõ Mã KM, Nội dung, Mã Hàng, MaCtu..." value="${window._ctkmSearchKey}" oninput="debounceFilterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
+            <input type="text" id="ctkmSearchInput" placeholder="🔍 Gõ Mã Công Ty hoặc Tên Công Ty để tra cứu CTKM..." value="${window._ctkmSearchKey}" oninput="debounceFilterCtkm(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:700; width:100%; border-radius:10px;">
         </div>
 
         <div id="ctkmDynamicContentArea" style="display:flex; flex-direction:column; gap:4px;">
-            <div style="text-align:center; color:var(--text-muted); padding:30px; font-weight:800;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải danh sách...</div>
+            <div style="text-align:center; color:var(--text-muted); padding:35px; font-size:14px; font-weight:800; background:var(--card-bg); border-radius:12px; border:1px solid var(--card-border);">Vui lòng gõ tên công ty, mã công ty hoặc bấm nút "Làm mới" để hiển thị danh sách CTKM.</div>
         </div>
     `;
 
+    // Nếu đã tải dữ liệu trước đó thì giữ lại trạng thái, nếu chưa thì load ngầm
     if (!window.promotionsLoaded) {
         getDocs(collection(db, "promotions")).then(snap => {
             window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
             window.promotionsLoaded = true;
-            drawCtkmUI();
+            // Không tự động render đè nếu chưa nhập từ khóa, giữ nguyên trạng thái tối ưu
         }).catch(e => {
             window.promotionsLoaded = true;
-            drawCtkmUI();
         });
-    } else {
-        drawCtkmUI();
     }
 }
     else if (tab === 'gocSales') {
