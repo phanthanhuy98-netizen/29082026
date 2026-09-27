@@ -419,11 +419,10 @@
     getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
     updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import {
+import {
     getFirestore, collection, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction
-  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
- 
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCGCHPxhUnZzwjXhfw3hcy-9VPi9RrZ6HY",
@@ -437,8 +436,29 @@
 
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
-  const db = getFirestore(app);
-  enableIndexedDbPersistence(db).catch(() => {});
+const db = getFirestore(app);
+enableIndexedDbPersistence(db).catch(() => {});
+
+// Đặt đoạn code lắng nghe ở đây (sau khi 'db' đã sẵn sàng)
+try {
+    onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
+        if (docSnap.exists()) {
+            const serverVersion = docSnap.data().version;
+            const localVersion = localStorage.getItem("localCtkmVersion") || 0;
+            
+            if (serverVersion > localVersion && currentUser && currentUser.role !== 'admin') {
+                localStorage.setItem("localCtkmVersion", serverVersion);
+                const snap = await getDocs(collection(db, "promotions"));
+                window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                window.promotionsLoaded = true;
+                
+                if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') {
+                    drawCtkmUI();
+                }
+            }
+        }
+    });
+} catch(e) {}
 
   const secondaryApp = initializeApp(firebaseConfig, "secondary");
   const secondaryAuth = getAuth(secondaryApp);
@@ -5322,18 +5342,31 @@ else if (tab === 'ctkm') {
     };
 
     // Hàm làm mới dữ liệu thủ công từ nút bấm
-    window.reloadCtkmDataManually = async function() {
-        try {
-            alert("⏳ Đang tải dữ liệu CTKM mới nhất từ máy chủ...");
-            const snap = await getDocs(collection(db, "promotions"));
-            window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-            window.promotionsLoaded = true;
-            drawCtkmUI();
-            alert("✅ Đã làm mới dữ liệu CTKM thành công!");
-        } catch (e) {
-            alert("Lỗi tải lại CTKM: " + e.message);
+   window.reloadCtkmDataManually = async function() {
+    try {
+        // Kiểm tra nếu là Admin hoặc Manager mới có quyền làm mới toàn cục
+        if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+            alert("⏳ Đang cập nhật dữ liệu CTKM mới nhất lên hệ thống cho tất cả mọi người...");
+            
+            // Cập nhật số phiên bản (version) lên bảng systemMeta để thông báo toàn cục
+            const versionVal = Date.now();
+            await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: versionVal }, { merge: true });
+        } else {
+            alert("⏳ Đang tải dữ liệu CTKM mới nhất về máy...");
         }
-    };
+
+        const snap = await getDocs(collection(db, "promotions"));
+        window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        window.promotionsLoaded = true;
+        
+        if (typeof drawCtkmUI === 'function') {
+            drawCtkmUI();
+        }
+        alert("✅ Đã cập nhật thành công!");
+    } catch (e) {
+        alert("Lỗi tải lại CTKM: " + e.message);
+    }
+};
 
     container.innerHTML = `
         <div class="tab-header-actions">
