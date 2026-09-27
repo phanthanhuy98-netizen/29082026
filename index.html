@@ -9274,24 +9274,48 @@ window.executeAdvancedClone = async function() {
     const targetSales = window._chiTieuTargetSalesCode === 'ALL' || !window._chiTieuTargetSalesCode ? "Toàn Công Ty" : window._chiTieuTargetSalesCode;
     const targetMonth = window._chiTieuTargetMonth;
 
+    // Các biến để cộng dồn dòng Tổng Cộng cuối cùng
+    let totalTargetQty = 0;
+    let totalActualQty = 0;
+    let totalTargetRev = 0;
+    let totalActualRev = 0;
+
     Object.keys(window._activeGroupedKPI).forEach(compCode => {
         const comp = window._activeGroupedKPI[compCode];
         
-        // Xuất dữ liệu từng mã SKU
         if (comp.skus && comp.skus.length > 0) {
-            comp.skus.forEach(sku => {
-                const pct = sku.target > 0 ? ((sku.actual / sku.target) * 100).toFixed(1) + '%' : (sku.actual > 0 ? '100%' : '0%');
+            // Sắp xếp sản phẩm theo doanh số từ cao xuống thấp cho báo cáo đẹp hơn
+            comp.skus.sort((a,b) => b.actualRev - a.actualRev).forEach(sku => {
+                
+                // 1. Sửa lỗi logic Tiến độ khi Chỉ tiêu = 0
+                let pctText = '0%';
+                if (sku.target > 0) {
+                    pctText = ((sku.actual / sku.target) * 100).toFixed(1) + '%';
+                } else if (sku.target === 0 && sku.actual > 0) {
+                    pctText = 'Vượt mức (Không giao KPI)';
+                }
+
+                // Cắt gọn số thập phân cho số thùng
+                const formatNum = (num) => Number.isInteger(Number(num)) ? Number(num) : Number(Number(num).toFixed(2));
+
+                // Cộng dồn vào Tổng
+                totalTargetQty += sku.target || 0;
+                totalActualQty += sku.actual || 0;
+                totalTargetRev += sku.targetRev || 0;
+                totalActualRev += sku.actualRev || 0;
+
                 exportData.push({
                     "Nhân viên": targetSales,
                     "Tháng KPI": targetMonth,
                     "Tên Công Ty": comp.compName || compCode,
                     "Mã Sản Phẩm": sku.code,
                     "Tên Sản Phẩm": sku.name,
-                    "Chỉ Tiêu (Thùng)": sku.target || 0,
-                    "Thực Đạt (Thùng)": sku.actual || 0,
-                    "Tiến Độ (%)": pct,
-                    "Chỉ Tiêu (VNĐ)": sku.targetRev || 0,
-                    "Thực Đạt (VNĐ)": sku.actualRev || 0
+                    "Chỉ Tiêu (Thùng)": formatNum(sku.target || 0),
+                    "Thực Đạt (Thùng)": formatNum(sku.actual || 0),
+                    "Tiến Độ (%)": pctText,
+                    // 2. Thêm dấu phân cách hàng nghìn cho tiền VNĐ
+                    "Chỉ Tiêu (VNĐ)": (sku.targetRev || 0).toLocaleString('vi-VN'),
+                    "Thực Đạt (VNĐ)": (sku.actualRev || 0).toLocaleString('vi-VN')
                 });
             });
         }
@@ -9301,12 +9325,46 @@ window.executeAdvancedClone = async function() {
         return alert("⛔ Không có chi tiết sản phẩm nào để xuất báo cáo!");
     }
 
-    // Sử dụng thư viện XLSX đã có sẵn
+    // 3. Xây dựng dòng TỔNG CỘNG ở cuối file Excel
+    let totalPctText = '0%';
+    if (totalTargetRev > 0) {
+        totalPctText = ((totalActualRev / totalTargetRev) * 100).toFixed(1) + '%';
+    } else if (totalTargetRev === 0 && totalActualRev > 0) {
+        totalPctText = 'Vượt mức';
+    }
+
+    exportData.push({
+        "Nhân viên": "TỔNG CỘNG",
+        "Tháng KPI": "",
+        "Tên Công Ty": "",
+        "Mã Sản Phẩm": "",
+        "Tên Sản Phẩm": "",
+        "Chỉ Tiêu (Thùng)": Number(totalTargetQty.toFixed(2)),
+        "Thực Đạt (Thùng)": Number(totalActualQty.toFixed(2)),
+        "Tiến Độ (%)": totalPctText,
+        "Chỉ Tiêu (VNĐ)": totalTargetRev.toLocaleString('vi-VN'),
+        "Thực Đạt (VNĐ)": totalActualRev.toLocaleString('vi-VN')
+    });
+
     const worksheet = XLSX.utils.json_to_sheet(exportData);
+    
+    // 4. Tự động kéo giãn độ rộng của các cột (Column Widths)
+    worksheet['!cols'] = [
+        {wch: 12}, // A: Nhân viên
+        {wch: 12}, // B: Tháng KPI
+        {wch: 35}, // C: Tên Công Ty (Kéo rộng ra)
+        {wch: 14}, // D: Mã Sản Phẩm
+        {wch: 35}, // E: Tên Sản Phẩm (Kéo rộng ra)
+        {wch: 16}, // F: Chỉ Tiêu Thùng
+        {wch: 18}, // G: Thực Đạt Thùng
+        {wch: 25}, // H: Tiến Độ (%)
+        {wch: 18}, // I: Chỉ Tiêu VNĐ
+        {wch: 20}  // J: Thực Đạt VNĐ
+    ];
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKPI");
     
-    // Tải file xuống
     XLSX.writeFile(workbook, `BaoCao_KPI_${targetSales}_Thang_${targetMonth}.xlsx`);
     playSystemSound('success');
 };
