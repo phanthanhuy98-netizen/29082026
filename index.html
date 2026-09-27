@@ -7703,55 +7703,6 @@ window.saveRouteAssignment = async function(uid) {
   } catch (e) { alert("Lỗi phân tuyến: " + e.message); }
 };
 
-  window.searchAssignRoutes = function(val) {
-  const q = removeAccents(val.trim().toLowerCase());
-  document.querySelectorAll('.route-assign-item').forEach(el => {
-    const text = removeAccents(el.innerText).toLowerCase();
-    el.style.display = text.includes(q) ? '' : 'none';
-  });
-};
-
-window.searchAssignRoutes = function(val) {
-  const q = removeAccents(val.trim().toLowerCase());
-  document.querySelectorAll('.route-assign-item').forEach(el => {
-    const text = removeAccents(el.getAttribute('data-search') || '').toLowerCase();
-    el.style.display = text.includes(q) ? '' : 'none';
-  });
-};
-
-window.toggleAllRoutes = function(selectAll, uid) {
-  document.querySelectorAll(`.route-checkbox-${uid}`).forEach(cb => {
-    if (cb.closest('label').style.display !== 'none') {
-      cb.checked = selectAll;
-      window.updateRouteStyle(cb);
-    }
-  });
-  window.updateRouteSummary(uid);
-};
-
-window.updateRouteStyle = function(cb) {
-  const label = cb.closest('label');
-  if (cb.checked) {
-    label.style.background = 'rgba(37, 99, 235, 0.08)';
-    label.style.borderColor = 'var(--primary)';
-  } else {
-    label.style.background = 'var(--card-bg)';
-    label.style.borderColor = 'var(--card-border)';
-  }
-};
-
-window.updateRouteSummary = function(uid) {
-  let totalStores = 0;
-  let totalRoutes = 0;
-  document.querySelectorAll(`.route-checkbox-${uid}:checked`).forEach(cb => {
-    totalRoutes++;
-    totalStores += parseInt(cb.getAttribute('data-count') || 0);
-  });
-  const summaryEl = document.getElementById('routeSelectionSummary');
-  if (summaryEl) {
-    summaryEl.innerHTML = `Đã chọn: <b style="color:var(--primary); font-size:16px;">${totalRoutes}</b> tuyến (<b style="color:var(--emerald); font-size:15px;">${totalStores}</b> KH)`;
-  }
-};
 // 2. Load và Render Tab Chỉ Tiêu
 window.renderChiTieuTab = async function(container) {
   const isPhanTuyen = window._chiTieuSubTab === 'phanTuyen';
@@ -7784,14 +7735,14 @@ window.renderChiTieuTab = async function(container) {
       </div>
     </div>
 
-  ${isPhanTuyen ? `
-      <!-- SUB-TAB 1: PHÂN TUYẾN (MOBILE OPTIMIZED) -->
-      <div class="card" style="padding:12px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
-        
+    ${isPhanTuyen ? `
+      <!-- SUB-TAB 1: PHÂN TUYẾN -->
+      <div class="card" style="padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
+        <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng (Tối Ưu)</h3>
         ${isAdminOrManager ? `
-          <div style="margin-bottom: 12px;">
-            <label style="font-size:13px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">👤 Chọn nhân viên để giao tuyến:</label>
-            <select onchange="window._chiTieuTargetSalesRouteCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="width:100%; padding:14px; font-size:15px; font-weight:900; color:var(--primary); background:var(--bg-dark); border-radius:10px; border:1px solid var(--card-border);">
+          <div style="margin-bottom: 16px;">
+            <label style="font-size:14px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN NHÂN VIÊN SALES CẦN PHÂN TUYẾN:</label>
+            <select onchange="window._chiTieuTargetSalesRouteCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="width:100%; padding:14px; font-size:16px; font-weight:900; color:var(--primary); background:var(--bg-dark); border-radius:10px; border:1px solid var(--card-border);">
               ${!window._chiTieuTargetSalesRouteCode ? '<option value="" disabled selected>-- Bấm để chọn 1 nhân viên Sales --</option>' : ''}
               ${salesUsersList.map(u => `<option value="${u.uid}" ${window._chiTieuTargetSalesRouteCode === u.uid ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
             </select>
@@ -7800,87 +7751,42 @@ window.renderChiTieuTab = async function(container) {
           ${window._chiTieuTargetSalesRouteCode ? (() => {
             const targetUser = salesUsersList.find(u => u.uid === window._chiTieuTargetSalesRouteCode);
             if (!targetUser) return '';
-            
-            // Ép kiểu tất cả mã tuyến đã lưu thành String để so sánh chính xác 100%
-            const assigned = (targetUser.assignedRoutes || []).map(String);
-            
-            // Đếm số KH theo tuyến
-            let routeStoreCount = {};
-            routeGroupsList.forEach(r => routeStoreCount[String(r.nhomDoiTuong)] = 0);
-            stores.forEach(s => {
-                let code = String(s.code || '').trim().toUpperCase();
-                let matched = routeGroupsList.find(r => code.startsWith(String(r.nhomDoiTuong).trim().toUpperCase()));
-                if(matched) routeStoreCount[String(matched.nhomDoiTuong)]++;
-            });
-
-            // Tổng kết lúc mới mở tab
-            let currentWorkload = 0;
-            let currentRoutes = assigned.length;
-            assigned.forEach(rCode => { currentWorkload += (routeStoreCount[rCode] || 0); });
-
+            const assigned = targetUser.assignedRoutes || [];
             return `
-              <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:12px;">
-                
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <div id="routeSelectionSummary" style="font-size:13px; font-weight:800; color:var(--text-muted);">
-                        Đã chọn: <b style="color:var(--primary); font-size:16px;">${currentRoutes}</b> tuyến (<b style="color:var(--emerald); font-size:15px;">${currentWorkload}</b> KH)
-                    </div>
-                    <button class="btn btn-green" style="font-weight:900; padding:10px 14px; font-size:13px; border-radius:8px; box-shadow:0 4px 10px rgba(5,150,105,0.2);" onclick="saveRouteAssignment('${targetUser.uid}')">
-                        <i class="fa-solid fa-floppy-disk"></i> LƯU
-                    </button>
+              <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px dashed var(--card-border); padding-bottom:10px;">
+                  <span style="font-weight:900; font-size:15px; color:var(--text-main);">2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span></span>
+                  <button class="btn btn-green" style="font-weight:900; padding:10px 18px; font-size:14px; box-shadow:0 4px 10px rgba(5,150,105,0.2); border-radius:8px;" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
                 </div>
-
-                <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
-                    <input type="text" placeholder="🔍 Tìm nhanh tuyến..." oninput="searchAssignRoutes(this.value)" style="flex:1; min-width:140px; padding:10px 12px; font-size:14px; font-weight:700; border-radius:8px; border:1px solid var(--card-border); margin:0;">
-                    <button class="btn btn-sm" style="background:#E2E8F0; color:#1E293B; font-weight:800; padding:0 12px;" onclick="toggleAllRoutes(true, '${targetUser.uid}')">Chọn hết</button>
-                    <button class="btn btn-sm" style="background:var(--rose); color:#fff; font-weight:800; padding:0 12px;" onclick="toggleAllRoutes(false, '${targetUser.uid}')">Bỏ chọn</button>
-                </div>
-
-                <div style="display:flex; flex-direction:column; gap:8px; max-height:450px; overflow-y:auto; padding-right:4px;">
-                  ${routeGroupsList.map(r => {
-                      let rCodeStr = String(r.nhomDoiTuong);
-                      let cCount = routeStoreCount[rCodeStr] || 0;
-                      let isChecked = assigned.includes(rCodeStr); // Bắt dính tuyệt đối
-                      let bgStyle = isChecked ? 'rgba(37, 99, 235, 0.08)' : 'var(--card-bg)';
-                      let borderStyle = isChecked ? 'var(--primary)' : 'var(--card-border)';
-                      
-                      return `
-                      <label class="route-assign-item" data-search="${r.nhomDoiTuong} ${r.noiDung || ''}" style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:12px; background:${bgStyle}; border:1px solid ${borderStyle}; border-radius:10px; transition:0.1s;">
-                        <input type="checkbox" class="route-checkbox-${targetUser.uid}" data-count="${cCount}" value="${r.nhomDoiTuong}" ${isChecked ? 'checked' : ''} onchange="window.updateRouteStyle(this); window.updateRouteSummary('${targetUser.uid}')" style="width:20px; height:20px; cursor:pointer; margin:0; flex-shrink:0; accent-color:var(--primary);">
-                        <div style="flex:1; display:flex; flex-direction:column; gap:2px;">
-                            <div style="font-size:15px; font-weight:800; color:var(--text-main); line-height:1.3;">
-                                <span style="color:var(--primary);">[${r.nhomDoiTuong}]</span> ${r.noiDung ? r.noiDung : 'Tuyến chưa đặt tên'}
-                            </div>
-                            <div style="font-size:12px; font-weight:700; color:var(--text-muted);">
-                                Có <b style="color:var(--emerald);">${cCount}</b> Khách hàng
-                            </div>
-                        </div>
-                      </label>
-                    `}).join('')}
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:400px; overflow-y:auto;">
+                  ${routeGroupsList.map(r => `
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:15px; font-weight:800; color:var(--text-main); padding:10px; background:rgba(0,0,0,0.02); border-radius:8px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='rgba(0,0,0,0.02)'">
+                      <input type="checkbox" class="route-checkbox-${targetUser.uid}" value="${r.nhomDoiTuong}" ${assigned.includes(String(r.nhomDoiTuong)) ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer; margin:0; padding:0; flex-shrink:0; appearance:auto; -webkit-appearance:auto; accent-color:var(--primary);">
+                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.nhomDoiTuong} - ${r.noiDung || 'Chưa có tên'}">
+                        <b style="color:var(--primary);">${r.nhomDoiTuong}</b> ${r.noiDung ? '- ' + r.noiDung : ''}
+                      </span>
+                    </label>
+                  `).join('')}
                 </div>
               </div>
             `;
           })() : `
-            <div style="text-align:center; padding:30px; color:var(--text-muted); background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:12px; font-weight:800; font-size:14px;">
-              Vui lòng chọn nhân viên để hiển thị danh sách tuyến.
+            <div style="text-align:center; padding:35px; color:var(--text-muted); background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:12px; font-weight:800; font-size:15px;">
+              <i class="fa-solid fa-arrow-up" style="margin-bottom:8px; font-size:22px; color:var(--card-border);"></i><br>
+              Vui lòng chọn 1 nhân viên Sales ở trên để bắt đầu giao tuyến.
             </div>
           `}
         ` : `
           <div style="text-align:center; padding:20px; color:var(--rose); font-weight:900; background:rgba(225, 29, 72, 0.1); border-radius:10px; font-size:14px;">
-            <i class="fa-solid fa-lock"></i> Chỉ Admin hoặc Manager mới có quyền phân tuyến.
+            <i class="fa-solid fa-lock"></i> Chỉ Admin hoặc Manager mới có quyền phân tuyến cho nhân viên khác.
           </div>
-       <div style="margin-top:16px; font-weight:900; color:var(--text-main); font-size:15px;">Tuyến bạn đang phụ trách:</div>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+          <div style="margin-top:16px; font-weight:900; color:var(--text-main); font-size:15px;">Tuyến bạn đang phụ trách:</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
             ${currentUser.assignedRoutes && currentUser.assignedRoutes.length > 0 ? currentUser.assignedRoutes.map(r => {
               const routeInfo = routeGroupsList.find(rt => String(rt.nhomDoiTuong) === String(r));
               const rName = routeInfo && routeInfo.noiDung ? routeInfo.noiDung : '';
-              return `
-                <div style="background:var(--primary); color:#fff; padding:12px 16px; border-radius:10px; font-weight:800; font-size:14px; box-shadow:0 2px 6px rgba(37,99,235,0.2); display:flex; align-items:center; gap:10px;">
-                    <i class="fa-solid fa-map-location-dot"></i>
-                    <span>[Tuyến ${r}]${rName}</span>
-                </div>
-              `;
-            }).join('') : '<div style="color:var(--text-muted); font-size:14px; font-weight:800; background:var(--card-bg); border:1px dashed var(--card-border); padding:16px; text-align:center; border-radius:10px;">Bạn chưa được phân tuyến nào.</div>'}
+              return `<span style="background:var(--primary); color:#fff; padding:8px 16px; border-radius:8px; font-weight:900; font-size:14px; box-shadow:0 2px 6px rgba(37,99,235,0.2);">Tuyến ${r}${rName ? '- ' + rName : ''}</span>`;
+            }).join('') : '<span style="color:var(--text-muted); font-size:14px; font-weight:800; background:var(--card-bg); padding:10px 14px; border-radius:8px;">Bạn chưa được phân tuyến nào.</span>'}
           </div>
         `}
       </div>
