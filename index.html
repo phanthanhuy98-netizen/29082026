@@ -3814,7 +3814,7 @@ window.updateCartItemNote = function(prdId, val) {
     XLSX.writeFile(workbook, `DanhSachCongTy_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
- window.importProductsExcel = function(event) {
+window.importProductsExcel = function(event) {
   if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file Excel!");
   const file = event.target.files[0];
   if (!file) return;
@@ -3826,33 +3826,52 @@ window.updateCartItemNote = function(prdId, val) {
       const workbook = XLSX.read(data, { type: 'array' });
       const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
       
+      // TỰ ĐỘNG DÒ TÌM CỘT CHUẨN XÁC 100% (Bất chấp cột ẩn hay dư khoảng trắng)
+      let headerIdx = -1, cCode = -1, cName = -1, cDvt = -1, cPrice = -1, cRatio = -1;
+      for (let i = 0; i < Math.min(jsonRows.length, 20); i++) {
+          const row = jsonRows[i];
+          if (!row) continue;
+          const rowStr = row.map(c => String(c || '').replace(/\s/g, '').toLowerCase());
+          cCode = rowStr.findIndex(s => s.includes('mavthh') || s === 'mavt');
+          if (cCode > -1) {
+              headerIdx = i;
+              cName = rowStr.findIndex(s => s.includes('tenvthh') || s.includes('tenvt') || s.includes('tenhang'));
+              cDvt = rowStr.findIndex(s => s.includes('donvitinh') || s.includes('dvt'));
+              cPrice = rowStr.findIndex(s => s.includes('vnddgban') || s.includes('gia'));
+              cRatio = rowStr.findIndex(s => s.includes('tylequydoi') || s.includes('quycach'));
+              break;
+          }
+      }
+
+      if (headerIdx === -1 || cCode === -1) return alert("Lỗi: Không tìm thấy tiêu đề 'Ma VTHH' trong file!");
+
       const uniqueMap = new Map();
-      for (let i = 0; i < jsonRows.length; i++) {
+      for (let i = headerIdx + 1; i < jsonRows.length; i++) {
         const r = jsonRows[i];
-        const code = r[0] ? String(r[0]).trim() : '';
-        const name = r[1] ? String(r[1]).trim() : '';
-        const dvt = r[2] ? String(r[2]).trim() : 'hộp';
-        // Xử lý loại bỏ dấu phẩy trong cột giá VNDDGBan1 nếu có
-        const priceStr = r[3] ? String(r[3]).replace(/,/g, '').trim() : '0';
-        const price = Number(priceStr) || 0;
-        const tyLe = Number(r[4]) || 50;
+        if (!r || r.length === 0) continue;
+
+        const code = cCode > -1 && r[cCode] ? String(r[cCode]).trim() : '';
+        if (!code || code.toLowerCase() === 'undefined') continue;
+
+        const name = cName > -1 && r[cName] ? String(r[cName]).trim() : '';
+        const dvt = cDvt > -1 && r[cDvt] ? String(r[cDvt]).trim() : 'hộp';
+        const priceStr = cPrice > -1 && r[cPrice] ? String(r[cPrice]).replace(/,/g, '').trim() : '0';
+        const tyLe = cRatio > -1 && r[cRatio] ? Number(r[cRatio]) : 50;
         
-        if (code && code !== 'Ma VTHH' && code !== 'undefined') {
-          uniqueMap.set(code, {
-            id: code,
-            code: code, 
-            name: name, 
-            dvt: dvt,
-            price: price,
-            tyLeQuyDoi: tyLe
-          });
-        }
+        uniqueMap.set(code, {
+          id: code,
+          code: code, 
+          name: name, 
+          dvt: dvt,
+          price: Number(priceStr) || 0,
+          tyLeQuyDoi: tyLe || 50
+        });
       }
 
       const rawProducts = Array.from(uniqueMap.values());
-      if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ trong file!");
+      if (rawProducts.length === 0) return alert("Không tìm thấy dữ liệu vật tư hợp lệ!");
 
-      alert(`⏳ Đang đẩy ${rawProducts.length} vật tư lên Firebase... Vui lòng chờ trong giây lát.`);
+      alert(`⏳ Đang đẩy ${rawProducts.length} vật tư lên Firebase...`);
 
       const chunkSize = 400;
       for (let i = 0; i < rawProducts.length; i += chunkSize) {
@@ -3872,13 +3891,142 @@ window.updateCartItemNote = function(prdId, val) {
       products = rawProducts;
       buildProductIndex();
       await saveProductsToLocalCache(products);
-      renderUI();
-      alert(`✅ Đã đẩy thành công ${products.length} vật tư lên Firebase Firestore!`);
+      alert(`✅ Đã thêm mới/cập nhật thành công ${products.length} vật tư!`);
+      
+      if (typeof filterTabProducts === 'function') filterTabProducts('');
     } catch (err) { 
-      alert("Lỗi đẩy lên Firebase: " + err.message); 
+      alert("Lỗi đọc file: " + err.message); 
     }
   };
   reader.readAsArrayBuffer(file);
+  event.target.value = ''; // Reset file input
+};
+
+window.deleteAllAndImportProductsExcel = async function(e) {
+  if (!currentUser || currentUser.role !== 'admin') return alert("Chỉ Admin mới có quyền thực hiện tính năng này!");
+
+  const confirmed = await window.showCustomConfirm(
+    "XÁC NHẬN XÓA TOÀN BỘ VẬT TƯ", 
+    "Hành động này sẽ XÓA SẠCH toàn bộ vật tư cũ và ghi đè bằng danh sách mới. Bạn có chắc chắn muốn tiếp tục?", 
+    "fa-triangle-exclamation", 
+    "Đồng ý Xóa & Tải Mới", 
+    "Hủy"
+  );
+  if (!confirmed) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx, .xls, .csv';
+  fileInput.onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        // TỰ ĐỘNG DÒ TÌM CỘT CHUẨN XÁC 100%
+        let headerIdx = -1, cCode = -1, cName = -1, cDvt = -1, cPrice = -1, cRatio = -1;
+        for (let i = 0; i < Math.min(jsonRows.length, 20); i++) {
+            const row = jsonRows[i];
+            if (!row) continue;
+            const rowStr = row.map(c => String(c || '').replace(/\s/g, '').toLowerCase());
+            cCode = rowStr.findIndex(s => s.includes('mavthh') || s === 'mavt');
+            if (cCode > -1) {
+                headerIdx = i;
+                cName = rowStr.findIndex(s => s.includes('tenvthh') || s.includes('tenvt') || s.includes('tenhang'));
+                cDvt = rowStr.findIndex(s => s.includes('donvitinh') || s.includes('dvt'));
+                cPrice = rowStr.findIndex(s => s.includes('vnddgban') || s.includes('gia'));
+                cRatio = rowStr.findIndex(s => s.includes('tylequydoi') || s.includes('quycach'));
+                break;
+            }
+        }
+
+        if (headerIdx === -1 || cCode === -1) return alert("Lỗi: Không tìm thấy tiêu đề 'Ma VTHH' trong file!");
+
+        const uniqueMap = new Map();
+        for (let i = headerIdx + 1; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          if (!r || r.length === 0) continue;
+
+          const code = cCode > -1 && r[cCode] ? String(r[cCode]).trim() : '';
+          if (!code || code.toLowerCase() === 'undefined') continue;
+
+          const name = cName > -1 && r[cName] ? String(r[cName]).trim() : '';
+          const dvt = cDvt > -1 && r[cDvt] ? String(r[cDvt]).trim() : 'hộp';
+          const priceStr = cPrice > -1 && r[cPrice] ? String(r[cPrice]).replace(/,/g, '').trim() : '0';
+          const tyLe = cRatio > -1 && r[cRatio] ? Number(r[cRatio]) : 50;
+          
+          uniqueMap.set(code, {
+            id: code,
+            code: code, 
+            name: name, 
+            dvt: dvt,
+            price: Number(priceStr) || 0,
+            tyLeQuyDoi: tyLe || 50
+          });
+        }
+
+        const newProductsList = Array.from(uniqueMap.values());
+        if (newProductsList.length === 0) return alert("Lỗi: Không đọc được dữ liệu vật tư nào!");
+
+        alert(`Đang tiến hành xóa danh mục cũ và tải lên ${newProductsList.length} vật tư mới...`);
+
+        // XÓA TẬN GỐC DATA CŨ
+        const prodSnap = await getDocs(collection(db, "products"));
+        let batches = [];
+        let currentBatch = writeBatch(db);
+        let operationCount = 0;
+
+        prodSnap.forEach((docSnap) => {
+          currentBatch.delete(docSnap.ref);
+          operationCount++;
+          if (operationCount >= 400) {
+            batches.push(currentBatch.commit());
+            currentBatch = writeBatch(db);
+            operationCount = 0;
+          }
+        });
+        if (operationCount > 0) batches.push(currentBatch.commit());
+        await Promise.all(batches);
+
+        // THÊM DATA MỚI
+        let uploadBatches = [];
+        let uploadBatch = writeBatch(db);
+        let upCount = 0;
+
+        newProductsList.forEach(p => {
+          const docRef = doc(collection(db, "products"), p.id);
+          uploadBatch.set(docRef, p);
+          upCount++;
+          if (upCount >= 400) {
+            uploadBatches.push(uploadBatch.commit());
+            uploadBatch = writeBatch(db);
+            upCount = 0;
+          }
+        });
+        if (upCount > 0) uploadBatches.push(uploadBatch.commit());
+        await Promise.all(uploadBatches);
+
+        products = newProductsList;
+        await saveProductsToLocalCache(products);
+        buildProductIndex();
+
+        playSystemSound('success');
+        alert(`✅ Đã dọn dẹp sạch sẽ mã rác và nạp mới thành công ${products.length} mã hàng chuẩn!`);
+        
+        if (typeof filterTabProducts === 'function') filterTabProducts('');
+      } catch (err) {
+        alert("Lỗi khi xử lý file Excel: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  fileInput.click();
 };
 
   window.importCustomersExcel = function(event) {
