@@ -7703,6 +7703,52 @@ window.saveRouteAssignment = async function(uid) {
   } catch (e) { alert("Lỗi phân tuyến: " + e.message); }
 };
 
+  window.searchAssignRoutes = function(val) {
+  const q = removeAccents(val.trim().toLowerCase());
+  document.querySelectorAll('.route-assign-item').forEach(el => {
+    const text = removeAccents(el.innerText).toLowerCase();
+    el.style.display = text.includes(q) ? '' : 'none';
+  });
+};
+
+window.toggleAllRoutes = function(selectAll, uid) {
+  const checkboxes = document.querySelectorAll(`.route-checkbox-${uid}`);
+  checkboxes.forEach(cb => {
+    if (cb.closest('label').style.display !== 'none') {
+      cb.checked = selectAll;
+    }
+  });
+  window.updateRouteWorkload(uid);
+};
+
+window.updateRouteWorkload = function(uid) {
+  const checkboxes = document.querySelectorAll(`.route-checkbox-${uid}:checked`);
+  let totalStores = 0;
+  checkboxes.forEach(cb => {
+    totalStores += parseInt(cb.getAttribute('data-count') || 0);
+  });
+  
+  const workloadEl = document.getElementById('routeWorkloadTotal');
+  const workloadBar = document.getElementById('routeWorkloadBar');
+  const alertEl = document.getElementById('routeWorkloadAlert');
+
+  if (workloadEl) workloadEl.innerText = totalStores;
+  if (workloadBar) {
+    let pct = Math.min((totalStores / 200) * 100, 100);
+    workloadBar.style.width = pct + '%';
+    
+    if (totalStores > 200) {
+      workloadBar.style.background = 'var(--rose-gradient)';
+      if(alertEl) { alertEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Cảnh báo: Nhân viên đang bị quá tải khách hàng!'; alertEl.style.color = 'var(--rose)'; }
+    } else if (totalStores > 150) {
+      workloadBar.style.background = 'var(--amber-gradient)';
+      if(alertEl) { alertEl.innerHTML = 'Tải trọng khách hàng đang ở mức tối ưu cao.'; alertEl.style.color = 'var(--amber)'; }
+    } else {
+      workloadBar.style.background = 'var(--emerald-gradient)';
+      if(alertEl) { alertEl.innerHTML = 'Khối lượng công việc an toàn.'; alertEl.style.color = 'var(--emerald)'; }
+    }
+  }
+};
 // 2. Load và Render Tab Chỉ Tiêu
 window.renderChiTieuTab = async function(container) {
   const isPhanTuyen = window._chiTieuSubTab === 'phanTuyen';
@@ -7736,14 +7782,10 @@ window.renderChiTieuTab = async function(container) {
     </div>
 
     ${isPhanTuyen ? `
-      <!-- SUB-TAB 1: PHÂN TUYẾN -->
+     <!-- SUB-TAB 1: PHÂN TUYẾN (NÂNG CẤP WORKLOAD BALANCE) -->
       <div class="card" style="padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.02); border-radius:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-        <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin:0;"><i class="fa-solid fa-user-check" style="color:var(--primary);"></i> Phân Tuyến Khách Hàng</h3>
-        <button class="btn btn-sm" style="background:#0D9488; color:white; font-weight:800;" onclick="openRouteMatrixModal()">
-          <i class="fa-solid fa-table-cells"></i> Xem Ma Trận Phân Tuyến
-        </button>
-      </div>
+        <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:16px;"><i class="fa-solid fa-scale-balanced" style="color:var(--primary);"></i> Phân Tuyến & Cân Bằng Tải</h3>
+        
         ${isAdminOrManager ? `
           <div style="margin-bottom: 16px;">
             <label style="font-size:14px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:6px;">1. CHỌN NHÂN VIÊN SALES CẦN PHÂN TUYẾN:</label>
@@ -7757,21 +7799,71 @@ window.renderChiTieuTab = async function(container) {
             const targetUser = salesUsersList.find(u => u.uid === window._chiTieuTargetSalesRouteCode);
             if (!targetUser) return '';
             const assigned = targetUser.assignedRoutes || [];
+            
+            // THUẬT TOÁN ĐẾM SỐ KHÁCH HÀNG THEO TUYẾN
+            let routeStoreCount = {};
+            routeGroupsList.forEach(r => routeStoreCount[r.nhomDoiTuong] = 0);
+            stores.forEach(s => {
+                let code = String(s.code || '').trim().toUpperCase();
+                let matched = routeGroupsList.find(r => code.startsWith(String(r.nhomDoiTuong).trim().toUpperCase()));
+                if(matched) routeStoreCount[matched.nhomDoiTuong]++;
+            });
+
+            // TÍNH TỔNG KHÁCH HÀNG HIỆN TẠI ĐANG ÔM
+            let currentWorkload = 0;
+            assigned.forEach(rCode => {
+                currentWorkload += (routeStoreCount[rCode] || 0);
+            });
+            let initialPct = Math.min((currentWorkload / 200) * 100, 100);
+            let barColor = currentWorkload > 200 ? 'var(--rose-gradient)' : (currentWorkload > 150 ? 'var(--amber-gradient)' : 'var(--emerald-gradient)');
+
             return `
               <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:18px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px dashed var(--card-border); padding-bottom:10px;">
                   <span style="font-weight:900; font-size:15px; color:var(--text-main);">2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span></span>
                   <button class="btn btn-green" style="font-weight:900; padding:10px 18px; font-size:14px; box-shadow:0 4px 10px rgba(5,150,105,0.2); border-radius:8px;" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
                 </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:400px; overflow-y:auto;">
-                  ${routeGroupsList.map(r => `
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:15px; font-weight:800; color:var(--text-main); padding:10px; background:rgba(0,0,0,0.02); border-radius:8px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='rgba(0,0,0,0.02)'">
-                      <input type="checkbox" class="route-checkbox-${targetUser.uid}" value="${r.nhomDoiTuong}" ${assigned.includes(String(r.nhomDoiTuong)) ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer; margin:0; padding:0; flex-shrink:0; appearance:auto; -webkit-appearance:auto; accent-color:var(--primary);">
-                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.nhomDoiTuong} - ${r.noiDung || 'Chưa có tên'}">
-                        <b style="color:var(--primary);">${r.nhomDoiTuong}</b> ${r.noiDung ? '- ' + r.noiDung : ''}
-                      </span>
-                    </label>
-                  `).join('')}
+
+                <!-- THANH ĐO LƯỜNG TẢI TRỌNG (WORKLOAD BAR) -->
+                <div style="background:rgba(0,0,0,0.02); border:1px dashed var(--card-border); border-radius:10px; padding:14px; margin-bottom:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
+                        <span style="font-size:12px; font-weight:800; color:var(--text-muted);"><i class="fa-solid fa-users"></i> Tổng lượng Khách hàng:</span>
+                        <div style="text-align:right;">
+                            <span id="routeWorkloadTotal" style="font-size:20px; font-weight:900; color:var(--primary);">${currentWorkload}</span>
+                            <span style="font-size:13px; font-weight:700; color:var(--text-muted);">/ 200 KH (Định mức)</span>
+                        </div>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; margin-bottom:6px;">
+                        <div id="routeWorkloadBar" style="height: 100%; width: ${initialPct}\%; background:${barColor}; border-radius: 4px; transition:width 0.3s, background 0.3s;"></div>
+                    </div>
+                    <div id="routeWorkloadAlert" style="font-size:11.5px; font-weight:700; text-align:right; color:var(--text-muted);">...</div>
+                </div>
+
+                <!-- THANH TÌM KIẾM & THAO TÁC NHANH -->
+                <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                    <input type="text" placeholder="🔍 Gõ mã hoặc tên tuyến..." oninput="searchAssignRoutes(this.value)" style="flex:1; min-width:180px; padding:10px; font-size:13px; font-weight:800; border-radius:8px; border:1px solid var(--card-border); margin:0;">
+                    <button class="btn btn-blue btn-sm" onclick="toggleAllRoutes(true, '${targetUser.uid}')" style="font-weight:800;">Chọn hết</button>
+                    <button class="btn btn-red btn-sm" onclick="toggleAllRoutes(false, '${targetUser.uid}')" style="font-weight:800;">Bỏ chọn hết</button>
+                </div>
+
+                <!-- DANH SÁCH CHECKBOX CÓ SỐ LƯỢNG KHÁCH HÀNG -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:12px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:350px; overflow-y:auto;">
+                  ${routeGroupsList.map(r => {
+                      let cCount = routeStoreCount[r.nhomDoiTuong] || 0;
+                      let isChecked = assigned.includes(String(r.nhomDoiTuong));
+                      return `
+                      <label class="route-assign-item" style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:800; color:var(--text-main); padding:10px; background:rgba(0,0,0,0.02); border-radius:8px; transition:0.2s; border:1px solid transparent;" onmouseover="this.style.background='rgba(37,99,235,0.05)'; this.style.borderColor='rgba(37,99,235,0.2)';" onmouseout="this.style.background='rgba(0,0,0,0.02)'; this.style.borderColor='transparent';">
+                        <input type="checkbox" class="route-checkbox-${targetUser.uid}" data-count="${cCount}" value="${r.nhomDoiTuong}" ${isChecked ? 'checked' : ''} onchange="updateRouteWorkload('${targetUser.uid}')" style="width:18px; height:18px; cursor:pointer; margin:0; padding:0; flex-shrink:0; accent-color:var(--primary);">
+                        <div style="flex:1; overflow:hidden;">
+                            <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.nhomDoiTuong} - ${r.noiDung || 'Chưa có tên'}">
+                            <b style="color:var(--primary);">${r.nhomDoiTuong}</b> ${r.noiDung ? '- ' + r.noiDung : ''}
+                            </div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                                <i class="fa-solid fa-users" style="color:var(--emerald);"></i> Phụ trách: <b>${cCount} KH</b>
+                            </div>
+                        </div>
+                      </label>
+                    `}).join('')}
                 </div>
               </div>
             `;
@@ -7790,7 +7882,7 @@ window.renderChiTieuTab = async function(container) {
             ${currentUser.assignedRoutes && currentUser.assignedRoutes.length > 0 ? currentUser.assignedRoutes.map(r => {
               const routeInfo = routeGroupsList.find(rt => String(rt.nhomDoiTuong) === String(r));
               const rName = routeInfo && routeInfo.noiDung ? routeInfo.noiDung : '';
-              return `<span style="background:var(--primary); color:#fff; padding:8px 16px; border-radius:8px; font-weight:900; font-size:14px; box-shadow:0 2px 6px rgba(37,99,235,0.2);">Tuyến ${r}${rName ? '- ' + rName : ''}</span>`;
+              return \`<span style="background:var(--primary); color:#fff; padding:8px 16px; border-radius:8px; font-weight:900; font-size:14px; box-shadow:0 2px 6px rgba(37,99,235,0.2);">Tuyến \${r}\${rName ? '- ' + rName : ''}</span>\`;
             }).join('') : '<span style="color:var(--text-muted); font-size:14px; font-weight:800; background:var(--card-bg); padding:10px 14px; border-radius:8px;">Bạn chưa được phân tuyến nào.</span>'}
           </div>
         `}
@@ -9524,119 +9616,6 @@ window.exportKpiExcel = async function() {
             btn.innerHTML = '<i class="fa-solid fa-file-excel"></i> XUẤT EXCEL';
         }
     }
-};
-  window.openRouteMatrixModal = function() {
-    // 1. Quét dữ liệu khách hàng và đếm số lượng tiệm trên từng tuyến
-    let routesMap = {};
-    const allCustomers = window.customers || []; // Lấy mảng khách hàng hiện tại
-    
-    allCustomers.forEach(c => {
-        let tuyen = c.maTuyen || 'Chưa rõ';
-        if (!routesMap[tuyen]) routesMap[tuyen] = { count: 0, sales: [] };
-        routesMap[tuyen].count++;
-    });
-
-    // 2. Quét danh sách Sales xem ai đang giữ tuyến nào
-    const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
-    salesUsers.forEach(su => {
-        let sRoutes = su.assignedRoutes || [];
-        sRoutes.forEach(sr => {
-            if (!routesMap[sr]) routesMap[sr] = { count: 0, sales: [] };
-            routesMap[sr].sales.push(`[${su.code}] ${su.name}`);
-        });
-    });
-
-    // 3. Tạo bảng HTML Ma trận
-    let tableRows = Object.keys(routesMap).sort().map(tuyen => {
-        const data = routesMap[tuyen];
-        const salesCount = data.sales.length;
-        
-        // Cảnh báo thông minh: Đỏ nếu không có ai chăm sóc, Vàng nếu > 1 người cùng chăm sóc, Cam nếu tuyến quá đông khách (>100)
-        let rowStyle = '';
-        let statusBadge = '<span style="background:var(--emerald); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;">Bình thường</span>';
-        
-        if (salesCount === 0) {
-            rowStyle = 'background: rgba(225, 29, 72, 0.1);';
-            statusBadge = '<span style="background:var(--rose); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-triangle-exclamation"></i> Bỏ sót</span>';
-        } else if (salesCount > 1) {
-            rowStyle = 'background: rgba(245, 158, 11, 0.1);';
-            statusBadge = '<span style="background:var(--amber); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-copy"></i> Trùng lặp</span>';
-        } else if (data.count > 100) {
-            statusBadge = '<span style="background:#ea580c; color:#fff; padding:2px 8px; border-radius:12px; font-size:12px;"><i class="fa-solid fa-weight-hanging"></i> Quá tải</span>';
-        }
-
-        return `
-            <tr style="${rowStyle} border-bottom: 1px solid var(--card-border);">
-                <td style="padding: 12px; font-weight: 800;">${tuyen}</td>
-                <td style="padding: 12px; text-align: center; font-weight: 900; color: #0284C7;">${data.count} tiệm</td>
-                <td style="padding: 12px;">${data.sales.length > 0 ? data.sales.join('<br>') : '<i style="color:var(--text-muted);">Chưa giao cho ai</i>'}</td>
-                <td style="padding: 12px; text-align: center;">${statusBadge}</td>
-            </tr>
-        `;
-    }).join('');
-
-    // 4. In ra giao diện Modal
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-        <div class="modal-content" style="max-width: 800px; width: 95%;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-map-location-dot"></i> BẢNG MA TRẬN PHÂN TUYẾN TOÀN CÔNG TY</h3>
-            <button class="btn btn-red" onclick="closeOrderDetailsModal()"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-          
-          <div style="max-height: 60vh; overflow-y: auto;">
-              <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 14px;">
-                  <thead style="background: var(--panel-bg); position: sticky; top: 0;">
-                      <tr>
-                          <th style="padding: 12px; border-bottom: 2px solid var(--primary);">Tên Tuyến</th>
-                          <th style="padding: 12px; border-bottom: 2px solid var(--primary); text-align: center;">SL Khách Hàng</th>
-                          <th style="padding: 12px; border-bottom: 2px solid var(--primary);">Nhân Viên Phụ Trách</th>
-                          <th style="padding: 12px; border-bottom: 2px solid var(--primary); text-align: center;">Trạng Thái</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                      ${tableRows}
-                  </tbody>
-              </table>
-          </div>
-        </div>
-      </div>
-    `;
-    modalContainer.classList.remove('hidden');
-};
-  window.autoAllocateKPI = function() {
-    let totalTargetString = prompt("🎯 NHẬP TỔNG MỤC TIÊU DOANH SỐ CẦN PHÂN BỔ (VNĐ):\n(Ví dụ: Nhập 50000000 cho 50 triệu)", "50000000");
-    if (!totalTargetString) return;
-    
-    let totalTarget = Number(totalTargetString.replace(/,/g, '').replace(/\./g, ''));
-    if (isNaN(totalTarget) || totalTarget <= 0) return alert("⛔ Vui lòng nhập số tiền hợp lệ!");
-
-    // Tìm tất cả các ô input nhập chỉ tiêu (thùng) đang hiển thị trên Modal
-    const inputFields = document.querySelectorAll('.kpi-target-input');
-    if (inputFields.length === 0) return alert("⛔ Không tìm thấy ô nhập liệu sản phẩm nào!");
-
-    // Chia đều tổng tiền cho số lượng sản phẩm
-    let budgetPerSKU = totalTarget / inputFields.length;
-
-    // Chạy vòng lặp tính ngược từ Tiền -> Thùng
-    let count = 0;
-    inputFields.forEach(input => {
-        let price = Number(input.getAttribute('data-price') || 0);
-        let ratio = Number(input.getAttribute('data-ratio') || 50); // Tỷ lệ quy đổi
-        
-        if (price > 0 && ratio > 0) {
-            let pricePerThung = price * ratio;
-            let targetThung = budgetPerSKU / pricePerThung;
-            
-            // Làm tròn đến 2 chữ số thập phân và điền vào ô
-            input.value = targetThung.toFixed(2);
-            count++;
-        }
-    });
-
-    playSystemSound('success');
-    alert(`✅ Đã phân bổ tự động xong cho ${count} sản phẩm!\nVui lòng kiểm tra lại số liệu và bấm LƯU.`);
 };
 </script>
 </body>
