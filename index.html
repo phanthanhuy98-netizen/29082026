@@ -9267,7 +9267,13 @@ window.executeAdvancedClone = async function() {
   }
 };
 window.exportKpiExcel = async function() {
-    const targetMonth = window._chiTieuTargetMonth;
+    const rawMonth = window._chiTieuTargetMonth; // Lấy tháng dạng "2026-09"
+    let formattedMonth = rawMonth;
+    if (rawMonth && rawMonth.includes('-')) {
+        const parts = rawMonth.split('-'); 
+        formattedMonth = `${parts[1]}/${parts[0]}`; // Chuyển thành "09/2026"
+    }
+
     const targetSalesCode = window._chiTieuTargetSalesCode; 
     
     const btn = document.querySelector('button[onclick="exportKpiExcel()"]');
@@ -9295,7 +9301,7 @@ window.exportKpiExcel = async function() {
             const sCode = salesUser.code;
             const sName = salesUser.name;
 
-            const targetDocId = `tgt_${sCode}_${targetMonth}`;
+            const targetDocId = `tgt_${sCode}_${rawMonth}`;
             const targetRef = doc(db, "monthlyTargets", targetDocId);
             const tSnap = await getDoc(targetRef);
 
@@ -9323,7 +9329,7 @@ window.exportKpiExcel = async function() {
             let compActualRevenues = {};
 
             orders.forEach(o => {
-                if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(targetMonth) && o.salesCode === sCode) {
+                if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(rawMonth) && o.salesCode === sCode) {
                     if (Array.isArray(o.items)) {
                         o.items.forEach(item => {
                             const pObj = products.find(p => p.id === (item.id||item.code) || p.code === (item.id||item.code));
@@ -9370,7 +9376,7 @@ window.exportKpiExcel = async function() {
                 rawExportRows.push({
                     "Mã NV": sCode,
                     "Tên Nhân Viên": sName,
-                    "Tháng KPI": targetMonth,
+                    "Tháng KPI": formattedMonth,
                     "Tên Công Ty": cName,
                     "Mã Sản Phẩm": "[DOANH SỐ TỔNG CTY]",
                     "Tên Sản Phẩm": `Mục tiêu doanh số công ty ${compCode}`,
@@ -9415,7 +9421,7 @@ window.exportKpiExcel = async function() {
                 rawExportRows.push({
                     "Mã NV": sCode,
                     "Tên Nhân Viên": sName,
-                    "Tháng KPI": targetMonth,
+                    "Tháng KPI": formattedMonth,
                     "Tên Công Ty": cName,
                     "Mã Sản Phẩm": skuKey,
                     "Tên Sản Phẩm": sNameFull,
@@ -9433,16 +9439,14 @@ window.exportKpiExcel = async function() {
             throw new Error("Tháng này chưa có chỉ tiêu hoặc dữ liệu bán hàng nào để xuất báo cáo!");
         }
 
-        // Sắp xếp toàn bộ dữ liệu theo doanh số giảm dần và LỌC BỎ HOÀN TOÀN biến tạm _sortRev
         rawExportRows.sort((a,b) => b._sortRev - a._sortRev);
         
         let exportData = rawExportRows.map(row => {
             let cleanRow = { ...row };
-            delete cleanRow._sortRev; // Xóa sạch biến tạm để không lòi cột L ra Excel
+            delete cleanRow._sortRev; 
             return cleanRow;
         });
 
-        // Thêm dòng TỔNG CỘNG TOÀN CÔNG TY
         let totalPctText = '0%';
         if (grandTargetRev > 0) {
             totalPctText = ((grandActualRev / grandTargetRev) * 100).toFixed(1) + '%';
@@ -9484,7 +9488,7 @@ window.exportKpiExcel = async function() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKPI");
         
         const fileNameSuffix = (!targetSalesCode || targetSalesCode === 'ALL') ? "Toan_Cong_Ty" : targetSalesCode;
-        XLSX.writeFile(workbook, `BaoCao_KPI_${fileNameSuffix}_Thang_${targetMonth}.xlsx`);
+        XLSX.writeFile(workbook, `BaoCao_KPI_${fileNameSuffix}_Thang_${rawMonth}.xlsx`);
         playSystemSound('success');
 
     } catch (e) {
