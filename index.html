@@ -7791,8 +7791,9 @@ window.renderChiTieuTab = async function(container) {
             <button class="btn btn-sm" onclick="changeChiTieuMonthStep(1)" style="padding:12px 16px; border-radius:10px; font-weight:900; font-size:15px;" title="Tháng sau">▶</button>
           </div>
 
-          ${isAdminOrManager ? `
+        ${isAdminOrManager ? `
             <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; min-width:220px; margin:0; padding:14px; font-weight:900; font-size:15px; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); outline:none;">
+              <option value="ALL" ${!window._chiTieuTargetSalesCode || window._chiTieuTargetSalesCode === 'ALL' ? 'selected' : ''}>🔥 TẤT CẢ NHÂN VIÊN</option>
               ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
             </select>
           ` : `
@@ -9265,7 +9266,7 @@ window.executeAdvancedClone = async function() {
     alert("Lỗi khi nhân bản: " + e.message);
   }
 };
- window.exportKpiExcel = async function() {
+window.exportKpiExcel = async function() {
     const targetMonth = window._chiTieuTargetMonth;
     const targetSalesCode = window._chiTieuTargetSalesCode; 
     
@@ -9277,7 +9278,7 @@ window.executeAdvancedClone = async function() {
 
     try {
         let allSalesToExport = [];
-        if (targetSalesCode === 'ALL' || !targetSalesCode) {
+        if (!targetSalesCode || targetSalesCode === 'ALL') {
             allSalesToExport = users.filter(u => u.role === 'sales' && u.active !== false);
         } else {
             allSalesToExport = users.filter(u => u.code === targetSalesCode);
@@ -9287,14 +9288,13 @@ window.executeAdvancedClone = async function() {
             throw new Error("Không tìm thấy nhân viên Sales nào để xuất báo cáo!");
         }
 
-        let exportData = [];
+        let rawExportRows = [];
         let grandTargetQty = 0, grandActualQty = 0, grandTargetRev = 0, grandActualRev = 0;
 
         for (const salesUser of allSalesToExport) {
             const sCode = salesUser.code;
             const sName = salesUser.name;
 
-            // 1. Lấy dữ liệu mục tiêu (Targets)
             const targetDocId = `tgt_${sCode}_${targetMonth}`;
             const targetRef = doc(db, "monthlyTargets", targetDocId);
             const tSnap = await getDoc(targetRef);
@@ -9319,7 +9319,6 @@ window.executeAdvancedClone = async function() {
                 });
             }
 
-            // 2. Lấy dữ liệu thực đạt (Actuals) từ đơn hàng
             let userActuals = {}; 
             let compActualRevenues = {};
 
@@ -9347,10 +9346,7 @@ window.executeAdvancedClone = async function() {
                 }
             });
 
-            // 3. Nếu nhân viên có cấu hình doanh số theo Công Ty (Chưa chia nhỏ SKU) -> Vẫn xuất ra bảng Excel
-            let processedComps = new Set();
             let allComps = new Set([...Object.keys(compRevenueTargets), ...Object.keys(compActualRevenues)]);
-
             allComps.forEach(compCode => {
                 const cTargetObj = compRevenueTargets[compCode] || { target: 0, compName: compCode };
                 const tRev = Number(cTargetObj.target || 0);
@@ -9371,7 +9367,7 @@ window.executeAdvancedClone = async function() {
                 grandTargetRev += tRev;
                 grandActualRev += aRev;
 
-                exportData.push({
+                rawExportRows.push({
                     "Mã NV": sCode,
                     "Tên Nhân Viên": sName,
                     "Tháng KPI": targetMonth,
@@ -9385,13 +9381,9 @@ window.executeAdvancedClone = async function() {
                     "Thực Đạt (VNĐ)": aRev.toLocaleString('vi-VN'),
                     _sortRev: aRev
                 });
-                processedComps.add(compCode);
             });
 
-            // 4. Tổng hợp các sản phẩm chi tiết (SKUs)
             let mergedSkus = new Set([...Object.keys(userTargets), ...Object.keys(userActuals)]);
-            let userExportLines = [];
-
             mergedSkus.forEach(skuKey => {
                 const t = userTargets[skuKey] || { targetQty: 0, targetRev: 0, skuName: '' };
                 const a = userActuals[skuKey] || { actualQty: 0, actualRev: 0, skuName: '' };
@@ -9420,7 +9412,7 @@ window.executeAdvancedClone = async function() {
                 grandTargetRev += tRev;
                 grandActualRev += aRev;
 
-                userExportLines.push({
+                rawExportRows.push({
                     "Mã NV": sCode,
                     "Tên Nhân Viên": sName,
                     "Tháng KPI": targetMonth,
@@ -9435,19 +9427,22 @@ window.executeAdvancedClone = async function() {
                     _sortRev: aRev
                 });
             });
-
-            userExportLines.sort((a,b) => b._sortRev - a._sortRev);
-            userExportLines.forEach(line => {
-                delete line._sortRev;
-                exportData.push(line);
-            });
         }
 
-        if (exportData.length === 0) {
+        if (rawExportRows.length === 0) {
             throw new Error("Tháng này chưa có chỉ tiêu hoặc dữ liệu bán hàng nào để xuất báo cáo!");
         }
 
-        // 5. Tạo dòng TỔNG CỘNG TOÀN CÔNG TY
+        // Sắp xếp toàn bộ dữ liệu theo doanh số giảm dần và LỌC BỎ HOÀN TOÀN biến tạm _sortRev
+        rawExportRows.sort((a,b) => b._sortRev - a._sortRev);
+        
+        let exportData = rawExportRows.map(row => {
+            let cleanRow = { ...row };
+            delete cleanRow._sortRev; // Xóa sạch biến tạm để không lòi cột L ra Excel
+            return cleanRow;
+        });
+
+        // Thêm dòng TỔNG CỘNG TOÀN CÔNG TY
         let totalPctText = '0%';
         if (grandTargetRev > 0) {
             totalPctText = ((grandActualRev / grandTargetRev) * 100).toFixed(1) + '%';
@@ -9488,7 +9483,7 @@ window.executeAdvancedClone = async function() {
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKPI");
         
-        const fileNameSuffix = (targetSalesCode === 'ALL' || !targetSalesCode) ? "Toan_Cong_Ty" : targetSalesCode;
+        const fileNameSuffix = (!targetSalesCode || targetSalesCode === 'ALL') ? "Toan_Cong_Ty" : targetSalesCode;
         XLSX.writeFile(workbook, `BaoCao_KPI_${fileNameSuffix}_Thang_${targetMonth}.xlsx`);
         playSystemSound('success');
 
