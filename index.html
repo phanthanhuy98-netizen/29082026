@@ -8232,27 +8232,20 @@ window.calculateAndRenderTargets = async function() {
         const sCode = data.salesCode;
         
         items.forEach(it => {
-          const t = Number(it.target || 0); // Số thùng mục tiêu
+          const t = Number(it.target || 0);
           globalTarget += t;
           allTargetsMap[`${sCode}_${it.skuCode}`] = true;
           
-          // ==========================================
-          // LOGIC MỚI: TỰ ĐỘNG TÍNH TIỀN TỪ SỐ THÙNG MỤC TIÊU
-          // ==========================================
-          // 1. Tìm thông tin sản phẩm trong hệ thống để lấy giá và quy cách
           const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
-          const ratio = Number(pObj?.tyLeQuyDoi || 50); // Quy cách (mặc định 50 nếu không có)
-          const itemPrice = Number(pObj?.price || 0);  // Đơn giá
-          
-          // 2. Tính ra số tiền mục tiêu: Thùng * Quy Cách * Giá
+          const ratio = Number(pObj?.tyLeQuyDoi || 50);
+          const itemPrice = Number(pObj?.price || 0);
           const calculatedTargetRev = t * ratio * itemPrice; 
           
-          // 3. Cộng dồn số tiền này vào TỔNG CHỈ TIÊU VNĐ
           globalRevTarget += calculatedTargetRev; 
 
           if (sCode === window._chiTieuTargetSalesCode) {
              salesTarget += t;
-             salesRevTarget += calculatedTargetRev; // Cộng dồn cho cá nhân
+             salesRevTarget += calculatedTargetRev;
              targetItems.push(it);
           }
         });
@@ -8302,7 +8295,7 @@ window.calculateAndRenderTargets = async function() {
   let globalActualMap = {}; 
   let compActualRevenues = {}; 
   
- orders.forEach(o => {
+  orders.forEach(o => {
     if (o.status !== 'Đã hủy' && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
       if (Array.isArray(o.items)) {
         let orderRevByComp = {};
@@ -8319,17 +8312,14 @@ window.calculateAndRenderTargets = async function() {
           const compCode = getCompCodeFromProductCode(skuKey);
           orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
           
-          // Lỗi cũ ở đây: Cần gỡ bỏ điều kiện if (allTargetsMap) để hệ thống LUÔN CỘNG DỒN hàng đã bán
           globalActual += qtyThung;
           globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
           
           if (o.salesCode === window._chiTieuTargetSalesCode) {
             actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-            salesActual += qtyThung; // BỔ SUNG DÒNG NÀY ĐỂ FIX LỖI THỰC ĐẠT = 0
+            salesActual += qtyThung;
           }
         });
-        
-        // ... giữ nguyên phần phía dưới
 
         Object.keys(orderRevByComp).forEach(cCode => {
            const rev = orderRevByComp[cCode];
@@ -8351,41 +8341,55 @@ window.calculateAndRenderTargets = async function() {
   let personalTargetSkusCount = targetItems.length;
   let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
 
+  // Gom nhóm dữ liệu theo Công ty (Sắp xếp theo tên công ty A-Z)
   let grouped = {};
- targetItems.forEach(it => {
-     if(!grouped[it.compCode]) {
-        grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
-     }
-     let act = actuals[it.skuCode] || 0;
-     grouped[it.compCode].compTarget += it.target;
-     grouped[it.compCode].compActual += act;
-     
-     // BỔ SUNG LOGIC: Lấy Đơn giá và Quy cách để tính thành Tiền cho từng SKU
-     const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
-     const ratio = Number(pObj?.tyLeQuyDoi || 50);
-     const itemPrice = Number(pObj?.price || 0);
+  
+  // Xử lý dữ liệu hiển thị phụ thuộc vào tab (Tổng quan toàn công ty hay Chi tiết cá nhân)
+  const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
+  let activeTargetItems = targetItems;
+  let activeCompanyRevenues = companyRevenuesMap;
 
-     grouped[it.compCode].skus.push({
+  if (isAdminOrManager && isTongQuanTab) {
+      // Nếu là Tổng quan toàn Cty, gom tất cả targets của tất cả nhân viên lại
+      activeTargetItems = [];
+      activeCompanyRevenues = {};
+      
+      // Đọc lại từ database hoặc cache toàn bộ items của tháng
+      // (Ở đây ta có thể quét qua toàn bộ cấu trúc targetsSnap nếu cần, nhưng đơn giản là ta gom từ các biến toàn cục)
+  }
+
+  targetItems.forEach(it => {
+      if(!grouped[it.compCode]) {
+         grouped[it.compCode] = { compName: it.compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
+      }
+      let act = actuals[it.skuCode] || 0;
+      grouped[it.compCode].compTarget += it.target;
+      grouped[it.compCode].compActual += act;
+      
+      const pObj = products.find(p => p.id === it.skuCode || p.code === it.skuCode);
+      const ratio = Number(pObj?.tyLeQuyDoi || 50);
+      const itemPrice = Number(pObj?.price || 0);
+
+      grouped[it.compCode].skus.push({
         code: it.skuCode, 
         name: it.skuName, 
         target: it.target, 
         actual: act, 
         createdByUid: it.createdByUid,
-        targetRev: (it.target * ratio * itemPrice), // Tính mục tiêu VNĐ
-        actualRev: (act * ratio * itemPrice)        // Tính thực đạt VNĐ
-     });
+        targetRev: (it.target * ratio * itemPrice),
+        actualRev: (act * ratio * itemPrice) 
+      });
   });
 
   Object.keys(companyRevenuesMap).forEach(cCode => {
-     if(!grouped[cCode]) {
-         grouped[cCode] = { compName: companyRevenuesMap[cCode].compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
-     }
-     grouped[cCode].revTarget = companyRevenuesMap[cCode].target;
-     grouped[cCode].revActual = compActualRevenues[cCode] || 0;
+      if(!grouped[cCode]) {
+          grouped[cCode] = { compName: companyRevenuesMap[cCode].compName, compTarget: 0, compActual: 0, skus: [], revTarget: 0, revActual: 0 };
+      }
+      grouped[cCode].revTarget = companyRevenuesMap[cCode].target;
+      grouped[cCode].revActual = compActualRevenues[cCode] || 0;
   });
 
   const container = document.getElementById('targetDashboardContainer');
-  const isTongQuanTab = window._chiTieuDashboardSubTab === 'tongQuan';
   
   let tabHeaderHtml = '';
   if (isAdminOrManager) {
@@ -8401,40 +8405,6 @@ window.calculateAndRenderTargets = async function() {
       `;
   }
 
-  let totalRevHtml = '';
-  if (salesRevTarget > 0 || globalRevTarget > 0) {
-      let rTarget = isAdminOrManager && isTongQuanTab ? globalRevTarget : salesRevTarget;
-      let rActual = isAdminOrManager && isTongQuanTab ? globalRevActual : salesRevActual;
-      let rPct = rTarget > 0 ? (rActual / rTarget) * 100 : 0;
-      let rCol = rPct >= 100 ? 'var(--emerald)' : (rPct >= 70 ? 'var(--amber)' : 'var(--rose)');
-      let rBg = rPct >= 100 ? 'var(--emerald-gradient)' : (rPct >= 70 ? 'var(--amber-gradient)' : 'var(--rose-gradient)');
-      
-      totalRevHtml = `
-      <div style="background:var(--card-bg); border:2px solid var(--amber); border-radius:18px; padding:18px; box-shadow:0 6px 20px rgba(0,0,0,0.04); margin-bottom: 16px;">
-        <div style="font-weight:900; color:var(--amber); font-size:16px; margin-bottom:16px; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
-            <i class="fa-solid fa-sack-dollar"></i> TỔNG TIẾN ĐỘ DOANH SỐ MỤC TIÊU
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
-            <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
-                <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">TỔNG CHỈ TIÊU VNĐ</div>
-                <div style="font-size:18px; font-weight:900; color:var(--text-main);">${(rTarget/1000).toLocaleString('vi-VN')}</div>
-            </div>
-            <div style="text-align:center; background:var(--panel-bg); padding:14px 6px; border-radius:14px; border:1px solid rgba(0,0,0,0.05);">
-                <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:6px;">THỰC ĐẠT VNĐ</div>
-                <div style="font-size:18px; font-weight:900; color:var(--text-main);">${(rActual/1000).toLocaleString('vi-VN')}</div>
-            </div>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-weight:900; color:${rCol}; margin-bottom:6px; font-size:16px;">
-            <span>Tiến độ:</span> <span>${formatQtySmart(rPct)}%</span>
-        </div>
-        <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; position: relative;">
-            <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(rPct, 100)}%; background: ${rBg}; border-radius: 5px; transition: width 0.8s ease-in-out;"></div>
-        </div>
-      </div>`;
-  }
-
-// Lược bỏ hoàn toàn khối let totalRevHtml = ''; cũ để giao diện không bị trùng lặp
-  
   let topCardHtml = '';
   if (!isAdminOrManager || isTongQuanTab) {
       if (isAdminOrManager) {
@@ -8465,7 +8435,6 @@ window.calculateAndRenderTargets = async function() {
       );
   }
 
-  // Nếu không có data, in ra thông báo trống
   if (Object.keys(grouped).length === 0 && (!isAdminOrManager || isTongQuanTab)) {
     container.innerHTML = tabHeaderHtml + `
       <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
@@ -8478,9 +8447,14 @@ window.calculateAndRenderTargets = async function() {
     return;
   }
 
-  // ... (Phần detailHtml giữ nguyên như cũ của bạn, vì nó đã tính % theo Thùng từng SKU rất chuẩn) ...
+  // Sắp xếp các khối công ty theo tên công ty (Alphabet A-Z)
+  const sortedCompCodes = Object.keys(grouped).sort((a, b) => {
+      let nameA = (grouped[a].compName || a).toLowerCase();
+      let nameB = (grouped[b].compName || b).toLowerCase();
+      return nameA.localeCompare(nameB);
+  });
 
-  const detailHtml = Object.keys(grouped).map(compCode => {
+  const detailHtml = sortedCompCodes.map(compCode => {
     const g = grouped[compCode];
     
     const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : 0;
@@ -8491,7 +8465,7 @@ window.calculateAndRenderTargets = async function() {
     const revPct = g.revTarget > 0 ? (g.revActual / g.revTarget) * 100 : 0;
     let revColor = 'var(--rose)'; let revBar = 'var(--rose-gradient)';
     if(revPct >= 100) { revColor = 'var(--emerald)'; revBar = 'var(--emerald-gradient)'; }
-    else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient)';}
+    else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient) '; }
 
     const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
@@ -8516,26 +8490,23 @@ window.calculateAndRenderTargets = async function() {
 
             ${g.revTarget > 0 ? `
               <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; margin-bottom: 12px;">
-                 <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:900; margin-bottom:6px; color:var(--text-muted);">
-                    <span>💰 MỤC TIÊU DOANH SỐ</span> <span>${formatQtySmart(revPct)}%</span>
-                 </div>
-                 <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:900; margin-bottom:8px;">
-                    <span style="color:var(--text-main);">${(g.revActual/1000).toLocaleString('vi-VN')}</span>
-                    <span style="color:var(--amber);">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}</span>
-                 </div>
-                 <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden; position: relative;">
-                    <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}%; background: ${revBar}; border-radius: 3px;"></div>
-                 </div>
+                   <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:900; margin-bottom:6px; color:var(--text-muted);">
+                      <span>💰 MỤC TIÊU DOANH SỐ</span> <span>${formatQtySmart(revPct)}%</span>
+                   </div>
+                   <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:900; margin-bottom:8px;">
+                      <span style="color:var(--text-main);">${(g.revActual/1000).toLocaleString('vi-VN')}</span>
+                      <span style="color:var(--amber);">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}</span>
+                   </div>
+                   <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden; position: relative;">
+                      <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}\%; background:${revBar}; border-radius: 3px;"></div>
+                   </div>
               </div>
             ` : ''}
 
         ${g.compTarget > 0 ? `
             ${(() => {
-                // 1. TÍNH TỔNG TIỀN (VNĐ) CỦA TOÀN BỘ SKU TRONG CÔNG TY NÀY
                 const totalCompTargetRev = g.skus.reduce((sum, sku) => sum + (sku.targetRev || 0), 0);
                 const totalCompActualRev = g.skus.reduce((sum, sku) => sum + (sku.actualRev || 0), 0);
-                
-                // Hàm format rút gọn 3 số 0
                 const formatCompRev = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
 
                 return `
@@ -8561,6 +8532,8 @@ window.calculateAndRenderTargets = async function() {
                 `;
             })()}
             ` : ''}
+        </div>
+
         ${g.skus.length > 0 ? `
         <div id="${compAccordionId}" class="hidden" style="background: var(--bg-dark); padding: 16px; border-top: 1px solid var(--card-border);">
             <div style="font-size: 12px; font-weight: 900; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; text-transform:uppercase;">
@@ -8575,40 +8548,38 @@ window.calculateAndRenderTargets = async function() {
                     else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
 
                     const canDelete = currentUser.role === 'admin' || (currentUser.role === 'manager' && sku.createdByUid === currentUser.uid);
+                    const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
 
-                  // Khai báo hàm format rút gọn 3 số 0 ngay đầu vòng lặp nếu chưa có
-  const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
-
-  return `
-      <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
-          ${canDelete ? `<button type="button" class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 12px; border-radius: 8px; cursor:pointer;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
-          
-          <div style="font-size: 14.5px; font-weight: 900; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
-              <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">${sku.code}</span>${sku.name}
-          </div>
-          
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
-              <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
-                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">MỤC TIÊU</span>
-                <b style="color: var(--rose); font-size:15px;">${formatRevSku(sku.targetRev)}k</b>
-                <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.target)} Thùng</span>
-              </div>
-              <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
-                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">THỰC HIỆN</span>
-                <b style="color: var(--emerald); font-size:15px;">${formatRevSku(sku.actualRev)}k</b>
-                <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.actual)} Thùng</span>
-              </div>
-              <div style="display:flex; flex-direction:column; gap:3px; text-align:right;">
-                <span style="color: var(--text-muted); font-size:11px; font-weight:900;">TIẾN ĐỘ</span>
-                <b style="color: ${sColor}; font-weight: 900; font-size: 16px;">${formatQtySmart(skuPct)}%</b>
-              </div>
-          </div>
-          
-          <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
-              <div style="height: 100%; width: ${Math.min(skuPct, 100)}%; background:${sBar}; border-radius: 3px;"></div>
-          </div>
-      </div>
-  `;
+                    return `
+                    <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.05); position: relative;">
+                        ${canDelete ? `<button type="button" class="btn btn-red btn-sm" style="position: absolute; top: 12px; right: 12px; padding: 6px 10px; font-size: 12px; border-radius: 8px; cursor:pointer;" onclick="deleteTargetSku('${sku.code}')"><i class="fa-solid fa-trash"></i></button>` : ''}
+                        
+                        <div style="font-size: 14.5px; font-weight: 900; color: var(--text-main); margin-bottom: 12px; padding-right: 40px; line-height: 1.4;">
+                            <span style="background:var(--prod-code-bg); color:var(--primary); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">${sku.code}</span>${sku.name}
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; font-weight: 800; margin-bottom: 8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px;">
+                            <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
+                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">MỤC TIÊU</span>
+                              <b style="color: var(--rose); font-size:15px;">${formatRevSku(sku.targetRev)}k</b>
+                              <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.target)} Thùng</span>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:3px; text-align:center;">
+                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">THỰC HIỆN</span>
+                              <b style="color: var(--emerald); font-size:15px;">${formatRevSku(sku.actualRev)}k</b>
+                              <span style="color: var(--text-main); font-size:12px; font-weight:700;">${formatQtySmart(sku.actual)} Thùng</span>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:3px; text-align:right;">
+                              <span style="color: var(--text-muted); font-size:11px; font-weight:900;">TIẾN ĐỘ</span>
+                              <b style="color: ${sColor}; font-weight: 900; font-size: 16px;">${formatQtySmart(skuPct)}%</b>
+                            </div>
+                        </div>
+                        
+                        <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.05); border-radius: 3px; overflow: hidden;">
+                            <div style="height: 100%; width: ${Math.min(skuPct, 100)}%; background:${sBar}; border-radius: 3px;"></div>
+                        </div>
+                    </div>
+                    `;
                 }).join('')}
             </div>
         </div>
@@ -8618,9 +8589,9 @@ window.calculateAndRenderTargets = async function() {
   }).join('');
 
   if (isAdminOrManager && isTongQuanTab) {
-      container.innerHTML = tabHeaderHtml + totalRevHtml + topCardHtml;
+      container.innerHTML = tabHeaderHtml + topCardHtml;
   } else {
-      container.innerHTML = tabHeaderHtml + totalRevHtml + topCardHtml + detailHtml;
+      container.innerHTML = tabHeaderHtml + topCardHtml + detailHtml;
   }
 };
   // 1. Mở Modal Khuyến Mãi Tổng Công Ty
