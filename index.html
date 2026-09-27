@@ -9072,6 +9072,24 @@ window.executeAdvancedClone = async function() {
     return alert("⛔ Nguồn và Đích không thể trùng lặp hoàn toàn!");
   }
 
+  // ---------------------------------------------------------
+  // [NÂNG CẤP 1]: CHỐT CHẶN KHÓA SỔ THỜI GIAN (Lịch sử)
+  // ---------------------------------------------------------
+  const currentMonthStr = new Date().toISOString().slice(0, 7);
+  if (targetMonth < currentMonthStr) {
+     return alert(`⛔ LỖI BẢO MẬT: Tháng ${targetMonth} đã qua. Dữ liệu quá khứ đã được khóa sổ để bảo vệ dữ liệu kế toán, không thể ghi đè!`);
+  }
+
+  // ---------------------------------------------------------
+  // [NÂNG CẤP 2]: CẢNH BÁO "BÀN TAY SẮT" (Chống bấm nhầm)
+  // ---------------------------------------------------------
+  if (targetCode === 'ALL' && cloneMode === 'overwrite') {
+      const confirmText = prompt(`⚠️ CẢNH BÁO MỨC ĐỘ CAO:\nBạn đang chuẩn bị XÓA SẠCH toàn bộ chỉ tiêu của TẤT CẢ nhân viên trong tháng ${targetMonth} và thay bằng dữ liệu mới.\nHành động này KHÔNG THỂ KHÔI PHỤC!\n\nGõ chữ "XOA" viết hoa vào ô bên dưới để xác nhận:`);
+      if (confirmText !== 'XOA') {
+          return alert("❌ Đã hủy thao tác nhân bản hàng loạt để đảm bảo an toàn dữ liệu.");
+      }
+  }
+
   const btn = document.getElementById('btnConfirmClone');
   btn.disabled = true;
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG XỬ LÝ DỮ LIỆU...';
@@ -9108,7 +9126,7 @@ window.executeAdvancedClone = async function() {
         };
     }
 
-    // Xác định tập hợp nhân viên đích (Đơn lẻ hoặc Toàn bộ)
+    // Xác định tập hợp nhân viên đích
     let targetUsers = [];
     if (targetCode === 'ALL') {
         targetUsers = users.filter(u => u.role === 'sales').map(u => u.code);
@@ -9117,32 +9135,34 @@ window.executeAdvancedClone = async function() {
     }
 
     const batch = writeBatch(db);
+    const nowISO = new Date().toISOString();
 
     for (const tCode of targetUsers) {
-        // Bỏ qua nếu Nguồn và Đích của chính user đó trong cùng 1 tháng trùng nhau
         if (tCode === sourceCode && sourceMonth === targetMonth) continue;
 
         const targetDocId = `tgt_${tCode}_${targetMonth}`;
         const targetRef = doc(db, "monthlyTargets", targetDocId);
 
         if (cloneMode === 'overwrite') {
-            // Chế độ Ghi đè: Quét sạch data cũ, đắp data mới vào
+            // Chế độ Ghi đè + [NÂNG CẤP 3: LƯU VẾT LỊCH SỬ THAO TÁC]
             batch.set(targetRef, {
                 salesCode: tCode,
                 month: targetMonth,
                 items: scaledItems,
-                companyRevenues: scaledRevenues
+                companyRevenues: scaledRevenues,
+                lastUpdatedByCode: currentUser.code,
+                lastUpdatedByName: currentUser.name,
+                lastUpdatedAt: nowISO
             });
         } else {
-            // Chế độ Cộng dồn (Merge): Đọc data cũ rồi hợp nhất
+            // Chế độ Cộng dồn
             const tSnap = await getDoc(targetRef);
             let existingItems = tSnap.exists() ? (tSnap.data().items || []) : [];
             let existingRevenues = tSnap.exists() ? (tSnap.data().companyRevenues || {}) : {};
 
             let mergedItemsMap = new Map();
-            // Đưa list cũ vào Map
             existingItems.forEach(i => mergedItemsMap.set(i.skuCode, i));
-            // Cộng dồn list mới vào
+            
             scaledItems.forEach(i => {
                 if (mergedItemsMap.has(i.skuCode)) {
                     let ext = mergedItemsMap.get(i.skuCode);
@@ -9153,7 +9173,6 @@ window.executeAdvancedClone = async function() {
                 }
             });
 
-            // Cộng dồn doanh thu
             let mergedRevenues = { ...existingRevenues };
             for (let comp in scaledRevenues) {
                 if (mergedRevenues[comp]) {
@@ -9163,11 +9182,15 @@ window.executeAdvancedClone = async function() {
                 }
             }
 
+            // Lưu vết lịch sử thao tác
             batch.set(targetRef, {
                 salesCode: tCode,
                 month: targetMonth,
                 items: Array.from(mergedItemsMap.values()),
-                companyRevenues: mergedRevenues
+                companyRevenues: mergedRevenues,
+                lastUpdatedByCode: currentUser.code,
+                lastUpdatedByName: currentUser.name,
+                lastUpdatedAt: nowISO
             }, { merge: true });
         }
     }
@@ -9176,8 +9199,8 @@ window.executeAdvancedClone = async function() {
 
     closeTargetModal();
     playSystemSound('success');
-    alert(`✅ Đã nhân bản thành công chỉ tiêu cho ${targetUsers.length} nhân viên sang tháng ${targetMonth}!`);
-    calculateAndRenderTargets(); // Tự động load lại biểu đồ
+    alert(`✅ Đã nhân bản thành công chỉ tiêu cho ${targetUsers.length} nhân viên sang tháng ${targetMonth}!\nToàn bộ thao tác đã được lưu vết lên hệ thống.`);
+    calculateAndRenderTargets();
 
   } catch (e) {
     btn.disabled = false;
