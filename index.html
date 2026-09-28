@@ -345,7 +345,8 @@
         <label style="font-size:12px; font-weight:700; color:#CBD5E1; display:block; margin-bottom:4px;">Mã nhân viên / Email:</label>
         <div class="input-icon-group">
           <i class="fa-solid fa-user"></i>
-          <input type="text" id="logUser" placeholder="Nhập mã NV hoặc email..." required autocomplete="username">
+          <!-- Đã chặn tự động viết hoa và tự động sửa từ -->
+          <input type="text" id="logUser" placeholder="Nhập mã NV hoặc email..." required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
         </div>
 
         <label style="font-size:12px; font-weight:700; color:#CBD5E1; display:block; margin-bottom:4px;">Mật khẩu:</label>
@@ -354,7 +355,7 @@
           <input type="password" id="logPass" placeholder="Nhập mật khẩu..." required autocomplete="current-password">
         </div>
 
-        <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:14px; font-size:14px; font-weight:800; border-radius:12px; margin-top:8px; box-shadow:0 10px 25px rgba(245,158,11,0.3);">
+        <button type="submit" id="btnLoginSubmit" class="btn btn-amber" style="width:100%; justify-content:center; padding:14px; font-size:14px; font-weight:800; border-radius:12px; margin-top:8px; box-shadow:0 10px 25px rgba(245,158,11,0.3);">
           ĐĂNG NHẬP HỆ THỐNG
         </button>
       </form>
@@ -1485,63 +1486,81 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
   };
 
   window.handleLogin = async function(e) {
-    e.preventDefault();
-    const usernameInput = document.getElementById('logUser').value.trim();
-    const pass = document.getElementById('logPass').value.trim();
-    
-    let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
+  e.preventDefault();
 
-    try {
-      if (!usernameInput.includes('@')) {
-        const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
-        const snapByCode = await getDocs(qUsersByCode);
-        if (!snapByCode.empty) {
-          const uData = snapByCode.docs[0].data();
-          if (uData.email) email = uData.email.toLowerCase();
-        }
+  // 1. Ép thu gọn bàn phím ảo trên điện thoại ngay lập tức để chống giật trang
+  document.getElementById('logUser').blur();
+  document.getElementById('logPass').blur();
+
+  const btnSubmit = document.getElementById('btnLoginSubmit') || document.querySelector('.login-card button[type="submit"]');
+  const originalBtnText = btnSubmit.innerHTML;
+
+  const usernameInput = document.getElementById('logUser').value.trim();
+  const pass = document.getElementById('logPass').value.trim();
+
+  if (!usernameInput || !pass) return;
+
+  // 2. CHỐNG SPAM: Khóa nút ngay lập tức và hiển thị trạng thái loading
+  btnSubmit.disabled = true;
+  btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG KIỂM TRA...';
+
+  let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : '';
+
+  try {
+    // 3. THUẬT TOÁN TÌM KIẾM MÃ NHÂN VIÊN THÔNG MINH BẤT CHẤP VIẾT HOA/THƯỜNG
+    if (!email) {
+      const usersRef = collection(db, "users");
+      // Lần 1: Tìm đúng nguyên bản người dùng gõ
+      let qUsersByCode = query(usersRef, where("code", "==", usernameInput), limit(1));
+      let snapByCode = await getDocs(qUsersByCode);
+      
+      if (snapByCode.empty) {
+         // Lần 2: Tự động chuyển thành CHỮ IN HOA TOÀN BỘ để tìm (Vì đa số mã NV là NV01, HCM02...)
+         qUsersByCode = query(usersRef, where("code", "==", usernameInput.toUpperCase()), limit(1));
+         snapByCode = await getDocs(qUsersByCode);
       }
 
-      const userCredential = await signInWithEmailAndPassword(authSvc, email, pass);
-      const authUser = userCredential.user;
-
-      const userDocRef = doc(db, "users", authUser.uid);
-      let userSnap = await getDoc(userDocRef);
-
-      if (!userSnap.exists()) {
-        const qUsers = query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1));
-        const usersQuerySnap = await getDocs(qUsers);
-        if (!usersQuerySnap.empty) {
-          userSnap = usersQuerySnap.docs[0];
-        }
-      }
-
-      if (!userSnap || !userSnap.exists()) {
-        await signOut(authSvc);
-        return alert("⛔ Tài khoản này tồn tại trên Auth nhưng chưa được cấu hình phân quyền trong bảng users của CSDL Firestore!");
-      }
-
-      const profile = userSnap.data();
-
-      if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
-        await signOut(authSvc);
-        return alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ quản trị viên để mở lại.");
-      }
-
-      localStorage.removeItem(`failed_attempts_${email}`);
-      triggerHaptic(40);
-
-    } catch (authErr) {
-      const failedAttemptsKey = `failed_attempts_${email}`;
-      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
-      localStorage.setItem(failedAttemptsKey, currentFailed);
-
-      if (currentFailed >= 10) {
-        alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
+      if (!snapByCode.empty) {
+        const uData = snapByCode.docs[0].data();
+        if (uData.email) email = uData.email.toLowerCase();
       } else {
-        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
+        // Fallback cuối cùng nếu không khớp mã nào
+        email = usernameInput.toLowerCase() + '@dms.com';
       }
     }
-  };
+
+    // 4. Gửi yêu cầu đăng nhập
+    await signInWithEmailAndPassword(authSvc, email, pass);
+    // Nếu thành công, hàm onAuthStateChanged bên dưới sẽ tự động ẩn màn hình Login.
+    // Không mở khóa nút lúc này để giao diện chuyển cảnh mượt mà.
+
+  } catch (authErr) {
+    // XỬ LÝ NẾU THẤT BẠI
+    const failedAttemptsKey = `failed_attempts_${email || usernameInput}`;
+    let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
+    localStorage.setItem(failedAttemptsKey, currentFailed);
+
+    if (currentFailed >= 10) {
+      alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
+    } else {
+      // Dịch lỗi của Firebase cho dễ hiểu
+      let errMsg = authErr.message;
+      if (errMsg.includes('invalid-credential') || errMsg.includes('user-not-found') || errMsg.includes('wrong-password')) {
+          errMsg = 'Sai mã nhân viên hoặc mật khẩu.';
+      } else if (errMsg.includes('network') || errMsg.includes('offline')) {
+          errMsg = 'Mạng yếu hoặc không có kết nối Internet.';
+      } else if (errMsg.includes('too-many-requests')) {
+          errMsg = 'Tạm khóa do đăng nhập sai nhiều lần. Hãy thử lại sau ít phút.';
+      }
+
+      alert(`⛔ Đăng nhập thất bại: ${errMsg}\nBạn còn ${10 - currentFailed} lần thử.`);
+    }
+
+    // Mở khóa lại nút để nhân viên có thể gõ lại
+    btnSubmit.disabled = false;
+    btnSubmit.innerHTML = originalBtnText;
+  }
+};
 
   async function loadMasterDataOptimized(forceCloud = false) {
     try {
