@@ -8468,6 +8468,7 @@ window.calculateAndRenderTargets = async function() {
         );
     }
 // --- BẢNG XẾP HẠNG ĐÓNG GÓP NHÂN VIÊN (BẢN AN TOÀN, CHỐNG LỖI NOT DEFINED) ---
+// --- BẢNG XẾP HẠNG ĐÓNG GÓP NHÂN VIÊN (BẢN CHUYÊN NGHIỆP - TÍNH KPI THỰC TẾ) ---
 let salesPerformanceHtml = '';
 if (isAdminOrManager && isTongQuanTab) {
     let activeSalesList = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
@@ -8477,7 +8478,10 @@ if (isAdminOrManager && isTongQuanTab) {
         let sCode = s.code;
         let sName = s.name;
         let sActualRev = 0;
+        let sTargetRev = 0;
+        let sActualQty = 0;
         
+        // 1. TÍNH THỰC ĐẠT CỦA NHÂN VIÊN NÀY
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
             orders.forEach(o => {
                 if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth) && o.salesCode === sCode) {
@@ -8485,50 +8489,140 @@ if (isAdminOrManager && isTongQuanTab) {
                         o.items.forEach(item => {
                             const pObj = typeof products !== 'undefined' ? products.find(p => p.id === (item.id||item.code) || p.code === (item.id||item.code)) : null;
                             const price = Number(item.price || pObj?.price || 0);
+                            const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+                            const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
+                            
                             sActualRev += Number(item.qty || 0) * price;
+                            sActualQty += qtyThung;
                         });
                     }
                 }
             });
         }
-        salesProgressList.push({ code: sCode, name: sName, actualRev: sActualRev });
+        
+        // 2. TÍNH CHỈ TIÊU ĐƯỢC GIAO TỪ HỆ THỐNG CỦA NHÂN VIÊN NÀY
+        if (typeof targetsSnap !== 'undefined') {
+            targetsSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                if (data && data.month === window._chiTieuTargetMonth && data.salesCode === sCode) {
+                    // Cộng dồn chỉ tiêu tiền từ SKU
+                    (data.items || []).forEach(it => {
+                        const pObj = typeof products !== 'undefined' ? products.find(p => p.id === it.skuCode || p.code === it.skuCode) : null;
+                        const ratio = Number(pObj?.tyLeQuyDoi || 50);
+                        const price = Number(pObj?.price || 0);
+                        sTargetRev += Number(it.target || 0) * ratio * price;
+                    });
+                    // Cộng dồn chỉ tiêu tiền từ Công ty
+                    const revs = data.companyRevenues || {};
+                    Object.keys(revs).forEach(cCode => {
+                        sTargetRev += Number(revs[cCode].target || 0);
+                    });
+                }
+            });
+        }
+
+        // 3. TÍNH TỶ LỆ HOÀN THÀNH (Tiến độ %)
+        let pct = sTargetRev > 0 ? (sActualRev / sTargetRev) * 100 : (sActualRev > 0 ? 100 : 0);
+
+        salesProgressList.push({ 
+            code: sCode, 
+            name: sName, 
+            actualRev: sActualRev, 
+            targetRev: sTargetRev,
+            actualQty: sActualQty,
+            pct: pct 
+        });
     });
 
+    // Xếp hạng theo Doanh số thực đạt mang về cho công ty
     salesProgressList.sort((a, b) => b.actualRev - a.actualRev);
-    const maxSalesRev = salesProgressList.length > 0 && salesProgressList[0].actualRev > 0 ? salesProgressList[0].actualRev : 1;
 
     salesPerformanceHtml = `
-        <div style="background: var(--card-bg); border-radius: 18px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.04); border: 1px solid var(--card-border); margin-top: 16px;">
-            <div style="font-size: 15px; font-weight: 900; color: var(--text-main); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; text-transform: uppercase;">
-                <i class="fa-solid fa-ranking-star" style="color: var(--amber);"></i> Bảng Xếp Hạng Đóng Góp & Tiến Độ Nhân Viên
+        <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 8px 25px rgba(0,0,0,0.06); border: 1px solid var(--amber); margin-top: 20px; overflow: hidden;">
+            
+            <!-- TIÊU ĐỀ ACCORDION (Click để thu/mở) -->
+            <div onclick="toggleOrderAccordion('acc_leaderboard_sales')" style="padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(255,255,255,0) 100%);">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <div style="width: 44px; height: 44px; border-radius: 12px; background: var(--amber-gradient); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 10px rgba(245,158,11,0.3);">
+                        <i class="fa-solid fa-trophy"></i>
+                    </div>
+                    <div>
+                        <div style="font-size: 16px; font-weight: 900; color: var(--text-main); text-transform: uppercase; margin-bottom: 2px;">Bảng Xếp Hạng Sales</div>
+                        <div style="font-size: 12px; color: var(--text-muted); font-weight: 700;">Đóng góp & Tiến độ KPI của ${activeSalesList.length} nhân viên</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,0.04);">
+                    <i id="icon_acc_leaderboard_sales" class="fa-solid fa-chevron-down" style="color: var(--amber); transition: transform 0.3s ease; font-size: 14px;"></i>
+                </div>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 14px;">
-                ${salesProgressList.map((sp, idx) => {
-                    const barW = Math.max((sp.actualRev / maxSalesRev) * 100, 5);
-                    const rankMedal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : `#${idx+1}`));
-                    
-                    return `
-                        <div style="background: var(--bg-dark); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--card-border);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <div style="display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 14.5px; color: var(--text-main);">
-                                    <span>${rankMedal}</span>
-                                    <span>[${sp.code}]${sp.name}</span>
+
+            <!-- NỘI DUNG DANH SÁCH -->
+            <div id="acc_leaderboard_sales" class="" style="padding: 0 20px 20px 20px; border-top: 1px dashed var(--card-border);">
+                <div style="display: flex; flex-direction: column; gap: 14px; padding-top: 16px;">
+                    ${salesProgressList.map((sp, idx) => {
+                        const pctDisplay = sp.pct.toFixed(1);
+                        const barW = Math.min(sp.pct, 100);
+                        
+                        // Phân loại màu sắc thanh KPI theo tiến độ
+                        let barColor = 'var(--rose-gradient)';
+                        let pctColor = 'var(--rose)';
+                        if (sp.pct >= 100) { barColor = 'var(--emerald-gradient)'; pctColor = 'var(--emerald)'; }
+                        else if (sp.pct >= 70) { barColor = 'var(--amber-gradient)'; pctColor = 'var(--amber)'; }
+
+                        // Thiết lập Style riêng cho TOP 1, 2, 3
+                        let rankStyle = '';
+                        let rankBadge = '';
+                        if (idx === 0) {
+                            rankStyle = 'border-left: 6px solid #F59E0B; background: linear-gradient(90deg, rgba(245,158,11,0.06) 0%, transparent 100%);';
+                            rankBadge = '<span style="font-size:32px; filter: drop-shadow(0 2px 4px rgba(245,158,11,0.4));">🏆</span>';
+                        } else if (idx === 1) {
+                            rankStyle = 'border-left: 6px solid #94A3B8; background: linear-gradient(90deg, rgba(148,163,184,0.06) 0%, transparent 100%);';
+                            rankBadge = '<span style="font-size:32px; filter: drop-shadow(0 2px 4px rgba(148,163,184,0.4));">🥈</span>';
+                        } else if (idx === 2) {
+                            rankStyle = 'border-left: 6px solid #D97706; background: linear-gradient(90deg, rgba(217,119,6,0.06) 0%, transparent 100%);';
+                            rankBadge = '<span style="font-size:32px; filter: drop-shadow(0 2px 4px rgba(217,119,6,0.4));">🥉</span>';
+                        } else {
+                            rankStyle = 'border-left: 5px solid var(--card-border); background: var(--bg-dark);';
+                            rankBadge = `<span style="font-size:14px; font-weight:900; color:var(--text-muted); width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.05); border-radius:50%;">#${idx+1}</span>`;
+                        }
+                        
+                        return `
+                            <div style="${rankStyle} padding: 16px; border-radius: 12px; border-top: 1px solid var(--card-border); border-right: 1px solid var(--card-border); border-bottom: 1px solid var(--card-border); transition: all 0.2s ease;" onmouseover="this.style.transform='scale(1.01)'; this.style.boxShadow='0 6px 20px rgba(0,0,0,0.06)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none';">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                                    <div style="display: flex; align-items: center; gap: 14px;">
+                                        ${rankBadge}
+                                        <div>
+                                            <div style="font-weight: 900; font-size: 16px; color: var(--text-main); margin-bottom: 2px;">${sp.name} <span style="font-size:11px; color:var(--text-muted); font-weight:800; background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:6px; margin-left:4px;">${sp.code}</span></div>
+                                            <div style="font-size: 12.5px; font-weight: 700; color: var(--text-muted);"><i class="fa-solid fa-box" style="color:var(--primary);"></i> Sản lượng: <b style="color:var(--text-main);">${sp.actualQty.toFixed(1)} Thùng</b></div>
+                                        </div>
+                                    </div>
+                                    <div style="text-align: right;">
+                                        <div style="font-size: 11px; font-weight: 800; color: var(--text-muted); margin-bottom: 2px; text-transform:uppercase;">Thực Đạt / Chỉ Tiêu</div>
+                                        <div style="font-weight: 900; font-size: 18px; color: var(--primary); line-height: 1;">
+                                            ${(sp.actualRev/1000).toLocaleString('vi-VN')}k
+                                        </div>
+                                        <div style="font-size: 13px; font-weight: 800; color: var(--text-muted); margin-top: 4px;">
+                                            / ${sp.targetRev > 0 ? (sp.targetRev/1000).toLocaleString('vi-VN') + 'k' : 'Chưa có'}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div style="font-weight: 900; font-size: 15px; color: var(--rose);">
-                                    ${(sp.actualRev/1000).toLocaleString('vi-VN')}k
+
+                                <!-- THIẾT KẾ THANH TIẾN ĐỘ KPI TỪNG CÁ NHÂN -->
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:800; color:var(--text-muted); margin-bottom:6px;">
+                                    <span>Tiến độ KPI:</span>
+                                    <span style="color:${pctColor}; font-size:15px; font-weight:900;">${pctDisplay}%</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); position:relative;">
+                                    <div style="position:absolute; top:0; left:0; height: 100%; width: ${barW}\%; background:${barColor}; border-radius: 4px; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
                                 </div>
                             </div>
-                            <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden;">
-                                <div style="height: 100%; width: ${barW}\%; background:${idx === 0 ? 'var(--emerald-gradient)' : 'var(--primary-gradient)'}; border-radius: 4px; transition: width 0.6s;"></div>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
+                        `;
+                    }).join('')}
+                </div>
             </div>
         </div>
     `;
 }
-
     if (Object.keys(activeGrouped).length === 0) {
       container.innerHTML = tabHeaderHtml + topCardHtml + `
         <div style="text-align:center; padding:50px 20px; background:var(--card-bg); border-radius:18px; border:2px dashed var(--card-border); display:flex; flex-direction:column; align-items:center; justify-content:center;">
