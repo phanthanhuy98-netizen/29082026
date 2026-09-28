@@ -5544,20 +5544,28 @@ else if (tab === 'users') {
                     </div>
                 </div>
 
-                <!-- Phần Footer thẻ: Nút chức năng -->
-                <div style="padding: 12px 16px; border-top: 1px solid var(--card-border); display: flex; justify-content: flex-end; gap: 8px; background: var(--panel-bg);">
-                    <button class="btn btn-purple" style="font-weight: 900; padding: 10px 16px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);" onclick="openAdminChangePassModal('${u.uid}', '${u.email}', '${u.name}')">
+             <!-- Phần Footer thẻ: Nút chức năng -->
+                <div style="padding: 12px 16px; border-top: 1px solid var(--card-border); display: flex; justify-content: flex-end; gap: 8px; background: var(--panel-bg); flex-wrap: wrap;">
+                    <button class="btn btn-purple" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);" onclick="openAdminChangePassModal('${u.uid}', '${u.email}', '${u.name}')">
                         <i class="fa-solid fa-key"></i> Đổi MK
                     </button>
+                    
                     ${isActive ? `
-                        <button class="btn btn-red" style="font-weight: 900; padding: 10px 16px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(225, 29, 72, 0.2);" onclick="toggleUserActive('${u.uid}', false)">
+                        <button class="btn btn-amber" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);" onclick="toggleUserActive('${u.uid}', false)">
                             <i class="fa-solid fa-lock"></i> Khóa
                         </button>
                     ` : `
-                        <button class="btn btn-green" style="font-weight: 900; padding: 10px 16px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);" onclick="toggleUserActive('${u.uid}', true)">
+                        <button class="btn btn-green" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);" onclick="toggleUserActive('${u.uid}', true)">
                             <i class="fa-solid fa-unlock"></i> Mở khóa
                         </button>
                     `}
+
+                    <!-- NÚT XÓA CHỈ HIỆN KHI NGƯỜI ĐANG ĐĂNG NHẬP LÀ ADMIN -->
+                    ${currentUser && currentUser.role === 'admin' ? `
+                        <button class="btn btn-red" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(225, 29, 72, 0.3);" onclick="deleteUserAccount('${u.uid}', '${u.email}', '${u.name.replace(/'/g, "\\'")}')">
+                            <i class="fa-solid fa-trash"></i> Xóa
+                        </button>
+                    ` : ''}
                 </div>
             </div>
             `;
@@ -10534,6 +10542,55 @@ window.submitAdminChangePass = async function(oldUid) {
         alert("Lỗi khi cấp lại mật khẩu: " + e.message);
     } finally {
         if (btn) { btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU MẬT KHẨU BẮT BUỘC'; btn.disabled = false; }
+    }
+};
+  // ==========================================
+// ADMIN: XÓA VĨNH VIỄN TÀI KHOẢN NHÂN VIÊN
+// ==========================================
+window.deleteUserAccount = async function(uid, email, name) {
+    // Lớp bảo vệ 1: Kiểm tra quyền
+    if (!currentUser || currentUser.role !== 'admin') {
+        return alert("⛔ Lỗi Phân Quyền: Chỉ Admin mới có quyền xóa tài khoản nhân viên!");
+    }
+    
+    // Lớp bảo vệ 2: Cấm xóa tài khoản Admin hệ thống
+    if (email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
+        return alert("⛔ Bảo vệ hệ thống: Tuyệt đối không thể xóa tài khoản Admin gốc!");
+    }
+    
+    // Lớp bảo vệ 3: Cấm tự sát (Admin tự xóa chính mình đang đăng nhập)
+    if (uid === currentUser.uid) {
+        return alert("⛔ Lỗi: Bạn không thể tự xóa tài khoản của chính mình khi đang đăng nhập!");
+    }
+
+    // Hiển thị hộp thoại xác nhận chuyên nghiệp
+    const confirmDel = await window.showCustomConfirm(
+        "Xóa Vĩnh Viễn Tài Khoản", 
+        `Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản của nhân viên:\n[${name}]\nHành động này sẽ gỡ hồ sơ nhân viên khỏi hệ thống và không thể hoàn tác!`, 
+        "fa-user-xmark", 
+        "Đồng ý Xóa", 
+        "Hủy"
+    );
+    
+    if (!confirmDel) return;
+
+    try {
+        // Xóa document trên Firebase Firestore
+        await deleteDoc(doc(db, "users", uid));
+        
+        // Loại bỏ nhân viên khỏi mảng hiển thị cục bộ
+        users = users.filter(u => u.uid !== uid);
+        
+        // Kích hoạt rung và âm thanh thành công
+        if (typeof triggerHaptic === 'function') triggerHaptic(30);
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        
+        alert("✅ Đã xóa tài khoản nhân viên thành công!");
+        
+        // Cập nhật lại giao diện danh sách
+        renderUI();
+    } catch (error) {
+        alert("Lỗi khi xóa nhân viên: " + error.message);
     }
 };
 </script>
