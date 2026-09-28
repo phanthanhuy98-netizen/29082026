@@ -7823,18 +7823,18 @@ window.renderChiTieuTab = async function(container) {
           `}
         </div>
 
-      ${isAdminOrManager ? `
+     ${isAdminOrManager ? `
   <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-      <button class="btn btn-amber" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
+      <button class="btn btn-amber" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
           <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP MỚI
       </button>
-      <button class="btn btn-blue" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openCloneTargetModal()">
-          <i class="fa-solid fa-copy"></i> NHÂN BẢN
+      <button class="btn btn-blue" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openMonthlyCloneModal()">
+          <i class="fa-solid fa-calendar-days"></i> NHÂN BẢN THÁNG MỚI
       </button>
-      <button class="btn btn-red" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(225, 29, 72, 0.3);" onclick="clearAllTargetsThisMonth()">
-   <i class="fa-solid fa-dumpster-fire"></i> LÀM LẠI (XÓA CHỈ TIÊU)
-</button>
-      <button class="btn btn-green" style="flex:1; min-width:120px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
+      <button class="btn btn-red" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(225, 29, 72, 0.3);" onclick="deleteAllKpiForCurrentMonth()">
+          <i class="fa-solid fa-trash-can"></i> XÓA TOÀN BỘ KPI
+      </button>
+      <button class="btn btn-green" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
           <i class="fa-solid fa-file-excel"></i> XUẤT EXCEL
       </button>
   </div>
@@ -7847,16 +7847,68 @@ window.renderChiTieuTab = async function(container) {
     `}
   `;
 
- if (!isPhanTuyen) {
+  if (!isPhanTuyen) {
     calculateAndRenderTargets();
   }
-}; // <--- DẤU NGOẶC NÀY CỰC KỲ QUAN TRỌNG ĐỂ KHÔNG BỊ LỖI CÚ PHÁP (ĐÓNG HÀM renderChiTieuTab)
+};
+window.deleteAllKpiForCurrentMonth = async function() {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+        return alert("⛔ Chỉ quản lý mới có quyền xóa toàn bộ chỉ tiêu!");
+    }
 
-// ==========================================
-// CÁC HÀM TÍNH TOÁN & RENDER GIAO DIỆN (ĐÃ PHỤC HỒI NGUYÊN VẸN)
-// ==========================================
+    const currentMonth = window._chiTieuTargetMonth;
+    const confirmText = prompt(`⚠️ CẢNH BÁO NGUY HIỂM:\nBạn đang chuẩn bị XÓA SẠCH VĨNH VIỄN toàn bộ dữ liệu KPI của TẤT CẢ nhân viên trong tháng ${currentMonth}!\nHành động này không thể hoàn tác.\n\nGõ chữ "XOAKPI" viết hoa vào ô dưới để xác nhận:`);
+    
+    if (confirmText !== 'XOAKPI') {
+        return alert("❌ Thao tác đã bị hủy bỏ.");
+    }
+
+    try {
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+        const batch = writeBatch(db);
+        let count = 0;
+
+        targetsSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data && data.month === currentMonth) {
+                batch.delete(docSnap.ref);
+                count++;
+            }
+        });
+
+        if (count === 0) {
+            return alert(`Không tìm thấy dữ liệu KPI nào trong tháng ${currentMonth} để xóa.`);
+        }
+
+        await batch.commit();
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        alert(`✅ Đã xóa toàn bộ ${count} bản ghi KPI trong tháng ${currentMonth} thành công!`);
+        calculateAndRenderTargets();
+    } catch (e) {
+        alert("Lỗi khi xóa KPI: " + e.message);
+    }
+};
+window.deleteTargetSku = async function(skuCode) {
+  const isConfirm = await window.showCustomConfirm("Xóa Chỉ Tiêu", "Bạn có chắc chắn muốn hủy giao chỉ tiêu mã sản phẩm này?", "fa-trash", "Xóa", "Hủy");
+  if(!isConfirm) return;
+  
+  const targetDocId = `tgt_${window._chiTieuTargetSalesCode}_${window._chiTieuTargetMonth}`;
+  try {
+      const docRef = doc(db, "monthlyTargets", targetDocId);
+      const snap = await getDoc(docRef);
+      if(snap.exists()) {
+          let items = snap.data().items || [];
+          items = items.filter(i => i.skuCode !== skuCode);
+          await setDoc(docRef, { items: items }, { merge: true });
+          calculateAndRenderTargets();
+      }
+  } catch(e) { alert("Lỗi xóa chỉ tiêu: " + e.message); }
+};
+// Component thẻ tiến độ (BẢN PRO - CÓ CHỈ BÁO RUN-RATE & THỜI GIAN)
 function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, targetRev, actualRev, targetSkus = 0, actualSkus = 0) {
     let pct = targetRev > 0 ? (actualRev / targetRev) * 100 : (actualRev > 0 ? 100 : 0);
+    
+    // Tính toán tỷ lệ thời gian (Chỉ áp dụng nếu là tháng hiện tại)
     const now = new Date();
     const yyyy_mm_now = now.toISOString().slice(0, 7);
     const targetMonth = window._chiTieuTargetMonth || yyyy_mm_now;
@@ -7876,6 +7928,8 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
             const revNeededPerDay = (targetRev - actualRev) / daysLeft;
             const qtyNeededPerDay = (targetQty - actualQty) / daysLeft;
             runRateText = `Cần bán: <b>${(revNeededPerDay/1000).toLocaleString('vi-VN')}k</b> hoặc <b>${qtyNeededPerDay.toFixed(1)} Thùng</b> / ngày để về đích.`;
+            
+            // Cảnh báo nếu tiến độ số < tiến độ thời gian
             if (pct < timePct - 5) {
                 timeWarningHtml = `<div style="margin-top:8px; font-size:12px; color:var(--rose); background:rgba(225,29,72,0.1); padding:6px 10px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: Tiến độ số (${pct.toFixed(1)}%) đang chạy chậm hơn tiến độ thời gian (${timePct.toFixed(1)}%). Cần tăng tốc!</div>`;
             } else {
@@ -7900,7 +7954,8 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
         barGradient = 'var(--emerald-gradient)'; 
         bgTint = 'rgba(16, 185, 129, 0.05)';
         iconBg = 'rgba(16, 185, 129, 0.1)';
-    } else if (pct >= 70) { 
+    }
+    else if (pct >= 70) { 
         statusColor = 'var(--amber)'; 
         barGradient = 'var(--amber-gradient)'; 
         bgTint = 'rgba(245, 158, 11, 0.05)';
@@ -7913,6 +7968,7 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
     return `
     <div style="background:var(--card-bg); border:1px solid var(--card-border); border-top: 5px solid var(--${colorTheme}); border-radius:18px; padding:20px; box-shadow:0 8px 25px rgba(0,0,0,0.05); margin-bottom: 20px; position: relative; overflow: hidden;">
         <div style="position:absolute; top:0; left:0; width:100%; height:100%; background: linear-gradient(180deg, ${bgTint} 0%, rgba(255,255,255,0) 100%); pointer-events:none;"></div>
+
         <div style="font-weight:900; color:var(--${colorTheme}); font-size:16px; margin-bottom:18px; text-transform:uppercase; display:flex; align-items:center; gap:10px; position:relative; z-index:1;">
             <div style="width:36px; height:36px; border-radius:10px; background:var(--${colorTheme}); color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
                 <i class="fa-solid ${icon}"></i>
@@ -7941,6 +7997,7 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
             <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; margin-bottom:10px;">
                 <div style="height: 100%; width: ${Math.min(timePct, 100)}%; background: var(--text-muted); border-radius: 3px;"></div>
             </div>
+            
             <div style="display:flex; justify-content:space-between; align-items:flex-end; font-weight:900; margin-bottom:6px;">
                 <span style="font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tiến độ KPI:</span>
                 <span style="font-size:24px; color:${statusColor}; line-height:1;">${pct.toFixed(1)}%</span>
@@ -7948,8 +8005,10 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
             <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);">
                 <div style="height: 100%; width: ${Math.min(pct, 100)}%; background: ${barGradient}; border-radius: 5px; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
             </div>
+            
             ${timeWarningHtml}
         </div>
+
         ${runRateText ? `
         <div style="position:relative; z-index:1; font-size:13px; color:var(--text-main); text-align:center; padding:10px; background:rgba(37,99,235,0.05); border:1px dashed var(--primary); border-radius:10px;">
             <i class="fa-solid fa-gauge-high" style="color:var(--primary);"></i> ${runRateText}
@@ -7982,6 +8041,7 @@ window.calculateAndRenderTargets = async function() {
 
   try {
     const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+    
     let globalTarget = 0; let globalActual = 0; 
     let salesTarget = 0; let salesActual = 0; 
 
@@ -8083,18 +8143,7 @@ window.calculateAndRenderTargets = async function() {
                 const itemPrice = Number(item.price || pObj?.price || 0);
                 const itemRev = Number(item.qty || 0) * itemPrice;
                 
-                let compCode = 'KHAC';
-                if (skuKey.startsWith('11') || skuKey.includes('TLSG')) compCode = '11';
-                else {
-                    let m = skuKey.match(/^\[(.*?)\]/);
-                    if (m) compCode = m[1].trim();
-                    else {
-                        let pts = skuKey.split(/[-_]/);
-                        if (pts.length > 1) compCode = pts[0].trim();
-                        else if (skuKey.length >= 2) compCode = skuKey.substring(0, 2);
-                    }
-                }
-
+                const compCode = getCompCodeFromProductCode(skuKey);
                 orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
                 
                 globalActual += qtyThung;
@@ -8264,8 +8313,7 @@ window.calculateAndRenderTargets = async function() {
       `;
       return;
     }
-    
-    window._activeGroupedKPI = activeGrouped;
+window._activeGroupedKPI = activeGrouped;
     const sortedCompCodes = Object.keys(activeGrouped).sort((a, b) => {
         let nameA = (activeGrouped[a].compName || a).toLowerCase();
         let nameB = (activeGrouped[b].compName || b).toLowerCase();
@@ -8320,7 +8368,7 @@ window.calculateAndRenderTargets = async function() {
                         <div style="font-size:20px; font-weight:900; color:${revColor};">${formatQtySmart(revPct)}%</div>
                      </div>
                      <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
-                        <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}%; background:${revBar}; border-radius: 4px; transition:width 0.5s;"></div>
+                        <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}\%; background:${revBar}; border-radius: 4px; transition:width 0.5s;"></div>
                      </div>
                 </div>
               ` : ''}
@@ -8373,6 +8421,7 @@ window.calculateAndRenderTargets = async function() {
                       const canDelete = isAdminOrManager && !isTongQuanTab;
                       const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('vi-VN');
 
+                      // Nếu mục tiêu thùng bằng 0 nhưng có thực hiện -> Ẩn chỉ tiêu, chỉ hiển thị số bán
                       if (sku.target <= 0) {
                           return `
                           <div style="background: var(--card-bg); padding: 14px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.05); position: relative;">
@@ -8435,10 +8484,7 @@ window.calculateAndRenderTargets = async function() {
     container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose); font-weight:900;">Lỗi hiển thị báo cáo: ${err.message}</div>`;
   }
 };
-
-// ==========================================
-// CÁC HÀM XỬ LÝ KHUYẾN MÃI (CTKM)
-// ==========================================
+  // 1. Mở Modal Khuyến Mãi Tổng Công Ty
 window.openAllPromosModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
@@ -8468,6 +8514,7 @@ window.openAllPromosModal = function() {
   modalContainer.classList.remove('hidden');
 };
 
+// 2. Mở Modal Khuyến Mãi Chi Tiết Từng Mã Hàng
 window.openProductPromoModal = function(code, name) {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
@@ -8482,6 +8529,8 @@ window.openProductPromoModal = function(code, name) {
           <div style="font-weight:800; margin-bottom:12px; color:var(--primary); font-size:15px; border-left: 3px solid var(--primary); padding-left: 8px;">
             [${code}] ${name}
           </div>
+          
+          <!-- Bạn có thể Fetch dữ liệu khuyến mãi từ Database vào đây sau -->
           <div style="background:rgba(225, 29, 72, 0.05); border:1px dashed #E11D48; padding:12px; border-radius:8px; color:#E11D48; font-weight:700;">
             <div style="margin-bottom: 6px;">🎁 Nhập 10 Thùng tặng 1 Thùng</div>
             <div style="margin-bottom: 6px;">🎁 Nhập 50 Thùng tặng 1 Chỉ vàng SJC</div>
@@ -8490,6 +8539,7 @@ window.openProductPromoModal = function(code, name) {
               * Có thể cộng dồn số lượng.
             </div>
           </div>
+          
         </div>
       </div>
     </div>
@@ -8497,6 +8547,7 @@ window.openProductPromoModal = function(code, name) {
   modalContainer.classList.remove('hidden');
 };
 
+// 3. Hàm đóng Modal Khuyến mãi
 window.closePromoModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (modalContainer) {
@@ -8504,6 +8555,9 @@ window.closePromoModal = function() {
     modalContainer.classList.add('hidden');
   }
 };
+  // ==========================================
+// CÁC HÀM XỬ LÝ CHO TAB CTKM (EXCEL & MODAL 2 CHẾ ĐỘ)
+// ==========================================
 
 window.deleteCtkm = async function(id) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
@@ -8513,7 +8567,7 @@ window.deleteCtkm = async function(id) {
   try {
     await deleteDoc(doc(db, "promotions", id));
     window.promotionsList = window.promotionsList.filter(p => p.id !== id);
-    if(window.filterCtkm) window.filterCtkm(window._ctkmSearchKey || '');
+    window.filterCtkm(window._ctkmSearchKey);
   } catch (err) {
     alert("Lỗi xóa CTKM: " + err.message);
   }
@@ -8523,6 +8577,7 @@ window.exportCtkmExcel = function() {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
   if (!window.promotionsList || window.promotionsList.length === 0) return alert("Không có dữ liệu CTKM!");
 
+  // Mapping đúng 100% với header trong ảnh
   const dataToExport = window.promotionsList.map(p => ({
     "Từ ngày": p.tuNgay || '',
     "Đến ngày": p.denNgay || '',
@@ -8553,10 +8608,11 @@ window.handleImportCtkmExcel = function(event) {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, { type: 'array' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); 
+      const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Đọc dạng mảng để né rác phía trên
 
       if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
 
+      // Tự động quét tìm dòng chứa tiêu đề "MaKM" để bỏ qua các dòng rác gạch chéo ở trên
       let headerIdx = -1;
       for (let i = 0; i < 20; i++) {
          if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('MaKM'))) {
@@ -8575,6 +8631,7 @@ window.handleImportCtkmExcel = function(event) {
       let newPromos = [];
       let importedCtus = new Set();
 
+      // Bắt đầu đọc từ dòng dưới dòng tiêu đề
       for (let i = headerIdx + 1; i < jsonRows.length; i++) {
           const row = jsonRows[i];
           if (!row || row.length === 0 || !row[colMap['MaKM']]) continue;
@@ -8597,6 +8654,7 @@ window.handleImportCtkmExcel = function(event) {
 
       if (newPromos.length === 0) return alert("Không đọc được dòng dữ liệu hợp lệ nào!");
 
+      // Hiển thị Modal để hỏi Chế độ nhập (Lưu vào biến tạm)
       window._tempImportedPromos = newPromos;
       window._tempImportedCtus = Array.from(importedCtus);
       
@@ -8623,6 +8681,8 @@ window.handleImportCtkmExcel = function(event) {
         </div>
       `;
       modalContainer.classList.remove('hidden');
+      
+      // Reset input file để chọn lại file cũ vẫn ăn event
       document.getElementById('ctkmFileInput').value = '';
     } catch (err) {
       alert("Lỗi khi đọc file Excel: " + err.message);
@@ -8641,11 +8701,12 @@ window.executeImportCtkm = async function(mode) {
   try {
     const promoSnap = await getDocs(collection(db, "promotions"));
     let batches = [];
-    let currentBatch = typeof writeBatch !== 'undefined' ? writeBatch(db) : null;
+    let currentBatch = writeBatch(db);
     let count = 0;
 
     promoSnap.forEach((docSnap) => {
       const data = docSnap.data();
+      // Nếu chế độ 2 (Chỉ ghi đè công ty) -> Kiểm tra maCtu có nằm trong file Excel không
       if (mode === 'replace_all' || (mode === 'replace_ctu' && targetCtus.includes(data.maCtu))) {
          currentBatch.delete(docSnap.ref);
          count++;
@@ -8659,6 +8720,7 @@ window.executeImportCtkm = async function(mode) {
     if (count > 0) batches.push(currentBatch.commit());
     await Promise.all(batches);
 
+    // Đẩy danh sách mới lên
     let uploadBatches = [];
     let uploadBatch = writeBatch(db);
     let upCount = 0;
@@ -8676,16 +8738,18 @@ window.executeImportCtkm = async function(mode) {
     if (upCount > 0) uploadBatches.push(uploadBatch.commit());
     await Promise.all(uploadBatches);
 
+    // Cập nhật Local UI
     if (mode === 'replace_all') {
        window.promotionsList = newPromos;
     } else {
+       // Xóa các mảng của MaCtu bị ghi đè, giữ lại cái không liên quan, sau đó gộp mảng mới
        window.promotionsList = window.promotionsList.filter(p => !targetCtus.includes(p.maCtu));
        window.promotionsList = [...window.promotionsList, ...newPromos];
     }
 
     modalContainer.classList.add('hidden');
-    if(window.filterCtkm) window.filterCtkm('');
-    if(typeof playSystemSound === 'function') playSystemSound('success');
+    window.filterCtkm('');
+    playSystemSound('success');
     alert("✅ Tải dữ liệu Khuyến Mãi thành công!");
 
   } catch(e) {
@@ -8693,750 +8757,132 @@ window.executeImportCtkm = async function(mode) {
     alert("Lỗi khi tải dữ liệu lên Firebase: " + e.message);
   }
 };
+  // 1. Mở Modal chọn nguồn nhân bản
+// 1. Mở Modal Nhân Bản Mở Rộng
+window.openMonthlyCloneModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
 
-// ==========================================
-// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V6 (CẬP NHẬT TỪ V5 CỦA BẠN)
-// ==========================================
-window._masterKpiState = {
-  totalTarget: 0,
-  companies: [], 
-  salesAllocations: { initialized: false }
-};
+    const currentMonth = window._chiTieuTargetMonth;
+    const parts = currentMonth.split('-');
+    let y = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
 
-window.openTargetModal = function() {
-  try {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-      return alert("Chỉ quản lý mới có quyền thiết lập chỉ tiêu tổng!");
-    }
-    window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: { initialized: false } };
-    renderMasterKpiStep1();
-  } catch (error) {
-    alert("Lỗi khi mở form thiết lập: " + error.message);
-    console.error(error);
-  }
-};
+    let nm = m + 1; let ny = y;
+    if (nm > 12) { nm = 1; ny++; }
+    const nextMonth = `${ny}-${String(nm).padStart(2, '0')}`;
 
-window.renderMasterKpiStep1 = function() {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return alert("Không tìm thấy container Modal!");
-  
-  let compHtml = window._masterKpiState.companies.map((c, cIdx) => `
-    <div style="background:var(--card-bg); border:1px solid rgba(37,99,235,0.2); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <div style="font-weight:900; color:var(--primary); font-size:16px; text-transform:uppercase;">
-          <i class="fa-solid fa-building"></i> [${c.compCode}] ${c.compName}
-        </div>
-        <button type="button" class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})" title="Xóa công ty này"><i class="fa-solid fa-trash"></i></button>
-      </div>
-      
-      <div style="margin-bottom:12px;">
-        <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">Ngân sách giao cho công ty này (VNĐ):</label>
-        <input type="text" id="mkpi_comp_${cIdx}" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" 
-               oninput="handleMkpiCompInput(${cIdx}, this.value)" 
-               placeholder="VD: 20,000,000,000" 
-               style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); font-weight:900; font-size:16px; color:var(--rose); outline:none; transition:0.2s;"
-               onfocus="this.style.borderColor='var(--rose)'; this.style.boxShadow='0 0 0 3px rgba(225,29,72,0.1)'"
-               onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none'">
-      </div>
-      
-      <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:12px; border:1px dashed rgba(37,99,235,0.3);">
-         <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> SKU Trọng tâm bắt buộc:</div>
-         
-         <div id="mkpi_sku_list_${cIdx}" style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
-           ${c.focusSkus.length === 0 ? '<div style="font-size:12px; color:var(--text-muted); font-style:italic;">Chưa thêm mã hàng nào.</div>' : ''}
-           ${c.focusSkus.map((sku, sIdx) => `
-              <div style="display:flex; gap:8px; align-items:center;">
-                 <div style="flex:1; font-size:13px; font-weight:800; background:#fff; border:1px solid var(--card-border); padding:10px 12px; border-radius:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                   <span style="color:var(--primary);">[${sku.skuCode}]</span> ${sku.skuName}
-                 </div>
-                 <input type="text" inputmode="numeric" value="${sku.qty || ''}" 
-                        oninput="handleMkpiSkuInput(${cIdx}, ${sIdx}, this.value)" 
-                        placeholder="Số thùng" 
-                        style="width:90px; font-weight:900; border-radius:8px; border:1px solid var(--card-border); padding:10px; text-align:center; color:var(--rose); outline:none; margin:0;">
-                 <button type="button" class="btn btn-red btn-sm" onclick="removeCompSku(${cIdx}, ${sIdx})" style="padding:10px 14px; border-radius:8px;"><i class="fa-solid fa-xmark"></i></button>
-              </div>
-           `).join('')}
-         </div>
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999; padding:12px;" onclick="if(event.target === this) closeTargetModal()">
+            <div class="modal-content" style="max-width: 440px; padding: 22px; border-radius: 20px; width:100%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+                    <h3 style="font-size:16px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-calendar-days"></i> Nhân Bản KPI Sang Tháng Mới</h3>
+                    <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()">Đóng</button>
+                </div>
+                
+                <div style="font-size:13.5px; color:var(--text-main); line-height:1.5; margin-bottom:16px;">
+                    Thao tác này sẽ sao chép toàn bộ chỉ tiêu (SKU & Doanh số công ty) của <b>tất cả nhân viên</b> từ tháng <b style="color:var(--primary);">${currentMonth}</b> sang tháng <b style="color:var(--emerald);">${nextMonth}</b>.
+                </div>
 
-         <!-- Tìm kiếm SKU thông minh -->
-         <div style="position:relative;">
-           <input type="text" id="mkpi_search_${cIdx}" placeholder="🔍 Gõ mã hoặc tên SP để thêm vào..." 
-                  oninput="searchMkpiSku(${cIdx}, this.value)" 
-                  autocomplete="off" 
-                  style="width:100%; padding:10px 14px; font-size:13px; font-weight:800; border-radius:8px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
-           <div id="mkpi_res_${cIdx}" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:180px; overflow-y:auto; border:1px solid var(--card-border); border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
-         </div>
-      </div>
-    </div>
-  `).join('');
+                <div style="background: rgba(245,158,11,0.08); padding: 12px; border-radius: 12px; border: 1px dashed var(--amber); margin-bottom: 20px;">
+                    <label style="font-size:12px; font-weight:900; color:var(--amber); display:block; margin-bottom:6px;">Tùy chọn hệ số tăng trưởng (%):</label>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="number" id="monthlyCloneMultiplier" value="0" style="width:100px; padding:10px; font-weight:900; font-size:15px; text-align:center; border-radius:8px; border:1px solid var(--card-border); color:var(--rose);">
+                        <span style="font-size:12px; color:var(--text-muted); font-weight:700;">% (VD: 10 nghĩa là tăng 10% chỉ tiêu tháng mới)</span>
+                    </div>
+                </div>
 
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;">
-      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
-        
-        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
-          <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-bullseye"></i> BƯỚC 1: KHAI BÁO TỔNG CHỈ TIÊU</h3>
-          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="padding:8px 16px; border-radius:8px; font-weight:800;">Đóng</button>
-        </div>
-        
-        <div style="flex:1; overflow-y:auto; padding:20px;">
-           <div style="background:var(--card-bg); padding:20px; border-radius:16px; border:2px solid var(--amber); margin-bottom:20px; box-shadow:0 8px 20px rgba(245,158,11,0.05);">
-              <label style="font-size:14px; font-weight:900; color:var(--amber); display:block; margin-bottom:8px;">1. TỔNG DOANH SỐ CẦN GIAO THÁNG NÀY (VNĐ):</label>
-              <input type="text" id="mkpi_total" value="${window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : ''}" 
-                     oninput="handleMkpiTotalInput(this.value)" 
-                     placeholder="VD: 50,000,000,000" 
-                     style="width:100%; padding:16px; font-size:24px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:12px; border:1px solid rgba(225,29,72,0.2); margin:0; text-align:center; outline:none; transition:0.2s;"
-                     onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
-           </div>
-
-           <div style="margin-bottom:14px;">
-              <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">2. TÌM VÀ CHỌN CÔNG TY ĐỂ CHIA SỐ:</div>
-              <div style="position:relative;">
-                 <input type="text" id="mkpi_search_comp_input" placeholder="🔍 Gõ mã hoặc tên công ty để thêm vào danh sách phân bổ..." 
-                        oninput="searchMkpiComp(this.value)" 
-                        autocomplete="off" 
-                        style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; border-radius:10px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
-                 <div id="mkpi_search_comp_res" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:200px; overflow-y:auto; border:1px solid var(--card-border); border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
-              </div>
-           </div>
-           
-           ${compHtml}
-           <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;"></div>
-        </div>
-
-        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
-           <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; box-shadow:0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndGoToStep2()">
-              TIẾP TỤC: RẢI SỐ CHO NHÂN VIÊN <i class="fa-solid fa-arrow-right"></i>
-           </button>
-        </div>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
-  updateMkpiDiffUI(); 
-};
-
-window.searchMkpiComp = function(keyword) {
-  const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
-  const resEl = document.getElementById('mkpi_search_comp_res');
-  if (!resEl) return;
-  if (!q) { resEl.classList.add('hidden'); return; }
-  
-  const matched = (typeof companyList !== 'undefined' ? companyList : []).filter(c => {
-      const txt = typeof removeAccents === 'function' ? removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase() : `${c.maCtu} ${c.tenCtu}`.toLowerCase();
-      return txt.includes(q);
-  }).slice(0, 15);
-
-  if (matched.length > 0) {
-      resEl.innerHTML = matched.map(c => `
-          <div onclick="addMkpiComp('${c.maCtu}', '${(c.tenCtu||'').replace(/'/g, "\\'")}')" 
-               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:14px; font-weight:800; transition:0.2s;"
-               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
-              <span style="color:var(--amber);">[${c.maCtu}]</span> ${c.tenCtu}
-          </div>
-      `).join('');
-      resEl.classList.remove('hidden');
-  } else {
-      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy công ty phù hợp.</div>';
-      resEl.classList.remove('hidden');
-  }
-};
-
-window.addMkpiComp = function(maCtu, tenCtu) {
-  if (window._masterKpiState.companies.find(c => c.compCode === maCtu)) return alert("Đã thêm công ty này rồi!");
-  window._masterKpiState.companies.push({ compCode: maCtu, compName: tenCtu, target: 0, focusSkus: [] });
-  renderMasterKpiStep1();
-};
-window.removeKpiCompany = function(idx) { window._masterKpiState.companies.splice(idx, 1); renderMasterKpiStep1(); };
-
-window.handleMkpiTotalInput = function(val) {
-  const cleanVal = val.replace(/[^0-9]/g, '');
-  window._masterKpiState.totalTarget = Number(cleanVal) || 0;
-  const el = document.getElementById('mkpi_total');
-  if(el) {
-     const formatted = window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : '';
-     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted; 
-  }
-  updateMkpiDiffUI();
-};
-
-window.handleMkpiCompInput = function(cIdx, val) {
-  const cleanVal = val.replace(/[^0-9]/g, '');
-  window._masterKpiState.companies[cIdx].target = Number(cleanVal) || 0;
-  const el = document.getElementById(`mkpi_comp_${cIdx}`);
-  if(el) {
-     const formatted = window._masterKpiState.companies[cIdx].target > 0 ? window._masterKpiState.companies[cIdx].target.toLocaleString('vi-VN') : '';
-     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
-  }
-  updateMkpiDiffUI();
-};
-
-window.handleMkpiSkuInput = function(cIdx, sIdx, val) {
-  const cleanVal = val.replace(/[^0-9]/g, '');
-  window._masterKpiState.companies[cIdx].focusSkus[sIdx].qty = Number(cleanVal) || 0;
-};
-
-window.updateMkpiDiffUI = function() {
-  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
-  const diff = window._masterKpiState.totalTarget - sumComps;
-  const alertEl = document.getElementById('mkpi_diff_alert');
-  
-  if(alertEl) {
-     if (diff === 0 && window._masterKpiState.totalTarget > 0 && window._masterKpiState.companies.length > 0) {
-         alertEl.style.background = 'rgba(16,185,129,0.1)';
-         alertEl.style.color = 'var(--emerald)';
-         alertEl.style.border = '1px solid var(--emerald)';
-         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>✅ ĐÃ KHỚP 100% SỐ TỔNG!`;
-     } else {
-         alertEl.style.background = 'rgba(245,158,11,0.1)';
-         alertEl.style.color = 'var(--amber)';
-         alertEl.style.border = '1px dashed var(--amber)';
-         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>⚠️ Đang lệch: ${(diff/1000).toLocaleString('vi-VN')}k`;
-     }
-  }
-};
-
-window.searchMkpiSku = function(cIdx, keyword) {
-  const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
-  const resEl = document.getElementById(`mkpi_res_${cIdx}`);
-  if (!resEl) return;
-  if (!q) { resEl.classList.add('hidden'); return; }
-  
-  const compCode = window._masterKpiState.companies[cIdx].compCode;
-  const matched = (typeof products !== 'undefined' ? products : []).filter(p => {
-      let pCodeStr = String(p.code || '').toUpperCase();
-      let extractedCtu = 'KHAC';
-      if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) extractedCtu = '11';
-      else {
-          let m = pCodeStr.match(/^\[(.*?)\]/);
-          if (m) extractedCtu = m[1].trim();
-          else {
-              let pts = pCodeStr.split(/[-_]/);
-              if (pts.length > 1) extractedCtu = pts[0].trim();
-              else if (pCodeStr.length >= 2) extractedCtu = pCodeStr.substring(0, 2);
-          }
-      }
-      if (extractedCtu !== compCode) return false;
-      const txt = typeof removeAccents === 'function' ? removeAccents(`${p.code} ${p.name}`).toLowerCase() : `${p.code} ${p.name}`.toLowerCase();
-      return txt.includes(q);
-  }).slice(0, 20);
-
-  if (matched.length > 0) {
-      resEl.innerHTML = matched.map(p => `
-          <div onclick="addMkpiSku(${cIdx}, '${p.code}', '${(p.name||'').replace(/'/g, "\\'")}')" 
-               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13px; font-weight:800; transition:0.2s;"
-               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
-              <span style="color:var(--primary);">[${p.code}]</span> ${p.name}
-          </div>
-      `).join('');
-      resEl.classList.remove('hidden');
-  } else {
-      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy vật tư.</div>';
-      resEl.classList.remove('hidden');
-  }
-};
-
-window.addMkpiSku = function(cIdx, skuCode, skuName) {
-  if(!window._masterKpiState.companies[cIdx].focusSkus.find(s => s.skuCode === skuCode)) {
-      window._masterKpiState.companies[cIdx].focusSkus.push({ skuCode, skuName, qty: 0 });
-  }
-  renderMasterKpiStep1(); 
-};
-window.removeCompSku = function(cIdx, sIdx) { window._masterKpiState.companies[cIdx].focusSkus.splice(sIdx, 1); renderMasterKpiStep1(); };
-
-window.validateAndGoToStep2 = function() {
-  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
-  if (window._masterKpiState.totalTarget === 0) return alert("Vui lòng nhập Tổng doanh số cần giao!");
-  if (window._masterKpiState.companies.length === 0) return alert("Chưa chọn công ty nào để phân bổ!");
-  if (sumComps !== window._masterKpiState.totalTarget) {
-     return alert("Số tổng của các Công ty KHÔNG KHỚP với Tổng Chỉ Tiêu Tháng! Hãy cân đối lại cho khớp 100%.");
-  }
-  
-  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
-  if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
-
-  if (!window._masterKpiState.salesAllocations.initialized) {
-     const totalSales = salesUsers.length;
-     salesUsers.forEach(s => {
-       window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
-     });
-
-     window._masterKpiState.companies.forEach(c => {
-         let compAssignedTotal = 0;
-         let skuAssignedTotal = {};
-         c.focusSkus.forEach(sku => skuAssignedTotal[sku.skuCode] = 0);
-
-         salesUsers.forEach((s, idx) => {
-             if (idx === totalSales - 1) {
-                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = c.target - compAssignedTotal;
-                 c.focusSkus.forEach(sku => {
-                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = sku.qty - skuAssignedTotal[sku.skuCode];
-                 });
-             } else {
-                 let compVal = Math.round(c.target / totalSales);
-                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = compVal;
-                 compAssignedTotal += compVal;
-                 c.focusSkus.forEach(sku => {
-                     let skuVal = Math.round(sku.qty / totalSales);
-                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = skuVal;
-                     skuAssignedTotal[sku.skuCode] += skuVal;
-                 });
-             }
-         });
-     });
-     window._masterKpiState.salesAllocations.initialized = true;
-  }
-  renderMasterKpiStep2(salesUsers);
-};
-
-window.renderMasterKpiStep2 = function(salesUsers) {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  let htmlContent = window._masterKpiState.companies.map(c => {
-     let skuHtml = c.focusSkus.map(sku => {
-        return `
-          <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:10px; margin-top:12px; border:1px dashed rgba(37,99,235,0.2);">
-            <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(37,99,235,0.1); padding-bottom:8px;">
-              <span>📦 [${sku.skuCode}] (Cần chia: ${sku.qty} Thùng)</span>
-              <span id="s2_diff_sku_${sku.skuCode}" style="font-size:12px; padding:3px 8px; border-radius:6px;"></span>
+                <button type="button" id="btnConfirmMonthlyClone" class="btn btn-blue" style="width:100%; justify-content:center; padding:14px; font-weight:900; border-radius:12px; cursor:pointer;" onclick="executeMonthlyClone('${currentMonth}', '${nextMonth}')">
+                    <i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN CHO TOÀN BỘ NHÂN VIÊN
+                </button>
             </div>
-            ${salesUsers.map(s => `
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:14px; font-weight:800;">
-                <span style="color:var(--text-main); flex:1;">[${s.code}] ${s.name.split(' ').pop()}</span>
-                <span id="s2_pct_sku_${s.code}_${sku.skuCode}" style="color:var(--text-muted); font-size:12px; margin-right:10px; font-weight:900;">0%</span>
-                <input type="text" inputmode="numeric" 
-                       value="${window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0}" 
-                       oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this.value)" 
-                       style="width:80px; padding:8px; text-align:center; border:1px solid var(--card-border); border-radius:8px; font-weight:900; color:var(--primary); outline:none;">
-              </div>
-            `).join('')}
-          </div>
-        `;
-     }).join('');
-
-     return `
-        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:16px; margin-bottom:20px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
-          <div style="font-weight:900; color:var(--text-main); font-size:16px; margin-bottom:8px; text-transform:uppercase;">
-            <i class="fa-solid fa-building" style="color:var(--primary);"></i> ${c.compName}
-          </div>
-          
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:900; margin-bottom:14px; padding-bottom:12px; border-bottom:1px dashed var(--card-border);">
-             <span style="color:var(--text-muted);">Tổng giao: <b style="color:var(--text-main); font-size:16px;">${(c.target/1000).toLocaleString('vi-VN')}k</b></span>
-             <span id="s2_diff_comp_${c.compCode}" style="padding:4px 10px; border-radius:8px; font-size:12px;"></span>
-          </div>
-
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            ${salesUsers.map(s => `
-               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.01); padding:8px; border-radius:8px;">
-                  <span style="font-size:14px; font-weight:900; color:var(--text-main); flex:1;">[${s.code}] ${s.name.split(' ').pop()}</span>
-                  <span id="s2_pct_comp_${s.code}_${c.compCode}" style="color:var(--amber); font-size:13px; margin-right:10px; font-weight:900;">0%</span>
-                  <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
-                         value="${window._masterKpiState.salesAllocations[s.code].companies[c.compCode].toLocaleString('vi-VN')}" 
-                         oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this.value)" 
-                         style="width:140px; padding:10px; text-align:right; font-weight:900; color:var(--rose); border:1px solid var(--card-border); border-radius:8px; font-size:15px; outline:none; transition:0.2s;"
-                         onfocus="this.style.borderColor='var(--rose)'" onblur="this.style.borderColor='var(--card-border)'">
-               </div>
-            `).join('')}
-          </div>
-          ${skuHtml}
         </div>
-     `;
-  }).join('');
-
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;">
-      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
-        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
-          <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border);"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
-          <h3 style="font-size:16px; font-weight:900; color:var(--primary); margin:0;">BƯỚC 2: TỶ TRỌNG GÁNH SỐ</h3>
-          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:8px;">Đóng</button>
-        </div>
-        <div style="flex:1; overflow-y:auto; padding:20px;">
-          <div style="background:rgba(245,158,11,0.1); border:1px solid var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:10px; margin-bottom:16px; text-align:center;">
-            💡 Theo dõi tỷ trọng % để biết Sales nào đang gánh số. Nút LƯU chỉ sáng khi tổng số khớp 100%.
-          </div>
-          ${htmlContent}
-        </div>
-        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
-           <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; transition:0.3s;" onclick="validateAndSaveMasterKpiToDatabase()">
-              <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH
-           </button>
-        </div>
-      </div>
-    </div>
-  `;
-  updateStep2DiffUI();
+    `;
+    modalContainer.classList.remove('hidden');
 };
 
-window.handleStep2CompInput = function(salesCode, compCode, val) {
-  const cleanVal = val.replace(/[^0-9]/g, '');
-  window._masterKpiState.salesAllocations[salesCode].companies[compCode] = Number(cleanVal) || 0;
-  
-  const el = document.getElementById(`s2_inp_comp_${salesCode}_${compCode}`);
-  if(el) {
-      const formatted = window._masterKpiState.salesAllocations[salesCode].companies[compCode] > 0 ? window._masterKpiState.salesAllocations[salesCode].companies[compCode].toLocaleString('vi-VN') : '';
-      if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
-  }
-  updateStep2DiffUI();
-};
+window.executeMonthlyClone = async function(srcMonth, destMonth) {
+    const multiplier = Number(document.getElementById('monthlyCloneMultiplier').value) || 0;
+    const ratio = 1 + (multiplier / 100);
 
-window.handleStep2SkuInput = function(salesCode, skuCode, val) {
-  const cleanVal = val.replace(/[^0-9]/g, '');
-  window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
-  updateStep2DiffUI();
-};
+    const btn = document.getElementById('btnConfirmMonthlyClone');
+    if(btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG NHÂN BẢN HÀNG LOẠT...';
+    }
 
-window.updateStep2DiffUI = function() {
-  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
-  let isAllValid = true;
+    try {
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+        const batch = writeBatch(db);
+        let clonedCount = 0;
+        const nowISO = new Date().toISOString();
 
-  window._masterKpiState.companies.forEach(c => {
-     let sumSalesComp = 0;
-     salesUsers.forEach(s => {
-         let sVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
-         sumSalesComp += sVal;
-         let pctComp = c.target > 0 ? ((sVal / c.target) * 100).toFixed(1) : 0;
-         const pctLabel = document.getElementById(`s2_pct_comp_${s.code}_${c.compCode}`);
-         if (pctLabel) pctLabel.innerText = `${pctComp}%`;
-     });
+        targetsSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data && data.month === srcMonth) {
+                const sCode = data.salesCode;
+                const destDocId = `tgt_${sCode}_${destMonth}`;
+                const destRef = doc(db, "monthlyTargets", destDocId);
 
-     let diffComp = c.target - sumSalesComp;
-     const compLabel = document.getElementById(`s2_diff_comp_${c.compCode}`);
-     if (compLabel) {
-         if (diffComp === 0) {
-             compLabel.innerHTML = '✅ Khớp 100%';
-             compLabel.style.background = 'rgba(16,185,129,0.1)'; compLabel.style.color = 'var(--emerald)';
-         } else {
-             compLabel.innerHTML = `⚠️ Lệch: ${(diffComp/1000).toLocaleString('vi-VN')}k`;
-             compLabel.style.background = 'rgba(225,29,72,0.1)'; compLabel.style.color = 'var(--rose)';
-             isAllValid = false;
-         }
-     }
-
-     c.focusSkus.forEach(sku => {
-        let sumSalesSku = 0;
-        salesUsers.forEach(s => {
-            let sSkuVal = window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0;
-            sumSalesSku += sSkuVal;
-            let pctSku = sku.qty > 0 ? ((sSkuVal / sku.qty) * 100).toFixed(1) : 0;
-            const pctSkuLabel = document.getElementById(`s2_pct_sku_${s.code}_${sku.skuCode}`);
-            if (pctSkuLabel) pctSkuLabel.innerText = `${pctSku}%`;
-        });
-
-        let diffSku = sku.qty - sumSalesSku;
-        const skuLabel = document.getElementById(`s2_diff_sku_${sku.skuCode}`);
-        if (skuLabel) {
-            if (diffSku === 0) {
-                skuLabel.innerHTML = '✅ Khớp 100%';
-                skuLabel.style.background = 'rgba(16,185,129,0.1)'; skuLabel.style.color = 'var(--emerald)';
-            } else {
-                skuLabel.innerHTML = `Lệch: ${diffSku} Th`;
-                skuLabel.style.background = 'rgba(225,29,72,0.1)'; skuLabel.style.color = 'var(--rose)';
-                isAllValid = false;
-            }
-        }
-     });
-  });
-
-  const saveBtn = document.getElementById('btn_save_master_kpi');
-  if (saveBtn) {
-      if (isAllValid) {
-          saveBtn.style.opacity = '1'; saveBtn.style.pointerEvents = 'auto';
-          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH';
-      } else {
-          saveBtn.style.opacity = '0.5'; saveBtn.style.pointerEvents = 'none';
-          saveBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SỐ LIỆU ĐANG LỆCH, KHÔNG THỂ LƯU';
-      }
-  }
-};
-
-window.validateAndSaveMasterKpiToDatabase = async function() {
-  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
-  const btn = document.getElementById('btn_save_master_kpi');
-  if(btn) {
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG ĐỒNG BỘ XUỐNG THIẾT BỊ SALES...';
-    btn.disabled = true;
-  }
-
-  try {
-     const batch = typeof writeBatch !== 'undefined' ? writeBatch(db) : null;
-     if (!batch) throw new Error("Database không khả dụng.");
-     
-     salesUsers.forEach(s => {
-        const sCode = s.code;
-        const targetDocId = `tgt_${sCode}_${window._chiTieuTargetMonth}`;
-        const docRef = doc(db, "monthlyTargets", targetDocId);
-
-        let companyRevenues = {};
-        let items = [];
-
-        window._masterKpiState.companies.forEach(c => {
-           let targetRev = window._masterKpiState.salesAllocations[sCode].companies[c.compCode] || 0;
-           if (targetRev > 0) {
-              companyRevenues[c.compCode] = { target: targetRev, compName: c.compName };
-           }
-
-           c.focusSkus.forEach(sku => {
-              let qtyTarget = window._masterKpiState.salesAllocations[sCode].skus[sku.skuCode] || 0;
-              if (qtyTarget > 0) {
-                 items.push({
-                    skuCode: sku.skuCode,
-                    skuName: sku.skuName,
-                    compCode: c.compCode,
-                    compName: c.compName,
-                    target: qtyTarget,
+                let scaledItems = (data.items || []).map(item => ({
+                    ...item,
+                    target: Math.round(item.target * ratio),
                     createdByUid: currentUser.uid,
                     createdByRole: currentUser.role
-                 });
-              }
-           });
-        });
+                }));
 
-        batch.set(docRef, {
-           salesCode: sCode,
-           month: window._chiTieuTargetMonth,
-           items: items,
-           companyRevenues: companyRevenues,
-           lastUpdatedByCode: currentUser.code,
-           lastUpdatedByName: currentUser.name,
-           lastUpdatedAt: new Date().toISOString()
-        });
-     });
+                let scaledRevenues = {};
+                const sourceRevenues = data.companyRevenues || {};
+                for (let comp in sourceRevenues) {
+                    scaledRevenues[comp] = {
+                        ...sourceRevenues[comp],
+                        target: Math.round(sourceRevenues[comp].target * ratio)
+                    };
+                }
 
-     await batch.commit();
-     if (typeof playSystemSound === 'function') playSystemSound('success');
-     alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${salesUsers.length} NHÂN VIÊN!`);
-     closeTargetModal();
-     if (typeof calculateAndRenderTargets === 'function') calculateAndRenderTargets(); 
+                batch.set(destRef, {
+                    salesCode: sCode,
+                    month: destMonth,
+                    items: scaledItems,
+                    companyRevenues: scaledRevenues,
+                    lastUpdatedByCode: currentUser.code,
+                    lastUpdatedByName: currentUser.name,
+                    lastUpdatedAt: nowISO
+                }, { merge: true });
 
-  } catch (err) {
-     alert("Lỗi khi đồng bộ lên hệ thống: " + err.message);
-     if(btn) {
-        btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> THỬ LẠI';
-        btn.disabled = false;
-     }
-  }
-};
-
-window.clearAllTargetsThisMonth = async function() {
-  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-  const targetMonth = window._chiTieuTargetMonth;
-
-  const confirmDel = await window.showCustomConfirm(
-    "XÓA SẠCH CHỈ TIÊU THÁNG", 
-    `Bạn có chắc chắn muốn XÓA TOÀN BỘ chỉ tiêu (Doanh số & SKU) của TẤT CẢ nhân viên trong tháng ${targetMonth} để làm lại từ đầu không? Hành động này không thể hoàn tác!`, 
-    "fa-dumpster-fire", 
-    "Đồng ý Xóa sạch", 
-    "Hủy"
-  );
-  if (!confirmDel) return;
-
-  try {
-    const salesUsers = users.filter(u => u.role === 'sales');
-    const batch = writeBatch(db);
-    
-    salesUsers.forEach(s => {
-      const docRef = doc(db, "monthlyTargets", `tgt_${s.code}_${targetMonth}`);
-      batch.delete(docRef);
-    });
-
-    await batch.commit();
-    if(typeof playSystemSound === 'function') playSystemSound('success');
-    alert(`✅ Đã xóa sạch chỉ tiêu của toàn bộ nhân viên trong tháng ${targetMonth}! Bạn có thể giao lại số mới.`);
-    if (typeof calculateAndRenderTargets === 'function') calculateAndRenderTargets(); 
-  } catch (err) {
-    alert("Lỗi khi xóa dữ liệu: " + err.message);
-  }
-};
-
-window.openCloneTargetModal = function() {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-
-  const salesUsersList = users.filter(u => u.role === 'sales');
-  const currentMonth = window._chiTieuTargetMonth;
-  const parts = currentMonth.split('-');
-  let y = parseInt(parts[0], 10);
-  let m = parseInt(parts[1], 10);
-
-  let pm = m - 1; let py = y;
-  if (pm < 1) { pm = 12; py--; }
-  const prevMonth = `${py}-${String(pm).padStart(2, '0')}`;
-
-  let nm = m + 1; let ny = y;
-  if (nm > 12) { nm = 1; ny++; }
-  const nextMonth = `${ny}-${String(nm).padStart(2, '0')}`;
-
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999; padding:12px;" onclick="if(event.target === this) closeTargetModal()">
-      <div class="modal-content" style="max-width: 500px; padding: 20px; border-radius: 20px; width:100%; max-height: 90vh; overflow-y: auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:16px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-copy"></i> Nhân Bản Chỉ Tiêu (Nâng Cao)</h3>
-          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()">Đóng</button>
-        </div>
-        
-        <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:20px;">
-          <div style="background: rgba(37,99,235,0.05); padding: 12px; border-radius: 12px; border: 1px dashed var(--primary);">
-            <label style="font-size:13px; font-weight:900; color:var(--primary); display:block; margin-bottom:8px;"><i class="fa-solid fa-file-export"></i> 1. SAO CHÉP TỪ (NGUỒN):</label>
-            <div style="display:flex; gap:8px;">
-                <select id="cloneSourceMonth" style="width:45%; padding:10px; font-weight:900; font-size:14px; border-radius:8px; border:1px solid var(--card-border);">
-                  <option value="${prevMonth}">Tháng ${pm}/${py}</option>
-                  <option value="${currentMonth}" selected>Tháng ${m}/${y}</option>
-                </select>
-                <select id="cloneSourceSales" style="width:55%; padding:10px; font-weight:900; font-size:14px; border-radius:8px; border:1px solid var(--card-border);">
-                  ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
-                </select>
-            </div>
-          </div>
-
-          <div style="background: rgba(16,185,129,0.05); padding: 12px; border-radius: 12px; border: 1px dashed var(--emerald);">
-            <label style="font-size:13px; font-weight:900; color:var(--emerald); display:block; margin-bottom:8px;"><i class="fa-solid fa-file-import"></i> 2. DÁN CHO (ĐÍCH):</label>
-            <div style="display:flex; gap:8px;">
-                <select id="cloneTargetMonth" style="width:45%; padding:10px; font-weight:900; font-size:14px; border-radius:8px; border:1px solid var(--card-border);">
-                  <option value="${currentMonth}" selected>Tháng ${m}/${y}</option>
-                  <option value="${nextMonth}">Tháng ${nm}/${ny}</option>
-                </select>
-                <select id="cloneTargetSales" style="width:55%; padding:10px; font-weight:900; font-size:14px; border-radius:8px; border:1px solid var(--card-border); color: var(--rose);">
-                  <option value="${window._chiTieuTargetSalesCode}" selected>Nhân viên hiện tại</option>
-                  <option value="ALL">🔥 TẤT CẢ NHÂN VIÊN</option>
-                  ${salesUsersList.map(u => `<option value="${u.code}">[${u.code}]${u.name}</option>`).join('')}
-                </select>
-            </div>
-          </div>
-
-          <div style="background: rgba(245,158,11,0.05); padding: 12px; border-radius: 12px; border: 1px dashed var(--amber);">
-            <label style="font-size:13px; font-weight:900; color:var(--amber); display:block; margin-bottom:8px;"><i class="fa-solid fa-sliders"></i> 3. TÙY CHỌN ÁP ĐẶT:</label>
-            <div style="margin-bottom:10px;">
-                <label style="font-size:12px; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Chế độ dán dữ liệu (Xung đột):</label>
-                <select id="cloneMode" style="width:100%; padding:10px; font-weight:900; font-size:13px; border-radius:8px; border:1px solid var(--card-border);">
-                  <option value="overwrite">⚠️ Xóa sạch cũ - Ghi đè 100%</option>
-                  <option value="merge">✅ Giữ nguyên cũ - Cộng dồn thêm</option>
-                </select>
-            </div>
-            <div>
-                <label style="font-size:12px; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Ép tỷ lệ Tăng/Giảm so với Nguồn (%):</label>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <input type="number" id="cloneMultiplier" value="0" style="width:100px; padding:10px; font-weight:900; font-size:15px; text-align:center; border-radius:8px; border:1px solid var(--card-border); color:var(--rose);">
-                    <span style="font-size:12px; color:var(--text-muted); font-weight:700;">% (VD: Điền 10 để tăng 10% chỉ tiêu)</span>
-                </div>
-            </div>
-          </div>
-        </div>
-
-        <button type="button" id="btnConfirmClone" class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-weight:900; border-radius:12px; cursor:pointer;" onclick="executeAdvancedClone()">
-          <i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN
-        </button>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
-};
-
-window.executeAdvancedClone = async function() {
-  const sourceMonth = document.getElementById('cloneSourceMonth').value;
-  const sourceCode = document.getElementById('cloneSourceSales').value;
-  const targetMonth = document.getElementById('cloneTargetMonth').value;
-  const targetCode = document.getElementById('cloneTargetSales').value;
-  const cloneMode = document.getElementById('cloneMode').value;
-  const multiplier = Number(document.getElementById('cloneMultiplier').value) || 0;
-  
-  const ratio = 1 + (multiplier / 100);
-
-  if (sourceCode === targetCode && sourceMonth === targetMonth) {
-    return alert("⛔ Nguồn và Đích không thể trùng lặp hoàn toàn!");
-  }
-
-  const btn = document.getElementById('btnConfirmClone');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG XỬ LÝ DỮ LIỆU...';
-
-  try {
-    const sourceRef = doc(db, "monthlyTargets", `tgt_${sourceCode}_${sourceMonth}`);
-    const sourceSnap = await getDoc(sourceRef);
-
-    if (!sourceSnap.exists()) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN';
-      return alert(`⛔ Nguồn [${sourceCode}] chưa có dữ liệu chỉ tiêu trong tháng ${sourceMonth}! Hãy chọn nguồn khác.`);
-    }
-
-    const sourceData = sourceSnap.data();
-    let scaledItems = (sourceData.items || []).map(item => ({
-        ...item,
-        target: Math.round(item.target * ratio),
-        createdByUid: currentUser.uid,
-        createdByRole: currentUser.role
-    }));
-
-    let scaledRevenues = {};
-    for (let comp in (sourceData.companyRevenues || {})) {
-        scaledRevenues[comp] = {
-            ...sourceData.companyRevenues[comp],
-            target: Math.round(sourceData.companyRevenues[comp].target * ratio)
-        };
-    }
-
-    let targetUsers = targetCode === 'ALL' ? users.filter(u => u.role === 'sales').map(u => u.code) : [targetCode];
-    const batch = writeBatch(db);
-
-    for (const tCode of targetUsers) {
-        if (tCode === sourceCode && sourceMonth === targetMonth) continue;
-        const targetRef = doc(db, "monthlyTargets", `tgt_${tCode}_${targetMonth}`);
-
-        if (cloneMode === 'overwrite') {
-            batch.set(targetRef, {
-                salesCode: tCode, month: targetMonth,
-                items: scaledItems, companyRevenues: scaledRevenues,
-                lastUpdatedByCode: currentUser.code, lastUpdatedAt: new Date().toISOString()
-            });
-        } else {
-            const tSnap = await getDoc(targetRef);
-            let mergedItemsMap = new Map();
-            if (tSnap.exists()) (tSnap.data().items || []).forEach(i => mergedItemsMap.set(i.skuCode, i));
-            
-            scaledItems.forEach(i => {
-                if (mergedItemsMap.has(i.skuCode)) {
-                    let ext = mergedItemsMap.get(i.skuCode);
-                    ext.target += i.target; 
-                    mergedItemsMap.set(i.skuCode, ext);
-                } else mergedItemsMap.set(i.skuCode, i);
-            });
-
-            let mergedRevenues = tSnap.exists() ? { ...tSnap.data().companyRevenues } : {};
-            for (let comp in scaledRevenues) {
-                if (mergedRevenues[comp]) mergedRevenues[comp].target += scaledRevenues[comp].target;
-                else mergedRevenues[comp] = scaledRevenues[comp];
+                clonedCount++;
             }
+        });
 
-            batch.set(targetRef, {
-                salesCode: tCode, month: targetMonth,
-                items: Array.from(mergedItemsMap.values()), companyRevenues: mergedRevenues,
-                lastUpdatedByCode: currentUser.code, lastUpdatedAt: new Date().toISOString()
-            }, { merge: true });
+        if (clonedCount === 0) {
+            if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN'; }
+            return alert(`Không tìm thấy dữ liệu KPI nào trong tháng ${srcMonth} để nhân bản!`);
         }
+
+        await batch.commit();
+        closeTargetModal();
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        
+        // Tự động chuyển màn hình sang tháng mới vừa nhân bản để xem kết quả
+        window._chiTieuTargetMonth = destMonth;
+        alert(`✅ Đã nhân bản thành công KPI của ${clonedCount} nhân viên sang tháng ${destMonth}!`);
+        calculateAndRenderTargets();
+
+    } catch (e) {
+        if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN'; }
+        alert("Lỗi nhân bản hàng loạt: " + e.message);
     }
-
-    await batch.commit();
-    closeTargetModal();
-    if(typeof playSystemSound === 'function') playSystemSound('success');
-    alert(`✅ Đã nhân bản thành công chỉ tiêu cho ${targetUsers.length} nhân viên sang tháng ${targetMonth}!`);
-    if (typeof calculateAndRenderTargets === 'function') calculateAndRenderTargets();
-
-  } catch (e) {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN';
-    alert("Lỗi khi nhân bản: " + e.message);
-  }
 };
-
 window.exportKpiExcel = async function() {
-    const rawMonth = window._chiTieuTargetMonth; 
+    const rawMonth = window._chiTieuTargetMonth; // Lấy tháng dạng "2026-09"
     let formattedMonth = rawMonth;
     if (rawMonth && rawMonth.includes('-')) {
         const parts = rawMonth.split('-'); 
-        formattedMonth = `${parts[1]}/${parts[0]}`; 
+        formattedMonth = `${parts[1]}/${parts[0]}`; // Chuyển thành "09/2026"
     }
 
     const targetSalesCode = window._chiTieuTargetSalesCode; 
+    
     const btn = document.querySelector('button[onclick="exportKpiExcel()"]');
     if (btn) {
         btn.disabled = true;
@@ -9500,18 +8946,7 @@ window.exportKpiExcel = async function() {
                             const rev = Number(item.qty || 0) * price;
                             const skuKey = String(item.code || item.id || '').toUpperCase();
 
-                            let compCode = 'KHAC';
-                            if (skuKey.startsWith('11') || skuKey.includes('TLSG')) compCode = '11';
-                            else {
-                                let m = skuKey.match(/^\[(.*?)\]/);
-                                if (m) compCode = m[1].trim();
-                                else {
-                                    let pts = skuKey.split(/[-_]/);
-                                    if (pts.length > 1) compCode = pts[0].trim();
-                                    else if (skuKey.length >= 2) compCode = skuKey.substring(0, 2);
-                                }
-                            }
-                            
+                            const compCode = getCompCodeFromProductCode(skuKey);
                             compActualRevenues[compCode] = (compActualRevenues[compCode] || 0) + rev;
 
                             if (!userActuals[skuKey]) {
@@ -9532,7 +8967,7 @@ window.exportKpiExcel = async function() {
 
                 if (tRev === 0 && aRev === 0) return;
 
-                let foundComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu||'').toUpperCase() === String(compCode).toUpperCase()) : null;
+                let foundComp = companyList.find(c => String(c.maCtu||'').toUpperCase() === String(compCode).toUpperCase());
                 let cName = foundComp ? foundComp.tenCtu : (cTargetObj.compName || compCode);
 
                 let pctText = '0%';
@@ -9571,27 +9006,16 @@ window.exportKpiExcel = async function() {
 
                 if (tQty === 0 && aQty === 0) return; 
 
-                let compCode = 'KHAC';
-                if (skuKey.startsWith('11') || skuKey.includes('TLSG')) compCode = '11';
-                else {
-                    let m = skuKey.match(/^\[(.*?)\]/);
-                    if (m) compCode = m[1].trim();
-                    else {
-                        let pts = skuKey.split(/[-_]/);
-                        if (pts.length > 1) compCode = pts[0].trim();
-                        else if (skuKey.length >= 2) compCode = skuKey.substring(0, 2);
-                    }
-                }
-                            
-                let foundComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu||'').toUpperCase() === String(compCode).toUpperCase()) : null;
-                let cName = foundComp ? foundComp.tenCtu : compCode;
+                let cCode = getCompCodeFromProductCode(skuKey);
+                let foundComp = companyList.find(c => String(c.maCtu||'').toUpperCase() === String(cCode).toUpperCase());
+                let cName = foundComp ? foundComp.tenCtu : cCode;
                 let sNameFull = t.skuName || a.skuName || skuKey;
 
                 let pctText = '0%';
                 if (tQty > 0) {
                     pctText = ((aQty / tQty) * 100).toFixed(1) + '%';
                 } else if (tQty === 0 && aQty > 0) {
-                    pctText = 'Vượt mức';
+                    pctText = 'Vượt mức (Không giao KPI)';
                 }
 
                 const formatNum = (num) => Number.isInteger(Number(num)) ? Number(num) : Number(Number(num).toFixed(2));
@@ -9654,8 +9078,17 @@ window.exportKpiExcel = async function() {
         const worksheet = XLSX.utils.json_to_sheet(exportData);
         
         worksheet['!cols'] = [
-            {wch: 10}, {wch: 22}, {wch: 12}, {wch: 35}, {wch: 18}, {wch: 40}, 
-            {wch: 16}, {wch: 18}, {wch: 25}, {wch: 18}, {wch: 20}  
+            {wch: 10}, 
+            {wch: 22}, 
+            {wch: 12}, 
+            {wch: 35}, 
+            {wch: 18}, 
+            {wch: 40}, 
+            {wch: 16}, 
+            {wch: 18}, 
+            {wch: 25}, 
+            {wch: 18}, 
+            {wch: 20}  
         ];
 
         const workbook = XLSX.utils.book_new();
@@ -9663,7 +9096,7 @@ window.exportKpiExcel = async function() {
         
         const fileNameSuffix = (!targetSalesCode || targetSalesCode === 'ALL') ? "Toan_Cong_Ty" : targetSalesCode;
         XLSX.writeFile(workbook, `BaoCao_KPI_${fileNameSuffix}_Thang_${rawMonth}.xlsx`);
-        if(typeof playSystemSound === 'function') playSystemSound('success');
+        playSystemSound('success');
 
     } catch (e) {
         alert("Lỗi xuất Excel: " + e.message);
@@ -9674,6 +9107,548 @@ window.exportKpiExcel = async function() {
         }
     }
 };
+// ==========================================
+// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V5 (ANTI-BUG & NO LAG)
+// ==========================================
+window._masterKpiState = {
+  totalTarget: 0,
+  companies: [], 
+  salesAllocations: { initialized: false }
+};
+
+window.openTargetModal = function() {
+  try {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+      return alert("Chỉ quản lý mới có quyền thiết lập chỉ tiêu tổng!");
+    }
+    // Khởi tạo lại rổ dữ liệu trống mỗi khi mở form
+    window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: { initialized: false } };
+    renderMasterKpiStep1();
+  } catch (error) {
+    alert("Lỗi khi mở form thiết lập: " + error.message);
+    console.error(error);
+  }
+};
+
+window.closeTargetModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
+};
+
+// ================= BƯỚC 1: KHAI BÁO SỐ TỔNG & CHIA CHO CÔNG TY =================
+window.renderMasterKpiStep1 = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return alert("Không tìm thấy container Modal!");
+  
+  let compHtml = window._masterKpiState.companies.map((c, cIdx) => `
+    <div style="background:var(--card-bg); border:1px solid rgba(37,99,235,0.2); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="font-weight:900; color:var(--primary); font-size:16px; text-transform:uppercase;">
+          <i class="fa-solid fa-building"></i> [${c.compCode}] ${c.compName}
+        </div>
+        <button type="button" class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})" title="Xóa công ty này"><i class="fa-solid fa-trash"></i></button>
+      </div>
+      
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">Ngân sách giao cho công ty này (VNĐ):</label>
+        <input type="text" id="mkpi_comp_${cIdx}" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" 
+               oninput="handleMkpiCompInput(${cIdx}, this.value)" 
+               placeholder="VD: 20,000,000,000" 
+               style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); font-weight:900; font-size:16px; color:var(--rose); outline:none; transition:0.2s;"
+               onfocus="this.style.borderColor='var(--rose)'; this.style.boxShadow='0 0 0 3px rgba(225,29,72,0.1)'"
+               onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none'">
+      </div>
+      
+      <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:12px; border:1px dashed rgba(37,99,235,0.3);">
+         <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> SKU Trọng tâm bắt buộc:</div>
+         
+         <div id="mkpi_sku_list_${cIdx}" style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+           ${c.focusSkus.length === 0 ? '<div style="font-size:12px; color:var(--text-muted); font-style:italic;">Chưa thêm mã hàng nào.</div>' : ''}
+           ${c.focusSkus.map((sku, sIdx) => `
+              <div style="display:flex; gap:8px; align-items:center;">
+                 <div style="flex:1; font-size:13px; font-weight:800; background:#fff; border:1px solid var(--card-border); padding:10px 12px; border-radius:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                   <span style="color:var(--primary);">[${sku.skuCode}]</span>${sku.skuName}
+                 </div>
+                 <input type="text" inputmode="numeric" value="${sku.qty || ''}" 
+                        oninput="handleMkpiSkuInput(${cIdx},${sIdx}, this.value)" 
+                        placeholder="Số thùng" 
+                        style="width:90px; font-weight:900; border-radius:8px; border:1px solid var(--card-border); padding:10px; text-align:center; color:var(--rose); outline:none; margin:0;">
+                 <button type="button" class="btn btn-red btn-sm" onclick="removeCompSku(${cIdx},${sIdx})" style="padding:10px 14px; border-radius:8px;"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+           `).join('')}
+         </div>
+
+         <!-- Tìm kiếm SKU thông minh -->
+         <div style="position:relative;">
+           <input type="text" id="mkpi_search_${cIdx}" placeholder="🔍 Gõ mã hoặc tên SP để thêm vào..." 
+                  oninput="searchMkpiSku(${cIdx}, this.value)" 
+                  autocomplete="off" 
+                  style="width:100%; padding:10px 14px; font-size:13px; font-weight:800; border-radius:8px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
+           <div id="mkpi_res_${cIdx}" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:180px; overflow-y:auto; border:1px solid var(--card-border); border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
+         </div>
+      </div>
+    </div>
+  `).join('');
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:999999;">
+      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
+        
+        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
+          <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-bullseye"></i> BƯỚC 1: KHAI BÁO TỔNG CHỈ TIÊU</h3>
+          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="padding:8px 16px; border-radius:8px; font-weight:800;">Đóng</button>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto; padding:20px;">
+           <div style="background:var(--card-bg); padding:20px; border-radius:16px; border:2px solid var(--amber); margin-bottom:20px; box-shadow:0 8px 20px rgba(245,158,11,0.05);">
+              <label style="font-size:14px; font-weight:900; color:var(--amber); display:block; margin-bottom:8px;">1. TỔNG DOANH SỐ CẦN GIAO THÁNG NÀY (VNĐ):</label>
+              <input type="text" id="mkpi_total" value="${window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : ''}" 
+                     oninput="handleMkpiTotalInput(this.value)" 
+                     placeholder="VD: 50,000,000,000" 
+                     style="width:100%; padding:16px; font-size:24px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:12px; border:1px solid rgba(225,29,72,0.2); margin:0; text-align:center; outline:none; transition:0.2s;"
+                     onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
+           </div>
+
+           <div style="margin-bottom:14px;">
+              <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">2. TÌM VÀ CHỌN CÔNG TY ĐỂ CHIA SỐ:</div>
+              <!-- Thanh tìm kiếm Công ty thông minh -->
+              <div style="position:relative;">
+                 <input type="text" id="mkpi_search_comp_input" placeholder="🔍 Gõ mã hoặc tên công ty để thêm vào danh sách phân bổ..." 
+                        oninput="searchMkpiComp(this.value)" 
+                        autocomplete="off" 
+                        style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; border-radius:10px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
+                 <div id="mkpi_search_comp_res" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:200px; overflow-y:auto; border:1px solid var(--card-border); border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
+              </div>
+           </div>
+           
+           ${compHtml}
+           
+           <!-- KHOẢNG TRỐNG CHO STATUS BÁO CÁO LỆCH CHẠY NGẦM -->
+           <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;"></div>
+        </div>
+
+        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
+           <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; box-shadow:0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndGoToStep2()">
+              TIẾP TỤC: RẢI SỐ CHO NHÂN VIÊN <i class="fa-solid fa-arrow-right"></i>
+           </button>
+        </div>
+      </div>
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+  updateMkpiDiffUI(); 
+};
+
+// ================= HÀM XỬ LÝ TÌM KIẾM CÔNG TY THÔNG MINH =================
+window.searchMkpiComp = function(keyword) {
+  const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+  const resEl = document.getElementById('mkpi_search_comp_res');
+  if (!resEl) return;
+
+  if (!q) { 
+      resEl.classList.add('hidden'); 
+      return; 
+  }
+  
+  const matched = (typeof companyList !== 'undefined' ? companyList : []).filter(c => {
+      const txt = typeof removeAccents === 'function' ? removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase() : `${c.maCtu} ${c.tenCtu}`.toLowerCase();
+      return txt.includes(q);
+  }).slice(0, 15);
+
+  if (matched.length > 0) {
+      resEl.innerHTML = matched.map(c => `
+          <div onclick="addMkpiComp('${c.maCtu}', '${(c.tenCtu||'').replace(/'/g, "\\'")}')" 
+               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:14px; font-weight:800; transition:0.2s;"
+               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+              <span style="color:var(--amber);">[${c.maCtu}]</span> ${c.tenCtu}
+          </div>
+      `).join('');
+      resEl.classList.remove('hidden');
+  } else {
+      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy công ty phù hợp.</div>';
+      resEl.classList.remove('hidden');
+  }
+};
+
+window.addMkpiComp = function(maCtu, tenCtu) {
+  if (window._masterKpiState.companies.find(c => c.compCode === maCtu)) return alert("Đã thêm công ty này rồi!");
+  window._masterKpiState.companies.push({ compCode: maCtu, compName: tenCtu, target: 0, focusSkus: [] });
+  renderMasterKpiStep1();
+};
+
+window.removeKpiCompany = function(idx) { window._masterKpiState.companies.splice(idx, 1); renderMasterKpiStep1(); };
+
+// ================= HÀM XỬ LÝ GÕ PHÍM KHÔNG GÂY LAG =================
+window.handleMkpiTotalInput = function(val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.totalTarget = Number(cleanVal) || 0;
+  const el = document.getElementById('mkpi_total');
+  if(el) {
+     const formatted = window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : '';
+     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted; 
+  }
+  updateMkpiDiffUI();
+};
+
+window.handleMkpiCompInput = function(cIdx, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.companies[cIdx].target = Number(cleanVal) || 0;
+  const el = document.getElementById(`mkpi_comp_${cIdx}`);
+  if(el) {
+     const formatted = window._masterKpiState.companies[cIdx].target > 0 ? window._masterKpiState.companies[cIdx].target.toLocaleString('vi-VN') : '';
+     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
+  }
+  updateMkpiDiffUI();
+};
+
+window.handleMkpiSkuInput = function(cIdx, sIdx, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.companies[cIdx].focusSkus[sIdx].qty = Number(cleanVal) || 0;
+};
+
+window.updateMkpiDiffUI = function() {
+  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
+  const diff = window._masterKpiState.totalTarget - sumComps;
+  const alertEl = document.getElementById('mkpi_diff_alert');
+  
+  if(alertEl) {
+     if (diff === 0 && window._masterKpiState.totalTarget > 0 && window._masterKpiState.companies.length > 0) {
+         alertEl.style.background = 'rgba(16,185,129,0.1)';
+         alertEl.style.color = 'var(--emerald)';
+         alertEl.style.border = '1px solid var(--emerald)';
+         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>✅ ĐÃ KHỚP 100% SỐ TỔNG!`;
+     } else {
+         alertEl.style.background = 'rgba(245,158,11,0.1)';
+         alertEl.style.color = 'var(--amber)';
+         alertEl.style.border = '1px dashed var(--amber)';
+         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>⚠️ Đang lệch: ${(diff/1000).toLocaleString('vi-VN')}k`;
+     }
+  }
+};
+
+// ================= SMART SEARCH SKU =================
+window.searchMkpiSku = function(cIdx, keyword) {
+  const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+  const resEl = document.getElementById(`mkpi_res_${cIdx}`);
+  if (!resEl) return;
+  if (!q) { resEl.classList.add('hidden'); return; }
+  
+  const compCode = window._masterKpiState.companies[cIdx].compCode;
+  const matched = (typeof products !== 'undefined' ? products : []).filter(p => {
+      let pCodeStr = String(p.code || '').toUpperCase();
+      let extractedCtu = 'KHAC';
+      if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) extractedCtu = '11';
+      else {
+          let m = pCodeStr.match(/^\[(.*?)\]/);
+          if (m) extractedCtu = m[1].trim();
+          else {
+              let pts = pCodeStr.split(/[-_]/);
+              if (pts.length > 1) extractedCtu = pts[0].trim();
+              else if (pCodeStr.length >= 2) extractedCtu = pCodeStr.substring(0, 2);
+          }
+      }
+      if (extractedCtu !== compCode) return false;
+      const txt = typeof removeAccents === 'function' ? removeAccents(`${p.code} ${p.name}`).toLowerCase() : `${p.code} ${p.name}`.toLowerCase();
+      return txt.includes(q);
+  }).slice(0, 20);
+
+  if (matched.length > 0) {
+      resEl.innerHTML = matched.map(p => `
+          <div onclick="addMkpiSku(${cIdx}, '${p.code}', '${(p.name||'').replace(/'/g, "\\'")}')" 
+               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13px; font-weight:800; transition:0.2s;"
+               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+              <span style="color:var(--primary);">[${p.code}]</span> ${p.name}
+          </div>
+      `).join('');
+      resEl.classList.remove('hidden');
+  } else {
+      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy vật tư.</div>';
+      resEl.classList.remove('hidden');
+  }
+};
+
+window.addMkpiSku = function(cIdx, skuCode, skuName) {
+  if(!window._masterKpiState.companies[cIdx].focusSkus.find(s => s.skuCode === skuCode)) {
+      window._masterKpiState.companies[cIdx].focusSkus.push({ skuCode, skuName, qty: 0 });
+  }
+  renderMasterKpiStep1(); 
+};
+window.removeCompSku = function(cIdx, sIdx) { window._masterKpiState.companies[cIdx].focusSkus.splice(sIdx, 1); renderMasterKpiStep1(); };
+
+// ================= CHUYỂN BƯỚC 2 VÀ SỬA LỖI TOÁN HỌC (AUTO-SPLIT REMAINDER FIX) =================
+window.validateAndGoToStep2 = function() {
+  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
+  if (window._masterKpiState.totalTarget === 0) return alert("Vui lòng nhập Tổng doanh số cần giao!");
+  if (window._masterKpiState.companies.length === 0) return alert("Chưa chọn công ty nào để phân bổ!");
+  if (sumComps !== window._masterKpiState.totalTarget) {
+     return alert("Số tổng của các Công ty KHÔNG KHỚP với Tổng Chỉ Tiêu Tháng! Hãy cân đối lại cho khớp 100%.");
+  }
+  
+  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+  if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
+
+  // THUẬT TOÁN AUTO-SPLIT REMAINDER (XÓA BỎ SAI SỐ CỦA PHÉP CHIA)
+  if (!window._masterKpiState.salesAllocations.initialized) {
+     const totalSales = salesUsers.length;
+     
+     salesUsers.forEach(s => {
+       window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
+     });
+
+     window._masterKpiState.companies.forEach(c => {
+         let compAssignedTotal = 0;
+         let skuAssignedTotal = {};
+         c.focusSkus.forEach(sku => skuAssignedTotal[sku.skuCode] = 0);
+
+         salesUsers.forEach((s, idx) => {
+             // Người Sales cuối cùng trong danh sách sẽ gánh phần dôi dư để đảm bảo tổng số khớp tuyệt đối
+             if (idx === totalSales - 1) {
+                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = c.target - compAssignedTotal;
+                 c.focusSkus.forEach(sku => {
+                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = sku.qty - skuAssignedTotal[sku.skuCode];
+                 });
+             } else {
+                 let compVal = Math.round(c.target / totalSales);
+                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = compVal;
+                 compAssignedTotal += compVal;
+
+                 c.focusSkus.forEach(sku => {
+                     let skuVal = Math.round(sku.qty / totalSales);
+                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = skuVal;
+                     skuAssignedTotal[sku.skuCode] += skuVal;
+                 });
+             }
+         });
+     });
+     window._masterKpiState.salesAllocations.initialized = true;
+  }
+  
+  renderMasterKpiStep2(salesUsers);
+};
+
+// ================= BƯỚC 2: RẢI SỐ CHO SALES =================
+window.renderMasterKpiStep2 = function(salesUsers) {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  
+  let htmlContent = window._masterKpiState.companies.map(c => {
+     let skuHtml = c.focusSkus.map(sku => {
+        return `
+          <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:10px; margin-top:12px; border:1px dashed rgba(37,99,235,0.2);">
+            <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(37,99,235,0.1); padding-bottom:8px;">
+              <span>📦 [${sku.skuCode}] (Cần chia: ${sku.qty} Thùng)</span>
+              <span id="s2_diff_sku_${sku.skuCode}" style="font-size:12px; padding:3px 8px; border-radius:6px;"></span>
+            </div>
+            ${salesUsers.map(s => `
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:14px; font-weight:800;">
+                <span style="color:var(--text-main);">[${s.code}]${s.name.split(' ').pop()}</span>
+                <input type="text" inputmode="numeric" 
+                       value="${window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0}" 
+                       oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this.value)" 
+                       style="width:80px; padding:8px; text-align:center; border:1px solid var(--card-border); border-radius:8px; font-weight:900; color:var(--primary); outline:none;">
+              </div>
+            `).join('')}
+          </div>
+        `;
+     }).join('');
+
+     return `
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:16px; margin-bottom:20px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
+          <div style="font-weight:900; color:var(--text-main); font-size:16px; margin-bottom:8px; text-transform:uppercase;">
+            <i class="fa-solid fa-building" style="color:var(--primary);"></i> ${c.compName}
+          </div>
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:900; margin-bottom:14px; padding-bottom:12px; border-bottom:1px dashed var(--card-border);">
+             <span style="color:var(--text-muted);">Tổng giao: <b style="color:var(--text-main); font-size:16px;">${(c.target/1000).toLocaleString('vi-VN')}k</b></span>
+             <span id="s2_diff_comp_${c.compCode}" style="padding:4px 10px; border-radius:8px; font-size:12px;"></span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            ${salesUsers.map(s => `
+               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.01); padding:8px; border-radius:8px;">
+                  <span style="font-size:14px; font-weight:900; color:var(--text-main);">[${s.code}]${s.name.split(' ').pop()}</span>
+                  <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
+                         value="${window._masterKpiState.salesAllocations[s.code].companies[c.compCode].toLocaleString('vi-VN')}" 
+                         oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this.value)" 
+                         style="width:140px; padding:10px; text-align:right; font-weight:900; color:var(--rose); border:1px solid var(--card-border); border-radius:8px; font-size:15px; outline:none; transition:0.2s;"
+                         onfocus="this.style.borderColor='var(--rose)'" onblur="this.style.borderColor='var(--card-border)'">
+               </div>
+            `).join('')}
+          </div>
+
+          ${skuHtml}
+        </div>
+     `;
+  }).join('');
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:999999;">
+      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
+        
+        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
+          <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border);"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
+          <h3 style="font-size:16px; font-weight:900; color:var(--primary); margin:0;">BƯỚC 2: RẢI SỐ CHO NHÂN VIÊN</h3>
+          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:8px;">Đóng</button>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto; padding:20px;">
+          <div style="background:rgba(245,158,11,0.1); border:1px solid var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:10px; margin-bottom:16px; text-align:center;">
+            💡 Hệ thống đã tự động chia sao cho khớp tuyệt đối. Bạn có thể sửa thủ công. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh.
+          </div>
+          ${htmlContent}
+        </div>
+
+        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
+           <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; transition:0.3s;" onclick="validateAndSaveMasterKpiToDatabase()">
+              <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH
+           </button>
+        </div>
+      </div>
+    </div>
+  `;
+  updateStep2DiffUI();
+};
+
+window.handleStep2CompInput = function(salesCode, compCode, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].companies[compCode] = Number(cleanVal) || 0;
+  
+  const el = document.getElementById(`s2_inp_comp_${salesCode}_${compCode}`);
+  if(el) {
+      const formatted = window._masterKpiState.salesAllocations[salesCode].companies[compCode] > 0 ? window._masterKpiState.salesAllocations[salesCode].companies[compCode].toLocaleString('vi-VN') : '';
+      if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
+  }
+  updateStep2DiffUI();
+};
+
+window.handleStep2SkuInput = function(salesCode, skuCode, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
+  updateStep2DiffUI();
+};
+
+window.updateStep2DiffUI = function() {
+  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+  let isAllValid = true;
+
+  window._masterKpiState.companies.forEach(c => {
+     let sumSalesComp = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0), 0);
+     let diffComp = c.target - sumSalesComp;
+     const compLabel = document.getElementById(`s2_diff_comp_${c.compCode}`);
+     if (compLabel) {
+         if (diffComp === 0) {
+             compLabel.innerHTML = '✅ Khớp 100%';
+             compLabel.style.background = 'rgba(16,185,129,0.1)'; compLabel.style.color = 'var(--emerald)';
+         } else {
+             compLabel.innerHTML = `⚠️ Lệch: ${(diffComp/1000).toLocaleString('vi-VN')}k`;
+             compLabel.style.background = 'rgba(225,29,72,0.1)'; compLabel.style.color = 'var(--rose)';
+             isAllValid = false;
+         }
+     }
+
+     c.focusSkus.forEach(sku => {
+        let sumSalesSku = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0), 0);
+        let diffSku = sku.qty - sumSalesSku;
+        const skuLabel = document.getElementById(`s2_diff_sku_${sku.skuCode}`);
+        if (skuLabel) {
+            if (diffSku === 0) {
+                skuLabel.innerHTML = '✅ Khớp 100%';
+                skuLabel.style.background = 'rgba(16,185,129,0.1)'; skuLabel.style.color = 'var(--emerald)';
+            } else {
+                skuLabel.innerHTML = `Lệch: ${diffSku} Th`;
+                skuLabel.style.background = 'rgba(225,29,72,0.1)'; skuLabel.style.color = 'var(--rose)';
+                isAllValid = false;
+            }
+        }
+     });
+  });
+
+  const saveBtn = document.getElementById('btn_save_master_kpi');
+  if (saveBtn) {
+      if (isAllValid) {
+          saveBtn.style.opacity = '1';
+          saveBtn.style.pointerEvents = 'auto';
+          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH';
+      } else {
+          saveBtn.style.opacity = '0.5';
+          saveBtn.style.pointerEvents = 'none';
+          saveBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SỐ LIỆU ĐANG LỆCH, KHÔNG THỂ LƯU';
+      }
+  }
+};
+
+window.validateAndSaveMasterKpiToDatabase = async function() {
+  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+  
+  const btn = document.getElementById('btn_save_master_kpi');
+  if(btn) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG ĐỒNG BỘ XUỐNG THIẾT BỊ SALES...';
+    btn.disabled = true;
+  }
+
+  try {
+     const batch = typeof writeBatch !== 'undefined' ? writeBatch(db) : null;
+     if (!batch) throw new Error("Database không khả dụng.");
+     
+     salesUsers.forEach(s => {
+        const sCode = s.code;
+        const targetDocId = `tgt_${sCode}_${window._chiTieuTargetMonth}`;
+        const docRef = doc(db, "monthlyTargets", targetDocId);
+
+        let companyRevenues = {};
+        let items = [];
+
+        window._masterKpiState.companies.forEach(c => {
+           let targetRev = window._masterKpiState.salesAllocations[sCode].companies[c.compCode] || 0;
+           if (targetRev > 0) {
+              companyRevenues[c.compCode] = { target: targetRev, compName: c.compName };
+           }
+
+           c.focusSkus.forEach(sku => {
+              let qtyTarget = window._masterKpiState.salesAllocations[sCode].skus[sku.skuCode] || 0;
+              if (qtyTarget > 0) {
+                 items.push({
+                    skuCode: sku.skuCode,
+                    skuName: sku.skuName,
+                    compCode: c.compCode,
+                    compName: c.compName,
+                    target: qtyTarget,
+                    createdByUid: currentUser.uid,
+                    createdByRole: currentUser.role
+                 });
+              }
+           });
+        });
+
+        batch.set(docRef, {
+           salesCode: sCode,
+           month: window._chiTieuTargetMonth,
+           items: items,
+           companyRevenues: companyRevenues,
+           lastUpdatedByCode: currentUser.code,
+           lastUpdatedByName: currentUser.name,
+           lastUpdatedAt: new Date().toISOString()
+        });
+     });
+
+     await batch.commit();
+
+     if (typeof playSystemSound === 'function') playSystemSound('success');
+     alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${salesUsers.length} NHÂN VIÊN!`);
+     closeTargetModal();
+     if (typeof calculateAndRenderTargets === 'function') calculateAndRenderTargets(); 
+
+  } catch (err) {
+     alert("Lỗi khi đồng bộ lên hệ thống: " + err.message);
+     if(btn) {
+        btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> THỬ LẠI';
+        btn.disabled = false;
+     }
+  }
+};
+// ==========================================
 </script>
 </body>
 </html>
