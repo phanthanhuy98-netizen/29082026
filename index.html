@@ -7752,21 +7752,96 @@ window.renderChiTieuTab = async function(container) {
             const targetUser = salesUsersList.find(u => u.uid === window._chiTieuTargetSalesRouteCode);
             if (!targetUser) return '';
             const assigned = targetUser.assignedRoutes || [];
+
+            // --- THUẬT TOÁN QUÉT DỮ LIỆU TUYẾN TOÀN CÔNG TY ---
+            // 1. Tạo bản đồ xem Tuyến nào đang được ai cầm
+            let routeOwnership = {};
+            salesUsersList.forEach(u => {
+                if (u.active === false) return; // Bỏ qua nhân viên đã khóa
+                (u.assignedRoutes || []).forEach(rCode => {
+                    if(!routeOwnership[rCode]) routeOwnership[rCode] = [];
+                    routeOwnership[rCode].push({ uid: u.uid, code: u.code, name: u.name });
+                });
+            });
+
+            // 2. Tìm tuyến bị trùng của nhân viên đang chọn
+            let conflictRoutes = [];
+            assigned.forEach(rCode => {
+                if (routeOwnership[rCode] && routeOwnership[rCode].length > 1) {
+                    // Lọc bỏ chính người này ra để lấy tên những người khác đang cầm chung
+                    let others = routeOwnership[rCode].filter(x => x.uid !== targetUser.uid);
+                    conflictRoutes.push({ route: rCode, others: others });
+                }
+            });
+
+            // 3. Tìm tuyến mồ côi (Chưa ai nhận)
+            let unassignedRoutes = routeGroupsList.filter(r => !routeOwnership[r.nhomDoiTuong] || routeOwnership[r.nhomDoiTuong].length === 0);
+
             return `
               <div style="background:var(--panel-bg); border:1px solid var(--primary); border-radius:12px; padding:18px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px dashed var(--card-border); padding-bottom:10px;">
-                  <span style="font-weight:900; font-size:15px; color:var(--text-main);">2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span></span>
-                  <button class="btn btn-green" style="font-weight:900; padding:10px 18px; font-size:14px; box-shadow:0 4px 10px rgba(5,150,105,0.2); border-radius:8px;" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
+                
+                <!-- THANH HÀNH ĐỘNG -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px dashed var(--card-border); padding-bottom:12px; flex-wrap:wrap; gap:10px;">
+                  <span style="font-weight:900; font-size:15px; color:var(--text-main);">
+                    2. ĐÁNH DẤU TUYẾN CHO: <span style="color:var(--rose);">${targetUser.name}</span> 
+                    <span style="background:var(--primary); color:#fff; padding:2px 8px; border-radius:8px; font-size:12px; margin-left:6px;">Đang chọn: ${assigned.length} tuyến</span>
+                  </span>
+                  <div style="display:flex; gap:8px;">
+                    <button class="btn btn-red" style="font-weight:900; padding:10px 14px; font-size:13px; border-radius:8px;" onclick="clearAllRouteAssignments('${targetUser.uid}')"><i class="fa-solid fa-eraser"></i> XÓA TRẮNG</button>
+                    <button class="btn btn-green" style="font-weight:900; padding:10px 14px; font-size:13px; box-shadow:0 4px 10px rgba(5,150,105,0.2); border-radius:8px;" onclick="saveRouteAssignment('${targetUser.uid}')"><i class="fa-solid fa-floppy-disk"></i> LƯU PHÂN TUYẾN</button>
+                  </div>
                 </div>
+
+                <!-- BẢNG PHÂN TÍCH CHỒNG CHÉO & BỎ SÓT -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <!-- Báo cáo Trùng Tuyến -->
+                    <div style="background: ${conflictRoutes.length > 0 ? 'rgba(225, 29, 72, 0.05)' : 'rgba(16, 185, 129, 0.05)'}; border: 1px solid${conflictRoutes.length > 0 ? 'var(--rose)' : 'var(--emerald)'}; padding: 12px; border-radius: 12px;">
+                        <div style="font-size: 13px; font-weight: 900; color: ${conflictRoutes.length > 0 ? 'var(--rose)' : 'var(--emerald)'}; margin-bottom: 8px;">
+                            ${conflictRoutes.length > 0 ? '<i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO TRÙNG TUYẾN' : '<i class="fa-solid fa-check-circle"></i> KHÔNG BỊ TRÙNG TUYẾN'}
+                        </div>
+                        ${conflictRoutes.length > 0 ? `
+                            <div style="font-size: 12px; color: var(--text-main); max-height: 80px; overflow-y: auto;">
+                                ${conflictRoutes.map(c => `
+                                    <div style="margin-bottom: 4px; padding-bottom:4px; border-bottom:1px dashed rgba(225,29,72,0.2);">
+                                        <b style="color:var(--rose);">Tuyến ${c.route}:</b> Đang bị trùng với <span style="font-weight:700; color:var(--primary);">${c.others.map(x => `[${x.code}] ${x.name.split(' ').pop()}`).join(', ')}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<div style="font-size: 12px; color: var(--text-muted);">Nhân viên này đang độc quyền các tuyến đã chọn, không dẫm chân lên ai.</div>'}
+                    </div>
+
+                    <!-- Báo cáo Tuyến Mồ Côi -->
+                    <div style="background: rgba(245, 158, 11, 0.05); border: 1px dashed var(--amber); padding: 12px; border-radius: 12px;">
+                        <div style="font-size: 13px; font-weight: 900; color: var(--amber); margin-bottom: 8px;">
+                            <i class="fa-solid fa-ghost"></i> TUYẾN CHƯA PHÂN BỔ (${unassignedRoutes.length})
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-main); max-height: 80px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px;">
+                            ${unassignedRoutes.length > 0 ? unassignedRoutes.map(r => `
+                                <span style="background: var(--card-bg); border: 1px solid var(--amber); padding: 2px 6px; border-radius: 4px; font-weight: 700; color: var(--amber);">${r.nhomDoiTuong}</span>
+                            `).join('') : '<span style="color: var(--emerald); font-weight:700;">Tuyệt vời! Toàn bộ tuyến trong hệ thống đã có người phụ trách.</span>'}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LƯỚI CHECKBOX CHỌN TUYẾN -->
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; background:var(--card-bg); padding:16px; border-radius:10px; border:1px inset var(--card-border); max-height:400px; overflow-y:auto;">
-                  ${routeGroupsList.map(r => `
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:15px; font-weight:800; color:var(--text-main); padding:10px; background:rgba(0,0,0,0.02); border-radius:8px; transition:0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='rgba(0,0,0,0.02)'">
-                      <input type="checkbox" class="route-checkbox-${targetUser.uid}" value="${r.nhomDoiTuong}" ${assigned.includes(String(r.nhomDoiTuong)) ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer; margin:0; padding:0; flex-shrink:0; appearance:auto; -webkit-appearance:auto; accent-color:var(--primary);">
-                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.nhomDoiTuong} - ${r.noiDung || 'Chưa có tên'}">
-                        <b style="color:var(--primary);">${r.nhomDoiTuong}</b> ${r.noiDung ? '- ' + r.noiDung : ''}
-                      </span>
-                    </label>
-                  `).join('')}
+                  ${routeGroupsList.map(r => {
+                      const isChecked = assigned.includes(String(r.nhomDoiTuong));
+                      const isConflict = conflictRoutes.some(c => c.route === String(r.nhomDoiTuong));
+                      // Nhấn mạnh màu đỏ nếu tuyến đó đang bị trùng
+                      const labelColor = isConflict && isChecked ? 'var(--rose)' : (isChecked ? 'var(--primary)' : 'var(--text-main)');
+                      const bgHover = isConflict && isChecked ? 'rgba(225,29,72,0.05)' : 'rgba(37,99,235,0.05)';
+
+                      return `
+                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:800; color:${labelColor}; padding:10px; background:rgba(0,0,0,0.02); border-radius:8px; border: 1px solid ${isChecked ? labelColor : 'transparent'}; transition:0.2s;" onmouseover="this.style.background='${bgHover}'" onmouseout="this.style.background='rgba(0,0,0,0.02)'">
+                        <input type="checkbox" class="route-checkbox-${targetUser.uid}" value="${r.nhomDoiTuong}" ${isChecked ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer; margin:0; padding:0; flex-shrink:0; accent-color:${labelColor};">
+                        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${r.nhomDoiTuong} - ${r.noiDung || 'Chưa có tên'}">
+                          <b style="font-size:15px;">${r.nhomDoiTuong}</b> ${r.noiDung ? '- ' + r.noiDung : ''}
+                        </span>
+                        ${isConflict && isChecked ? '<i class="fa-solid fa-triangle-exclamation" title="Tuyến trùng" style="margin-left:auto;"></i>' : ''}
+                      </label>
+                    `;
+                  }).join('')}
                 </div>
               </div>
             `;
@@ -10186,6 +10261,37 @@ window.executeTransferKpi = async function(fromUid, fromSalesCode) {
 
     } catch (e) {
         alert("Lỗi khi chuyển giao: " + e.message);
+    }
+};
+  window.clearAllRouteAssignments = async function(uid) {
+    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+    
+    const confirmClear = await window.showCustomConfirm(
+        "Thu Hồi Toàn Bộ Tuyến",
+        "Bạn có chắc chắn muốn THU HỒI TOÀN BỘ tuyến của nhân viên này không?\nHành động này sẽ cập nhật ngay lập tức lên hệ thống.",
+        "fa-eraser",
+        "Đồng ý thu hồi",
+        "Hủy"
+    );
+    if (!confirmClear) return;
+
+    try {
+        await updateDoc(doc(db, "users", uid), { assignedRoutes: [] });
+        
+        // Cập nhật lại mảng local
+        const userIndex = users.findIndex(u => u.uid === uid);
+        if (userIndex > -1) users[userIndex].assignedRoutes = [];
+        if (currentUser.uid === uid) currentUser.assignedRoutes = [];
+        
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        alert("✅ Đã thu hồi toàn bộ tuyến thành công!");
+        
+        // Render lại giao diện tab
+        const activePane = document.getElementById('tabPane_chiTieu');
+        if (activePane) renderChiTieuTab(activePane);
+
+    } catch (e) {
+        alert("Lỗi khi thu hồi tuyến: " + e.message);
     }
 };
 </script>
