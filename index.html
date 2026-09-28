@@ -9198,7 +9198,7 @@ window.exportKpiExcel = async function() {
     }
 };
 // ==========================================
-// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V2 (PRO/SMOOTH)
+// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V3 (SMART SEARCH & MATH FIX)
 // ==========================================
 window._masterKpiState = {
   totalTarget: 0,
@@ -9212,6 +9212,14 @@ window.openTargetModal = function() {
   }
   window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: { initialized: false } };
   renderMasterKpiStep1();
+};
+
+window.closeTargetModal = function() {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (modalContainer) {
+    modalContainer.innerHTML = '';
+    modalContainer.classList.add('hidden');
+  }
 };
 
 // ================= BƯỚC 1: KHAI BÁO SỐ TỔNG & CHIA CHO CÔNG TY =================
@@ -9237,7 +9245,6 @@ window.renderMasterKpiStep1 = function() {
                onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none'">
       </div>
       
-      <!-- Smart Search SKU Area -->
       <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:12px; border:1px dashed rgba(37,99,235,0.3);">
          <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> SKU Trọng tâm bắt buộc:</div>
          
@@ -9257,7 +9264,7 @@ window.renderMasterKpiStep1 = function() {
            `).join('')}
          </div>
 
-         <!-- Thanh tìm kiếm thông minh thay thế Prompt -->
+         <!-- Thanh tìm kiếm SKU thông minh -->
          <div style="position:relative;">
            <input type="text" id="mkpi_search_${cIdx}" placeholder="🔍 Gõ mã hoặc tên SP để thêm vào..." 
                   oninput="searchMkpiSku(${cIdx}, this.value)" 
@@ -9270,7 +9277,7 @@ window.renderMasterKpiStep1 = function() {
   `).join('');
 
   modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
+    <div class="modal" style="display:flex; z-index:999999;">
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
         
         <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
@@ -9288,20 +9295,21 @@ window.renderMasterKpiStep1 = function() {
                      onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
            </div>
 
-           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <div style="font-size:15px; font-weight:900; color:var(--text-main);">2. CHIA CHO CÁC CÔNG TY:</div>
-              <select onchange="if(this.value) { addKpiCompany(this.value); this.value=''; }" style="padding:10px 14px; border-radius:10px; border:1px solid var(--primary); font-weight:900; font-size:13px; color:var(--primary); background:#fff; outline:none; cursor:pointer;">
-                 <option value="">+ Chọn công ty để chia số...</option>
-                 ${companyList.map(c => `<option value="${c.maCtu}">[${c.maCtu}]${c.tenCtu}</option>`).join('')}
-              </select>
+           <div style="margin-bottom:14px;">
+              <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">2. CHIA SỐ CHO CÁC CÔNG TY:</div>
+              <!-- Thanh tìm kiếm Công ty thông minh -->
+              <div style="position:relative;">
+                 <input type="text" id="mkpi_search_comp_input" placeholder="🔍 Gõ mã hoặc tên công ty để thêm vào danh sách phân bổ..." 
+                        oninput="searchMkpiComp(this.value)" 
+                        autocomplete="off" 
+                        style="width:100%; padding:12px 14px; font-size:14px; font-weight:800; border-radius:10px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
+                 <div id="mkpi_search_comp_res" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:200px; overflow-y:auto; border:1px solid var(--card-border); border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
+              </div>
            </div>
            
            ${compHtml}
            
-           <!-- KHOẢNG TRỐNG CHO STATUS BÁO CÁO LỆCH -->
-           <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;">
-              <!-- Sẽ được điền tự động bởi JS -->
-           </div>
+           <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;"></div>
         </div>
 
         <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
@@ -9312,18 +9320,52 @@ window.renderMasterKpiStep1 = function() {
       </div>
     </div>
   `;
-  modalContainer.classList.remove('hidden');
-  updateMkpiDiffUI(); // Gọi lần đầu để render thanh trạng thái
+  updateMkpiDiffUI();
 };
 
-// HÀM XỬ LÝ KHÔNG GÂY LAG (DOM MANIPULATION CHUẨN)
+// ================= HÀM XỬ LÝ TÌM KIẾM CÔNG TY THÔNG MINH =================
+window.searchMkpiComp = function(keyword) {
+  const q = removeAccents(keyword.trim().toLowerCase());
+  const resEl = document.getElementById('mkpi_search_comp_res');
+  if (!resEl) return;
+
+  if (!q) { 
+      resEl.classList.add('hidden'); 
+      return; 
+  }
+  
+  const matched = companyList.filter(c => removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase().includes(q)).slice(0, 15);
+
+  if (matched.length > 0) {
+      resEl.innerHTML = matched.map(c => `
+          <div onclick="addMkpiComp('${c.maCtu}', '${(c.tenCtu||'').replace(/'/g, "\\'")}')" 
+               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:14px; font-weight:800; transition:0.2s;"
+               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+              <span style="color:var(--amber);">[${c.maCtu}]</span> ${c.tenCtu}
+          </div>
+      `).join('');
+      resEl.classList.remove('hidden');
+  } else {
+      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy công ty phù hợp.</div>';
+      resEl.classList.remove('hidden');
+  }
+};
+
+window.addMkpiComp = function(maCtu, tenCtu) {
+  if (window._masterKpiState.companies.find(c => c.compCode === maCtu)) return alert("Đã thêm công ty này rồi!");
+  window._masterKpiState.companies.push({ compCode: maCtu, compName: tenCtu, target: 0, focusSkus: [] });
+  renderMasterKpiStep1();
+};
+
+window.removeKpiCompany = function(idx) { window._masterKpiState.companies.splice(idx, 1); renderMasterKpiStep1(); };
+
+// ================= HÀM XỬ LÝ GÕ PHÍM KHÔNG GÂY LAG =================
 window.handleMkpiTotalInput = function(val) {
   const cleanVal = val.replace(/[^0-9]/g, '');
   window._masterKpiState.totalTarget = Number(cleanVal) || 0;
   const el = document.getElementById('mkpi_total');
   if(el) {
      const formatted = window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : '';
-     // Chỉ update value nếu khác biệt để tránh con trỏ chuột nhảy lung tung
      if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted; 
   }
   updateMkpiDiffUI();
@@ -9365,30 +9407,15 @@ window.updateMkpiDiffUI = function() {
   }
 };
 
-// CÁC HÀM XỬ LÝ SỰ KIỆN THÊM/XÓA DOM (Render lại Step 1)
-window.addKpiCompany = function(maCtu) {
-  if (window._masterKpiState.companies.find(c => c.compCode === maCtu)) return alert("Đã chọn công ty này rồi!");
-  const cObj = companyList.find(c => c.maCtu === maCtu);
-  window._masterKpiState.companies.push({ compCode: maCtu, compName: cObj.tenCtu, target: 0, focusSkus: [] });
-  renderMasterKpiStep1();
-};
-window.removeKpiCompany = function(idx) { window._masterKpiState.companies.splice(idx, 1); renderMasterKpiStep1(); };
-window.removeCompSku = function(cIdx, sIdx) { window._masterKpiState.companies[cIdx].focusSkus.splice(sIdx, 1); renderMasterKpiStep1(); };
-
-// SMART SEARCH SKU BẰNG CHỮ/MÃ THAY VÌ PROMPT
+// ================= SMART SEARCH SKU =================
 window.searchMkpiSku = function(cIdx, keyword) {
   const q = removeAccents(keyword.trim().toLowerCase());
   const resEl = document.getElementById(`mkpi_res_${cIdx}`);
   if (!resEl) return;
-
-  if (!q) { 
-      resEl.classList.add('hidden'); 
-      return; 
-  }
+  if (!q) { resEl.classList.add('hidden'); return; }
   
   const compCode = window._masterKpiState.companies[cIdx].compCode;
   const matched = products.filter(p => {
-      // Chỉ tìm sản phẩm thuộc đúng mã công ty đang cấu hình
       if (getCompCodeFromProductCode(p.code) !== compCode) return false;
       return removeAccents(`${p.code} ${p.name}`).toLowerCase().includes(q);
   }).slice(0, 20);
@@ -9412,11 +9439,12 @@ window.addMkpiSku = function(cIdx, skuCode, skuName) {
   if(!window._masterKpiState.companies[cIdx].focusSkus.find(s => s.skuCode === skuCode)) {
       window._masterKpiState.companies[cIdx].focusSkus.push({ skuCode, skuName, qty: 0 });
   }
-  renderMasterKpiStep1(); // Click xong vẽ lại giao diện cập nhật list
+  renderMasterKpiStep1(); 
 };
+window.removeCompSku = function(cIdx, sIdx) { window._masterKpiState.companies[cIdx].focusSkus.splice(sIdx, 1); renderMasterKpiStep1(); };
 
 
-// KIỂM TRA ĐIỀU KIỆN TRƯỚC KHI QUA BƯỚC 2
+// ================= CHUYỂN BƯỚC 2 VÀ SỬA LỖI TOÁN HỌC (AUTO-SPLIT FIX) =================
 window.validateAndGoToStep2 = function() {
   const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
   if (window._masterKpiState.totalTarget === 0) return alert("Vui lòng nhập Tổng doanh số cần giao!");
@@ -9428,22 +9456,41 @@ window.validateAndGoToStep2 = function() {
   const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
   if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
 
-  // Tự động chia đều cho lần đầu tiên bật Bước 2
+  // Tự động chia đều cho lần đầu tiên bật Bước 2 (Thuật toán dồn phần dư cho người cuối)
   if (!window._masterKpiState.salesAllocations.initialized) {
-     let totalSales = salesUsers.length;
+     const totalSales = salesUsers.length;
+     
+     // Khởi tạo mảng trống cho toàn bộ Sales
      salesUsers.forEach(s => {
-       window._masterKpiState.salesAllocations[s.code] = {
-          name: s.name, 
-          companies: {}, 
-          skus: {}
-       };
-       window._masterKpiState.companies.forEach(c => {
-         // Auto split
-         window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = Math.round(c.target / totalSales);
-         c.focusSkus.forEach(sku => {
-           window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = Math.round(sku.qty / totalSales);
+       window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
+     });
+
+     window._masterKpiState.companies.forEach(c => {
+         let compAssignedTotal = 0;
+         let skuAssignedTotal = {};
+         c.focusSkus.forEach(sku => skuAssignedTotal[sku.skuCode] = 0);
+
+         salesUsers.forEach((s, idx) => {
+             // Nếu là người cuối cùng trong danh sách -> Nhận toàn bộ phần dư còn lại
+             if (idx === totalSales - 1) {
+                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = c.target - compAssignedTotal;
+                 c.focusSkus.forEach(sku => {
+                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = sku.qty - skuAssignedTotal[sku.skuCode];
+                 });
+             } 
+             // Nếu là người bình thường -> Chia trung bình và làm tròn
+             else {
+                 let compVal = Math.round(c.target / totalSales);
+                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = compVal;
+                 compAssignedTotal += compVal;
+
+                 c.focusSkus.forEach(sku => {
+                     let skuVal = Math.round(sku.qty / totalSales);
+                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = skuVal;
+                     skuAssignedTotal[sku.skuCode] += skuVal;
+                 });
+             }
          });
-       });
      });
      window._masterKpiState.salesAllocations.initialized = true;
   }
@@ -9451,7 +9498,7 @@ window.validateAndGoToStep2 = function() {
   renderMasterKpiStep2(salesUsers);
 };
 
-// ================= BƯỚC 2: RẢI SỐ CHO SALES (DOM MANIPULATION MƯỢT MÀ) =================
+// ================= BƯỚC 2: RẢI SỐ CHO SALES =================
 window.renderMasterKpiStep2 = function(salesUsers) {
   const modalContainer = document.getElementById('dynamicModalContainer');
   
@@ -9507,7 +9554,7 @@ window.renderMasterKpiStep2 = function(salesUsers) {
   }).join('');
 
   modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
+    <div class="modal" style="display:flex; z-index:999999;">
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
         
         <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
@@ -9518,7 +9565,7 @@ window.renderMasterKpiStep2 = function(salesUsers) {
         
         <div style="flex:1; overflow-y:auto; padding:20px;">
           <div style="background:rgba(245,158,11,0.1); border:1px solid var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:10px; margin-bottom:16px; text-align:center;">
-            💡 Mẹo: Hệ thống đã chia đều tự động. Bạn có thể gõ sửa số của từng bạn Sales. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh (Khớp 100%).
+            💡 Hệ thống đã tự động chia đều. Bạn có thể sửa thủ công. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh (Khớp tuyệt đối).
           </div>
           ${htmlContent}
         </div>
@@ -9531,10 +9578,9 @@ window.renderMasterKpiStep2 = function(salesUsers) {
       </div>
     </div>
   `;
-  updateStep2DiffUI(); // Chạy hàm kiểm tra khớp ngay khi vừa mở
+  updateStep2DiffUI();
 };
 
-// HÀM XỬ LÝ GÕ PHÍM BƯỚC 2 - KHÔNG LAG
 window.handleStep2CompInput = function(salesCode, compCode, val) {
   const cleanVal = val.replace(/[^0-9]/g, '');
   window._masterKpiState.salesAllocations[salesCode].companies[compCode] = Number(cleanVal) || 0;
@@ -9558,7 +9604,6 @@ window.updateStep2DiffUI = function() {
   let isAllValid = true;
 
   window._masterKpiState.companies.forEach(c => {
-     // Check Company Revenue
      let sumSalesComp = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0), 0);
      let diffComp = c.target - sumSalesComp;
      const compLabel = document.getElementById(`s2_diff_comp_${c.compCode}`);
@@ -9573,7 +9618,6 @@ window.updateStep2DiffUI = function() {
          }
      }
 
-     // Check SKUs
      c.focusSkus.forEach(sku => {
         let sumSalesSku = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0), 0);
         let diffSku = sku.qty - sumSalesSku;
@@ -9591,7 +9635,6 @@ window.updateStep2DiffUI = function() {
      });
   });
 
-  // Tắt/Mở nút Save
   const saveBtn = document.getElementById('btn_save_master_kpi');
   if (saveBtn) {
       if (isAllValid) {
@@ -9606,7 +9649,6 @@ window.updateStep2DiffUI = function() {
   }
 };
 
-// LƯU DB HÀNG LOẠT XUỐNG TỪNG NHÂN VIÊN
 window.validateAndSaveMasterKpiToDatabase = async function() {
   const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
   
@@ -9619,7 +9661,6 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
   try {
      const batch = writeBatch(db);
      
-     // Build payload and push to batch for each active Sales Rep
      salesUsers.forEach(s => {
         const sCode = s.code;
         const targetDocId = `tgt_${sCode}_${window._chiTieuTargetMonth}`;
@@ -9650,7 +9691,6 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
            });
         });
 
-        // Ghi đè vào database
         batch.set(docRef, {
            salesCode: sCode,
            month: window._chiTieuTargetMonth,
@@ -9667,7 +9707,7 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
      playSystemSound('success');
      alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${salesUsers.length} NHÂN VIÊN!`);
      closeTargetModal();
-     calculateAndRenderTargets(); // Làm mới dashboard ở màn hình ngoài
+     calculateAndRenderTargets(); 
 
   } catch (err) {
      alert("Lỗi khi đồng bộ lên hệ thống: " + err.message);
