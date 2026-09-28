@@ -5469,13 +5469,16 @@ ${users.map(u => `
               </div>
               <div style="font-size:15px; font-weight:800; color:var(--text-main);">${u.name}</div>
               <div style="font-size:12px; color:var(--text-muted);">📧 ${u.email} • Phân quyền: <b style="color:var(--primary); text-transform:uppercase;">${u.role || 'sales'}</b></div>
-              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
-                ${u.active !== false ? `
-                  <button class="btn btn-red btn-sm" onclick="toggleUserActive('${u.uid}', false)">Khóa tài khoản</button>
-                ` : `
-                  <button class="btn btn-green btn-sm" onclick="toggleUserActive('${u.uid}', true)">Mở khóa</button>
-                `}
-              </div>
+             <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
+    <button class="btn btn-purple btn-sm" style="font-weight:800;" onclick="openAdminChangePassModal('${u.uid}', '${u.email}', '${u.name}')">
+        <i class="fa-solid fa-key"></i> Đổi MK
+    </button>
+    ${u.active !== false ? `
+      <button class="btn btn-red btn-sm" onclick="toggleUserActive('${u.uid}', false)">Khóa tài khoản</button>
+    ` : `
+      <button class="btn btn-green btn-sm" onclick="toggleUserActive('${u.uid}', true)">Mở khóa</button>
+    `}
+  </div>
             </div>
           `).join('')}
         </div>
@@ -10366,6 +10369,90 @@ window.clearAllRouteAssignments = async function(uid) {
 
     } catch (e) {
         alert("Lỗi khi thu hồi tuyến: " + e.message);
+    }
+};
+  // ==========================================
+// ADMIN: ĐỔI MẬT KHẨU TÀI KHOẢN NHÂN VIÊN
+// ==========================================
+window.openAdminChangePassModal = function(uid, email, name) {
+    if (!currentUser || currentUser.role !== 'admin') {
+        return alert("⛔ Chỉ Admin mới có quyền ép đổi mật khẩu nhân viên!");
+    }
+    if (email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
+        return alert("⛔ Bảo vệ hệ thống: Không thể tự ý đổi mật khẩu của tài khoản Admin gốc!");
+    }
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;">
+            <div class="modal-content" style="max-width: 400px; padding: 24px; border-radius: 18px; text-align:center;">
+                <div style="font-size:36px; color:var(--purple); margin-bottom:16px;"><i class="fa-solid fa-user-shield"></i></div>
+                <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:8px;">Admin Cấp Lại Mật Khẩu</h3>
+                <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">Tài khoản: <b style="color:var(--primary);">${name} (${email})</b></p>
+                
+                <input type="text" id="adminNewPassInput" placeholder="Nhập mật khẩu mới (ít nhất 6 ký tự)..." autocomplete="off"
+                       style="width:100%; padding:14px; font-size:15px; font-weight:700; text-align:center; border-radius:10px; border:2px solid var(--purple); color:var(--text-main); outline:none; margin-bottom:20px;">
+                
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-purple" style="flex:1; padding:12px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px;" onclick="submitAdminChangePass('${uid}')">
+                        <i class="fa-solid fa-floppy-disk"></i> LƯU MẬT KHẨU BẮT BUỘC
+                    </button>
+                    <button class="btn" style="flex:1; padding:12px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden'); document.getElementById('dynamicModalContainer').innerHTML='';">
+                        HỦY
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    modalContainer.classList.remove('hidden');
+};
+
+window.submitAdminChangePass = async function(oldUid) {
+    const newPass = document.getElementById('adminNewPassInput').value.trim();
+    if (newPass.length < 6) return alert("Mật khẩu phải có ít nhất 6 ký tự theo chuẩn bảo mật!");
+
+    const btn = document.querySelector('.modal-content .btn-purple');
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG XỬ LÝ...'; btn.disabled = true; }
+
+    try {
+        // 1. Lấy thông tin tài khoản nhân viên cũ từ Database
+        const oldUserDocRef = doc(db, "users", oldUid);
+        const oldUserSnap = await getDoc(oldUserDocRef);
+        if (!oldUserSnap.exists()) throw new Error("Không tìm thấy dữ liệu nhân viên này trong CSDL!");
+        const oldData = oldUserSnap.data();
+
+        // 2. Tạo một email ảo mới tinh để tránh trùng lặp hệ thống Auth
+        const newFakeEmail = `${oldData.code.toLowerCase()}_reset_${Date.now()}@dms.com`;
+
+        // 3. TẠO TÀI KHOẢN MỚI NGẦM (Dùng secondaryAuth để Admin không bị văng đăng xuất)
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, newFakeEmail, newPass);
+        const newUid = cred.user.uid;
+        await secondaryAuth.signOut(); // Đóng kết nối phụ ngay lập tức
+
+        // 4. Chép nguyên xi Data cũ sang nhà mới
+        const newData = {
+            ...oldData,         // Giữ nguyên Tên, Mã NV, Role, Tuyến...
+            uid: newUid,        // Cập nhật ID hệ thống mới
+            email: newFakeEmail // Cập nhật email đăng nhập mới
+        };
+        await setDoc(doc(db, "users", newUid), newData);
+
+        // 5. Xóa Database cũ để ngăn nhân viên dùng lại mật khẩu cũ
+        await deleteDoc(oldUserDocRef);
+
+        // 6. Cập nhật lại giao diện ngay lập tức
+        users = users.filter(u => u.uid !== oldUid);
+        users.push(newData);
+
+        alert(`✅ Đổi mật khẩu thành công!\nNhân viên cứ dùng Mã [${oldData.code}] và Mật khẩu mới để đăng nhập bình thường. Toàn bộ Chỉ tiêu và Đơn hàng cũ vẫn còn nguyên!`);
+        document.getElementById('dynamicModalContainer').classList.add('hidden');
+        
+        renderUI();
+
+    } catch (e) {
+        alert("Lỗi khi cấp lại mật khẩu: " + e.message);
+    } finally {
+        if (btn) { btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU MẬT KHẨU BẮT BUỘC'; btn.disabled = false; }
     }
 };
 </script>
