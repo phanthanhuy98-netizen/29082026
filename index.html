@@ -7824,17 +7824,17 @@ window.renderChiTieuTab = async function(container) {
         </div>
 
      ${isAdminOrManager ? `
-  <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-      <button class="btn btn-amber" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:12px;">
+      <button class="btn btn-amber" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
           <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP MỚI
       </button>
-      <button class="btn btn-blue" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openMonthlyCloneModal()">
-          <i class="fa-solid fa-calendar-days"></i> NHÂN BẢN THÁNG MỚI
+      <button class="btn btn-blue" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openMonthlyCloneModal()">
+          <i class="fa-solid fa-calendar-days"></i> NHÂN BẢN
       </button>
-      <button class="btn btn-red" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(225, 29, 72, 0.3);" onclick="deleteAllKpiForCurrentMonth()">
-          <i class="fa-solid fa-trash-can"></i> XÓA TOÀN BỘ KPI
+      <button class="btn btn-red" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(225, 29, 72, 0.3);" onclick="deleteAllKpiForCurrentMonth()">
+          <i class="fa-solid fa-trash-can"></i> XÓA TOÀN BỘ
       </button>
-      <button class="btn btn-green" style="flex:1; min-width:110px; justify-content:center; font-weight:900; font-size:13px; padding:12px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
+      <button class="btn btn-green" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
           <i class="fa-solid fa-file-excel"></i> XUẤT EXCEL
       </button>
   </div>
@@ -8034,7 +8034,76 @@ function findProductObj(skuCode) {
   });
   return found || null;
 }
+window.editIndividualCompRevKpi = async function(compCode, currentRev) {
+    const targetSalesCode = window._chiTieuTargetSalesCode;
+    if (!targetSalesCode || targetSalesCode === 'ALL') return alert("Vui lòng chọn cụ thể một nhân viên ở danh sách bên trên để điều chỉnh!");
 
+    let newVal = prompt(`Nhập chỉ tiêu DOANH SỐ (VNĐ) mới cho công ty [${compCode}]:`, currentRev);
+    if (newVal === null) return;
+    
+    let numVal = Number(newVal.replace(/[^0-9]/g, ''));
+    if (isNaN(numVal)) return alert("Số tiền không hợp lệ!");
+
+    try {
+        const targetDocId = `tgt_${targetSalesCode}_${window._chiTieuTargetMonth}`;
+        const docRef = doc(db, "monthlyTargets", targetDocId);
+        const tSnap = await getDoc(docRef);
+
+        if (tSnap.exists()) {
+            let data = tSnap.data();
+            let companyRevenues = data.companyRevenues || {};
+            if (!companyRevenues[compCode]) {
+                 companyRevenues[compCode] = { compName: compCode, target: 0 };
+            }
+            companyRevenues[compCode].target = numVal;
+
+            await updateDoc(docRef, { companyRevenues: companyRevenues });
+            if (typeof triggerHaptic === 'function') triggerHaptic(20);
+            alert("✅ Đã cập nhật chỉ tiêu doanh số thành công! Tổng công ty sẽ tự động thay đổi.");
+            calculateAndRenderTargets(); 
+        } else {
+            alert("Chưa có bản ghi chỉ tiêu cho nhân viên này trong tháng!");
+        }
+    } catch (e) {
+        alert("Lỗi: " + e.message);
+    }
+};
+
+window.editIndividualSkuKpi = async function(skuCode, currentQty) {
+    const targetSalesCode = window._chiTieuTargetSalesCode;
+    if (!targetSalesCode || targetSalesCode === 'ALL') return alert("Vui lòng chọn cụ thể một nhân viên ở danh sách bên trên để điều chỉnh!");
+
+    let newVal = prompt(`Nhập chỉ tiêu SẢN LƯỢNG (Thùng) mới cho mã [${skuCode}]:`, currentQty);
+    if (newVal === null) return;
+    
+    let numVal = Number(newVal.replace(/[^0-9.]/g, ''));
+    if (isNaN(numVal)) return alert("Số lượng không hợp lệ!");
+
+    try {
+        const targetDocId = `tgt_${targetSalesCode}_${window._chiTieuTargetMonth}`;
+        const docRef = doc(db, "monthlyTargets", targetDocId);
+        const tSnap = await getDoc(docRef);
+
+        if (tSnap.exists()) {
+            let data = tSnap.data();
+            let items = data.items || [];
+            
+            let foundItem = items.find(i => i.skuCode === skuCode);
+            if (foundItem) {
+                foundItem.target = numVal;
+            } else {
+                return alert("Mã hàng này chưa được giao chỉ tiêu ban đầu. Vui lòng vào 'Thiết Lập Mới' để giao thêm!");
+            }
+
+            await updateDoc(docRef, { items: items });
+            if (typeof triggerHaptic === 'function') triggerHaptic(20);
+            alert("✅ Đã cập nhật chỉ tiêu sản lượng thành công! Tổng công ty sẽ tự động thay đổi.");
+            calculateAndRenderTargets(); 
+        }
+    } catch (e) {
+        alert("Lỗi: " + e.message);
+    }
+};
 window.calculateAndRenderTargets = async function() {
   const container = document.getElementById('targetDashboardContainer');
   if (!container) return;
@@ -8395,6 +8464,7 @@ window._activeGroupedKPI = activeGrouped;
       else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient)'; }
 
       const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const canEditIndividual = isAdminOrManager && !isTongQuanTab && window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL';
       const formatQtySmart = (num) => Number.isInteger(Number(num||0)) ? Number(num||0).toString() : Number(num||0).toFixed(1);
 
       return `
@@ -8421,10 +8491,10 @@ window._activeGroupedKPI = activeGrouped;
                      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:10px;">
                         <div>
                             <div style="font-size:11px; font-weight:900; color:var(--amber); margin-bottom:4px; letter-spacing:0.5px;">💰 MỤC TIÊU DOANH SỐ</div>
-                            <div style="font-size:17px; font-weight:900; color:var(--text-main);">
-                                <span style="color:${revColor};">${(g.revActual/1000).toLocaleString('vi-VN')}k</span> 
-                                <span style="color:var(--text-muted); font-size:14px;">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}k</span>
-                            </div>
+                           <div style="font-size:17px; font-weight:900; color:var(--text-main);">
+    <span style="color:${revColor};">${(g.revActual/1000).toLocaleString('vi-VN')}k</span> 
+    <span style="color:var(--text-muted); font-size:14px;">/ ${(g.revTarget/1000).toLocaleString('vi-VN')}k</span>${canEditIndividual ? `<button class="btn btn-sm" onclick="event.stopPropagation(); editIndividualCompRevKpi('${compCode}', ${g.revTarget})" style="margin-left:6px; padding:3px 8px; font-size:11px; background:var(--amber); color:#fff; border-radius:6px; vertical-align:middle;"><i class="fa-solid fa-pen"></i> Sửa</button>` : ''}
+</div>
                         </div>
                         <div style="font-size:20px; font-weight:900; color:${revColor};">${formatQtySmart(revPct)}%</div>
                      </div>
@@ -8512,11 +8582,12 @@ window._activeGroupedKPI = activeGrouped;
                           </div>
                           
                           <div style="display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 12px; gap:10px;">
-                              <div style="flex:1; background:var(--card-bg); padding:10px 12px; border-radius:10px; border:1px dashed var(--card-border); display:flex; flex-direction:column; justify-content:center;">
-                                <span style="color: var(--text-muted); font-size:11px; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">MỤC TIÊU</span>
-                                <b style="color: var(--text-main); font-size:16px;">${formatRevSku(sku.targetRev)}k</b>
-                                <span style="color: var(--text-muted); font-size:12px; font-weight:700; margin-top:2px;">${formatQtySmart(sku.target)} Thùng</span>
-                              </div>
+                             <div style="flex:1; background:var(--card-bg); padding:10px 12px; border-radius:10px; border:1px dashed var(--card-border); display:flex; flex-direction:column; justify-content:center; position:relative;">
+  <span style="color: var(--text-muted); font-size:11px; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">MỤC TIÊU</span>
+  <b style="color: var(--text-main); font-size:16px;">${formatRevSku(sku.targetRev)}k</b>
+  <span style="color: var(--text-muted); font-size:12px; font-weight:700; margin-top:2px;">${formatQtySmart(sku.target)} Thùng</span>
+  ${canEditIndividual ? `<button class="btn btn-sm" onclick="event.stopPropagation(); editIndividualSkuKpi('${sku.code}', ${sku.target})" style="position:absolute; top:6px; right:6px; padding:3px 8px; font-size:10px; background:var(--amber); color:#fff; border-radius:6px;"><i class="fa-solid fa-pen"></i> Sửa</button>` : ''}
+</div>
                               <div style="flex:1; background:var(--card-bg); padding:10px 12px; border-radius:10px; border:1px solid ${sColor}; display:flex; flex-direction:column; justify-content:center; position:relative;">
                                 <div style="position:absolute; top:-8px; right:-8px; background:${sColor}; color:#fff; font-size:11px; font-weight:900; padding:3px 8px; border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.15);">${formatQtySmart(skuPct)}%</div>
                                 <span style="color: ${sColor}; font-size:11px; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">THỰC ĐẠT</span>
