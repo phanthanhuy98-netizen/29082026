@@ -7810,12 +7810,18 @@ window.renderChiTieuTab = async function(container) {
 
             <button class="btn btn-sm" onclick="changeChiTieuMonthStep(1)" style="padding:12px 16px; border-radius:10px; font-weight:900; font-size:15px;" title="Tháng sau">▶</button>
           </div>
-
-        ${isAdminOrManager ? `
-            <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; min-width:220px; margin:0; padding:14px; font-weight:900; font-size:15px; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); outline:none;">
-              <option value="ALL" ${!window._chiTieuTargetSalesCode || window._chiTieuTargetSalesCode === 'ALL' ? 'selected' : ''}>🔥 TẤT CẢ NHÂN VIÊN</option>
-              ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
-            </select>
+${isAdminOrManager ? `
+            <div style="display:flex; flex:1; min-width:220px; gap:8px;">
+                <select onchange="window._chiTieuTargetSalesCode = this.value; renderChiTieuTab(document.getElementById('tabPane_chiTieu'));" style="flex:1; margin:0; padding:14px; font-weight:900; font-size:15px; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); outline:none;">
+                  <option value="ALL" ${!window._chiTieuTargetSalesCode || window._chiTieuTargetSalesCode === 'ALL' ? 'selected' : ''}>🔥 TẤT CẢ NHÂN VIÊN</option>
+                  ${salesUsersList.map(u => `<option value="${u.code}" ${window._chiTieuTargetSalesCode === u.code ? 'selected' : ''}>[${u.code}]${u.name}</option>`).join('')}
+                </select>
+                ${window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL' ? `
+                <button class="btn btn-purple" onclick="openTransferKpiModal('${window._chiTieuTargetSalesCode}')" title="Chuyển giao chỉ tiêu & Tuyến cho người khác khi nhân viên này nghỉ việc" style="padding:0 16px; border-radius:10px; font-weight:900; box-shadow:0 4px 10px rgba(124,58,237,0.3);">
+                    <i class="fa-solid fa-people-arrows"></i> BÀN GIAO
+                </button>
+                ` : ''}
+            </div>
           ` : `
             <div style="flex:1; min-width:220px; padding:14px; font-size:15px; font-weight:900; color:var(--primary); background:rgba(37, 99, 235, 0.05); border-radius:10px; border:1px solid rgba(37, 99, 235, 0.2); display:flex; align-items:center; justify-content:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
               <i class="fa-solid fa-user-tie" style="margin-right:8px;"></i> [${currentUser.code}] ${currentUser.name}
@@ -10053,7 +10059,130 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
      }
   }
 };
+  // ==========================================
+// TÍNH NĂNG CHUYỂN GIAO TUYẾN & CHỈ TIÊU KHI NHÂN VIÊN NGHỈ NGANG
 // ==========================================
+window.openTransferKpiModal = function(fromSalesCode) {
+    const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.code !== fromSalesCode && u.active !== false) : [];
+    const fromUser = users.find(u => u.code === fromSalesCode);
+    
+    if (!fromUser) return alert("Không tìm thấy thông tin nhân viên bàn giao!");
+    if (salesUsers.length === 0) return alert("Không có nhân viên Sales nào đang hoạt động để nhận bàn giao!");
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;">
+            <div class="modal-content" style="max-width: 450px; padding: 24px; border-radius: 18px;">
+                <div style="text-align:center; font-size:36px; color:#7C3AED; margin-bottom:16px;"><i class="fa-solid fa-people-arrows"></i></div>
+                <h3 style="font-size:18px; font-weight:900; color:var(--text-main); margin-bottom:8px; text-align:center;">Bàn Giao Tuyến & Chỉ Tiêu</h3>
+                <p style="font-size:13px; color:var(--text-muted); margin-bottom:20px; line-height:1.5; text-align:center;">
+                    Thao tác này sẽ cộng dồn toàn bộ chỉ tiêu chưa hoàn thành và Tuyến của <b style="color:var(--rose);">[${fromUser.code}] ${fromUser.name}</b> sang cho người tiếp nhận.
+                </p>
+                
+                <label style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:6px; display:block;">Chọn người nhận bàn giao:</label>
+                <select id="transferToSalesCode" style="width:100%; padding:14px; font-size:15px; font-weight:900; color:var(--text-main); border-radius:10px; border:2px solid var(--primary); outline:none; margin-bottom:20px; background:var(--bg-dark);">
+                    <option value="" disabled selected>-- Chọn nhân viên tiếp nhận --</option>
+                    ${salesUsers.map(u => `<option value="${u.code}">[${u.code}]${u.name}</option>`).join('')}
+                </select>
+                
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-purple" style="flex:1; padding:14px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px;" onclick="executeTransferKpi('${fromUser.uid}', '${fromSalesCode}')">
+                        <i class="fa-solid fa-bolt"></i> CHUYỂN GIAO NGAY
+                    </button>
+                    <button class="btn" style="padding:14px 20px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden'); document.getElementById('dynamicModalContainer').innerHTML='';">
+                        HỦY
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    modalContainer.classList.remove('hidden');
+};
+
+window.executeTransferKpi = async function(fromUid, fromSalesCode) {
+    const toSalesCode = document.getElementById('transferToSalesCode').value;
+    if (!toSalesCode) return alert("Vui lòng chọn người tiếp nhận!");
+
+    const toUser = users.find(u => u.code === toSalesCode);
+    if (!toUser) return alert("Lỗi không tìm thấy dữ liệu người nhận!");
+
+    const confirmTransfer = await window.showCustomConfirm(
+        "Xác Nhận Bàn Giao", 
+        `Bạn có chắc chắn muốn chuyển toàn bộ Chỉ tiêu và Tuyến của [${fromSalesCode}] sang cho [${toSalesCode}] không?\nLưu ý: Chỉ tiêu sẽ được cộng dồn, phần thực đạt cũ vẫn giữ nguyên ở tên người cũ để tính lương.`, 
+        "fa-triangle-exclamation", 
+        "Đồng ý Chuyển", 
+        "Hủy"
+    );
+    if (!confirmTransfer) return;
+
+    try {
+        const batch = writeBatch(db);
+        const targetMonth = window._chiTieuTargetMonth;
+        
+        // 1. Chuyển giao Tuyến (Cộng dồn mảng Route)
+        const fromUserDoc = users.find(u => u.uid === fromUid);
+        if (fromUserDoc && fromUserDoc.assignedRoutes && fromUserDoc.assignedRoutes.length > 0) {
+            let toAssignedRoutes = toUser.assignedRoutes || [];
+            // Merge mảng tuyến và lọc trùng
+            let mergedRoutes = Array.from(new Set([...toAssignedRoutes, ...fromUserDoc.assignedRoutes]));
+            batch.update(doc(db, "users", toUser.uid), { assignedRoutes: mergedRoutes });
+            batch.update(doc(db, "users", fromUid), { assignedRoutes: [] }); // Gỡ tuyến người cũ
+        }
+
+        // 2. Chuyển giao Chỉ Tiêu (Cộng dồn target)
+        const fromTargetRef = doc(db, "monthlyTargets", `tgt_${fromSalesCode}_${targetMonth}`);
+        const toTargetRef = doc(db, "monthlyTargets", `tgt_${toSalesCode}_${targetMonth}`);
+        
+        const fromSnap = await getDoc(fromTargetRef);
+        const toSnap = await getDoc(toTargetRef);
+
+        if (fromSnap.exists()) {
+            let fromData = fromSnap.data();
+            let toData = toSnap.exists() ? toSnap.data() : { salesCode: toSalesCode, month: targetMonth, items: [], companyRevenues: {} };
+            
+            // a. Cộng dồn items (Sản lượng)
+            (fromData.items || []).forEach(fItem => {
+                let match = toData.items.find(t => t.skuCode === fItem.skuCode);
+                if (match) {
+                    match.target += Number(fItem.target || 0); // Cộng dồn
+                } else {
+                    toData.items.push({...fItem}); // Thêm mới
+                }
+            });
+
+            // b. Cộng dồn companyRevenues (Doanh số công ty)
+            let fRevs = fromData.companyRevenues || {};
+            let tRevs = toData.companyRevenues || {};
+            Object.keys(fRevs).forEach(cCode => {
+                if (tRevs[cCode]) {
+                    tRevs[cCode].target += Number(fRevs[cCode].target || 0);
+                } else {
+                    tRevs[cCode] = {...fRevs[cCode]};
+                }
+            });
+            toData.companyRevenues = tRevs;
+            
+            // Cập nhật lên Database
+            batch.set(toTargetRef, toData, { merge: true });
+            // Cập nhật người cũ thành 0 để không bị ảo số tổng công ty
+            batch.update(fromTargetRef, { items: [], companyRevenues: {} });
+        }
+
+        await batch.commit();
+
+        // 3. Ẩn Modal và Cập nhật giao diện
+        document.getElementById('dynamicModalContainer').classList.add('hidden');
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        alert(`✅ Đã chuyển giao thành công toàn bộ Tuyến và Chỉ tiêu sang cho ${toUser.name}! Bạn có thể vào tab Nhân viên để Khóa tài khoản của người nghỉ.`);
+        
+        // Chọn lại tên người nhận để xem kết quả
+        window._chiTieuTargetSalesCode = toSalesCode;
+        calculateAndRenderTargets();
+
+    } catch (e) {
+        alert("Lỗi khi chuyển giao: " + e.message);
+    }
+};
 </script>
 </body>
 </html>
