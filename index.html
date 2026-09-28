@@ -345,8 +345,7 @@
         <label style="font-size:12px; font-weight:700; color:#CBD5E1; display:block; margin-bottom:4px;">Mã nhân viên / Email:</label>
         <div class="input-icon-group">
           <i class="fa-solid fa-user"></i>
-          <!-- Đã chặn tự động viết hoa và tự động sửa từ -->
-          <input type="text" id="logUser" placeholder="Nhập mã NV hoặc email..." required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+          <input type="text" id="logUser" placeholder="Nhập mã NV hoặc email..." required autocomplete="username">
         </div>
 
         <label style="font-size:12px; font-weight:700; color:#CBD5E1; display:block; margin-bottom:4px;">Mật khẩu:</label>
@@ -355,7 +354,7 @@
           <input type="password" id="logPass" placeholder="Nhập mật khẩu..." required autocomplete="current-password">
         </div>
 
-        <button type="submit" id="btnLoginSubmit" class="btn btn-amber" style="width:100%; justify-content:center; padding:14px; font-size:14px; font-weight:800; border-radius:12px; margin-top:8px; box-shadow:0 10px 25px rgba(245,158,11,0.3);">
+        <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:14px; font-size:14px; font-weight:800; border-radius:12px; margin-top:8px; box-shadow:0 10px 25px rgba(245,158,11,0.3);">
           ĐĂNG NHẬP HỆ THỐNG
         </button>
       </form>
@@ -1486,85 +1485,63 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
   };
 
   window.handleLogin = async function(e) {
-  e.preventDefault();
+    e.preventDefault();
+    const usernameInput = document.getElementById('logUser').value.trim();
+    const pass = document.getElementById('logPass').value.trim();
+    
+    let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
-  // 1. Ép thu gọn bàn phím ảo trên điện thoại ngay lập tức để chống giật trang
-  document.getElementById('logUser').blur();
-  document.getElementById('logPass').blur();
-
-  const btnSubmit = document.getElementById('btnLoginSubmit') || document.querySelector('.login-card button[type="submit"]');
-  const originalBtnText = btnSubmit.innerHTML;
-
-  const usernameInput = document.getElementById('logUser').value.trim();
-  const pass = document.getElementById('logPass').value.trim();
-
-  if (!usernameInput || !pass) return;
-
-  // 2. CHỐNG SPAM: Khóa nút ngay lập tức và hiển thị trạng thái loading
-  btnSubmit.disabled = true;
-  btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG KIỂM TRA...';
-
- let email = usernameInput.includes('@') ? 
-            usernameInput.toLowerCase() : 
-            `${usernameInput.toLowerCase()}@dms.com`;
-
-await signInWithEmailAndPassword(authSvc, email, pass);
-
-  try {
-    // 3. THUẬT TOÁN TÌM KIẾM MÃ NHÂN VIÊN THÔNG MINH BẤT CHẤP VIẾT HOA/THƯỜNG
-    if (!email) {
-      const usersRef = collection(db, "users");
-      // Lần 1: Tìm đúng nguyên bản người dùng gõ
-      let qUsersByCode = query(usersRef, where("code", "==", usernameInput), limit(1));
-      let snapByCode = await getDocs(qUsersByCode);
-      
-      if (snapByCode.empty) {
-         // Lần 2: Tự động chuyển thành CHỮ IN HOA TOÀN BỘ để tìm (Vì đa số mã NV là NV01, HCM02...)
-         qUsersByCode = query(usersRef, where("code", "==", usernameInput.toUpperCase()), limit(1));
-         snapByCode = await getDocs(qUsersByCode);
+    try {
+      if (!usernameInput.includes('@')) {
+        const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
+        const snapByCode = await getDocs(qUsersByCode);
+        if (!snapByCode.empty) {
+          const uData = snapByCode.docs[0].data();
+          if (uData.email) email = uData.email.toLowerCase();
+        }
       }
 
-      if (!snapByCode.empty) {
-        const uData = snapByCode.docs[0].data();
-        if (uData.email) email = uData.email.toLowerCase();
+      const userCredential = await signInWithEmailAndPassword(authSvc, email, pass);
+      const authUser = userCredential.user;
+
+      const userDocRef = doc(db, "users", authUser.uid);
+      let userSnap = await getDoc(userDocRef);
+
+      if (!userSnap.exists()) {
+        const qUsers = query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1));
+        const usersQuerySnap = await getDocs(qUsers);
+        if (!usersQuerySnap.empty) {
+          userSnap = usersQuerySnap.docs[0];
+        }
+      }
+
+      if (!userSnap || !userSnap.exists()) {
+        await signOut(authSvc);
+        return alert("⛔ Tài khoản này tồn tại trên Auth nhưng chưa được cấu hình phân quyền trong bảng users của CSDL Firestore!");
+      }
+
+      const profile = userSnap.data();
+
+      if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') {
+        await signOut(authSvc);
+        return alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ quản trị viên để mở lại.");
+      }
+
+      localStorage.removeItem(`failed_attempts_${email}`);
+      triggerHaptic(40);
+
+    } catch (authErr) {
+      const failedAttemptsKey = `failed_attempts_${email}`;
+      let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
+      localStorage.setItem(failedAttemptsKey, currentFailed);
+
+      if (currentFailed >= 10) {
+        alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
       } else {
-        // Fallback cuối cùng nếu không khớp mã nào
-        email = usernameInput.toLowerCase() + '@dms.com';
+        alert(`⛔ Đăng nhập thất bại (Sai mật khẩu hoặc tài khoản không tồn tại). Còn ${10 - currentFailed} lần thử.`);
       }
     }
-
-    // 4. Gửi yêu cầu đăng nhập
-    await signInWithEmailAndPassword(authSvc, email, pass);
-    // Nếu thành công, hàm onAuthStateChanged bên dưới sẽ tự động ẩn màn hình Login.
-    // Không mở khóa nút lúc này để giao diện chuyển cảnh mượt mà.
-
-  } catch (authErr) {
-    // XỬ LÝ NẾU THẤT BẠI
-    const failedAttemptsKey = `failed_attempts_${email || usernameInput}`;
-    let currentFailed = Number(localStorage.getItem(failedAttemptsKey) || 0) + 1;
-    localStorage.setItem(failedAttemptsKey, currentFailed);
-
-    if (currentFailed >= 10) {
-      alert("⛔ Bạn đã nhập sai mật khẩu 10 lần! Tài khoản đã bị vô hiệu hóa tạm thời.");
-    } else {
-      // Dịch lỗi của Firebase cho dễ hiểu
-      let errMsg = authErr.message;
-      if (errMsg.includes('invalid-credential') || errMsg.includes('user-not-found') || errMsg.includes('wrong-password')) {
-          errMsg = 'Sai mã nhân viên hoặc mật khẩu.';
-      } else if (errMsg.includes('network') || errMsg.includes('offline')) {
-          errMsg = 'Mạng yếu hoặc không có kết nối Internet.';
-      } else if (errMsg.includes('too-many-requests')) {
-          errMsg = 'Tạm khóa do đăng nhập sai nhiều lần. Hãy thử lại sau ít phút.';
-      }
-
-      alert(`⛔ Đăng nhập thất bại: ${errMsg}\nBạn còn ${10 - currentFailed} lần thử.`);
-    }
-
-    // Mở khóa lại nút để nhân viên có thể gõ lại
-    btnSubmit.disabled = false;
-    btnSubmit.innerHTML = originalBtnText;
-  }
-};
+  };
 
   async function loadMasterDataOptimized(forceCloud = false) {
     try {
@@ -1676,18 +1653,15 @@ await signInWithEmailAndPassword(authSvc, email, pass);
       return;
     }
 
-   if (!profileSnap.exists()) {
-    alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
-    await signOut(authSvc);
-    
-    // Mở khóa lại nút submit nếu nó đang bị kẹt
-    const btnSubmit = document.getElementById('btnLoginSubmit');
-    if(btnSubmit) {
-        btnSubmit.disabled = false;
-        btnSubmit.innerHTML = 'ĐĂNG NHẬP HỆ THỐNG';
+    const profileSnap = await getDoc(doc(db, "users", user.uid));
+    if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
+    const profile = profileSnap.data();
+
+    if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
+      alert("⛔ Tài khoản bị khóa."); 
+      await signOut(authSvc); 
+      return; 
     }
-    return;
-}
 
   currentUser = { 
       uid: user.uid, 
@@ -5459,143 +5433,51 @@ else if (tab === 'ctkm') {
       if (activePane) renderChiTieuTab(activePane);
     }
 
-else if (tab === 'users') {
+    else if (tab === 'users') {
       container.innerHTML = `
-        <!-- Tiêu đề Tab -->
-        <div class="tab-header-actions" style="margin-bottom: 20px; border-bottom: 2px solid rgba(0,0,0,0.05); padding-bottom: 12px;">
-          <h2 style="font-weight: 900; font-size: 22px; color: var(--text-main); margin: 0;">
-            <i class="fa-solid fa-users" style="color: var(--amber);"></i> Quản Lý Nhân Sự (${users.length})
-          </h2>
+        <div class="tab-header-actions">
+          <h2 style="font-weight:800;"><i class="fa-solid fa-users" style="color:var(--amber);"></i> Quản Lý Nhân Viên (${users.length})</h2>
         </div>
 
-        <!-- KHU VỰC 1: FORM THÊM NHÂN VIÊN MỚI -->
-        <div class="card" style="margin-bottom: 30px; padding: 24px; border-radius: 16px; box-shadow: 0 8px 25px rgba(0,0,0,0.04); border: 1px solid var(--card-border);">
-          <div style="font-size: 16px; font-weight: 900; margin-bottom: 16px; color: var(--primary); display: flex; align-items: center; gap: 10px;">
-            <div style="width: 36px; height: 36px; background: rgba(37,99,235,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px;">
-              <i class="fa-solid fa-user-plus"></i>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 style="font-size:14px; font-weight:800; margin-bottom:8px; color:var(--primary);"><i class="fa-solid fa-user-plus"></i> Thêm Nhân Viên Mới</h3>
+          <form id="userForm" onsubmit="addUser(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <input type="text" id="usCode" placeholder="Mã NV (VD: NV01)" required style="margin:0; padding:10px;">
+              <input type="text" id="usName" placeholder="Họ và tên..." required style="margin:0; padding:10px;">
             </div>
-            Tạo Tài Khoản Mới
-          </div>
-
-          <form id="userForm" onsubmit="addUser(event)" style="display: flex; flex-direction: column; gap: 16px;">
-            
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-              <div>
-                <label style="font-size: 12px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px; display: block; letter-spacing: 0.5px;">MÃ NHÂN VIÊN <span style="color:var(--rose);">*</span></label>
-                <input type="text" id="usCode" placeholder="VD: NV01, HCM_02..." required style="margin: 0; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--bg-dark); font-weight: 800; color: var(--text-main);">
-              </div>
-              <div>
-                <label style="font-size: 12px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px; display: block; letter-spacing: 0.5px;">HỌ VÀ TÊN <span style="color:var(--rose);">*</span></label>
-                <input type="text" id="usName" placeholder="Nhập họ tên đầy đủ..." required style="margin: 0; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--bg-dark); font-weight: 800; color: var(--text-main);">
-              </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <input type="text" id="usUsername" placeholder="Tên đăng nhập hoặc email..." required style="margin:0; padding:10px;">
+              <input type="password" id="usPass" placeholder="Mật khẩu..." required style="margin:0; padding:10px;">
             </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-              <div>
-                <label style="font-size: 12px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px; display: block; letter-spacing: 0.5px;">TÀI KHOẢN / EMAIL <span style="color:var(--rose);">*</span></label>
-                <input type="text" id="usUsername" placeholder="Nhập tên đăng nhập hoặc email..." required style="margin: 0; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--bg-dark); font-weight: 800; color: var(--text-main);">
-              </div>
-              <div>
-                <label style="font-size: 12px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px; display: block; letter-spacing: 0.5px;">MẬT KHẨU <span style="color:var(--rose);">*</span></label>
-                <input type="password" id="usPass" placeholder="Tối thiểu 6 ký tự..." required style="margin: 0; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--bg-dark); font-weight: 800; color: var(--text-main);">
-              </div>
-            </div>
-
-            <div>
-              <label style="font-size: 12px; font-weight: 900; color: var(--text-muted); margin-bottom: 6px; display: block; letter-spacing: 0.5px;">PHÂN QUYỀN HỆ THỐNG <span style="color:var(--rose);">*</span></label>
-              <select id="usRole" style="margin: 0; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--bg-dark); font-weight: 800; color: var(--primary); cursor: pointer; outline: none;">
-                <option value="sales">Sales (Nhân viên đi thị trường)</option>
-                <option value="accountant">Accountant (Kế toán xử lý đơn)</option>
-                <option value="manager">Manager (Quản lý - Xem báo cáo)</option>
-                <option value="viewer">Viewer (Tài khoản chỉ xem)</option>
-              </select>
-            </div>
-
-            <button type="submit" class="btn btn-amber" style="width: 100%; justify-content: center; padding: 16px; font-weight: 900; font-size: 15px; border-radius: 12px; box-shadow: 0 6px 20px rgba(245, 158, 11, 0.25); margin-top: 8px;">
-              <i class="fa-solid fa-plus-circle"></i> TẠO TÀI KHOẢN NGAY
-            </button>
+            <select id="usRole" style="margin:0; padding:10px;">
+            <option value="sales">Sales (Nhân viên bán hàng)</option>
+  <option value="accountant">Accountant (Kế toán)</option>
+  <option value="manager">Manager (Quản lý)</option>
+  <option value="viewer">Viewer (Chỉ xem)</option>
+</select>
+            <button type="submit" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-weight:800;">TẠO TÀI KHOẢN</button>
           </form>
         </div>
 
-        <!-- KHU VỰC 2: DANH SÁCH NHÂN SỰ -->
-        <div style="font-size: 14px; font-weight: 900; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px;">
-          <i class="fa-solid fa-address-book" style="color:var(--primary); margin-right: 6px;"></i> Danh sách tài khoản hệ thống
-        </div>
-        
-        <!-- Bố cục dạng lưới tự động co giãn -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding-bottom: 40px;">
-        ${users.map(u => {
-            // Setup màu sắc và nhãn theo Role
-            let roleColor, roleName, iconClass;
-            const uRole = (u.role || 'sales').toLowerCase();
-            if(uRole === 'admin') { roleColor = 'var(--rose)'; roleName = 'Quản trị viên'; iconClass='fa-user-shield'; }
-            else if(uRole === 'manager') { roleColor = 'var(--purple)'; roleName = 'Quản lý'; iconClass='fa-user-tie'; }
-            else if(uRole === 'accountant') { roleColor = 'var(--emerald)'; roleName = 'Kế toán'; iconClass='fa-calculator'; }
-            else if(uRole === 'viewer') { roleColor = 'var(--text-muted)'; roleName = 'Chỉ xem'; iconClass='fa-eye'; }
-            else { roleColor = 'var(--primary)'; roleName = 'Sales Thị Trường'; iconClass='fa-briefcase'; }
-
-            const isActive = u.active !== false;
-
-            return `
-            <div style="background: var(--card-bg); border-radius: 16px; border: 1px solid var(--card-border); overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.03); display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.08)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.03)';">
-                
-                <!-- Phần Header thẻ: Phân quyền & Trạng thái -->
-                <div style="display:flex; justify-content:space-between; align-items:center; padding: 12px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--card-border);">
-                    <span style="font-size: 11px; font-weight: 900; color: ${roleColor}; background:${roleColor}15; padding: 4px 10px; border-radius: 8px; text-transform: uppercase;">
-                        <i class="fa-solid ${iconClass}"></i> ${roleName}
-                    </span>
-                    <span style="font-size: 11px; font-weight: 800; color: ${isActive ? 'var(--emerald)' : 'var(--rose)'}; display: flex; align-items: center; gap: 5px; background: ${isActive ? 'var(--emerald)' : 'var(--rose)'}15; padding: 4px 10px; border-radius: 8px;">
-                        <span style="width: 6px; height: 6px; border-radius: 50%; background: ${isActive ? 'var(--emerald)' : 'var(--rose)'}; box-shadow: 0 0 4px ${isActive ? 'var(--emerald)' : 'var(--rose)'};"></span>
-                        ${isActive ? 'Hoạt động' : 'Đã khóa'}
-                    </span>
-                </div>
-
-                <!-- Phần Body thẻ: Thông tin chính -->
-                <div style="padding: 16px; flex: 1;">
-                    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 14px;">
-                        <div style="width: 50px; height: 50px; border-radius: 14px; background: var(--bg-dark); border: 1px solid var(--card-border); display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--text-muted); font-weight: 900;">
-                            ${u.name ? u.name.charAt(0).toUpperCase() : 'U'}
-                        </div>
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="font-size: 18px; font-weight: 900; color: var(--text-main); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${u.name}">${u.name}</div>
-                            <div style="font-size: 13px; font-weight: 800; color: var(--primary);">
-                                <span style="background: var(--prod-code-bg); color: var(--primary); padding: 2px 8px; border-radius: 6px;">Mã: ${u.code || '---'}</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 8px; background: var(--bg-dark); padding: 10px 14px; border-radius: 10px; border: 1px dashed var(--card-border);">
-                        <i class="fa-solid fa-envelope" style="color: var(--amber);"></i> 
-                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all;" title="${u.email}">${u.email}</span>
-                    </div>
-                </div>
-
-             <!-- Phần Footer thẻ: Nút chức năng -->
-                <div style="padding: 12px 16px; border-top: 1px solid var(--card-border); display: flex; justify-content: flex-end; gap: 8px; background: var(--panel-bg); flex-wrap: wrap;">
-                    <button class="btn btn-purple" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);" onclick="openAdminChangePassModal('${u.uid}', '${u.email}', '${u.name}')">
-                        <i class="fa-solid fa-key"></i> Đổi MK
-                    </button>
-                    
-                    ${isActive ? `
-                        <button class="btn btn-amber" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);" onclick="toggleUserActive('${u.uid}', false)">
-                            <i class="fa-solid fa-lock"></i> Khóa
-                        </button>
-                    ` : `
-                        <button class="btn btn-green" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);" onclick="toggleUserActive('${u.uid}', true)">
-                            <i class="fa-solid fa-unlock"></i> Mở khóa
-                        </button>
-                    `}
-
-                    <!-- NÚT XÓA CHỈ HIỆN KHI NGƯỜI ĐANG ĐĂNG NHẬP LÀ ADMIN -->
-                    ${currentUser && currentUser.role === 'admin' ? `
-                        <button class="btn btn-red" style="font-weight: 900; padding: 10px 14px; font-size: 12.5px; border-radius: 10px; box-shadow: 0 2px 8px rgba(225, 29, 72, 0.3);" onclick="deleteUserAccount('${u.uid}', '${u.email}', '${u.name.replace(/'/g, "\\'")}')">
-                            <i class="fa-solid fa-trash"></i> Xóa
-                        </button>
-                    ` : ''}
-                </div>
+<div style="display:flex; flex-direction:column; gap:8px; max-height: 280px; overflow-y: auto; padding-right: 8px;">
+${users.map(u => `
+            <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:4px; font-size:12px; font-weight:800;">[${u.code || 'NV'}]</span>
+                <span class="badge ${u.active !== false ? 'badge-success' : 'badge-danger'}">${u.active !== false ? 'Đang hoạt động' : 'Đã khóa'}</span>
+              </div>
+              <div style="font-size:15px; font-weight:800; color:var(--text-main);">${u.name}</div>
+              <div style="font-size:12px; color:var(--text-muted);">📧 ${u.email} • Phân quyền: <b style="color:var(--primary); text-transform:uppercase;">${u.role || 'sales'}</b></div>
+              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:4px;">
+                ${u.active !== false ? `
+                  <button class="btn btn-red btn-sm" onclick="toggleUserActive('${u.uid}', false)">Khóa tài khoản</button>
+                ` : `
+                  <button class="btn btn-green btn-sm" onclick="toggleUserActive('${u.uid}', true)">Mở khóa</button>
+                `}
+              </div>
             </div>
-            `;
-        }).join('')}
+          `).join('')}
         </div>
       `;
     }
@@ -10484,139 +10366,6 @@ window.clearAllRouteAssignments = async function(uid) {
 
     } catch (e) {
         alert("Lỗi khi thu hồi tuyến: " + e.message);
-    }
-};
-  // ==========================================
-// ADMIN: ĐỔI MẬT KHẨU TÀI KHOẢN NHÂN VIÊN
-// ==========================================
-window.openAdminChangePassModal = function(uid, email, name) {
-    if (!currentUser || currentUser.role !== 'admin') {
-        return alert("⛔ Chỉ Admin mới có quyền ép đổi mật khẩu nhân viên!");
-    }
-    if (email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
-        return alert("⛔ Bảo vệ hệ thống: Không thể tự ý đổi mật khẩu của tài khoản Admin gốc!");
-    }
-
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;">
-            <div class="modal-content" style="max-width: 400px; padding: 24px; border-radius: 18px; text-align:center;">
-                <div style="font-size:36px; color:var(--purple); margin-bottom:16px;"><i class="fa-solid fa-user-shield"></i></div>
-                <h3 style="font-size:16px; font-weight:900; color:var(--text-main); margin-bottom:8px;">Admin Cấp Lại Mật Khẩu</h3>
-                <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">Tài khoản: <b style="color:var(--primary);">${name} (${email})</b></p>
-                
-                <input type="text" id="adminNewPassInput" placeholder="Nhập mật khẩu mới (ít nhất 6 ký tự)..." autocomplete="off"
-                       style="width:100%; padding:14px; font-size:15px; font-weight:700; text-align:center; border-radius:10px; border:2px solid var(--purple); color:var(--text-main); outline:none; margin-bottom:20px;">
-                
-                <div style="display:flex; gap:10px;">
-                    <button class="btn btn-purple" style="flex:1; padding:12px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px;" onclick="submitAdminChangePass('${uid}')">
-                        <i class="fa-solid fa-floppy-disk"></i> LƯU MẬT KHẨU BẮT BUỘC
-                    </button>
-                    <button class="btn" style="flex:1; padding:12px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden'); document.getElementById('dynamicModalContainer').innerHTML='';">
-                        HỦY
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    modalContainer.classList.remove('hidden');
-};
-
-window.submitAdminChangePass = async function(oldUid) {
-    const newPass = document.getElementById('adminNewPassInput').value.trim();
-    if (newPass.length < 6) return alert("Mật khẩu phải có ít nhất 6 ký tự theo chuẩn bảo mật!");
-
-    const btn = document.querySelector('.modal-content .btn-purple');
-    if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG XỬ LÝ...'; btn.disabled = true; }
-
-    try {
-        // 1. Lấy thông tin tài khoản nhân viên cũ từ Database
-        const oldUserDocRef = doc(db, "users", oldUid);
-        const oldUserSnap = await getDoc(oldUserDocRef);
-        if (!oldUserSnap.exists()) throw new Error("Không tìm thấy dữ liệu nhân viên này trong CSDL!");
-        const oldData = oldUserSnap.data();
-
-        // 2. Tạo một email ảo mới tinh để tránh trùng lặp hệ thống Auth
-        const newFakeEmail = `${oldData.code.toLowerCase()}_reset_${Date.now()}@dms.com`;
-
-        // 3. TẠO TÀI KHOẢN MỚI NGẦM (Dùng secondaryAuth để Admin không bị văng đăng xuất)
-        const cred = await createUserWithEmailAndPassword(secondaryAuth, newFakeEmail, newPass);
-        const newUid = cred.user.uid;
-        await secondaryAuth.signOut(); // Đóng kết nối phụ ngay lập tức
-
-        // 4. Chép nguyên xi Data cũ sang nhà mới
-        const newData = {
-            ...oldData,         // Giữ nguyên Tên, Mã NV, Role, Tuyến...
-            uid: newUid,        // Cập nhật ID hệ thống mới
-            email: newFakeEmail // Cập nhật email đăng nhập mới
-        };
-        await setDoc(doc(db, "users", newUid), newData);
-
-        // 5. Xóa Database cũ để ngăn nhân viên dùng lại mật khẩu cũ
-        await deleteDoc(oldUserDocRef);
-
-        // 6. Cập nhật lại giao diện ngay lập tức
-        users = users.filter(u => u.uid !== oldUid);
-        users.push(newData);
-
-        alert(`✅ Đổi mật khẩu thành công!\nNhân viên cứ dùng Mã [${oldData.code}] và Mật khẩu mới để đăng nhập bình thường. Toàn bộ Chỉ tiêu và Đơn hàng cũ vẫn còn nguyên!`);
-        document.getElementById('dynamicModalContainer').classList.add('hidden');
-        
-        renderUI();
-
-    } catch (e) {
-        alert("Lỗi khi cấp lại mật khẩu: " + e.message);
-    } finally {
-        if (btn) { btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU MẬT KHẨU BẮT BUỘC'; btn.disabled = false; }
-    }
-};
-  // ==========================================
-// ADMIN: XÓA VĨNH VIỄN TÀI KHOẢN NHÂN VIÊN
-// ==========================================
-window.deleteUserAccount = async function(uid, email, name) {
-    // Lớp bảo vệ 1: Kiểm tra quyền
-    if (!currentUser || currentUser.role !== 'admin') {
-        return alert("⛔ Lỗi Phân Quyền: Chỉ Admin mới có quyền xóa tài khoản nhân viên!");
-    }
-    
-    // Lớp bảo vệ 2: Cấm xóa tài khoản Admin hệ thống
-    if (email.toLowerCase() === 'phanthanhhuy98@gmail.com') {
-        return alert("⛔ Bảo vệ hệ thống: Tuyệt đối không thể xóa tài khoản Admin gốc!");
-    }
-    
-    // Lớp bảo vệ 3: Cấm tự sát (Admin tự xóa chính mình đang đăng nhập)
-    if (uid === currentUser.uid) {
-        return alert("⛔ Lỗi: Bạn không thể tự xóa tài khoản của chính mình khi đang đăng nhập!");
-    }
-
-    // Hiển thị hộp thoại xác nhận chuyên nghiệp
-    const confirmDel = await window.showCustomConfirm(
-        "Xóa Vĩnh Viễn Tài Khoản", 
-        `Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản của nhân viên:\n[${name}]\nHành động này sẽ gỡ hồ sơ nhân viên khỏi hệ thống và không thể hoàn tác!`, 
-        "fa-user-xmark", 
-        "Đồng ý Xóa", 
-        "Hủy"
-    );
-    
-    if (!confirmDel) return;
-
-    try {
-        // Xóa document trên Firebase Firestore
-        await deleteDoc(doc(db, "users", uid));
-        
-        // Loại bỏ nhân viên khỏi mảng hiển thị cục bộ
-        users = users.filter(u => u.uid !== uid);
-        
-        // Kích hoạt rung và âm thanh thành công
-        if (typeof triggerHaptic === 'function') triggerHaptic(30);
-        if (typeof playSystemSound === 'function') playSystemSound('success');
-        
-        alert("✅ Đã xóa tài khoản nhân viên thành công!");
-        
-        // Cập nhật lại giao diện danh sách
-        renderUI();
-    } catch (error) {
-        alert("Lỗi khi xóa nhân viên: " + error.message);
     }
 };
 </script>
