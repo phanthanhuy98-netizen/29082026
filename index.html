@@ -9198,7 +9198,7 @@ window.exportKpiExcel = async function() {
     }
 };
 // ==========================================
-// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V3 (SMART SEARCH & MATH FIX)
+// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V4 (FINAL PRO)
 // ==========================================
 window._masterKpiState = {
   totalTarget: 0,
@@ -9207,7 +9207,7 @@ window._masterKpiState = {
 };
 
 window.openTargetModal = function() {
-  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
     return alert("Chỉ quản lý mới có quyền thiết lập chỉ tiêu tổng!");
   }
   window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: { initialized: false } };
@@ -9245,6 +9245,7 @@ window.renderMasterKpiStep1 = function() {
                onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none'">
       </div>
       
+      <!-- Khai báo SKU Trọng tâm -->
       <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:12px; border:1px dashed rgba(37,99,235,0.3);">
          <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> SKU Trọng tâm bắt buộc:</div>
          
@@ -9264,7 +9265,7 @@ window.renderMasterKpiStep1 = function() {
            `).join('')}
          </div>
 
-         <!-- Thanh tìm kiếm SKU thông minh -->
+         <!-- Thanh tìm kiếm SKU thông minh thay cho Prompt -->
          <div style="position:relative;">
            <input type="text" id="mkpi_search_${cIdx}" placeholder="🔍 Gõ mã hoặc tên SP để thêm vào..." 
                   oninput="searchMkpiSku(${cIdx}, this.value)" 
@@ -9296,7 +9297,7 @@ window.renderMasterKpiStep1 = function() {
            </div>
 
            <div style="margin-bottom:14px;">
-              <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">2. CHIA SỐ CHO CÁC CÔNG TY:</div>
+              <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">2. TÌM VÀ CHỌN CÔNG TY ĐỂ CHIA SỐ:</div>
               <!-- Thanh tìm kiếm Công ty thông minh -->
               <div style="position:relative;">
                  <input type="text" id="mkpi_search_comp_input" placeholder="🔍 Gõ mã hoặc tên công ty để thêm vào danh sách phân bổ..." 
@@ -9309,6 +9310,7 @@ window.renderMasterKpiStep1 = function() {
            
            ${compHtml}
            
+           <!-- KHOẢNG TRỐNG CHO STATUS BÁO CÁO LỆCH CHẠY NGẦM -->
            <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;"></div>
         </div>
 
@@ -9320,7 +9322,10 @@ window.renderMasterKpiStep1 = function() {
       </div>
     </div>
   `;
-  updateMkpiDiffUI();
+  
+  // HIỂN THỊ MODAL (FIX LỖI NÚT THIẾT LẬP KHÔNG HOẠT ĐỘNG)
+  modalContainer.classList.remove('hidden');
+  updateMkpiDiffUI(); 
 };
 
 // ================= HÀM XỬ LÝ TÌM KIẾM CÔNG TY THÔNG MINH =================
@@ -9456,11 +9461,10 @@ window.validateAndGoToStep2 = function() {
   const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
   if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
 
-  // Tự động chia đều cho lần đầu tiên bật Bước 2 (Thuật toán dồn phần dư cho người cuối)
+  // THUẬT TOÁN AUTO-SPLIT REMAINDER CHỐNG LỆCH SỐ DƯ
   if (!window._masterKpiState.salesAllocations.initialized) {
      const totalSales = salesUsers.length;
      
-     // Khởi tạo mảng trống cho toàn bộ Sales
      salesUsers.forEach(s => {
        window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
      });
@@ -9471,15 +9475,13 @@ window.validateAndGoToStep2 = function() {
          c.focusSkus.forEach(sku => skuAssignedTotal[sku.skuCode] = 0);
 
          salesUsers.forEach((s, idx) => {
-             // Nếu là người cuối cùng trong danh sách -> Nhận toàn bộ phần dư còn lại
+             // Người Sales cuối cùng nhận phần dôi dư để khớp tuyệt đối 100%
              if (idx === totalSales - 1) {
                  window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = c.target - compAssignedTotal;
                  c.focusSkus.forEach(sku => {
                      window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = sku.qty - skuAssignedTotal[sku.skuCode];
                  });
-             } 
-             // Nếu là người bình thường -> Chia trung bình và làm tròn
-             else {
+             } else {
                  let compVal = Math.round(c.target / totalSales);
                  window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = compVal;
                  compAssignedTotal += compVal;
@@ -9554,7 +9556,7 @@ window.renderMasterKpiStep2 = function(salesUsers) {
   }).join('');
 
   modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;">
+    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
         
         <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
@@ -9565,7 +9567,7 @@ window.renderMasterKpiStep2 = function(salesUsers) {
         
         <div style="flex:1; overflow-y:auto; padding:20px;">
           <div style="background:rgba(245,158,11,0.1); border:1px solid var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:10px; margin-bottom:16px; text-align:center;">
-            💡 Hệ thống đã tự động chia đều. Bạn có thể sửa thủ công. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh (Khớp tuyệt đối).
+            💡 Hệ thống đã tự động chia cho mọi người. Bạn có thể sửa thủ công. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh (Khớp tuyệt đối).
           </div>
           ${htmlContent}
         </div>
