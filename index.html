@@ -9197,21 +9197,20 @@ window.exportKpiExcel = async function() {
         }
     }
 };
-  // ==========================================
-// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD)
+// ==========================================
+// TÍNH NĂNG GIAO CHỈ TIÊU TOP-DOWN TỔNG (MASTER KPI WIZARD) - V2 (PRO/SMOOTH)
 // ==========================================
 window._masterKpiState = {
   totalTarget: 0,
   companies: [], // { compCode, compName, target, focusSkus: [{skuCode, skuName, qty}] }
-  salesAllocations: {} // Dữ liệu chia cho Sales
+  salesAllocations: { initialized: false }
 };
 
 window.openTargetModal = function() {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
     return alert("Chỉ quản lý mới có quyền thiết lập chỉ tiêu tổng!");
   }
-  // Reset trạng thái
-  window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: {} };
+  window._masterKpiState = { totalTarget: 0, companies: [], salesAllocations: { initialized: false } };
   renderMasterKpiStep1();
 };
 
@@ -9220,51 +9219,78 @@ window.renderMasterKpiStep1 = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   
   let compHtml = window._masterKpiState.companies.map((c, cIdx) => `
-    <div style="background:var(--card-bg); border:1px solid var(--primary); border-radius:12px; padding:12px; margin-bottom:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <div style="font-weight:900; color:var(--primary); font-size:15px;"><i class="fa-solid fa-building"></i> [${c.compCode}] ${c.compName}</div>
-        <button class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})"><i class="fa-solid fa-trash"></i></button>
+    <div style="background:var(--card-bg); border:1px solid rgba(37,99,235,0.2); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="font-weight:900; color:var(--primary); font-size:16px; text-transform:uppercase;">
+          <i class="fa-solid fa-building"></i> [${c.compCode}] ${c.compName}
+        </div>
+        <button type="button" class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})" title="Xóa công ty này"><i class="fa-solid fa-trash"></i></button>
       </div>
       
-      <label style="font-size:12px; font-weight:800; color:var(--text-muted);">Ngân sách giao cho công ty này (VNĐ):</label>
-      <input type="text" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" oninput="this.value = this.value.replace(/[^0-9]/g, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ','); updateCompTarget(${cIdx}, this.value)" placeholder="VD: 20,000,000,000" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--card-border); font-weight:900; font-size:16px; color:var(--rose); margin-bottom:10px;">
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">Ngân sách giao cho công ty này (VNĐ):</label>
+        <input type="text" id="mkpi_comp_${cIdx}" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" 
+               oninput="handleMkpiCompInput(${cIdx}, this.value)" 
+               placeholder="VD: 20,000,000,000" 
+               style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); font-weight:900; font-size:16px; color:var(--rose); outline:none; transition:0.2s;"
+               onfocus="this.style.borderColor='var(--rose)'; this.style.boxShadow='0 0 0 3px rgba(225,29,72,0.1)'"
+               onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none'">
+      </div>
       
-      <!-- Khai báo SKU Trọng tâm -->
-      <div style="background:rgba(37,99,235,0.05); padding:10px; border-radius:8px;">
-         <div style="font-size:12px; font-weight:800; color:var(--primary); margin-bottom:6px;">SKU Trọng tâm bắt buộc:</div>
-         ${c.focusSkus.map((sku, sIdx) => `
-            <div style="display:flex; gap:6px; margin-bottom:6px;">
-               <div style="flex:1; font-size:13px; font-weight:700; background:#fff; border:1px solid var(--card-border); padding:8px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">[${sku.skuCode}]${sku.skuName}</div>
-               <input type="number" value="${sku.qty}" onchange="updateCompSkuTarget(${cIdx},${sIdx}, this.value)" placeholder="Số thùng" style="width:80px; font-weight:900; border-radius:6px; border:1px solid var(--card-border); padding:8px; text-align:center; color:var(--rose);">
-               <button class="btn btn-red btn-sm" onclick="removeCompSku(${cIdx},${sIdx})"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-         `).join('')}
-         <button class="btn btn-sm" style="background:#fff; border:1px dashed var(--primary); color:var(--primary); width:100%; font-weight:800; margin-top:4px;" onclick="promptAddSkuToComp(${cIdx})"><i class="fa-solid fa-plus"></i> Thêm mã sản phẩm</button>
+      <!-- Smart Search SKU Area -->
+      <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:12px; border:1px dashed rgba(37,99,235,0.3);">
+         <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px;"><i class="fa-solid fa-box-open"></i> SKU Trọng tâm bắt buộc:</div>
+         
+         <div id="mkpi_sku_list_${cIdx}" style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+           ${c.focusSkus.length === 0 ? '<div style="font-size:12px; color:var(--text-muted); font-style:italic;">Chưa thêm mã hàng nào.</div>' : ''}
+           ${c.focusSkus.map((sku, sIdx) => `
+              <div style="display:flex; gap:8px; align-items:center;">
+                 <div style="flex:1; font-size:13px; font-weight:800; background:#fff; border:1px solid var(--card-border); padding:10px 12px; border-radius:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                   <span style="color:var(--primary);">[${sku.skuCode}]</span>${sku.skuName}
+                 </div>
+                 <input type="text" inputmode="numeric" value="${sku.qty || ''}" 
+                        oninput="handleMkpiSkuInput(${cIdx},${sIdx}, this.value)" 
+                        placeholder="Số thùng" 
+                        style="width:90px; font-weight:900; border-radius:8px; border:1px solid var(--card-border); padding:10px; text-align:center; color:var(--rose); outline:none; margin:0;">
+                 <button type="button" class="btn btn-red btn-sm" onclick="removeCompSku(${cIdx},${sIdx})" style="padding:10px 14px; border-radius:8px;"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+           `).join('')}
+         </div>
+
+         <!-- Thanh tìm kiếm thông minh thay thế Prompt -->
+         <div style="position:relative;">
+           <input type="text" id="mkpi_search_${cIdx}" placeholder="🔍 Gõ mã hoặc tên SP để thêm vào..." 
+                  oninput="searchMkpiSku(${cIdx}, this.value)" 
+                  autocomplete="off" 
+                  style="width:100%; padding:10px 14px; font-size:13px; font-weight:800; border-radius:8px; border:1px solid var(--primary); outline:none; margin:0; background:#fff;">
+           <div id="mkpi_res_${cIdx}" class="hidden" style="position:absolute; top:100%; left:0; right:0; z-index:100; background:var(--card-bg); max-height:180px; overflow-y:auto; border:1px solid var(--card-border); border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,0.15); margin-top:4px;"></div>
+         </div>
       </div>
     </div>
   `).join('');
 
-  // Tính tổng
-  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
-  const diff = window._masterKpiState.totalTarget - sumComps;
-
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
-        <div style="padding:16px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="font-size:16px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-bullseye"></i> BƯỚC 1: KHAI BÁO TỔNG CHỈ TIÊU</h3>
-          <button class="btn btn-red btn-sm" onclick="closeTargetModal()">Đóng</button>
+        
+        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
+          <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-bullseye"></i> BƯỚC 1: KHAI BÁO TỔNG CHỈ TIÊU</h3>
+          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="padding:8px 16px; border-radius:8px; font-weight:800;">Đóng</button>
         </div>
         
-        <div style="flex:1; overflow-y:auto; padding:16px;">
-           <div style="background:var(--card-bg); padding:16px; border-radius:12px; border:2px solid var(--amber); margin-bottom:16px;">
-              <label style="font-size:13px; font-weight:900; color:var(--amber);">1. TỔNG DOANH SỐ CẦN GIAO THÁNG NÀY (VNĐ):</label>
-              <input type="text" value="${window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : ''}" oninput="this.value = this.value.replace(/[^0-9]/g, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ','); window._masterKpiState.totalTarget = Number(this.value.replace(/,/g, '')) || 0; renderMasterKpiStep1();" placeholder="VD: 50,000,000,000" style="width:100%; padding:14px; font-size:22px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:10px; border:1px solid rgba(225,29,72,0.2); margin-top:8px; text-align:center;">
+        <div style="flex:1; overflow-y:auto; padding:20px;">
+           <div style="background:var(--card-bg); padding:20px; border-radius:16px; border:2px solid var(--amber); margin-bottom:20px; box-shadow:0 8px 20px rgba(245,158,11,0.05);">
+              <label style="font-size:14px; font-weight:900; color:var(--amber); display:block; margin-bottom:8px;">1. TỔNG DOANH SỐ CẦN GIAO THÁNG NÀY (VNĐ):</label>
+              <input type="text" id="mkpi_total" value="${window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : ''}" 
+                     oninput="handleMkpiTotalInput(this.value)" 
+                     placeholder="VD: 50,000,000,000" 
+                     style="width:100%; padding:16px; font-size:24px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:12px; border:1px solid rgba(225,29,72,0.2); margin:0; text-align:center; outline:none; transition:0.2s;"
+                     onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
            </div>
 
-           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-              <div style="font-size:13px; font-weight:900; color:var(--text-main);">2. CHIA CHO CÁC CÔNG TY:</div>
-              <select onchange="if(this.value) { addKpiCompany(this.value); this.value=''; }" style="padding:6px 10px; border-radius:8px; border:1px solid var(--primary); font-weight:800; font-size:12px; color:var(--primary);">
+           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <div style="font-size:15px; font-weight:900; color:var(--text-main);">2. CHIA CHO CÁC CÔNG TY:</div>
+              <select onchange="if(this.value) { addKpiCompany(this.value); this.value=''; }" style="padding:10px 14px; border-radius:10px; border:1px solid var(--primary); font-weight:900; font-size:13px; color:var(--primary); background:#fff; outline:none; cursor:pointer;">
                  <option value="">+ Chọn công ty để chia số...</option>
                  ${companyList.map(c => `<option value="${c.maCtu}">[${c.maCtu}]${c.tenCtu}</option>`).join('')}
               </select>
@@ -9272,24 +9298,74 @@ window.renderMasterKpiStep1 = function() {
            
            ${compHtml}
            
-           <div style="padding:16px; border-radius:12px; background:${diff === 0 ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)'}; color:${diff === 0 ? 'var(--emerald)' : 'var(--amber)'}; font-weight:900; font-size:14px; text-align:center; border:1px dashed ${diff === 0 ? 'var(--emerald)' : 'var(--amber)'};">
-              Tổng số công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>
-              ${diff === 0 ? '✅ Đã phân bổ khớp 100% số tổng!' : `⚠️ Vẫn còn chênh lệch: ${(diff/1000).toLocaleString('vi-VN')}k`}
+           <!-- KHOẢNG TRỐNG CHO STATUS BÁO CÁO LỆCH -->
+           <div id="mkpi_diff_alert" style="padding:16px; border-radius:12px; font-weight:900; font-size:15px; text-align:center; transition:0.3s;">
+              <!-- Sẽ được điền tự động bởi JS -->
            </div>
         </div>
 
-        <div style="padding:16px; background:var(--panel-bg); border-top:1px solid var(--card-border);">
-           <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:12px;" onclick="validateAndGoToStep2()">
-              TIẾP TỤC: CHIA SỐ CHO SALES <i class="fa-solid fa-arrow-right"></i>
+        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
+           <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; box-shadow:0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndGoToStep2()">
+              TIẾP TỤC: RẢI SỐ CHO NHÂN VIÊN <i class="fa-solid fa-arrow-right"></i>
            </button>
         </div>
       </div>
     </div>
   `;
   modalContainer.classList.remove('hidden');
+  updateMkpiDiffUI(); // Gọi lần đầu để render thanh trạng thái
 };
 
-// Helper thao tác DOM
+// HÀM XỬ LÝ KHÔNG GÂY LAG (DOM MANIPULATION CHUẨN)
+window.handleMkpiTotalInput = function(val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.totalTarget = Number(cleanVal) || 0;
+  const el = document.getElementById('mkpi_total');
+  if(el) {
+     const formatted = window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : '';
+     // Chỉ update value nếu khác biệt để tránh con trỏ chuột nhảy lung tung
+     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted; 
+  }
+  updateMkpiDiffUI();
+};
+
+window.handleMkpiCompInput = function(cIdx, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.companies[cIdx].target = Number(cleanVal) || 0;
+  const el = document.getElementById(`mkpi_comp_${cIdx}`);
+  if(el) {
+     const formatted = window._masterKpiState.companies[cIdx].target > 0 ? window._masterKpiState.companies[cIdx].target.toLocaleString('vi-VN') : '';
+     if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
+  }
+  updateMkpiDiffUI();
+};
+
+window.handleMkpiSkuInput = function(cIdx, sIdx, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.companies[cIdx].focusSkus[sIdx].qty = Number(cleanVal) || 0;
+};
+
+window.updateMkpiDiffUI = function() {
+  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
+  const diff = window._masterKpiState.totalTarget - sumComps;
+  const alertEl = document.getElementById('mkpi_diff_alert');
+  
+  if(alertEl) {
+     if (diff === 0 && window._masterKpiState.totalTarget > 0 && window._masterKpiState.companies.length > 0) {
+         alertEl.style.background = 'rgba(16,185,129,0.1)';
+         alertEl.style.color = 'var(--emerald)';
+         alertEl.style.border = '1px solid var(--emerald)';
+         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>✅ ĐÃ KHỚP 100% SỐ TỔNG!`;
+     } else {
+         alertEl.style.background = 'rgba(245,158,11,0.1)';
+         alertEl.style.color = 'var(--amber)';
+         alertEl.style.border = '1px dashed var(--amber)';
+         alertEl.innerHTML = `Tổng các công ty: ${(sumComps/1000).toLocaleString('vi-VN')}k<br>⚠️ Đang lệch: ${(diff/1000).toLocaleString('vi-VN')}k`;
+     }
+  }
+};
+
+// CÁC HÀM XỬ LÝ SỰ KIỆN THÊM/XÓA DOM (Render lại Step 1)
 window.addKpiCompany = function(maCtu) {
   if (window._masterKpiState.companies.find(c => c.compCode === maCtu)) return alert("Đã chọn công ty này rồi!");
   const cObj = companyList.find(c => c.maCtu === maCtu);
@@ -9297,38 +9373,72 @@ window.addKpiCompany = function(maCtu) {
   renderMasterKpiStep1();
 };
 window.removeKpiCompany = function(idx) { window._masterKpiState.companies.splice(idx, 1); renderMasterKpiStep1(); };
-window.updateCompTarget = function(idx, val) { window._masterKpiState.companies[idx].target = Number(val.replace(/,/g, '')) || 0; renderMasterKpiStep1(); };
-window.promptAddSkuToComp = function(cIdx) {
-  const code = prompt("Nhập MÃ VẬT TƯ để giao chỉ tiêu:");
-  if (!code) return;
-  const p = findProductObj(code);
-  if (!p) return alert("Không tìm thấy mã sản phẩm này!");
-  window._masterKpiState.companies[cIdx].focusSkus.push({ skuCode: p.code, skuName: p.name, qty: 0 });
-  renderMasterKpiStep1();
-};
-window.updateCompSkuTarget = function(cIdx, sIdx, val) { window._masterKpiState.companies[cIdx].focusSkus[sIdx].qty = Number(val) || 0; };
 window.removeCompSku = function(cIdx, sIdx) { window._masterKpiState.companies[cIdx].focusSkus.splice(sIdx, 1); renderMasterKpiStep1(); };
 
-window.validateAndGoToStep2 = function() {
-  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
-  if (window._masterKpiState.totalTarget === 0) return alert("Chưa nhập số tổng!");
-  if (window._masterKpiState.companies.length === 0) return alert("Chưa chọn công ty phân bổ!");
-  if (sumComps !== window._masterKpiState.totalTarget) {
-     return alert("Số tổng của các công ty KHÔNG KHỚP với Tổng Doanh Số Tháng! Hãy điều chỉnh lại cho khớp 100%.");
+// SMART SEARCH SKU BẰNG CHỮ/MÃ THAY VÌ PROMPT
+window.searchMkpiSku = function(cIdx, keyword) {
+  const q = removeAccents(keyword.trim().toLowerCase());
+  const resEl = document.getElementById(`mkpi_res_${cIdx}`);
+  if (!resEl) return;
+
+  if (!q) { 
+      resEl.classList.add('hidden'); 
+      return; 
   }
   
-  // Chuẩn bị dữ liệu mảng Sales (Lấy danh sách Sales đang active)
+  const compCode = window._masterKpiState.companies[cIdx].compCode;
+  const matched = products.filter(p => {
+      // Chỉ tìm sản phẩm thuộc đúng mã công ty đang cấu hình
+      if (getCompCodeFromProductCode(p.code) !== compCode) return false;
+      return removeAccents(`${p.code} ${p.name}`).toLowerCase().includes(q);
+  }).slice(0, 20);
+
+  if (matched.length > 0) {
+      resEl.innerHTML = matched.map(p => `
+          <div onclick="addMkpiSku(${cIdx}, '${p.code}', '${p.name.replace(/'/g, "\\'")}')" 
+               style="padding:12px 14px; border-bottom:1px solid var(--card-border); cursor:pointer; font-size:13px; font-weight:800; transition:0.2s;"
+               onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='transparent'">
+              <span style="color:var(--primary);">[${p.code}]</span> ${p.name}
+          </div>
+      `).join('');
+      resEl.classList.remove('hidden');
+  } else {
+      resEl.innerHTML = '<div style="padding:14px; color:var(--text-muted); font-size:13px; font-style:italic; text-align:center;">Không tìm thấy vật tư phù hợp.</div>';
+      resEl.classList.remove('hidden');
+  }
+};
+
+window.addMkpiSku = function(cIdx, skuCode, skuName) {
+  if(!window._masterKpiState.companies[cIdx].focusSkus.find(s => s.skuCode === skuCode)) {
+      window._masterKpiState.companies[cIdx].focusSkus.push({ skuCode, skuName, qty: 0 });
+  }
+  renderMasterKpiStep1(); // Click xong vẽ lại giao diện cập nhật list
+};
+
+
+// KIỂM TRA ĐIỀU KIỆN TRƯỚC KHI QUA BƯỚC 2
+window.validateAndGoToStep2 = function() {
+  const sumComps = window._masterKpiState.companies.reduce((sum, c) => sum + c.target, 0);
+  if (window._masterKpiState.totalTarget === 0) return alert("Vui lòng nhập Tổng doanh số cần giao!");
+  if (window._masterKpiState.companies.length === 0) return alert("Chưa chọn công ty nào để phân bổ!");
+  if (sumComps !== window._masterKpiState.totalTarget) {
+     return alert("Số tổng của các Công ty KHÔNG KHỚP với Tổng Chỉ Tiêu Tháng! Hãy cân đối lại cho khớp 100%.");
+  }
+  
   const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+  if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
+
+  // Tự động chia đều cho lần đầu tiên bật Bước 2
   if (!window._masterKpiState.salesAllocations.initialized) {
-     // Auto split đều để tạo dữ liệu nền ban đầu
      let totalSales = salesUsers.length;
      salesUsers.forEach(s => {
        window._masterKpiState.salesAllocations[s.code] = {
           name: s.name, 
-          companies: {}, // { 'CT1': revTarget }
-          skus: {} // { 'SKU1': qtyTarget }
+          companies: {}, 
+          skus: {}
        };
        window._masterKpiState.companies.forEach(c => {
+         // Auto split
          window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = Math.round(c.target / totalSales);
          c.focusSkus.forEach(sku => {
            window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = Math.round(sku.qty / totalSales);
@@ -9341,27 +9451,25 @@ window.validateAndGoToStep2 = function() {
   renderMasterKpiStep2(salesUsers);
 };
 
-// ================= BƯỚC 2: CHIA SỐ CHO TỪNG SALES =================
+// ================= BƯỚC 2: RẢI SỐ CHO SALES (DOM MANIPULATION MƯỢT MÀ) =================
 window.renderMasterKpiStep2 = function(salesUsers) {
   const modalContainer = document.getElementById('dynamicModalContainer');
   
   let htmlContent = window._masterKpiState.companies.map(c => {
-     let sumSalesComp = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0), 0);
-     let diffComp = c.target - sumSalesComp;
-
      let skuHtml = c.focusSkus.map(sku => {
-        let sumSalesSku = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0), 0);
-        let diffSku = sku.qty - sumSalesSku;
         return `
-          <div style="background:rgba(37,99,235,0.05); padding:10px; border-radius:8px; margin-top:10px;">
-            <div style="font-size:12px; font-weight:800; color:var(--primary); margin-bottom:6px; display:flex; justify-content:space-between;">
-              <span>Mã Hàng: [${sku.skuCode}] (TổNG: ${sku.qty} Th)</span>
-              <span style="color:${diffSku === 0 ? 'var(--emerald)' : 'var(--rose)'}">${diffSku === 0 ? '✅ Khớp' : `Lệch: ${diffSku} Th`}</span>
+          <div style="background:rgba(37,99,235,0.03); padding:14px; border-radius:10px; margin-top:12px; border:1px dashed rgba(37,99,235,0.2);">
+            <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(37,99,235,0.1); padding-bottom:8px;">
+              <span>📦 [${sku.skuCode}] (Cần chia: ${sku.qty} Thùng)</span>
+              <span id="s2_diff_sku_${sku.skuCode}" style="font-size:12px; padding:3px 8px; border-radius:6px;"></span>
             </div>
             ${salesUsers.map(s => `
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:13px; font-weight:700;">
-                <span>${s.name.split(' ').pop()} (${s.code})</span>
-                <input type="number" value="${window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode]}" onchange="window._masterKpiState.salesAllocations['${s.code}'].skus['${sku.skuCode}'] = Number(this.value)||0; renderMasterKpiStep2(users.filter(u=>u.role==='sales'&&u.active!==false));" style="width:70px; padding:6px; text-align:center; border:1px solid var(--card-border); border-radius:4px; font-weight:800;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:14px; font-weight:800;">
+                <span style="color:var(--text-main);">[${s.code}]${s.name.split(' ').pop()}</span>
+                <input type="text" inputmode="numeric" 
+                       value="${window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0}" 
+                       oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this.value)" 
+                       style="width:80px; padding:8px; text-align:center; border:1px solid var(--card-border); border-radius:8px; font-weight:900; color:var(--primary); outline:none;">
               </div>
             `).join('')}
           </div>
@@ -9369,20 +9477,29 @@ window.renderMasterKpiStep2 = function(salesUsers) {
      }).join('');
 
      return `
-        <div style="background:var(--card-bg); border:1px solid ${diffComp === 0 ? 'var(--emerald)' : 'var(--rose)'}; border-radius:12px; padding:12px; margin-bottom:16px;">
-          <div style="font-weight:900; color:var(--text-main); font-size:15px; margin-bottom:4px; text-transform:uppercase;">CÔNG TY: ${c.compName}</div>
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; margin-bottom:10px; padding-bottom:8px; border-bottom:1px dashed var(--card-border);">
-             <span style="color:var(--text-muted);">Tổng giao: <b style="color:var(--text-main);">${(c.target/1000).toLocaleString('vi-VN')}k</b></span>
-             <span style="color:${diffComp === 0 ? 'var(--emerald)' : 'var(--rose)'}">${diffComp === 0 ? '✅ Đã khớp' : `⚠️ Lệch: ${(diffComp/1000).toLocaleString('vi-VN')}k`}</span>
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:16px; margin-bottom:20px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
+          <div style="font-weight:900; color:var(--text-main); font-size:16px; margin-bottom:8px; text-transform:uppercase;">
+            <i class="fa-solid fa-building" style="color:var(--primary);"></i> ${c.compName}
+          </div>
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:900; margin-bottom:14px; padding-bottom:12px; border-bottom:1px dashed var(--card-border);">
+             <span style="color:var(--text-muted);">Tổng giao: <b style="color:var(--text-main); font-size:16px;">${(c.target/1000).toLocaleString('vi-VN')}k</b></span>
+             <span id="s2_diff_comp_${c.compCode}" style="padding:4px 10px; border-radius:8px; font-size:12px;"></span>
           </div>
 
           <!-- Nhập số tiền cho từng NV -->
-          ${salesUsers.map(s => `
-             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <span style="font-size:13px; font-weight:800; color:var(--primary);">[${s.code}]${s.name.split(' ').pop()}</span>
-                <input type="text" value="${window._masterKpiState.salesAllocations[s.code].companies[c.compCode].toLocaleString('vi-VN')}" oninput="this.value = this.value.replace(/[^0-9]/g, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');" onchange="window._masterKpiState.salesAllocations['${s.code}'].companies['${c.compCode}'] = Number(this.value.replace(/,/g,''))||0; renderMasterKpiStep2(users.filter(u=>u.role==='sales'&&u.active!==false));" style="width:140px; padding:8px; text-align:right; font-weight:900; color:var(--rose); border:1px solid var(--card-border); border-radius:6px; font-size:14px;">
-             </div>
-          `).join('')}
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            ${salesUsers.map(s => `
+               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.01); padding:8px; border-radius:8px;">
+                  <span style="font-size:14px; font-weight:900; color:var(--text-main);">[${s.code}]${s.name.split(' ').pop()}</span>
+                  <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
+                         value="${window._masterKpiState.salesAllocations[s.code].companies[c.compCode].toLocaleString('vi-VN')}" 
+                         oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this.value)" 
+                         style="width:140px; padding:10px; text-align:right; font-weight:900; color:var(--rose); border:1px solid var(--card-border); border-radius:8px; font-size:15px; outline:none; transition:0.2s;"
+                         onfocus="this.style.borderColor='var(--rose)'" onblur="this.style.borderColor='var(--card-border)'">
+               </div>
+            `).join('')}
+          </div>
 
           ${skuHtml}
         </div>
@@ -9392,55 +9509,117 @@ window.renderMasterKpiStep2 = function(salesUsers) {
   modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
-        <div style="padding:16px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
-          <button class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900;"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
-          <h3 style="font-size:16px; font-weight:900; color:var(--primary);">BƯỚC 2: RẢI SỐ CHO NHÂN VIÊN</h3>
-          <button class="btn btn-red btn-sm" onclick="closeTargetModal()">Đóng</button>
+        
+        <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
+          <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border);"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
+          <h3 style="font-size:16px; font-weight:900; color:var(--primary); margin:0;">BƯỚC 2: RẢI SỐ CHO NHÂN VIÊN</h3>
+          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:8px;">Đóng</button>
         </div>
         
-        <div style="flex:1; overflow-y:auto; padding:16px;">
-          <div style="font-size:12px; color:var(--text-muted); font-style:italic; margin-bottom:12px; text-align:center;">Lưu ý: Bạn có thể sửa số cho từng bạn Sales. Nút LƯU chỉ sáng lên khi TẤT CẢ các chỉ tiêu (Tiền và Thùng) đều khớp 100% với Số Tổng.</div>
+        <div style="flex:1; overflow-y:auto; padding:20px;">
+          <div style="background:rgba(245,158,11,0.1); border:1px solid var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:10px; margin-bottom:16px; text-align:center;">
+            💡 Mẹo: Hệ thống đã chia đều tự động. Bạn có thể gõ sửa số của từng bạn Sales. Nút LƯU sẽ sáng lên khi tất cả chỉ tiêu báo Xanh (Khớp 100%).
+          </div>
           ${htmlContent}
         </div>
 
-        <div style="padding:16px; background:var(--panel-bg); border-top:1px solid var(--card-border);">
-           <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:12px;" onclick="validateAndSaveMasterKpiToDatabase()">
-              <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT VÀ GIAO CHỈ TIÊU ĐỒNG LOẠT
+        <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
+           <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; transition:0.3s;" onclick="validateAndSaveMasterKpiToDatabase()">
+              <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH
            </button>
         </div>
       </div>
     </div>
   `;
+  updateStep2DiffUI(); // Chạy hàm kiểm tra khớp ngay khi vừa mở
+};
+
+// HÀM XỬ LÝ GÕ PHÍM BƯỚC 2 - KHÔNG LAG
+window.handleStep2CompInput = function(salesCode, compCode, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].companies[compCode] = Number(cleanVal) || 0;
+  
+  const el = document.getElementById(`s2_inp_comp_${salesCode}_${compCode}`);
+  if(el) {
+      const formatted = window._masterKpiState.salesAllocations[salesCode].companies[compCode] > 0 ? window._masterKpiState.salesAllocations[salesCode].companies[compCode].toLocaleString('vi-VN') : '';
+      if (el.value.replace(/,/g, '') !== cleanVal) el.value = formatted;
+  }
+  updateStep2DiffUI();
+};
+
+window.handleStep2SkuInput = function(salesCode, skuCode, val) {
+  const cleanVal = val.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
+  updateStep2DiffUI();
+};
+
+window.updateStep2DiffUI = function() {
+  const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+  let isAllValid = true;
+
+  window._masterKpiState.companies.forEach(c => {
+     // Check Company Revenue
+     let sumSalesComp = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0), 0);
+     let diffComp = c.target - sumSalesComp;
+     const compLabel = document.getElementById(`s2_diff_comp_${c.compCode}`);
+     if (compLabel) {
+         if (diffComp === 0) {
+             compLabel.innerHTML = '✅ Đã khớp';
+             compLabel.style.background = 'rgba(16,185,129,0.1)'; compLabel.style.color = 'var(--emerald)';
+         } else {
+             compLabel.innerHTML = `⚠️ Lệch: ${(diffComp/1000).toLocaleString('vi-VN')}k`;
+             compLabel.style.background = 'rgba(225,29,72,0.1)'; compLabel.style.color = 'var(--rose)';
+             isAllValid = false;
+         }
+     }
+
+     // Check SKUs
+     c.focusSkus.forEach(sku => {
+        let sumSalesSku = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0), 0);
+        let diffSku = sku.qty - sumSalesSku;
+        const skuLabel = document.getElementById(`s2_diff_sku_${sku.skuCode}`);
+        if (skuLabel) {
+            if (diffSku === 0) {
+                skuLabel.innerHTML = '✅ Khớp';
+                skuLabel.style.background = 'rgba(16,185,129,0.1)'; skuLabel.style.color = 'var(--emerald)';
+            } else {
+                skuLabel.innerHTML = `Lệch: ${diffSku} Th`;
+                skuLabel.style.background = 'rgba(225,29,72,0.1)'; skuLabel.style.color = 'var(--rose)';
+                isAllValid = false;
+            }
+        }
+     });
+  });
+
+  // Tắt/Mở nút Save
+  const saveBtn = document.getElementById('btn_save_master_kpi');
+  if (saveBtn) {
+      if (isAllValid) {
+          saveBtn.style.opacity = '1';
+          saveBtn.style.pointerEvents = 'auto';
+          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG KÊNH';
+      } else {
+          saveBtn.style.opacity = '0.5';
+          saveBtn.style.pointerEvents = 'none';
+          saveBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SỐ LIỆU ĐANG LỆCH, KHÔNG THỂ LƯU';
+      }
+  }
 };
 
 // LƯU DB HÀNG LOẠT XUỐNG TỪNG NHÂN VIÊN
 window.validateAndSaveMasterKpiToDatabase = async function() {
   const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
   
-  // 1. Validations 100% matches Master
-  let isError = false;
-  window._masterKpiState.companies.forEach(c => {
-     let sumSalesComp = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0), 0);
-     if (sumSalesComp !== c.target) isError = true;
-
-     c.focusSkus.forEach(sku => {
-        let sumSalesSku = salesUsers.reduce((sum, s) => sum + (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0), 0);
-        if (sumSalesSku !== sku.qty) isError = true;
-     });
-  });
-
-  if (isError) {
-     return alert("⛔ TỔNG SỐ KHÔNG KHỚP! Hãy kiểm tra lại các mục báo màu đỏ Lệch. Hệ thống yêu cầu rải số phải chính xác 100% theo tổng đã thiết lập.");
+  const btn = document.getElementById('btn_save_master_kpi');
+  if(btn) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG ĐỒNG BỘ XUỐNG THIẾT BỊ SALES...';
+    btn.disabled = true;
   }
-
-  const btn = document.querySelector('.modal-content .btn-green');
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG ĐỒNG BỘ...';
-  btn.disabled = true;
 
   try {
      const batch = writeBatch(db);
      
-     // 2. Map data for each Sales Rep and write to DB
+     // Build payload and push to batch for each active Sales Rep
      salesUsers.forEach(s => {
         const sCode = s.code;
         const targetDocId = `tgt_${sCode}_${window._chiTieuTargetMonth}`;
@@ -9471,7 +9650,7 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
            });
         });
 
-        // Set document cho từng sales
+        // Ghi đè vào database
         batch.set(docRef, {
            salesCode: sCode,
            month: window._chiTieuTargetMonth,
@@ -9486,14 +9665,16 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
      await batch.commit();
 
      playSystemSound('success');
-     alert(`✅ ĐÃ LƯU & GIAO CHỈ TIÊU XUỐNG THÀNH CÔNG CHO ${salesUsers.length} NHÂN VIÊN!`);
+     alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${salesUsers.length} NHÂN VIÊN!`);
      closeTargetModal();
-     calculateAndRenderTargets();
+     calculateAndRenderTargets(); // Làm mới dashboard ở màn hình ngoài
 
   } catch (err) {
-     alert("Lỗi khi lưu dữ liệu lên server: " + err.message);
-     btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> THỬ LẠI';
-     btn.disabled = false;
+     alert("Lỗi khi đồng bộ lên hệ thống: " + err.message);
+     if(btn) {
+        btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> THỬ LẠI';
+        btn.disabled = false;
+     }
   }
 };
 // ==========================================
