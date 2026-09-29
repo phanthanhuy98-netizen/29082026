@@ -1649,6 +1649,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
   };
 
  // Khai báo biến lưu trữ trình lắng nghe tài khoản
+ // Khai báo biến lưu trữ trình lắng nghe tài khoản
   window._userAuthListener = null;
 
   onAuthStateChanged(authSvc, async (user) => {
@@ -1665,7 +1666,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       return;
     }
 
-    // 1. TẠO HOẶC LẤY SESSION ID CỦA MÁY HIỆN TẠI
+    // 1. LẤY MÃ ĐỊNH DANH CỦA MÁY HIỆN TẠI
     let localSessionId = localStorage.getItem('dms_session_id');
     if (!localSessionId) {
         localSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
@@ -1680,18 +1681,33 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     
     const isAdminGoc = profile.email?.toLowerCase() === 'phanthanhhuy98@gmail.com';
 
-    // 2. KIỂM TRA TRẠNG THÁI KHÓA BAN ĐẦU
+    // 2. KIỂM TRA TÀI KHOẢN CÓ BỊ KHÓA TỪ TRƯỚC KHÔNG
     if (profile.active === false && !isAdminGoc) { 
       alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ Admin để mở lại."); 
       await signOut(authSvc); 
       return; 
     }
 
-    // 3. ĐĂNG KÝ MÃ MÁY NÀY LÊN HỆ THỐNG (Trừ Admin gốc để tránh phiền phức khi bảo trì)
+    // 3. CƠ CHẾ KHÓA CHÉO 2 CHIỀU (AGGRESSIVE LOCK)
     if (!isAdminGoc) {
+        // Nếu phát hiện CSDL đã có mã Session ID của máy khác để lại
+        if (profile.currentSessionId && profile.currentSessionId !== localSessionId) {
+            alert("⚠️ CẢNH BÁO BẢO MẬT: Phát hiện tài khoản này đang được đăng nhập ở thiết bị khác!\n\nHệ thống tự động KHÓA TÀI KHOẢN trên cả 2 thiết bị. Vui lòng liên hệ Admin để mở khóa.");
+            
+            // a. Máy B lập tức đánh sập tài khoản trên CSDL (Lệnh này sẽ đá văng Máy A đang online)
+            await updateDoc(userRef, { active: false, currentSessionId: "" });
+            
+            // b. Tự động đá văng Máy B (máy hiện tại) ra ngoài
+            if (window._userAuthListener) window._userAuthListener();
+            await signOut(authSvc);
+            return;
+        }
+
+        // Nếu an toàn (chưa có ai đăng nhập), ghi dấu vết của máy này lên CSDL
         await setDoc(userRef, { currentSessionId: localSessionId }, { merge: true });
     }
 
+    // NẠP THÔNG TIN NGƯỜI DÙNG VÀO HỆ THỐNG
     currentUser = { 
       uid: user.uid, 
       email: user.email, 
@@ -1702,9 +1718,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     };
 
     const isAccountant = currentUser && currentUser.role === 'accountant';
-    if (isAccountant) {
-      currentTab = 'soGocBH';
-    }
+    if (isAccountant) currentTab = 'soGocBH';
     
     loadUserCustomPreferences();
     
@@ -1737,41 +1751,25 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     setTimeout(async () => {
       await cleanupExpiredOrdersOptimized();
       await loadMasterDataOptimized(false);
-
       try {
         const pos = await getHighAccuracyPosition();
         currentSalesGPS = { lat: pos.lat, lng: pos.lng };
       } catch (e) {
         currentSalesGPS = DEFAULT_MAP_CENTER;
       }
-
       attachListeners();
       window.syncOfflineCheckins();
       window.syncOfflineOrders();
     }, 50);
 
-    // 4. LẮNG NGHE REAL-TIME: CHỐNG ĐĂNG NHẬP 2 MÁY CÙNG LÚC
+    // 4. LẮNG NGHE REAL-TIME: ĐỢI LỆNH TỬ HÌNH TỪ MÁY KHÁC
     if (!isAdminGoc) {
         window._userAuthListener = onSnapshot(userRef, async (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                
-                // Trưởng hợp A: Bị Admin khóa thủ công hoặc khóa tự động từ máy khác
+                // Nếu Máy B vào sau đổi active = false, Máy A đang online sẽ nhận tín hiệu và tự văng ra
                 if (data.active === false) {
-                    alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ Quản trị viên để mở lại.");
-                    if (window._userAuthListener) window._userAuthListener();
-                    await signOut(authSvc);
-                    return;
-                }
-
-                // Trường hợp B: Phát hiện có máy khác vừa đăng nhập (Mã Session ID bị ghi đè)
-                if (data.currentSessionId && data.currentSessionId !== localSessionId) {
-                    alert("⚠️ CẢNH BÁO BẢO MẬT: Phát hiện tài khoản này vừa đăng nhập từ thiết bị khác!\n\nHệ thống tự động KHÓA TÀI KHOẢN để bảo vệ dữ liệu. Hãy liên hệ Admin để mở lại.");
-                    
-                    // Lập tức khóa tài khoản trên Firebase
-                    await updateDoc(userRef, { active: false });
-                    
-                    // Hủy lắng nghe và đá văng phiên hiện tại
+                    alert("⛔ Tài khoản của bạn đã bị KHÓA do phát hiện đăng nhập ở thiết bị khác, hoặc do Admin thao tác! Vui lòng liên hệ Admin để mở lại.");
                     if (window._userAuthListener) window._userAuthListener();
                     await signOut(authSvc);
                 }
@@ -1779,7 +1777,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
         });
     }
   });
-
  window.handleLogout = async function() {
       // Dọn dẹp trình lắng nghe bảo mật trước khi thoát
       if (window._userAuthListener) {
