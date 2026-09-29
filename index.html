@@ -3263,44 +3263,123 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
     }
   };
 
-  window.deleteAllOrdersByDatePrompt = async function() {
+// ==========================================
+  // 1. MỞ MODAL CHỌN KHOẢNG NGÀY CẦN XÓA ĐƠN
+  // ==========================================
+  window.openDeleteOrdersRangeModal = function() {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {
-      return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền xóa toàn bộ đơn hàng theo ngày!");
+      return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền xóa đơn hàng loạt!");
     }
-    const dateInput = prompt("Nhập ngày cần xóa toàn bộ đơn hàng (Định dạng YYYY-MM-DD, VD: 2026-09-03):");
-    if (!dateInput) return;
 
-    const targetDate = dateInput.trim();
-    const targetOrders = orders.filter(o => o.ngayCtu === targetDate);
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    // Lấy ngày hôm nay làm mặc định
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex; z-index:999999;">
+        <div class="modal-content" style="max-width: 420px; padding: 24px; border-radius: 18px;">
+          <div style="text-align:center; font-size:36px; color:var(--rose); margin-bottom:12px;">
+            <i class="fa-solid fa-calendar-xmark"></i>
+          </div>
+          <h3 style="font-size:18px; font-weight:900; color:var(--text-main); margin-bottom:8px; text-align:center;">Xóa Đơn Hàng Hàng Loạt</h3>
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:20px; line-height:1.5; text-align:center;">
+            Vui lòng chọn khoảng thời gian. Toàn bộ đơn hàng nằm trong khoảng này sẽ bị <b style="color:var(--rose);">xóa vĩnh viễn</b> khỏi hệ thống.
+          </p>
+          
+          <div style="display:flex; gap:12px; margin-bottom:20px;">
+            <div style="flex:1;">
+              <label style="font-size:12px; font-weight:900; color:var(--primary); display:block; margin-bottom:6px;">TỪ NGÀY:</label>
+              <input type="date" id="delRangeFrom" value="${todayStr}" style="width:100%; padding:12px; border-radius:10px; border:1px solid var(--card-border); font-size:14px; font-weight:800; color:var(--text-main); background:var(--bg-dark); outline:none;">
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:12px; font-weight:900; color:var(--primary); display:block; margin-bottom:6px;">ĐẾN NGÀY:</label>
+              <input type="date" id="delRangeTo" value="${todayStr}" style="width:100%; padding:12px; border-radius:10px; border:1px solid var(--card-border); font-size:14px; font-weight:800; color:var(--text-main); background:var(--bg-dark); outline:none;">
+            </div>
+          </div>
+          
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-red" style="flex:1; padding:14px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px;" onclick="executeDeleteOrdersRange()">
+              <i class="fa-solid fa-trash-can"></i> XÓA DỮ LIỆU
+            </button>
+            <button class="btn" style="padding:14px 20px; font-size:14px; font-weight:900; justify-content:center; border-radius:10px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden'); document.getElementById('dynamicModalContainer').innerHTML='';">
+              HỦY
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+  };
+
+  // ==========================================
+  // 2. THỰC THI LỆNH XÓA (CÓ CHIA BATCH ĐỂ CHỐNG LỖI FIREBASE)
+  // ==========================================
+  window.executeDeleteOrdersRange = async function() {
+    const fromDate = document.getElementById('delRangeFrom').value;
+    const toDate = document.getElementById('delRangeTo').value;
+
+    if (!fromDate || !toDate) return alert("Vui lòng chọn đầy đủ Từ ngày và Đến ngày!");
+    if (fromDate > toDate) return alert("Lỗi: 'Từ ngày' không được lớn hơn 'Đến ngày'!");
+
+    // Lọc ra các đơn hàng nằm trong khoảng ngày
+    const targetOrders = orders.filter(o => o.ngayCtu >= fromDate && o.ngayCtu <= toDate);
+
+    // Format ngày sang DD/MM/YYYY để hiển thị cho đẹp
+    const formatVN = (dateStr) => dateStr.split('-').reverse().join('/');
 
     if (targetOrders.length === 0) {
-      return alert(`Không tìm thấy đơn hàng nào trong ngày ${targetDate} để xóa!`);
+      return alert(`Không tìm thấy đơn hàng nào từ ${formatVN(fromDate)} đến ${formatVN(toDate)} để xóa!`);
     }
 
     const confirmDel = await window.showCustomConfirm(
-      "Xóa Hàng Loạt Đơn Hàng",
-      `⚠️ CẢNH BÁO: Bạn sắp xóa toàn bộ ${targetOrders.length} đơn hàng trong ngày ${targetDate}!\nHành động này không thể hoàn tác. Bạn có thực sự chắc chắn không?`,
+      "XÁC NHẬN XÓA HÀNG LOẠT",
+      `⚠️ CẢNH BÁO: Bạn sắp xóa VĨNH VIỄN ${targetOrders.length} đơn hàng từ ngày ${formatVN(fromDate)} đến ${formatVN(toDate)}!\n\nHành động này không thể hoàn tác. Bạn có thực sự chắc chắn không?`,
       "fa-triangle-exclamation",
-      "Xóa toàn bộ",
+      "Đồng ý Xóa",
       "Hủy"
     );
     if (!confirmDel) return;
 
     try {
-      const batch = writeBatch(db);
-      targetOrders.forEach(o => {
-        batch.delete(doc(db, "orders", o.id));
-      });
-      await batch.commit();
+      alert("⏳ Đang tiến hành xóa dữ liệu trên đám mây. Vui lòng chờ...");
+      
+      // Chia nhỏ ra từng batch 400 document để tránh lỗi giới hạn của Firebase khi xóa số lượng lớn
+      let batches = [];
+      let currentBatch = writeBatch(db);
+      let count = 0;
 
-      orders = orders.filter(o => o.ngayCtu !== targetDate);
+      targetOrders.forEach(o => {
+        currentBatch.delete(doc(db, "orders", o.id));
+        count++;
+        if (count >= 400) {
+          batches.push(currentBatch.commit());
+          currentBatch = writeBatch(db);
+          count = 0;
+        }
+      });
+      
+      if (count > 0) batches.push(currentBatch.commit());
+      await Promise.all(batches);
+
+      // Cập nhật lại mảng dữ liệu trên máy & Giao diện
+      orders = orders.filter(o => o.ngayCtu < fromDate || o.ngayCtu > toDate);
+      
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
         renderTabContent('soGocBH', activePane);
       } else {
         filterSoGocCards();
       }
-      alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng trong ngày ${targetDate}!`);
+
+      // Đóng modal
+      document.getElementById('dynamicModalContainer').classList.add('hidden');
+      document.getElementById('dynamicModalContainer').innerHTML='';
+
+      if (typeof playSystemSound === 'function') playSystemSound('success');
+      alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng (Từ ${formatVN(fromDate)} - ${formatVN(toDate)})!`);
+      
     } catch (err) {
       alert("Lỗi khi xóa hàng loạt: " + err.message);
     }
@@ -5167,8 +5246,8 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
           <h2 style="font-size: 20px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
           <div class="excel-group-btns">
          <button class="btn btn-amber" style="padding: 8px 16px; font-size: 17px;" onclick="reloadSoGocDataManually()" title="Làm mới danh sách đơn hàng"><i class="fa-solid fa-rotate"></i> Làm mới</button>
-            ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteAllOrdersByDatePrompt()"><i class="fa-solid fa-trash-can"></i> Xóa đơn theo ngày</button>` : ''}
-            ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
+${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="openDeleteOrdersRangeModal()"><i class="fa-solid fa-calendar-minus"></i> Xóa đơn (Từ ngày - Đến ngày)</button>` : ''}
+${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
 
