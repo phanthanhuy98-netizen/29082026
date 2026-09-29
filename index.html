@@ -1648,48 +1648,77 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     }
   };
 
+ // Khai báo biến lưu trữ trình lắng nghe tài khoản
+  window._userAuthListener = null;
+
   onAuthStateChanged(authSvc, async (user) => {
     if (!user) {
       currentUser = null;
       document.getElementById('loginView').classList.remove('hidden');
       document.getElementById('appView').classList.add('hidden');
+      
+      // Hủy lắng nghe khi đã đăng xuất
+      if (window._userAuthListener) {
+          window._userAuthListener();
+          window._userAuthListener = null;
+      }
       return;
     }
 
-    const profileSnap = await getDoc(doc(db, "users", user.uid));
+    // 1. TẠO HOẶC LẤY SESSION ID CỦA MÁY HIỆN TẠI
+    let localSessionId = localStorage.getItem('dms_session_id');
+    if (!localSessionId) {
+        localSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('dms_session_id', localSessionId);
+    }
+
+    const userRef = doc(db, "users", user.uid);
+    const profileSnap = await getDoc(userRef);
+    
     if (!profileSnap.exists()) return alert("Tài khoản chưa được cấu hình phân quyền trong CSDL (bảng users).");
     const profile = profileSnap.data();
+    
+    const isAdminGoc = profile.email?.toLowerCase() === 'phanthanhhuy98@gmail.com';
 
-    if (profile.active === false && profile.email?.toLowerCase() !== 'phanthanhhuy98@gmail.com') { 
-      alert("⛔ Tài khoản bị khóa."); 
+    // 2. KIỂM TRA TRẠNG THÁI KHÓA BAN ĐẦU
+    if (profile.active === false && !isAdminGoc) { 
+      alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ Admin để mở lại."); 
       await signOut(authSvc); 
       return; 
     }
 
-  currentUser = { 
+    // 3. ĐĂNG KÝ MÃ MÁY NÀY LÊN HỆ THỐNG (Trừ Admin gốc để tránh phiền phức khi bảo trì)
+    if (!isAdminGoc) {
+        await setDoc(userRef, { currentSessionId: localSessionId }, { merge: true });
+    }
+
+    currentUser = { 
       uid: user.uid, 
       email: user.email, 
       name: profile.name, 
       code: profile.code, 
-      role: (profile.role || 'sales').toLowerCase(), // Thêm dấu phẩy vào cuối dòng này
+      role: (profile.role || 'sales').toLowerCase(),
       assignedRoutes: profile.assignedRoutes || [] 
     };
-const isAccountant = currentUser && currentUser.role === 'accountant';
-if (isAccountant) {
-  currentTab = 'soGocBH';
-}
+
+    const isAccountant = currentUser && currentUser.role === 'accountant';
+    if (isAccountant) {
+      currentTab = 'soGocBH';
+    }
+    
     loadUserCustomPreferences();
+    
     try {
-    getDoc(doc(db, "systemMeta", "companyGPS")).then(compGpsSnap => {
-      if (compGpsSnap.exists()) {
-        globalCompanyGps = compGpsSnap.data();
-        localStorage.setItem('dms_company_gps', JSON.stringify(globalCompanyGps));
-      } else {
-        const cached = localStorage.getItem('dms_company_gps');
-        if (cached) globalCompanyGps = JSON.parse(cached);
-      }
-    });
-  } catch(e) {}
+      getDoc(doc(db, "systemMeta", "companyGPS")).then(compGpsSnap => {
+        if (compGpsSnap.exists()) {
+          globalCompanyGps = compGpsSnap.data();
+          localStorage.setItem('dms_company_gps', JSON.stringify(globalCompanyGps));
+        } else {
+          const cached = localStorage.getItem('dms_company_gps');
+          if (cached) globalCompanyGps = JSON.parse(cached);
+        }
+      });
+    } catch(e) {}
 
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
@@ -1720,18 +1749,52 @@ if (isAccountant) {
       window.syncOfflineCheckins();
       window.syncOfflineOrders();
     }, 50);
+
+    // 4. LẮNG NGHE REAL-TIME: CHỐNG ĐĂNG NHẬP 2 MÁY CÙNG LÚC
+    if (!isAdminGoc) {
+        window._userAuthListener = onSnapshot(userRef, async (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                
+                // Trưởng hợp A: Bị Admin khóa thủ công hoặc khóa tự động từ máy khác
+                if (data.active === false) {
+                    alert("⛔ Tài khoản của bạn đã bị khóa! Vui lòng liên hệ Quản trị viên để mở lại.");
+                    if (window._userAuthListener) window._userAuthListener();
+                    await signOut(authSvc);
+                    return;
+                }
+
+                // Trường hợp B: Phát hiện có máy khác vừa đăng nhập (Mã Session ID bị ghi đè)
+                if (data.currentSessionId && data.currentSessionId !== localSessionId) {
+                    alert("⚠️ CẢNH BÁO BẢO MẬT: Phát hiện tài khoản này vừa đăng nhập từ thiết bị khác!\n\nHệ thống tự động KHÓA TÀI KHOẢN để bảo vệ dữ liệu. Hãy liên hệ Admin để mở lại.");
+                    
+                    // Lập tức khóa tài khoản trên Firebase
+                    await updateDoc(userRef, { active: false });
+                    
+                    // Hủy lắng nghe và đá văng phiên hiện tại
+                    if (window._userAuthListener) window._userAuthListener();
+                    await signOut(authSvc);
+                }
+            }
+        });
+    }
   });
 
-  window.handleLogout = async function() {
-  
-    const loginView = document.getElementById('loginView');
-    const appView = document.getElementById('appView');
-    if (loginView) loginView.classList.remove('hidden');
-    if (appView) appView.classList.add('hidden');
+ window.handleLogout = async function() {
+      // Dọn dẹp trình lắng nghe bảo mật trước khi thoát
+      if (window._userAuthListener) {
+          window._userAuthListener();
+          window._userAuthListener = null;
+      }
 
-    const logPassEl = document.getElementById('logPass');
-    if (logPassEl) {
-      logPassEl.value = '';
+      const loginView = document.getElementById('loginView');
+      const appView = document.getElementById('appView');
+      if (loginView) loginView.classList.remove('hidden');
+      if (appView) appView.classList.add('hidden');
+
+      const logPassEl = document.getElementById('logPass');
+      if (logPassEl) {
+        logPassEl.value = '';
       logPassEl.setAttribute('readonly', 'readonly');
       setTimeout(() => logPassEl.removeAttribute('readonly'), 100);
     }
