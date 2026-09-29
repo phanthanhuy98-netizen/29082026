@@ -961,8 +961,11 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
   let existingOrderSoCtu = null; 
   let isSubmittingOrder = false;
 
-  let soGocFilterKeyword = "", soGocFilterDateFrom = "", soGocFilterDateTo = "", soGocSalesFilter = "", soGocQuickDate = localStorage.getItem('dms_sogoc_quickdate') || 'all';
-
+let soGocFilterKeyword = "";
+  let soGocFilterDateFrom = localStorage.getItem('dms_sogoc_date_from') || "";
+  let soGocFilterDateTo = localStorage.getItem('dms_sogoc_date_to') || "";
+  let soGocSalesFilter = localStorage.getItem('dms_sogoc_sales_filter') || "";
+  let soGocQuickDate = localStorage.getItem('dms_sogoc_quickdate') || 'all';
   let customerSearchKeyword = ""; 
   let productSearchKeyword = ""; 
   let tabCustomerSearchKey = ""; 
@@ -3033,10 +3036,16 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
     filterSoGocCards();
   };
 
-  window.reloadSoGocDataManually = async function() {
+ window.reloadSoGocDataManually = async function() {
     try {
+      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
+      const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
+      if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+
+      // Tải dữ liệu mới từ Firebase
       const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30)));
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
         hasMoreOrders = snap.docs.length >= 30;
@@ -3046,14 +3055,23 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
-        renderTabContent('soGocBH', activePane);
+        // 1. Vẽ lại toàn bộ HTML với dữ liệu mới
+        await renderTabContent('soGocBH', activePane);
+
+        // 2. QUAN TRỌNG: Gọi lại hàm lọc để giữ nguyên trạng thái Nhân viên, Ngày tháng và Từ khóa đang nhập
+        setTimeout(() => {
+          if (typeof filterSoGocCards === 'function') {
+            filterSoGocCards(soGocFilterKeyword);
+          }
+        }, 50);
       }
-      triggerHaptic(20);
+      
+      if (typeof triggerHaptic === 'function') triggerHaptic(20);
+
     } catch (e) {
       alert("Lỗi tải lại dữ liệu: " + e.message);
     }
   };
-
   window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
     try {
