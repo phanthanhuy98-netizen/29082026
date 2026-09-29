@@ -5321,32 +5321,30 @@ else if (tab === 'ctkm') {
         const container = document.getElementById('ctkmDynamicContentArea');
         if (!container) return;
 
-        let filteredPromos = window.promotionsList;
+        let filteredPromos = window.promotionsList || [];
         const rawSearchKey = window._ctkmSearchKey.trim();
 
-        // NẾU CHƯA GÕ TÌM KIẾM -> ẨN BỚT HOẶC YÊU CẦU NHẬP TỪ KHÓA ĐỂ TỐI ƯU TỐC ĐỘ (GIỐNG SỔ GỐC)
-        if (rawSearchKey === '') {
-            container.innerHTML = `<div style="text-align:center; padding:35px; color:var(--text-muted); font-size:14px; font-weight:800; background:var(--card-bg); border-radius:12px; border:1px solid var(--card-border);">Vui lòng gõ tên công ty, mã công ty hoặc bấm nút "Làm mới" để hiển thị danh sách CTKM.</div>`;
-            return;
+        // NẾU CÓ TỪ KHÓA TÌM KIẾM THÌ LỌC, NẾU KHÔNG CÓ THÌ GIỮ NGUYÊN TOÀN BỘ DANH SÁCH
+        if (rawSearchKey !== '') {
+            const q = removeAccents(rawSearchKey);
+            filteredPromos = filteredPromos.filter(p => {
+                let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(p.maCtu || '').trim().toUpperCase());
+                let compFullName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : '';
+
+                const maCtuNorm = removeAccents(String(p.maCtu || ''));
+                const maKMNorm = removeAccents(String(p.maKM || ''));
+                const compFullNorm = removeAccents(compFullName);
+
+                if (/^\d+$/.test(rawSearchKey)) {
+                    return maCtuNorm.startsWith(q) || maKMNorm.startsWith(q);
+                }
+
+                const textToSearch = `${maCtuNorm} ${maKMNorm} ${compFullNorm}`;
+                return textToSearch.includes(q);
+            });
         }
 
-        const q = removeAccents(rawSearchKey);
-        filteredPromos = filteredPromos.filter(p => {
-            let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === String(p.maCtu || '').trim().toUpperCase());
-            let compFullName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : '';
-
-            const maCtuNorm = removeAccents(String(p.maCtu || ''));
-            const maKMNorm = removeAccents(String(p.maKM || ''));
-            const compFullNorm = removeAccents(compFullName);
-
-            if (/^\d+$/.test(rawSearchKey)) {
-                return maCtuNorm.startsWith(q) || maKMNorm.startsWith(q);
-            }
-
-            const textToSearch = `${maCtuNorm} ${maKMNorm} ${compFullNorm}`;
-            return textToSearch.includes(q);
-        });
-
+        // GOM NHÓM THEO CÔNG TY
         let groupedPromos = {};
         filteredPromos.forEach(km => {
             let ctuKey = (km.maCtu || 'KHÁC').toUpperCase();
@@ -5387,6 +5385,7 @@ else if (tab === 'ctkm') {
 
             return `
               <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:12px;">
+                <!-- Header của Accordion: Click để mở -->
                 <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(37, 99, 235, 0.05);">
                   <div style="display:flex; gap:10px; align-items:center; flex:1;">
                     <span style="font-size:15px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-building"></i> ${compDisplayName}</span>
@@ -5394,6 +5393,7 @@ else if (tab === 'ctkm') {
                   </div>
                   <i class="fa-solid fa-chevron-down" id="icon_${accId}" style="font-size:14px; color:var(--primary); transition:transform 0.2s;"></i>
                 </div>
+                <!-- Nội dung chi tiết mặc định ẩn (class="hidden") -->
                 <div id="${accId}" class="hidden" style="padding:10px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; background:var(--card-bg);">
                   ${listHtml}
                 </div>
@@ -5401,39 +5401,39 @@ else if (tab === 'ctkm') {
             `;
         });
 
+        // Cập nhật lại số lượng CTKM trên tiêu đề
+        const titleEl = document.getElementById('ctkmTitleCount');
+        if (titleEl) titleEl.innerText = window.promotionsList.length;
+
         container.innerHTML = groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào phù hợp.</div>';
     };
 
-    // Hàm làm mới dữ liệu thủ công từ nút bấm
-   window.reloadCtkmDataManually = async function() {
-    try {
-        // Kiểm tra nếu là Admin hoặc Manager mới có quyền làm mới toàn cục
-        if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-            alert("⏳ Đang cập nhật dữ liệu CTKM mới nhất lên hệ thống cho tất cả mọi người...");
+    window.reloadCtkmDataManually = async function() {
+        try {
+            if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+                alert("⏳ Đang cập nhật dữ liệu CTKM mới nhất lên hệ thống cho tất cả mọi người...");
+                const versionVal = Date.now();
+                await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: versionVal }, { merge: true });
+            } else {
+                alert("⏳ Đang tải dữ liệu CTKM mới nhất về máy...");
+            }
+
+            const snap = await getDocs(collection(db, "promotions"));
+            window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+            window.promotionsLoaded = true;
             
-            // Cập nhật số phiên bản (version) lên bảng systemMeta để thông báo toàn cục
-            const versionVal = Date.now();
-            await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: versionVal }, { merge: true });
-        } else {
-            alert("⏳ Đang tải dữ liệu CTKM mới nhất về máy...");
+            if (typeof drawCtkmUI === 'function') {
+                drawCtkmUI();
+            }
+            alert("✅ Đã cập nhật thành công!");
+        } catch (e) {
+            alert("Lỗi tải lại CTKM: " + e.message);
         }
+    };
 
-        const snap = await getDocs(collection(db, "promotions"));
-        window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-        window.promotionsLoaded = true;
-        
-        if (typeof drawCtkmUI === 'function') {
-            drawCtkmUI();
-        }
-        alert("✅ Đã cập nhật thành công!");
-    } catch (e) {
-        alert("Lỗi tải lại CTKM: " + e.message);
-    }
-};
-
-   container.innerHTML = `
+    container.innerHTML = `
         <div class="tab-header-actions">
-            <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM (${window.promotionsList ? window.promotionsList.length : 0})</h2>
+            <h2 style="font-weight:900; font-size: 20px;"><i class="fa-solid fa-gift" style="color:var(--rose);"></i> Quản Lý CTKM (<span id="ctkmTitleCount">${window.promotionsList ? window.promotionsList.length : 0}</span>)</h2>
             <div class="excel-group-btns">
                 <button class="btn btn-amber" style="padding: 6px 14px; font-size: 14px; font-weight:800;" onclick="reloadCtkmDataManually()"><i class="fa-solid fa-rotate"></i> Làm mới</button>
                 ${isAdminOrManager ? `
@@ -5448,21 +5448,26 @@ else if (tab === 'ctkm') {
         </div>
 
         <div id="ctkmDynamicContentArea" style="display:flex; flex-direction:column; gap:4px;">
-            <div style="text-align:center; color:var(--text-muted); padding:35px; font-size:14px; font-weight:800; background:var(--card-bg); border-radius:12px; border:1px solid var(--card-border);">Vui lòng gõ tên công ty, mã công ty hoặc bấm nút "Làm mới" để hiển thị danh sách CTKM.</div>
+            <div style="text-align:center; padding:35px; color:var(--text-muted); font-size:14px; font-weight:800;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu CTKM...</div>
         </div>
     `;
 
-    // Nếu đã tải dữ liệu trước đó thì giữ lại trạng thái, nếu chưa thì load ngầm
+    // Tải dữ liệu ngay khi mở tab và tự động render
     if (!window.promotionsLoaded) {
         getDocs(collection(db, "promotions")).then(snap => {
             window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
             window.promotionsLoaded = true;
-            // Không tự động render đè nếu chưa nhập từ khóa, giữ nguyên trạng thái tối ưu
+            // TỰ ĐỘNG VẼ GIAO DIỆN NGAY KHI TẢI XONG
+            if (typeof drawCtkmUI === 'function') drawCtkmUI();
         }).catch(e => {
             window.promotionsLoaded = true;
+            document.getElementById('ctkmDynamicContentArea').innerHTML = `<div style="text-align:center; padding:35px; color:var(--rose); font-weight:800;">Lỗi tải dữ liệu CTKM. Vui lòng bấm Làm mới.</div>`;
         });
+    } else {
+        // Đã load từ trước thì vẽ luôn
+        drawCtkmUI();
     }
-}
+  }
     else if (tab === 'gocSales') {
       renderGocSalesTab(container);
     }
