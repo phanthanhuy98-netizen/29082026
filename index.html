@@ -4482,7 +4482,7 @@ window.filterModalCompanyList = function(val) {
     </div>
   `).join('') : `<div style="text-align:center; padding:20px; color:var(--text-muted);">Không tìm thấy công ty phù hợp.</div>`;
 };
-  window.addUser = async function(e) {
+window.addUser = async function(e) {
     e.preventDefault();
     const code = document.getElementById('usCode').value.trim();
     const name = document.getElementById('usName').value.trim();
@@ -4491,17 +4491,55 @@ window.filterModalCompanyList = function(val) {
     const roleInput = document.getElementById('usRole').value.trim();
     const role = roleInput.toLowerCase();
     
+    // Chuẩn hóa email hoặc tên đăng nhập
     const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
+      // 1. KIỂM TRA TRÙNG MÃ NHÂN VIÊN TRONG CSDL
+      const qCode = query(collection(db, "users"), where("code", "==", code), limit(1));
+      const snapCode = await getDocs(qCode);
+      if (!snapCode.empty) {
+        return alert(`⛔ Lỗi: Mã nhân viên "${code}" đã tồn tại trong hệ thống! Vui lòng chọn mã khác.`);
+      }
+
+      // 2. KIỂM TRA TRÙNG TÊN ĐĂNG NHẬP / EMAIL TRONG CSDL
+      const qEmail = query(collection(db, "users"), where("email", "==", email), limit(1));
+      const snapEmail = await getDocs(qEmail);
+      if (!snapEmail.empty) {
+        return alert(`⛔ Lỗi: Tên đăng nhập hoặc email "${usernameInput}" đã được sử dụng! Vui lòng chọn tài khoản khác.`);
+      }
+
+      // 3. TIẾN HÀNH TẠO TÀI KHOẢN NẾU KHÔNG TRÙNG
       const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      await setDoc(doc(db, "users", cred.user.uid), { uid: cred.user.uid, email, name, code, role, active: true, createdAt: serverTimestamp() });
+      await setDoc(doc(db, "users", cred.user.uid), { 
+        uid: cred.user.uid, 
+        email, 
+        name, 
+        code, 
+        role, 
+        active: true, 
+        createdAt: serverTimestamp() 
+      });
+      
       await secondaryAuth.signOut();
       document.getElementById('userForm').reset();
+      
       alert("✅ Tạo tài khoản thành công!");
+      
+      // Cập nhật lại danh sách hiển thị trên giao diện
       users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code, role, active: true });
       renderUI();
-    } catch (err) { alert("Lỗi: " + err.message); }
+      
+    } catch (err) { 
+      // Xử lý các lỗi từ Firebase Auth (ví dụ: mật khẩu quá yếu, email sai định dạng...)
+      let errMsg = err.message;
+      if (err.code === 'auth/email-already-in-use') {
+        errMsg = "Tên đăng nhập / Email này đã tồn tại trên hệ thống xác thực Auth.";
+      } else if (err.code === 'auth/weak-password') {
+        errMsg = "Mật khẩu quá yếu (yêu cầu tối thiểu 6 ký tự).";
+      }
+      alert("⛔ Không thể tạo tài khoản: " + errMsg); 
+    }
   };
 
   window.toggleUserActive = async function(uid, active) { 
