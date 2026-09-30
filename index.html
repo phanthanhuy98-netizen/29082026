@@ -1708,11 +1708,6 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
 
     // 3. CƠ CHẾ KHÓA CHÉO 2 CHIỀU (AGGRESSIVE LOCK)
     if (!isAdminGoc) {
-        // Nếu phát hiện CSDL đã có mã Session ID của máy khác để lại
-        if (profile.currentSessionId && profile.currentSessionId !== localSessionId) {
-            alert("⚠️ CẢNH BÁO BẢO MẬT: Phát hiện tài khoản này đang được đăng nhập ở thiết bị khác!\n\nHệ thống tự động KHÓA TÀI KHOẢN trên cả 2 thiết bị. Vui lòng liên hệ Admin để mở khóa.");
-            
-            // a. Máy B lập tức đánh sập tài khoản trên CSDL (Lệnh này sẽ đá văng Máy A đang online)
             await updateDoc(userRef, { active: false, currentSessionId: "" });
             
             // b. Tự động đá văng Máy B (máy hiện tại) ra ngoài
@@ -1780,21 +1775,30 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
       window.syncOfflineOrders();
     }, 50);
 
-    // 4. LẮNG NGHE REAL-TIME: ĐỢI LỆNH TỬ HÌNH TỪ MÁY KHÁC
+   // 4. LẮNG NGHE REAL-TIME: ĐÁ VĂNG MÁY CŨ
     if (!isAdminGoc) {
         window._userAuthListener = onSnapshot(userRef, async (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                // Nếu Máy B vào sau đổi active = false, Máy A đang online sẽ nhận tín hiệu và tự văng ra
+                
+                // Trường hợp 1: Bị Admin chủ động khóa tài khoản trong tab Nhân Viên
                 if (data.active === false) {
-                    alert("⛔ Tài khoản của bạn đã bị KHÓA do phát hiện đăng nhập ở thiết bị khác, hoặc do Admin thao tác! Vui lòng liên hệ Admin để mở lại.");
+                    alert("⛔ Tài khoản của bạn đã bị KHÓA bởi Admin! Vui lòng liên hệ quản lý để mở lại.");
+                    if (window._userAuthListener) window._userAuthListener();
+                    await signOut(authSvc);
+                    return;
+                }
+
+                // Trường hợp 2: Bị máy khác (hoặc thiết bị mới) đăng nhập chiếm quyền
+                // Nếu Session ID trên mạng khác với ID của máy hiện tại -> Tự động văng ra
+                if (data.currentSessionId && data.currentSessionId !== localSessionId) {
+                    alert("⚠️ ĐĂNG NHẬP NƠI KHÁC!\nTài khoản này vừa được đăng nhập ở một thiết bị mới. Máy này sẽ tự động đăng xuất ra ngoài để bảo mật.");
                     if (window._userAuthListener) window._userAuthListener();
                     await signOut(authSvc);
                 }
             }
         });
     }
-  });
 window.handleLogout = async function() {
       // 1. Dọn dẹp trình lắng nghe bảo mật trước khi thoát
       if (window._userAuthListener) {
