@@ -9407,13 +9407,16 @@ window.handleImportCtkmExcel = function(event) {
     reader.onload = async function(e) {
       try {
         const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+        // CẤU HÌNH cellDates: true ĐỂ NHẬN DIỆN NGÀY THÁNG TỪ EXCEL
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true }); 
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Đọc dạng mảng để né rác phía trên
+        
+        // CẤU HÌNH raw: false ĐỂ ÉP EXCEL XUẤT RA CHUỖI ĐÃ FORMAT THAY VÌ SỐ SERIAL (45962)
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, dateNF: "dd/mm/yyyy" }); 
 
         if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
 
-        // Tự động quét tìm dòng chứa tiêu đề "Ma CTKM" (đã đổi theo chuẩn file mẫu)
+        // Tự động quét tìm dòng chứa tiêu đề "Ma CTKM"
         let headerIdx = -1;
         for (let i = 0; i < 20; i++) {
            if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('Ma CTKM'))) {
@@ -9432,19 +9435,24 @@ window.handleImportCtkmExcel = function(event) {
         let newPromos = [];
         let importedCtus = new Set();
 
+        // Hàm tiện ích cắt bỏ đuôi 00:00:00 nếu Excel tự thêm vào
+        const formatCleanDate = (val) => {
+            if (!val) return '';
+            return String(val).split(' ')[0].trim();
+        };
+
         // Bắt đầu đọc từ dòng dưới dòng tiêu đề
         for (let i = headerIdx + 1; i < jsonRows.length; i++) {
             const row = jsonRows[i];
             if (!row || row.length === 0 || !row[colMap['Ma CTKM']]) continue;
             
-            // Map đúng tên cột mới từ file ctkm.xlsx
             const ctu = row[colMap['Ma Ctu']] ? String(row[colMap['Ma Ctu']]).trim() : 'KHÁC';
             importedCtus.add(ctu);
 
             newPromos.push({
                id: 'km_' + Date.now() + '_' + i,
-               tuNgay: row[colMap['Tu Ngay']] ? String(row[colMap['Tu Ngay']]).trim() : '',
-               denNgay: row[colMap['Den Ngay']] ? String(row[colMap['Den Ngay']]).trim() : '',
+               tuNgay: formatCleanDate(row[colMap['Tu Ngay']]),
+               denNgay: formatCleanDate(row[colMap['Den Ngay']]),
                maKM: String(row[colMap['Ma CTKM']]).trim(),
                noiDung: row[colMap['Noi Dung']] ? String(row[colMap['Noi Dung']]).trim() : '',
                hangHoa: row[colMap['Nhom Hang Hoa']] ? String(row[colMap['Nhom Hang Hoa']]).trim() : '',
@@ -9484,7 +9492,6 @@ window.handleImportCtkmExcel = function(event) {
         `;
         modalContainer.classList.remove('hidden');
         
-        // Reset input file để chọn lại file cũ vẫn ăn event
         document.getElementById('ctkmFileInput').value = '';
       } catch (err) {
         alert("Lỗi khi đọc file Excel: " + err.message);
@@ -9540,18 +9547,23 @@ window.executeImportCtkm = async function(mode) {
     if (upCount > 0) uploadBatches.push(uploadBatch.commit());
     await Promise.all(uploadBatches);
 
-    // Cập nhật Local UI
+// Cập nhật Local UI
     if (mode === 'replace_all') {
        window.promotionsList = newPromos;
     } else {
-       // Xóa các mảng của MaCtu bị ghi đè, giữ lại cái không liên quan, sau đó gộp mảng mới
        window.promotionsList = window.promotionsList.filter(p => !targetCtus.includes(p.maCtu));
        window.promotionsList = [...window.promotionsList, ...newPromos];
     }
 
     modalContainer.classList.add('hidden');
-    window.debounceFilterCtkm('');
-    playSystemSound('success');
+    
+    // GỌI LẠI HÀM SWITCH TAB ĐỂ VẼ LẠI GIAO DIỆN (Cách này an toàn nhất không bị báo lỗi function)
+    window._ctkmSearchKey = '';
+    if (typeof switchTab === 'function') {
+        switchTab('ctkm'); 
+    }
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
     alert("✅ Tải dữ liệu Khuyến Mãi thành công!");
 
   } catch(e) {
