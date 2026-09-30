@@ -3915,11 +3915,12 @@ window.openCurrentCartModal = function() {
     }
   };
 
- window.exportSoGocExcel = function() {
-  const tableEl = document.getElementById('soGocExportTable');
-  if (!tableEl) return alert("Không có dữ liệu sổ gốc để xuất!");
+window.exportSoGocExcel = function() {
+  if (!window._flatExcelRows || window._flatExcelRows.length === 0) {
+    return alert("Không có dữ liệu sổ gốc để xuất!");
+  }
 
-  // Lọc các dòng theo trạng thái đang hiển thị trên giao diện (tuân theo bộ lọc ngày/nhân viên)
+  // 1. Lọc các chứng từ đang hiển thị trên màn hình (theo bộ lọc Ngày/Nhân viên)
   const visibleCards = document.querySelectorAll('.so-goc-card-item');
   const visibleSoCtuSet = new Set();
   
@@ -3930,31 +3931,35 @@ window.openCurrentCartModal = function() {
     }
   });
 
-  // Tạo bảng tạm thời chứa các dòng thuộc các chứng từ đang hiển thị
-  const rows = tableEl.querySelectorAll('tbody tr');
-  let filteredRowsHtml = '';
-  let count = 0;
+  // 2. Lấy dữ liệu chuẩn từ mảng
+  const filteredData = window._flatExcelRows.filter(r => visibleSoCtuSet.has(String(r.soCtu)));
 
-  rows.forEach(row => {
-    const soCtuCell = row.cells[0];
-    if (soCtuCell && visibleSoCtuSet.has(String(soCtuCell.innerText.trim()))) {
-      filteredRowsHtml += row.outerHTML;
-      count++;
-    }
-  });
-
-  if (count === 0) {
-    return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc ngày hiện tại để xuất Excel!");
+  if (filteredData.length === 0) {
+    return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc để xuất Excel!");
   }
 
-  // Tạo bảng ảo để xuất file Excel đúng phần đang lọc
-  const tempTable = document.createElement('table');
-  tempTable.innerHTML = `<thead>${tableEl.querySelector('thead').innerHTML}</thead><tbody>${filteredRowsHtml}</tbody>`;
+  // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
+  const exportData = filteredData.map(r => ({
+    "So CTu": r.soCtu,
+    "Ngay CTu": r.ngayCtuFormatted,
+    "Ma DTPNNo": r.maDTPNNo,
+    "SoHoaDon": r.maTuyen,
+    "Ma DTPNCo": r.maNhanVien,
+    "Ten DTPNCo": r.tenNhanVien,
+    "Ma VTHHCo": r.maVTHHCo,
+    "Ten Hang Hoa": r.tenHangHoa,
+    "Don Vi Tinh": r.donViTinh,
+    "So Luong": Number(r.soLuong || 0),           // <-- Hàm Number() ép thành số chuẩn
+    "Don Gia": Number(r.donGia || 0),             // <-- Hàm Number() ép thành số chuẩn
+    "VND Thanh Tien": Number(r.thanhTien || 0),   // <-- Hàm Number() ép thành số chuẩn
+    "Ghi Chu": r.ghiChu,
+    "GPS CTy": r.khoangCachKm === Infinity ? 0 : Number(r.khoangCachKm.toFixed(2))
+  }));
 
-  const wb = XLSX.utils.table_to_book(tempTable, { raw: true });
-  
-  // TỰ ĐỘNG ẨN CÁC CỘT THEO YÊU CẦU (BÔI ĐỎ TRONG MẪU)
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  // 4. Tạo file Excel mới
+  const ws = XLSX.utils.json_to_sheet(exportData);
+
+  // TỰ ĐỘNG ẨN CÁC CỘT THEO YÊU CẦU (CÁC CỘT BÔI ĐỎ)
   ws['!cols'] = [
     { wch: 10 },               // 0: So CTu
     { wch: 12 },               // 1: Ngay CTu
@@ -3971,6 +3976,9 @@ window.openCurrentCartModal = function() {
     { wch: 20 },               // 12: Ghi Chu
     { wch: 10 }                // 13: GPS CTy
   ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "SoGoc");
 
   const dateStr = new Date().toISOString().slice(0, 10);
   const fromStr = soGocFilterDateFrom || 'tat_ca';
@@ -5269,6 +5277,7 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
           }
         }
       });
+      window._flatExcelRows = flatExcelRows; // Lưu ra biến toàn cục để xuất Excel chuẩn
       const allGroupedList = Array.from(groupedOrdersMap.values());
       const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
       
