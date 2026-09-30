@@ -8852,6 +8852,8 @@ const targetDocId = `tgt_${safeCode}_${window._chiTieuTargetMonth}`;
         if (btn) { btn.innerHTML = 'LƯU CHỈ TIÊU'; btn.disabled = false; }
     }
 };
+window._cachedKpiOrders = {};
+window._cachedKpiMonth = '';  
 window.calculateAndRenderTargets = async function() {
   const container = document.getElementById('targetDashboardContainer');
   if (!container) return;
@@ -8872,7 +8874,8 @@ window.calculateAndRenderTargets = async function() {
     let globalGroupedData = {};
     let assignedSalesCodes = new Set(); 
 
-    const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+   const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
+    const targetsSnap = await getDocs(qTargets);
     let targetDocFound = false;
     
     targetsSnap.forEach(doc => {
@@ -8945,29 +8948,33 @@ window.calculateAndRenderTargets = async function() {
     let compActualRevenues = {}; 
 
     // BẢN VÁ: TẢI TRỰC TIẾP DỮ LIỆU CỦA THÁNG TỪ FIREBASE (Chống sai số & chống lag)
+ // BẢN VÁ TỐI ƯU READS: TẢI TRỰC TIẾP TỪ FIREBASE VÀ LƯU CACHE VÀO RAM
     let monthlyOrdersForKpi = [];
     try {
         const startOfMonth = window._chiTieuTargetMonth + "-01";
         const endOfMonth = window._chiTieuTargetMonth + "-31";
-        let q;
         
-        // Nếu Quản lý đang xem chỉ tiêu 1 nhân viên cụ thể -> Chỉ tải đơn của người đó (Cực nhẹ)
-        if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
-            q = query(collection(db, "orders"), 
-                where("ngayCtu", ">=", startOfMonth), 
-                where("ngayCtu", "<=", endOfMonth),
-                where("salesCode", "==", window._chiTieuTargetSalesCode)
-            );
-        } else {
-            // Xem toàn Công ty
-            q = query(collection(db, "orders"), 
+        // Chỉ tải từ Firebase khi đổi tháng hoặc chưa có cache
+        if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+            // Tải 1 lần toàn bộ đơn của công ty trong tháng đó
+            const q = query(collection(db, "orders"), 
                 where("ngayCtu", ">=", startOfMonth), 
                 where("ngayCtu", "<=", endOfMonth)
             );
+            const mSnap = await getDocs(q);
+            window._cachedKpiOrders[window._chiTieuTargetMonth] = mSnap.docs.map(d => d.data());
+            window._cachedKpiMonth = window._chiTieuTargetMonth;
         }
         
-        const mSnap = await getDocs(q);
-        monthlyOrdersForKpi = mSnap.docs.map(d => d.data());
+        // Rút dữ liệu đã tải từ RAM ra xài (0 tốn reads)
+        let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
+        
+        // Lọc theo nhân viên bằng Javascript ngay trên máy
+        if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
+            monthlyOrdersForKpi = allMonthOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
+        } else {
+            monthlyOrdersForKpi = allMonthOrders;
+        }
     } catch(e) {
         console.warn("Lỗi tải dữ liệu KPI: ", e);
         monthlyOrdersForKpi = typeof orders !== 'undefined' ? orders : []; // Fallback
