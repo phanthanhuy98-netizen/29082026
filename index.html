@@ -9191,8 +9191,47 @@ window.calculateAndRenderTargets = async function() {
             personalTargetSkusCount, personalActualSkusCount
         );
     }
-// --- BẢNG XẾP HẠNG ĐÓNG GÓP NHÂN VIÊN (BẢN AN TOÀN, CHỐNG LỖI NOT DEFINED) ---
-// --- BẢNG XẾP HẠNG ĐÓNG GÓP NHÂN VIÊN (BẢN CHUYÊN NGHIỆP - TÍNH KPI THỰC TẾ) ---
+// --- KHỞI TẠO NỘI DUNG SMART INSIGHTS TỰ ĐỘNG ---
+    let insightsList = [];
+    
+    // 1. Kiểm tra tiến độ thời gian tháng hiện tại so với thực tế
+    const nowInsight = new Date();
+    const yyyy_mm_now = nowInsight.toISOString().slice(0, 7);
+    if (window._chiTieuTargetMonth === yyyy_mm_now && globalRevTarget > 0) {
+        const currentDay = nowInsight.getDate();
+        const totalDaysInMonth = new Date(nowInsight.getFullYear(), nowInsight.getMonth() + 1, 0).getDate();
+        const timePct = (currentDay / totalDaysInMonth) * 100;
+        const globalPct = (globalRevActual / globalRevTarget) * 100;
+
+        if (globalPct >= timePct) {
+            insightsList.push(`🔥 <b>Nhịp độ tốt:</b> Doanh số toàn cty đạt <b>${globalPct.toFixed(1)}%</b>, đang bám sát hoặc vượt tiến độ thời gian tháng (${timePct.toFixed(1)}%).`);
+        } else {
+            insightsList.push(`⚠️ <b>Cần tăng tốc:</b> Tiến độ toàn cty (${globalPct.toFixed(1)}%) đang chậm hơn tiến độ thời gian (${timePct.toFixed(1)}%). Cần đẩy mạnh xả hàng.`);
+        }
+    }
+
+    // 2. Cảnh báo nhân viên chậm tiến độ hoặc chưa có doanh số (Chỉ hiện với Admin/Manager)
+    if (isAdminOrManager && typeof salesProgressList !== 'undefined' && salesProgressList.length > 0) {
+        let laggingSales = salesProgressList.filter(s => s.targetRev > 0 && s.pct < 40);
+        if (laggingSales.length > 0) {
+            insightsList.push(`📌 <b>Cảnh báo nhân sự:</b> Có <b>${laggingSales.length} nhân viên</b> đang đạt tiến độ dưới 40%. Cần hỗ trợ kịp thời.`);
+        }
+        let zeroSales = salesProgressList.filter(s => s.actualRev === 0);
+        if (zeroSales.length > 0) {
+            insightsList.push(`🚨 <b>Chưa nổ đơn:</b> Phát hiện <b>${zeroSales.length} nhân viên</b> chưa có phát sinh doanh số trong kỳ này.`);
+        }
+    }
+
+    let smartInsightsHtml = `
+        <div style="background: linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(37,99,235,0.05) 100%); border: 1px solid rgba(14,165,233,0.3); border-radius: 16px; padding: 16px 18px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+            <div style="display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 14px; color: #0284C7; margin-bottom: 10px; text-transform: uppercase;">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Trợ Lý AI - Phân Tích Thông Minh (Insights)
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-main); line-height: 1.4;">
+                ${insightsList.length > 0 ? insightsList.map(item => `<div>• ${item}</div>`).join('') : '<div>• Hệ thống đang duy trì vận hành ổn định. Chưa ghi nhận bất thường.</div>'}
+            </div>
+        </div>
+    `;
 let salesPerformanceHtml = '';
 if (isAdminOrManager && isTongQuanTab) {
     let activeSalesList = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
@@ -9525,7 +9564,7 @@ window._activeGroupedKPI = activeGrouped;
       `;
     }).join('');
 
-container.innerHTML = tabHeaderHtml + salesPerformanceHtml + topCardHtml + detailHtml;
+container.innerHTML = tabHeaderHtml + smartInsightsHtml + topCardHtml + salesPerformanceHtml + detailHtml;
   } catch (err) {
     console.error("Lỗi tính toán chỉ tiêu:", err);
     container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--rose); font-weight:900;">Lỗi hiển thị báo cáo: ${err.message}</div>`;
