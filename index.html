@@ -10054,22 +10054,69 @@ window.openTargetModal = function() {
     alert("Lỗi khi mở form thiết lập: " + error.message);
   }
 };
-  window.toggleKpiSales = function(code, isChecked) {
+window.toggleKpiSales = function(code, isChecked) {
+    // 1. Cập nhật dữ liệu vào biến tạm
     if (isChecked) {
-        if (!window._masterKpiState.selectedSalesCodes.includes(code)) window._masterKpiState.selectedSalesCodes.push(code);
+        if (!window._masterKpiState.selectedSalesCodes.includes(code)) {
+            window._masterKpiState.selectedSalesCodes.push(code);
+        }
     } else {
         window._masterKpiState.selectedSalesCodes = window._masterKpiState.selectedSalesCodes.filter(c => c !== code);
     }
-    renderMasterKpiStep1();
+
+    // 2. Đổi màu Giao diện (Mượt mà không load lại trang)
+    const lbl = document.getElementById(`lbl_sales_${code}`);
+    if (lbl) {
+        if (isChecked) {
+            lbl.style.background = 'rgba(37,99,235,0.08)';
+            lbl.style.border = '1px solid var(--primary)';
+            lbl.style.color = 'var(--primary)';
+        } else {
+            lbl.style.background = 'var(--bg-dark)';
+            lbl.style.border = '1px solid var(--card-border)';
+            lbl.style.color = 'var(--text-main)';
+        }
+    }
+
+    // 3. Cập nhật con số hiển thị
+    const countEl = document.getElementById('mkpi_selected_sales_count');
+    if (countEl) countEl.innerText = window._masterKpiState.selectedSalesCodes.length;
 };
 
 window.toggleAllKpiSales = function(selectAll) {
+    const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
+
+    // 1. Cập nhật dữ liệu
     if (selectAll) {
-        window._masterKpiState.selectedSalesCodes = users.filter(u => u.role === 'sales' && u.active !== false).map(u => u.code);
+        window._masterKpiState.selectedSalesCodes = salesUsers.map(u => u.code);
     } else {
         window._masterKpiState.selectedSalesCodes = [];
     }
-    renderMasterKpiStep1();
+
+    // 2. Chạy vòng lặp đổi màu tất cả các thẻ NV cùng lúc
+    salesUsers.forEach(u => {
+        const code = u.code;
+        const cb = document.getElementById(`cb_sales_${code}`);
+        const lbl = document.getElementById(`lbl_sales_${code}`);
+        
+        if (cb) cb.checked = selectAll;
+        
+        if (lbl) {
+            if (selectAll) {
+                lbl.style.background = 'rgba(37,99,235,0.08)';
+                lbl.style.border = '1px solid var(--primary)';
+                lbl.style.color = 'var(--primary)';
+            } else {
+                lbl.style.background = 'var(--bg-dark)';
+                lbl.style.border = '1px solid var(--card-border)';
+                lbl.style.color = 'var(--text-main)';
+            }
+        }
+    });
+
+    // 3. Cập nhật con số hiển thị
+    const countEl = document.getElementById('mkpi_selected_sales_count');
+    if (countEl) countEl.innerText = window._masterKpiState.selectedSalesCodes.length;
 };
 window.loadAndEditCurrentMonthKpi = async function() {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
@@ -10326,10 +10373,10 @@ window.toggleModalCompSelection = function(maCtu, tenCtu) {
                      onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
            </div>
 
-           <!-- KHỐI 2: CHỌN NHÂN VIÊN NHẬN SỐ -->
+          <!-- KHỐI 2: CHỌN NHÂN VIÊN NHẬN SỐ -->
            <div style="background:var(--card-bg); padding:16px 20px; border-radius:16px; border:1px solid var(--card-border); margin-bottom:20px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-                   <label style="font-size:14px; font-weight:900; color:var(--primary); margin:0;">2. CHỌN NHÂN VIÊN NHẬN SỐ (${window._masterKpiState.selectedSalesCodes.length} người):</label>
+                   <label style="font-size:14px; font-weight:900; color:var(--primary); margin:0;">2. CHỌN NHÂN VIÊN NHẬN SỐ (<span id="mkpi_selected_sales_count">${window._masterKpiState.selectedSalesCodes.length}</span> người):</label>
                    <div style="display:flex; gap:8px;">
                        <button type="button" class="btn btn-sm" style="background:var(--emerald); color:#fff; font-weight:800; padding:6px 12px;" onclick="toggleAllKpiSales(true)"><i class="fa-solid fa-check-double"></i> Chọn hết</button>
                        <button type="button" class="btn btn-sm" style="background:var(--card-border); color:var(--text-main); font-weight:800; padding:6px 12px;" onclick="toggleAllKpiSales(false)"><i class="fa-solid fa-eraser"></i> Bỏ chọn</button>
@@ -10339,8 +10386,8 @@ window.toggleModalCompSelection = function(maCtu, tenCtu) {
                    ${(typeof users !== 'undefined' ? users : []).filter(u => u.role === 'sales' && u.active !== false).map(u => {
                        const isChecked = window._masterKpiState.selectedSalesCodes.includes(u.code);
                        return `
-                           <label style="display:flex; align-items:center; gap:6px; padding:8px 12px; background:${isChecked ? 'rgba(37,99,235,0.08)' : 'var(--bg-dark)'}; border:1px solid ${isChecked ? 'var(--primary)' : 'var(--card-border)'}; border-radius:8px; cursor:pointer; font-size:13px; font-weight:800; color:${isChecked ? 'var(--primary)' : 'var(--text-main)'}; transition:0.2s; user-select:none;">
-                               <input type="checkbox" value="${u.code}" ${isChecked ? 'checked' : ''} onchange="toggleKpiSales('${u.code}', this.checked)" style="margin:0; width:16px; height:16px; cursor:pointer; accent-color:var(--primary);">
+                           <label id="lbl_sales_${u.code}" style="display:flex; align-items:center; gap:6px; padding:8px 12px; background:${isChecked ? 'rgba(37,99,235,0.08)' : 'var(--bg-dark)'}; border:1px solid ${isChecked ? 'var(--primary)' : 'var(--card-border)'}; border-radius:8px; cursor:pointer; font-size:13px; font-weight:800; color:${isChecked ? 'var(--primary)' : 'var(--text-main)'}; transition:all 0.2s ease; user-select:none;">
+                               <input type="checkbox" id="cb_sales_${u.code}" value="${u.code}" ${isChecked ? 'checked' : ''} onchange="toggleKpiSales('${u.code}', this.checked)" style="margin:0; width:16px; height:16px; cursor:pointer; accent-color:var(--primary);">
                                [${u.code}] ${u.name.split(' ').pop()}
                            </label>
                        `;
