@@ -441,19 +441,41 @@ enableIndexedDbPersistence(db).catch(() => {});
 
 // Đặt đoạn code lắng nghe ở đây (sau khi 'db' đã sẵn sàng)
 try {
+    // 1. Lắng nghe thay đổi CTKM
     onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
-            
             if (serverVersion > localVersion && currentUser && currentUser.role !== 'admin') {
                 localStorage.setItem("localCtkmVersion", serverVersion);
                 const snap = await getDocs(collection(db, "promotions"));
                 window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 window.promotionsLoaded = true;
+                if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') drawCtkmUI();
+            }
+        }
+    });
+
+    // 2. Lắng nghe thay đổi danh sách CÔNG TY (THÊM MỚI ĐOẠN NÀY)
+    onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
+        if (docSnap.exists()) {
+            const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
+            const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
+            
+            // Nếu phát hiện có người khác cập nhật công ty -> tự động kéo data mới về
+            if (serverCompsVersion > localCompsVersion) {
+                const cSnap = await getDocs(collection(db, "companies"));
+                companyList = cSnap.docs.map(d => d.data());
+                window.allCompanies = companyList;
                 
-                if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') {
-                    drawCtkmUI();
+                if (typeof saveCompaniesToLocalCache === 'function') {
+                    await saveCompaniesToLocalCache(companyList);
+                }
+                localStorage.setItem("companiesVersion", serverCompsVersion);
+                
+                // Cập nhật giao diện ngay lập tức nếu đang đứng ở tab Công ty
+                if (typeof renderUI === 'function' && currentTab === 'company') {
+                    renderUI();
                 }
             }
         }
@@ -4450,32 +4472,46 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   };
 
   window.updateCompanyField = async function(index, field, val) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền chỉnh sửa!");
-    companyList[index][field] = val;
-    const c = companyList[index];
-    try {
-      await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
-      await saveCompaniesToLocalCache(companyList);
-    } catch (err) {}
-    renderUI();
-  };
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền chỉnh sửa!");
+  companyList[index][field] = val;
+  const c = companyList[index];
+  try {
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
+    await saveCompaniesToLocalCache(companyList);
+
+    // -- THÊM MỚI 3 DÒNG NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+    localStorage.setItem("companiesVersion", newVersion);
+    // --------------------------------------------------------
+
+  } catch (err) {}
+  renderUI();
+};
 
   window.toggleCompanyStatus = async function(index) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái!");
-    const c = companyList[index];
-    const newStatus = c.status === 'Đóng' ? 'Mở' : 'Đóng';
-    c.status = newStatus;
-    try {
-      await updateDoc(doc(db, "companies", String(c.maCtu)), { status: newStatus });
-      await saveCompaniesToLocalCache(companyList);
-      renderUI();
-      triggerHaptic(20);
-    } catch (err) {
-      alert("Lỗi cập nhật trạng thái công ty: " + err.message);
-    }
-  };
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái!");
+  const c = companyList[index];
+  const newStatus = c.status === 'Đóng' ? 'Mở' : 'Đóng';
+  c.status = newStatus;
+  try {
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { status: newStatus });
+    await saveCompaniesToLocalCache(companyList);
 
-  window.toggleCompanyDvtStatus = async function(companyIndex, dvtIndex) {
+    // -- THÊM MỚI 3 DÒNG NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+    localStorage.setItem("companiesVersion", newVersion);
+    // --------------------------------------------------------
+
+    renderUI();
+    triggerHaptic(20);
+  } catch (err) {
+    alert("Lỗi cập nhật trạng thái công ty: " + err.message);
+  }
+};
+
+window.toggleCompanyDvtStatus = async function(companyIndex, dvtIndex) {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
       return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái ĐVT!");
     }
@@ -4491,12 +4527,18 @@ window.deleteAllAndImportProductsExcel = async function(e) {
       await updateDoc(docRef, { dvtDetails: c.dvtDetails });
       await saveCompaniesToLocalCache(companyList);
       
+      // -- THÊM MỚI ĐOẠN NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
+      const newVersion = Date.now();
+      await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+      localStorage.setItem("companiesVersion", newVersion);
+      // ------------------------------------------------------
+
       renderUI();
       triggerHaptic(25);
     } catch (err) {
       alert("Lỗi cập nhật trạng thái ĐVT: " + err.message);
     }
-  };
+};
 
   window.addCompanyDvtPrompt = async function(companyIndex) {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
@@ -4676,31 +4718,50 @@ window.addUser = async function(e) {
     const roleInput = document.getElementById('usRole').value.trim();
     const role = roleInput.toLowerCase();
     
-    // Chuẩn hóa email hoặc tên đăng nhập
+    // Chuẩn hóa email hoặc tên đăng nhập (luôn đưa về chữ thường)
     const email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
+    // 1. KIỂM TRA TRÙNG LẶP KHÔNG PHÂN BIỆT HOA/THƯỜNG TRỰC TIẾP TRÊN GIAO DIỆN
+    const codeLower = code.toLowerCase();
+    const emailLower = email.toLowerCase();
+
+    // Quét mã nhân viên
+    const duplicateCode = users.find(u => (u.code || '').toLowerCase() === codeLower);
+    if (duplicateCode) {
+      return alert(`⛔ Lỗi: Mã nhân viên "${code}" đã bị trùng với [${duplicateCode.code}] của nhân viên ${duplicateCode.name} (Không phân biệt hoa/thường)! Vui lòng chọn mã khác.`);
+    }
+
+    // Quét tên đăng nhập / email
+    const duplicateEmail = users.find(u => (u.email || '').toLowerCase() === emailLower);
+    if (duplicateEmail) {
+      return alert(`⛔ Lỗi: Tên đăng nhập/Email "${usernameInput}" đã bị trùng với tài khoản của ${duplicateEmail.name}! Vui lòng chọn tên khác.`);
+    }
+
     try {
-      // 1. KIỂM TRA TRÙNG MÃ NHÂN VIÊN TRONG CSDL
+      // 2. KIỂM TRA BẢO MẬT KÉP TRÊN FIRESTORE (Đề phòng trường hợp có người khác vừa tạo cùng lúc)
       const qCode = query(collection(db, "users"), where("code", "==", code), limit(1));
       const snapCode = await getDocs(qCode);
       if (!snapCode.empty) {
-        return alert(`⛔ Lỗi: Mã nhân viên "${code}" đã tồn tại trong hệ thống! Vui lòng chọn mã khác.`);
+        return alert(`⛔ Lỗi: Mã nhân viên "${code}" đã tồn tại trên máy chủ! Vui lòng chọn mã khác.`);
       }
 
-      // 2. KIỂM TRA TRÙNG TÊN ĐĂNG NHẬP / EMAIL TRONG CSDL
       const qEmail = query(collection(db, "users"), where("email", "==", email), limit(1));
       const snapEmail = await getDocs(qEmail);
       if (!snapEmail.empty) {
-        return alert(`⛔ Lỗi: Tên đăng nhập hoặc email "${usernameInput}" đã được sử dụng! Vui lòng chọn tài khoản khác.`);
+        return alert(`⛔ Lỗi: Tên đăng nhập hoặc email "${usernameInput}" đã tồn tại trên máy chủ! Vui lòng chọn tài khoản khác.`);
       }
 
-      // 3. TIẾN HÀNH TẠO TÀI KHOẢN NẾU KHÔNG TRÙNG
+      // 3. TIẾN HÀNH TẠO TÀI KHOẢN NẾU AN TOÀN
       const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      
+      // Khuyến nghị: Tự động ép Mã nhân viên viết hoa khi lưu vào CSDL để data đẹp và chuẩn xác
+      const upperCode = code.toUpperCase(); 
+
       await setDoc(doc(db, "users", cred.user.uid), { 
         uid: cred.user.uid, 
         email, 
         name, 
-        code, 
+        code: upperCode, 
         role, 
         active: true, 
         createdAt: serverTimestamp() 
@@ -4712,7 +4773,7 @@ window.addUser = async function(e) {
       alert("✅ Tạo tài khoản thành công!");
       
       // Cập nhật lại danh sách hiển thị trên giao diện
-      users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code, role, active: true });
+      users.push({ id: cred.user.uid, uid: cred.user.uid, email, name, code: upperCode, role, active: true });
       renderUI();
       
     } catch (err) { 
