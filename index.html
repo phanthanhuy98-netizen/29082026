@@ -9400,97 +9400,98 @@ window.triggerImportCtkmExcel = function() {
 };
 
 window.handleImportCtkmExcel = function(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+    const file = event.target.files[0];
+    if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = async function(e) {
-    try {
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Đọc dạng mảng để né rác phía trên
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Đọc dạng mảng để né rác phía trên
 
-      if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
+        if (!jsonRows || jsonRows.length === 0) return alert("File Excel rỗng!");
 
-      // Tự động quét tìm dòng chứa tiêu đề "MaKM" để bỏ qua các dòng rác gạch chéo ở trên
-      let headerIdx = -1;
-      for (let i = 0; i < 20; i++) {
-         if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('MaKM'))) {
-             headerIdx = i; break;
-         }
-      }
+        // Tự động quét tìm dòng chứa tiêu đề "Ma CTKM" (đã đổi theo chuẩn file mẫu)
+        let headerIdx = -1;
+        for (let i = 0; i < 20; i++) {
+           if (jsonRows[i] && jsonRows[i].some(cell => String(cell).includes('Ma CTKM'))) {
+               headerIdx = i; break;
+           }
+        }
 
-      if (headerIdx === -1) {
-          return alert("Lỗi: Không tìm thấy dòng tiêu đề chứa chữ 'MaKM' trong file!");
-      }
+        if (headerIdx === -1) {
+            return alert("Lỗi: Không tìm thấy dòng tiêu đề chứa chữ 'Ma CTKM' trong file!");
+        }
 
-      const headers = jsonRows[headerIdx];
-      const colMap = {};
-      headers.forEach((h, i) => { if (h) colMap[String(h).trim()] = i; });
+        const headers = jsonRows[headerIdx];
+        const colMap = {};
+        headers.forEach((h, i) => { if (h) colMap[String(h).trim()] = i; });
 
-      let newPromos = [];
-      let importedCtus = new Set();
+        let newPromos = [];
+        let importedCtus = new Set();
 
-      // Bắt đầu đọc từ dòng dưới dòng tiêu đề
-      for (let i = headerIdx + 1; i < jsonRows.length; i++) {
-          const row = jsonRows[i];
-          if (!row || row.length === 0 || !row[colMap['MaKM']]) continue;
-          
-          const ctu = row[colMap['MaCtu']] ? String(row[colMap['MaCtu']]).trim() : 'KHÁC';
-          importedCtus.add(ctu);
-
-          newPromos.push({
-             id: 'km_' + Date.now() + '_' + i,
-             tuNgay: row[colMap['Từ ngày']] ? String(row[colMap['Từ ngày']]).trim() : '',
-             denNgay: row[colMap['Đến ngày']] ? String(row[colMap['Đến ngày']]).trim() : '',
-             maKM: String(row[colMap['MaKM']]).trim(),
-             noiDung: row[colMap['Nội dung']] ? String(row[colMap['Nội dung']]).trim() : '',
-             hangHoa: row[colMap['HangHoa']] ? String(row[colMap['HangHoa']]).trim() : '',
-             khachHang: row[colMap['KhachHang']] ? String(row[colMap['KhachHang']]).trim() : '',
-             maCtu: ctu,
-             createdAt: new Date().toISOString()
-          });
-      }
-
-      if (newPromos.length === 0) return alert("Không đọc được dòng dữ liệu hợp lệ nào!");
-
-      // Hiển thị Modal để hỏi Chế độ nhập (Lưu vào biến tạm)
-      window._tempImportedPromos = newPromos;
-      window._tempImportedCtus = Array.from(importedCtus);
-      
-      const modalContainer = document.getElementById('dynamicModalContainer');
-      modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;">
-          <div class="modal-content" style="max-width: 450px; padding: 24px; border-radius: 18px; text-align:center;">
-            <div style="font-size:36px; color:var(--amber); margin-bottom:16px;"><i class="fa-solid fa-file-import"></i></div>
-            <h3 style="font-size:18px; font-weight:900; color:var(--text-main); margin-bottom:8px;">Tải Lên ${newPromos.length} Chương Trình</h3>
-            <p style="font-size:14px; color:var(--text-muted); margin-bottom:20px; line-height:1.5;">Hệ thống phát hiện các mã Công ty (MaCtu): <b style="color:var(--primary);">${window._tempImportedCtus.join(', ')}</b>. Bạn muốn lưu dữ liệu theo chế độ nào?</p>
+        // Bắt đầu đọc từ dòng dưới dòng tiêu đề
+        for (let i = headerIdx + 1; i < jsonRows.length; i++) {
+            const row = jsonRows[i];
+            if (!row || row.length === 0 || !row[colMap['Ma CTKM']]) continue;
             
-            <div style="display:flex; flex-direction:column; gap:10px;">
-              <button class="btn btn-amber" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_ctu')">
-                <i class="fa-solid fa-object-group"></i> 1. CHỈ GHI ĐÈ CÁC CÔNG TY TRONG FILE
-              </button>
-              <button class="btn btn-red" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_all')">
-                <i class="fa-solid fa-dumpster-fire"></i> 2. XÓA TOÀN BỘ CŨ & THAY MỚI 100%
-              </button>
-              <button class="btn" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px; margin-top:8px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')">
-                HỦY BỎ
-              </button>
+            // Map đúng tên cột mới từ file ctkm.xlsx
+            const ctu = row[colMap['Ma Ctu']] ? String(row[colMap['Ma Ctu']]).trim() : 'KHÁC';
+            importedCtus.add(ctu);
+
+            newPromos.push({
+               id: 'km_' + Date.now() + '_' + i,
+               tuNgay: row[colMap['Tu Ngay']] ? String(row[colMap['Tu Ngay']]).trim() : '',
+               denNgay: row[colMap['Den Ngay']] ? String(row[colMap['Den Ngay']]).trim() : '',
+               maKM: String(row[colMap['Ma CTKM']]).trim(),
+               noiDung: row[colMap['Noi Dung']] ? String(row[colMap['Noi Dung']]).trim() : '',
+               hangHoa: row[colMap['Nhom Hang Hoa']] ? String(row[colMap['Nhom Hang Hoa']]).trim() : '',
+               khachHang: row[colMap['Khach Hang']] ? String(row[colMap['Khach Hang']]).trim() : '',
+               maCtu: ctu,
+               createdAt: new Date().toISOString()
+            });
+        }
+
+        if (newPromos.length === 0) return alert("Không đọc được dòng dữ liệu hợp lệ nào!");
+
+        // Hiển thị Modal để hỏi Chế độ nhập
+        window._tempImportedPromos = newPromos;
+        window._tempImportedCtus = Array.from(importedCtus);
+        
+        const modalContainer = document.getElementById('dynamicModalContainer');
+        modalContainer.innerHTML = `
+          <div class="modal" style="display:flex; z-index:999999;">
+            <div class="modal-content" style="max-width: 450px; padding: 24px; border-radius: 18px; text-align:center;">
+              <div style="font-size:36px; color:var(--amber); margin-bottom:16px;"><i class="fa-solid fa-file-import"></i></div>
+              <h3 style="font-size:18px; font-weight:900; color:var(--text-main); margin-bottom:8px;">Tải Lên ${newPromos.length} Chương Trình</h3>
+              <p style="font-size:14px; color:var(--text-muted); margin-bottom:20px; line-height:1.5;">Hệ thống phát hiện các mã Công ty (MaCtu): <b style="color:var(--primary);">${window._tempImportedCtus.join(', ')}</b>. Bạn muốn lưu dữ liệu theo chế độ nào?</p>
+              
+              <div style="display:flex; flex-direction:column; gap:10px;">
+                <button class="btn btn-amber" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_ctu')">
+                  <i class="fa-solid fa-object-group"></i> 1. CHỈ GHI ĐÈ CÁC CÔNG TY TRONG FILE
+                </button>
+                <button class="btn btn-red" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px;" onclick="executeImportCtkm('replace_all')">
+                  <i class="fa-solid fa-dumpster-fire"></i> 2. XÓA TOÀN BỘ CŨ & THAY MỚI 100%
+                </button>
+                <button class="btn" style="padding:14px; font-size:14px; font-weight:800; justify-content:center; border-radius:10px; margin-top:8px; background:var(--card-border);" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')">
+                  HỦY BỎ
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      `;
-      modalContainer.classList.remove('hidden');
-      
-      // Reset input file để chọn lại file cũ vẫn ăn event
-      document.getElementById('ctkmFileInput').value = '';
-    } catch (err) {
-      alert("Lỗi khi đọc file Excel: " + err.message);
-    }
+        `;
+        modalContainer.classList.remove('hidden');
+        
+        // Reset input file để chọn lại file cũ vẫn ăn event
+        document.getElementById('ctkmFileInput').value = '';
+      } catch (err) {
+        alert("Lỗi khi đọc file Excel: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
   };
-  reader.readAsArrayBuffer(file);
-};
 
 window.executeImportCtkm = async function(mode) {
   const newPromos = window._tempImportedPromos;
