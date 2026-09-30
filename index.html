@@ -3069,7 +3069,7 @@ window.filterTabProducts = function(val) {
     filterSoGocCards();
   };
 
-window.setSoGocQuickDateFilter = function(type) {
+  window.setSoGocQuickDateFilter = function(type) {
     soGocQuickDate = type;
     localStorage.setItem('dms_sogoc_quickdate', type);
 
@@ -3080,21 +3080,21 @@ window.setSoGocQuickDateFilter = function(type) {
     let todayStr = `${yyyy}-${mm}-${dd}`;
 
     if (type === 'today') {
-        soGocFilterDateFrom = todayStr;
-        soGocFilterDateTo = todayStr;
+      soGocFilterDateFrom = todayStr;
+      soGocFilterDateTo = todayStr;
     } else if (type === 'week') {
-        const firstDayOfWeek = new Date(today);
-        const day = today.getDay();
-        const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
-        firstDayOfWeek.setDate(diff);
-        soGocFilterDateFrom = firstDayOfWeek.toISOString().slice(0, 10);
-        soGocFilterDateTo = todayStr;
+      const firstDayOfWeek = new Date(today);
+      const day = today.getDay();
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
+      firstDayOfWeek.setDate(diff);
+      soGocFilterDateFrom = firstDayOfWeek.toISOString().slice(0, 10);
+      soGocFilterDateTo = todayStr;
     } else if (type === 'month') {
-        soGocFilterDateFrom = `${yyyy}-${mm}-01`;
-        soGocFilterDateTo = todayStr;
+      soGocFilterDateFrom = `${yyyy}-${mm}-01`;
+      soGocFilterDateTo = todayStr;
     } else if (type === 'all') {
-        soGocFilterDateFrom = '';
-        soGocFilterDateTo = '';
+      soGocFilterDateFrom = '';
+      soGocFilterDateTo = '';
     }
 
     localStorage.setItem('dms_sogoc_date_from', soGocFilterDateFrom);
@@ -3102,73 +3102,58 @@ window.setSoGocQuickDateFilter = function(type) {
 
     const inputFrom = document.getElementById('soGocDateFrom');
     const inputTo = document.getElementById('soGocDateTo');
-    if (inputFrom) inputFrom.value = soGocFilterDateFrom ? soGocFilterDateFrom.split('-').reverse().join('/') : '';
-    if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').reverse().join('/') : '';
-
+ if (inputFrom) inputFrom.value = soGocFilterDateFrom ? soGocFilterDateFrom.split('-').reverse().join('/') : '';
+if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').reverse().join('/') : '';
     ['today', 'week', 'month', 'all'].forEach(k => {
-        const btn = document.getElementById(`quickDateBtn_${k}`);
-        if (btn) {
-            btn.className = (k === type) ? "btn btn-sm btn-amber" : "btn btn-sm";
+      const btn = document.getElementById(`quickDateBtn_${k}`);
+      if (btn) {
+        if (k === type) {
+          btn.className = "btn btn-sm btn-amber";
+        } else {
+          btn.className = "btn btn-sm";
         }
+      }
     });
 
-    // KÍCH HOẠT TẢI LẠI DATA TỪ SERVER KHI CHUYỂN CHẾ ĐỘ
-    reloadSoGocDataManually();
-};
-window.reloadSoGocDataManually = async function() {
+    filterSoGocCards();
+  };
+
+ window.reloadSoGocDataManually = async function() {
     try {
-        const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
-        if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
+      const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
+      if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-        const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const dd = String(today.getDate()).padStart(2, '0');
-        const todayStr = `${yyyy}-${mm}-${dd}`;
+      // Tải dữ liệu mới từ Firebase
+      const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30)));
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
+      
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) {
+        // 1. Vẽ lại toàn bộ HTML với dữ liệu mới
+        await renderTabContent('soGocBH', activePane);
 
-        // Kiểm tra xem đang chọn chế độ ngày nào
-        const currentMode = localStorage.getItem('dms_sogoc_quickdate') || 'all';
-
-        let snap;
-        if (currentMode === 'today') {
-            // TẢI TẤT CẢ ĐƠN TRONG NGÀY (Không giới hạn)
-            const q = query(collection(db, "orders"), where("ngayCtu", "==", todayStr));
-            snap = await getDocs(q);
-            orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Dùng JS sắp xếp giảm dần để tránh lỗi thiếu Composite Index trên Firebase
-            orders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
-            hasMoreOrders = false; // Đã tải hết trong ngày
-            lastVisibleOrderDoc = null;
-        } else {
-            // CÁC CHẾ ĐỘ KHÁC (Tải 20 đơn)
-            const q = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(20));
-            snap = await getDocs(q);
-            orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            
-            if (!snap.empty && snap.docs.length >= 20) {
-                lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-                hasMoreOrders = true;
-            } else {
-                hasMoreOrders = false;
-            }
-        }
-
-        const activePane = document.getElementById('tabPane_soGocBH');
-        if (activePane) {
-            await renderTabContent('soGocBH', activePane);
-            setTimeout(() => {
-                if (typeof filterSoGocCards === 'function') filterSoGocCards(soGocFilterKeyword);
-            }, 50);
-        }
-        if (typeof triggerHaptic === 'function') triggerHaptic(20);
-        if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
+        // 2. QUAN TRỌNG: Gọi lại hàm lọc để giữ nguyên trạng thái Nhân viên, Ngày tháng và Từ khóa đang nhập
+        setTimeout(() => {
+          if (typeof filterSoGocCards === 'function') {
+            filterSoGocCards(soGocFilterKeyword);
+          }
+        }, 50);
+      }
+      
+      if (typeof triggerHaptic === 'function') triggerHaptic(20);
 
     } catch (e) {
-        alert("Lỗi tải lại dữ liệu: " + e.message);
-        const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
-        if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
+      alert("Lỗi tải lại dữ liệu: " + e.message);
     }
-};
+  };
 window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
     
@@ -3179,8 +3164,7 @@ window.loadMoreSoGoc = async function() {
     }
 
     try {
-        // TẢI TỪNG NHỊP 20 ĐƠN
-        let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(20));
+        let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
         const snap = await getDocs(q);
         
         if (snap.empty) {
@@ -3193,7 +3177,7 @@ window.loadMoreSoGoc = async function() {
         const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         orders = [...orders, ...newOrders];
 
-        if (snap.docs.length < 20) {
+        if (snap.docs.length < 30) {
             hasMoreOrders = false;
             if (btn) btn.style.display = 'none';
         } else {
@@ -3203,7 +3187,7 @@ window.loadMoreSoGoc = async function() {
             }
         }
 
-        // Kỹ thuật chèn nối thẻ HTML (Không vẽ lại nguyên trang chống đơ máy)
+        // TỐI ƯU HÓA: Chỉ chèn thêm HTML vào cuối, không vẽ lại toàn bộ
         const container = document.getElementById('soGocCardsContainer');
         if (container) {
             const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
@@ -3220,7 +3204,9 @@ window.loadMoreSoGoc = async function() {
                 const isViewed = viewedData[o.id || o.orderId] ? true : false;
                 
                 let inferredMaDTPN = o.maDTPNNo || '';
-                if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) inferredMaDTPN = o.maKH.split(' - ')[0].trim();
+                if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
+                    inferredMaDTPN = o.maKH.split(' - ')[0].trim();
+                }
                 
                 let orderTotalQty = 0;
                 o.items.forEach(item => orderTotalQty += Number(item.qty || 0));
@@ -3262,7 +3248,7 @@ window.loadMoreSoGoc = async function() {
 
             container.insertAdjacentHTML('beforeend', appendHtml);
             
-            // Ép bộ lọc chạy lại trên mảng mới tải về
+            // Cập nhật lại bộ lọc nếu có
             if (typeof filterSoGocCards === 'function') {
                 filterSoGocCards(soGocFilterKeyword);
             }
@@ -4967,31 +4953,32 @@ window.filterUsersList = function(val) {
     selectStoreDirectly(storeId);
   };
 
- function attachListeners() {
-    // Khi vừa mở ứng dụng lên, tự động tải dữ liệu theo cấu hình lưu sẵn
-    reloadSoGocDataManually();
+  function attachListeners() {
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 30;
+      } else {
+        hasMoreOrders = false;
+      }
+
+      if (currentTab === 'soGocBH' || currentTab === 'sales') {
+        const activePane = document.getElementById(`tabPane_${currentTab}`);
+        if (activePane) renderTabContent(currentTab, activePane);
+      }
+    }).catch(e => {});
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-        getDocs(collection(db, "users")).then(snap => {
-            users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
-            if (currentTab === 'users') {
-                const activePane = document.getElementById('tabPane_users');
-                if (activePane) renderTabContent(currentTab, activePane);
-            }
-        }).catch(e => {});
+      getDocs(collection(db, "users")).then(snap => {
+        users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+        if (currentTab === 'users') {
+          const activePane = document.getElementById('tabPane_users');
+          if (activePane) renderTabContent(currentTab, activePane);
+        }
+      }).catch(e => {});
     }
-}
-
- if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-  getDocs(collection(db, "users")).then(snap => {
-    users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
-    if (currentTab === 'users') {
-      const activePane = document.getElementById('tabPane_users');
-      if (activePane) renderTabContent(currentTab, activePane);
-    }
-  }).catch(e => {});
-}
-}
+  }
 
   window.switchTab = function(tabName) {
     currentTab = tabName;
