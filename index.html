@@ -10031,12 +10031,41 @@ window._masterKpiState = {
   salesAllocations: { initialized: false }
 };
 
-window.openTargetModal = function() {
+window.openTargetModal = async function() {
   try {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
       return alert("Chỉ quản lý mới có quyền thiết lập chỉ tiêu tổng!");
     }
+
+    // 1. KIỂM TRA BẢO VỆ: Quét xem tháng hiện tại đã có KPI trên hệ thống chưa?
+    const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+    let hasExisting = false;
+    targetsSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data && data.month === window._chiTieuTargetMonth) {
+            hasExisting = true;
+        }
+    });
+
+    // Nếu đã có KPI, đưa ra cảnh báo chặn lại để tránh ghi đè làm mất dữ liệu
+    if (hasExisting) {
+        const confirmEdit = await window.showCustomConfirm(
+            "THÁNG NÀY ĐÃ CÓ CHỈ TIÊU",
+            `Tháng ${window._chiTieuTargetMonth} đã được thiết lập KPI rồi.\n\nNếu bạn "Thiết lập mới", toàn bộ số cũ sẽ bị xóa sổ. Bạn có muốn chuyển sang chế độ XEM & SỬA không?`,
+            "fa-triangle-exclamation",
+            "Đồng ý Xem & Sửa",
+            "Hủy bỏ"
+        );
+        
+        // Nếu chọn "Đồng ý", chuyển hướng gọi thẳng hàm Edit
+        if (confirmEdit) {
+            return loadAndEditCurrentMonthKpi();
+        } 
+        // Nếu chọn "Hủy bỏ", dừng lại luôn
+        return; 
+    }
     
+    // 2. KHỞI TẠO BÌNH THƯỜNG NẾU THÁNG ĐÓ CHƯA CÓ KPI
     // Mặc định chọn tất cả Sales đang hoạt động
     const activeSalesCodes = (typeof users !== 'undefined' ? users : [])
                               .filter(u => u.role === 'sales' && u.active !== false)
@@ -10046,10 +10075,11 @@ window.openTargetModal = function() {
     window._masterKpiState = { 
         totalTarget: 0, 
         companies: [], 
-        selectedSalesCodes: activeSalesCodes, // THÊM DÒNG NÀY
+        selectedSalesCodes: activeSalesCodes, 
         salesAllocations: { initialized: false } 
     };
     renderMasterKpiStep1();
+    
   } catch (error) {
     alert("Lỗi khi mở form thiết lập: " + error.message);
   }
