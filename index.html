@@ -8399,14 +8399,17 @@ ${isAdminOrManager ? `
       <button class="btn btn-amber" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(245, 158, 11, 0.3);" onclick="openTargetModal()">
           <i class="fa-solid fa-plus-circle"></i> THIẾT LẬP MỚI
       </button>
+      <button class="btn btn-purple" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(124, 58, 237, 0.3);" onclick="loadAndEditCurrentMonthKpi()">
+          <i class="fa-solid fa-pen-to-square"></i> XEM & SỬA
+      </button>
       <button class="btn btn-blue" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(37, 99, 235, 0.3);" onclick="openMonthlyCloneModal()">
           <i class="fa-solid fa-calendar-days"></i> NHÂN BẢN
       </button>
       <button class="btn btn-red" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(225, 29, 72, 0.3);" onclick="deleteAllKpiForCurrentMonth()">
           <i class="fa-solid fa-trash-can"></i> XÓA TOÀN BỘ
       </button>
-      <button class="btn btn-green" style="justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
-          <i class="fa-solid fa-file-excel"></i> XUẤT EXCEL
+      <button class="btn btn-green" style="grid-column: span 2; justify-content:center; font-weight:900; font-size:12.5px; padding:12px 6px; border-radius:12px; box-shadow:0 4px 15px rgba(16, 185, 129, 0.3);" onclick="exportKpiExcel()">
+          <i class="fa-solid fa-file-excel"></i> XUẤT EXCEL BÁO CÁO
       </button>
   </div>
 ` : ''}
@@ -10036,7 +10039,89 @@ window.openTargetModal = function() {
     console.error(error);
   }
 };
+window.loadAndEditCurrentMonthKpi = async function() {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
 
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (modalContainer) {
+        modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu thiết lập kỳ này...</div></div>`;
+        modalContainer.classList.remove('hidden');
+    }
+
+    try {
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+        let foundDocs = [];
+        targetsSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data && data.month === window._chiTieuTargetMonth) {
+                foundDocs.push(data);
+            }
+        });
+
+        if (foundDocs.length === 0) {
+            if (modalContainer) modalContainer.classList.add('hidden');
+            return alert(`Tháng ${window._chiTieuTargetMonth} chưa có thiết lập chỉ tiêu nào. Vui lòng bấm "THIẾT LẬP MỚI".`);
+        }
+
+        let totalTarget = 0;
+        let compMap = {}; 
+        let alloc = { initialized: true };
+
+        const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+        salesUsers.forEach(s => {
+            alloc[s.code] = { name: s.name, companies: {}, skus: {} };
+        });
+
+        // Bóc tách dữ liệu từ Firebase
+        foundDocs.forEach(data => {
+            const sCode = data.salesCode;
+            if (!alloc[sCode]) alloc[sCode] = { name: sCode, companies: {}, skus: {} };
+
+            // Bóc tách tiền Công ty
+            const revs = data.companyRevenues || {};
+            Object.keys(revs).forEach(cCode => {
+                const t = Number(revs[cCode].target || 0);
+                alloc[sCode].companies[cCode] = t;
+
+                if (!compMap[cCode]) compMap[cCode] = { compName: revs[cCode].compName || cCode, target: 0, skusMap: {} };
+                compMap[cCode].target += t;
+                totalTarget += t;
+            });
+
+            // Bóc tách sản lượng SKU
+            const items = data.items || [];
+            items.forEach(it => {
+                const cCode = it.compCode || 'KHAC';
+                const sku = it.skuCode;
+                const t = Number(it.target || 0);
+
+                alloc[sCode].skus[sku] = t;
+
+                if (!compMap[cCode]) compMap[cCode] = { compName: it.compName || cCode, target: 0, skusMap: {} };
+                if (!compMap[cCode].skusMap[sku]) compMap[cCode].skusMap[sku] = { skuName: it.skuName || sku, qty: 0 };
+                compMap[cCode].skusMap[sku].qty += t;
+            });
+        });
+
+        // Đóng gói mảng giao diện Bước 1
+        let companies = [];
+        Object.keys(compMap).forEach(cCode => {
+            const c = compMap[cCode];
+            let focusSkus = [];
+            Object.keys(c.skusMap).forEach(sku => {
+                focusSkus.push({ skuCode: sku, skuName: c.skusMap[sku].skuName, qty: c.skusMap[sku].qty });
+            });
+            companies.push({ compCode: cCode, compName: c.compName, target: c.target, focusSkus });
+        });
+
+        window._masterKpiState = { totalTarget, companies, salesAllocations: alloc };
+        renderMasterKpiStep1(); // Kích hoạt giao diện hiển thị Bước 1
+
+    } catch (err) {
+        if (modalContainer) modalContainer.classList.add('hidden');
+        alert("Lỗi tải dữ liệu: " + err.message);
+    }
+};
 window.closeTargetModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (modalContainer) {
@@ -10379,10 +10464,10 @@ window.validateAndGoToStep2 = function() {
   const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
   if (salesUsers.length === 0) return alert("Hệ thống chưa có nhân viên Sales nào đang hoạt động!");
 
-  // THUẬT TOÁN AUTO-SPLIT REMAINDER (XÓA BỎ SAI SỐ CỦA PHÉP CHIA)
+  const totalSales = salesUsers.length;
+
+  // NẾU TẠO MỚI HOÀN TOÀN: Tự động chia đều cho tất cả NV
   if (!window._masterKpiState.salesAllocations.initialized) {
-     const totalSales = salesUsers.length;
-     
      salesUsers.forEach(s => {
        window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
      });
@@ -10393,7 +10478,7 @@ window.validateAndGoToStep2 = function() {
          c.focusSkus.forEach(sku => skuAssignedTotal[sku.skuCode] = 0);
 
          salesUsers.forEach((s, idx) => {
-             // Người Sales cuối cùng trong danh sách sẽ gánh phần dôi dư để đảm bảo tổng số khớp tuyệt đối
+             // Người cuối gánh số dôi dư (Fix lỗi phép chia không tròn)
              if (idx === totalSales - 1) {
                  window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = c.target - compAssignedTotal;
                  c.focusSkus.forEach(sku => {
@@ -10413,8 +10498,26 @@ window.validateAndGoToStep2 = function() {
          });
      });
      window._masterKpiState.salesAllocations.initialized = true;
+  } else {
+     // NẾU LÀ "XEM & SỬA": Tự động vá (Patch) nếu Admin thêm công ty/SKU mới ở Bước 1
+     salesUsers.forEach(s => {
+         if (!window._masterKpiState.salesAllocations[s.code]) {
+             window._masterKpiState.salesAllocations[s.code] = { name: s.name, companies: {}, skus: {} };
+         }
+         window._masterKpiState.companies.forEach(c => {
+             if (window._masterKpiState.salesAllocations[s.code].companies[c.compCode] === undefined) {
+                 window._masterKpiState.salesAllocations[s.code].companies[c.compCode] = 0;
+             }
+             c.focusSkus.forEach(sku => {
+                 if (window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] === undefined) {
+                     window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] = 0;
+                 }
+             });
+         });
+     });
   }
   
+  // Chuyển sang hiển thị Bước 2
   renderMasterKpiStep2(salesUsers);
 };
 
