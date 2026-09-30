@@ -1462,10 +1462,8 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     });
   }
 
-  window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
-    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-      return false; 
-    }
+window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
+    // Đã xóa ngoại lệ của Admin/Manager ở đây. Tất cả đều bị chặn công bằng.
 
     let compPrefix = (typeof pinnedCompanyPrefix !== 'undefined' && pinnedCompanyPrefix) 
       ? pinnedCompanyPrefix.trim().toLowerCase() 
@@ -1475,6 +1473,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
     
     if (!matchedComp) return false;
 
+    // 1. Chặn tuyệt đối nếu Công ty trạng thái "Đóng"
     if (matchedComp.status === 'Đóng') {
       return true; 
     }
@@ -1485,6 +1484,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
     let currentProductDvt = removeAccents(String(dvt || '')).toLowerCase().trim();
 
+    // 2. Chặn tuyệt đối nếu ĐVT trạng thái "Đóng"
     for (const detail of matchedComp.dvtDetails) {
       let detailNameNorm = removeAccents(String(detail.name || '')).toLowerCase().trim();
       if (detailNameNorm && detail.status === 'Đóng') {
@@ -1498,14 +1498,10 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
   };
 
   window.isProductAllowedByCompanyDvt = function(p) {
-    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-      return true;
-    }
-    
+    // Đã xóa ngoại lệ của Admin/Manager
     if (window.isDvtHiddenForCurrentCompany(p.dvt, p.code, p.name)) {
       return false;
     }
-
     return true;
   };
 
@@ -2957,9 +2953,13 @@ window.filterTabProducts = function(val) {
     return;
   }
 
-  let matched = [];
+ let matched = [];
   for (const [id, entry] of productIndexMap.entries()) {
     const p = entry.product;
+    
+    // THÊM CHỐT CHẶN NÀY ĐỂ ẨN TRONG TAB HÀNG
+    if (!isProductAllowedByCompanyDvt(p)) continue;
+
     const pCode = removeAccents(String(p.code || '')).toLowerCase();
     
     // Ưu tiên khớp tiền tố đầu tiên của mã vật tư
@@ -10490,7 +10490,7 @@ window.closeTargetModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    const allComps = typeof companyList !== 'undefined' ? companyList : [];
+   const allComps = typeof companyList !== 'undefined' ? companyList.filter(c => c.status !== 'Đóng') : [];
 
    modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeTargetModal()">
@@ -10537,8 +10537,8 @@ window.filterModalCompList = function(keyword) {
     const container = document.getElementById('modalCompResultsContainer');
     if (!container) return;
 
-    const allComps = typeof companyList !== 'undefined' ? companyList : [];
-    const matched = allComps.filter(c => {
+const allComps = typeof companyList !== 'undefined' ? companyList.filter(c => c.status !== 'Đóng') : [];
+  const matched = allComps.filter(c => {
         const txt = typeof removeAccents === 'function' ? removeAccents(`${c.maCtu} ${c.tenCtu}`).toLowerCase() : `${c.maCtu} ${c.tenCtu}`.toLowerCase();
         return txt.includes(q);
     });
@@ -10875,7 +10875,10 @@ window.searchMkpiSku = function(cIdx, keyword) {
   if (!q) { resEl.classList.add('hidden'); return; }
   
   const compCode = window._masterKpiState.companies[cIdx].compCode;
-  const matched = (typeof products !== 'undefined' ? products : []).filter(p => {
+ const matched = (typeof products !== 'undefined' ? products : []).filter(p => {
+      // THÊM CHỐT CHẶN: Ẩn ngay nếu Cty hoặc ĐVT bị đóng
+      if (!isProductAllowedByCompanyDvt(p)) return false;
+
       let pCodeStr = String(p.code || '').toUpperCase();
       let extractedCtu = 'KHAC';
       if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) extractedCtu = '11';
