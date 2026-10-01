@@ -4551,25 +4551,39 @@ window.deleteAllAndImportProductsExcel = async function(e) {
     }
   };
 
-  window.updateCompanyField = async function(index, field, val) {
+ // --- HÀM GIỮ SCROLL VÀ TÌM KIẾM CHO TAB CÔNG TY CHỐNG GIẬT ---
+window._reloadCompanyTab = function() {
+    const searchInput = document.querySelector('#tabPane_company input[placeholder="🔍 Tìm kiếm công ty..."]');
+    const currentSearch = searchInput ? searchInput.value : '';
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
+
+    renderUI();
+
+    setTimeout(() => {
+        const newSearchInput = document.querySelector('#tabPane_company input[placeholder="🔍 Tìm kiếm công ty..."]');
+        if (newSearchInput && currentSearch) {
+            newSearchInput.value = currentSearch;
+            filterCompanyTable(currentSearch);
+        }
+        window.scrollTo({ top: scrollY, behavior: 'instant' });
+    }, 10);
+};
+
+window.updateCompanyField = async function(index, field, val) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền chỉnh sửa!");
   companyList[index][field] = val;
   const c = companyList[index];
   try {
     await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
     await saveCompaniesToLocalCache(companyList);
-
-    // -- THÊM MỚI 3 DÒNG NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
     const newVersion = Date.now();
     await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
     localStorage.setItem("companiesVersion", newVersion);
-    // --------------------------------------------------------
-
   } catch (err) {}
-  renderUI();
+  _reloadCompanyTab();
 };
 
-  window.toggleCompanyStatus = async function(index) {
+window.toggleCompanyStatus = async function(index) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái!");
   const c = companyList[index];
   const newStatus = c.status === 'Đóng' ? 'Mở' : 'Đóng';
@@ -4577,137 +4591,118 @@ window.deleteAllAndImportProductsExcel = async function(e) {
   try {
     await updateDoc(doc(db, "companies", String(c.maCtu)), { status: newStatus });
     await saveCompaniesToLocalCache(companyList);
-
-    // -- THÊM MỚI 3 DÒNG NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
     const newVersion = Date.now();
     await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
     localStorage.setItem("companiesVersion", newVersion);
-    // --------------------------------------------------------
-
-    renderUI();
+    _reloadCompanyTab();
     triggerHaptic(20);
   } catch (err) {
-    alert("Lỗi cập nhật trạng thái công ty: " + err.message);
+    alert("Lỗi: " + err.message);
   }
 };
 
 window.toggleCompanyDvtStatus = async function(companyIndex, dvtIndex) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-      return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái ĐVT!");
-    }
-    
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thay đổi trạng thái ĐVT!");
     let c = companyList[companyIndex];
     if (!c.dvtDetails || !c.dvtDetails[dvtIndex]) return;
-
     let currentStatus = c.dvtDetails[dvtIndex].status || 'Mở';
     c.dvtDetails[dvtIndex].status = currentStatus === 'Đóng' ? 'Mở' : 'Đóng';
-
     try {
       const docRef = doc(db, "companies", String(c.maCtu));
       await updateDoc(docRef, { dvtDetails: c.dvtDetails });
       await saveCompaniesToLocalCache(companyList);
-      
-      // -- THÊM MỚI ĐOẠN NÀY ĐỂ ĐỒNG BỘ CÁC MÁY QUẢN LÝ KHÁC --
       const newVersion = Date.now();
       await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
       localStorage.setItem("companiesVersion", newVersion);
-      // ------------------------------------------------------
-
-      renderUI();
+      _reloadCompanyTab();
       triggerHaptic(25);
     } catch (err) {
-      alert("Lỗi cập nhật trạng thái ĐVT: " + err.message);
+      alert("Lỗi: " + err.message);
     }
 };
 
-  window.addCompanyDvtPrompt = async function(companyIndex) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
-    let newName = prompt("Nhập tên Đơn vị tính mới (VD: lốc, hộp, thùng...):");
-    if (!newName || !newName.trim()) return;
+window.addCompanyDvtPrompt = async function(companyIndex) {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+  let newName = prompt("Nhập tên Đơn vị tính mới (VD: lốc, hộp, thùng...):");
+  if (!newName || !newName.trim()) return;
+  let c = companyList[companyIndex];
+  if (!c.dvtDetails) c.dvtDetails = [];
+  c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
+  try {
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+    await saveCompaniesToLocalCache(companyList);
+    _reloadCompanyTab();
+  } catch (err) {
+    alert("Lỗi: " + err.message);
+  }
+};
 
-    let c = companyList[companyIndex];
-    if (!c.dvtDetails) {
-      c.dvtDetails = [];
-    }
-
-    c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
-
+window.removeCompanyDvt = async function(companyIndex, dvtIndex) {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+  let confirmDel = await window.showCustomConfirm("Xóa ĐVT", "Bạn có chắc muốn xóa đơn vị tính này không?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+  let c = companyList[companyIndex];
+  if (c.dvtDetails) {
+    c.dvtDetails.splice(dvtIndex, 1);
     try {
       await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
       await saveCompaniesToLocalCache(companyList);
-      renderUI();
+      _reloadCompanyTab();
     } catch (err) {
       alert("Lỗi: " + err.message);
     }
-  };
+  }
+};
 
-  window.removeCompanyDvt = async function(companyIndex, dvtIndex) {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
-    let confirmDel = await window.showCustomConfirm("Xóa ĐVT", "Bạn có chắc muốn xóa đơn vị tính này không?", "fa-trash", "Xóa", "Hủy");
-    if (!confirmDel) return;
+window.updateRouteField = async function(index, field, val) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  if (field === 'nhomDoiTuong') {
+    let intVal = parseInt(val.trim(), 10);
+    if (isNaN(intVal) || intVal < 10) return alert("Nhóm đối tượng phải >= 10");
+    routeGroupsList[index][field] = String(intVal);
+  } else {
+    routeGroupsList[index][field] = val;
+  }
+  const r = routeGroupsList[index];
+  try {
+    await updateDoc(doc(db, "routes", String(r.id)), { [field]: routeGroupsList[index][field] });
+    await saveRoutesToLocalCache(routeGroupsList);
+  } catch (err) {}
+  renderUI();
+};
 
-    let c = companyList[companyIndex];
-    if (c.dvtDetails) {
-      c.dvtDetails.splice(dvtIndex, 1);
-      try {
-        await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
-        await saveCompaniesToLocalCache(companyList);
-        renderUI();
-      } catch (err) {
-        alert("Lỗi: " + err.message);
-      }
-    }
-  };
+window.deleteCompanyItem = async function(index) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+  
+  const c = companyList[index];
+  try {
+    await deleteDoc(doc(db, "companies", String(c.maCtu)));
+    companyList.splice(index, 1);
+    await saveCompaniesToLocalCache(companyList);
+    _reloadCompanyTab();
+  } catch (err) {
+    alert("Lỗi: " + err.message);
+  }
+};
 
-  window.updateRouteField = async function(index, field, val) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-    if (field === 'nhomDoiTuong') {
-      let intVal = parseInt(val.trim(), 10);
-      if (isNaN(intVal) || intVal < 10) return alert("Nhóm đối tượng phải >= 10");
-      routeGroupsList[index][field] = String(intVal);
-    } else {
-      routeGroupsList[index][field] = val;
-    }
-    const r = routeGroupsList[index];
-    try {
-      await updateDoc(doc(db, "routes", String(r.id)), { [field]: routeGroupsList[index][field] });
-      await saveRoutesToLocalCache(routeGroupsList);
-    } catch (err) {}
+window.deleteRouteItem = async function(index) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa tuyến này không?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+
+  const r = routeGroupsList[index];
+  try {
+    await deleteDoc(doc(db, "routes", String(r.id)));
+    routeGroupsList.splice(index, 1);
+    await saveRoutesToLocalCache(routeGroupsList);
     renderUI();
-  };
-
-  window.deleteCompanyItem = async function(index) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-    const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
-    if (!confirmDel) return;
-    
-    const c = companyList[index];
-    try {
-      await deleteDoc(doc(db, "companies", String(c.maCtu)));
-      companyList.splice(index, 1);
-      await saveCompaniesToLocalCache(companyList);
-      renderUI();
-    } catch (err) {
-      alert("Lỗi khi xóa: " + err.message);
-    }
-  };
-
-  window.deleteRouteItem = async function(index) {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-    const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa tuyến này không?", "fa-trash", "Xóa", "Hủy");
-    if (!confirmDel) return;
-
-    const r = routeGroupsList[index];
-    try {
-      await deleteDoc(doc(db, "routes", String(r.id)));
-      routeGroupsList.splice(index, 1);
-      await saveRoutesToLocalCache(routeGroupsList);
-      renderUI();
-      alert("✅ Đã xóa tuyến thành công!");
-    } catch (err) {
-      alert("Lỗi: " + err.message);
-    }
-  };
+    alert("✅ Đã xóa tuyến thành công!");
+  } catch (err) {
+    alert("Lỗi: " + err.message);
+  }
+};
 
  window.filterCompanyTable = function(val) {
   const q = removeAccents(val.trim());
