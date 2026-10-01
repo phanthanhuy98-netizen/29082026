@@ -9024,7 +9024,7 @@ window.calculateAndRenderTargets = async function() {
             if (Array.isArray(o.items)) {
               let orderRevByComp = {};
 
-              o.items.forEach(item => {
+         o.items.forEach(item => {
                 if (!item) return;
                 const pObj = findProductObj(item.code || item.id);
                 const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
@@ -9037,8 +9037,19 @@ window.calculateAndRenderTargets = async function() {
                 const compCode = getCompCodeFromProductCode(skuKey);
                 orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
                 
-                globalActual += qtyThung;
-                globalRevActual += itemRev; 
+                // --- BẮT ĐẦU FIX LOGIC: CHỈ TÍNH THỰC ĐẠT CHO HÀNG CÓ KPI ---
+                
+                // 1. XÉT TRÊN GÓC ĐỘ TOÀN CÔNG TY (GLOBAL)
+                let isTargetedGlobally = false;
+                if (globalGroupedData[compCode] && (globalGroupedData[compCode].compTarget > 0 || globalGroupedData[compCode].revTarget > 0)) {
+                    isTargetedGlobally = true;
+                }
+                
+                // Chỉ cộng vào số Tổng Cty nếu Cty/SKU đó có được giao KPI
+                if (isTargetedGlobally) {
+                    globalActual += qtyThung;
+                    globalRevActual += itemRev; 
+                }
                 
                 globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
 
@@ -9072,11 +9083,21 @@ window.calculateAndRenderTargets = async function() {
                     };
                 }
                 
+                // 2. XÉT TRÊN GÓC ĐỘ CÁ NHÂN NHÂN VIÊN
                 if (o.salesCode === window._chiTieuTargetSalesCode) {
-                  actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-                  salesActual += qtyThung;
-                  salesRevActual += itemRev; 
+                    let isTargetedForSales = false;
+                    // Nếu công ty này được giao chỉ tiêu tiền HOẶC mã hàng này được giao chỉ tiêu thùng
+                    if (companyRevenuesMap[compCode] && Number(companyRevenuesMap[compCode].target) > 0) isTargetedForSales = true;
+                    if (allTargetsMap[`${o.salesCode}_${skuKey}`]) isTargetedForSales = true;
+
+                    // Chỉ cộng vào thanh tiến độ Cá nhân nếu mặt hàng đó nằm trong KPI
+                    if (isTargetedForSales) {
+                        actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
+                        salesActual += qtyThung;
+                        salesRevActual += itemRev; 
+                    }
                 }
+                // --- KẾT THÚC FIX LOGIC ---
               });
 
               Object.keys(orderRevByComp).forEach(cCode => {
