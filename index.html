@@ -8912,8 +8912,15 @@ window.calculateAndRenderTargets = async function() {
     let assignedSalesCodes = new Set(); 
 
    const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
-    const targetsSnap = await getDocs(qTargets);
+const targetsSnap = await getDocs(qTargets);
     let targetDocFound = false;
+    
+    // Khởi tạo các biến tổng toàn cty bằng 0
+    globalTarget = 0;
+    globalRevTarget = 0;
+    
+    // Dùng Set để theo dõi các nhân viên đã cộng dồn (tránh cộng lặp)
+    let processedSalesForTotal = new Set();
     
     targetsSnap.forEach(doc => {
       const data = doc.data();
@@ -8929,10 +8936,28 @@ window.calculateAndRenderTargets = async function() {
             assignedSalesCodes.add(sCode);
         }
         
+        // --- CHỈ CỘNG DỒN VÀO TỔNG TOÀN CÔNG TY NẾU NHÂN VIÊN NÀY CHƯA ĐƯỢC TÍNH ---
+        if (sCode && !processedSalesForTotal.has(sCode)) {
+            processedSalesForTotal.add(sCode);
+            
+            // 1. Cộng dồn doanh số từ các Công ty của nhân viên này
+            Object.keys(revenues).forEach(cCode => {
+                const rt = Number(revenues[cCode].target || 0);
+                globalRevTarget += rt;
+            });
+
+            // 2. Cộng dồn sản lượng (Thùng) từ các SKU của nhân viên này
+            items.forEach(it => {
+                if (it) {
+                    globalTarget += Number(it.target || 0);
+                }
+            });
+        }
+        // --------------------------------------------------------------------------
+
         items.forEach(it => {
           if (!it) return;
           const t = Number(it.target || 0);
-          globalTarget += t;
           allTargetsMap[`${sCode}_${it.skuCode}`] = true;
           
           const pObj = findProductObj(it.skuCode);
@@ -8940,33 +8965,26 @@ window.calculateAndRenderTargets = async function() {
           const itemPrice = Number(pObj?.price || 0);
           const calculatedTargetRev = t * ratio * itemPrice; 
           
-          // Đã XÓA dòng: globalRevTarget += calculatedTargetRev; (Gây cộng dồn kép)
-          
           const cCode = it.compCode || 'KHAC';
           if (!globalGroupedData[cCode]) {
               globalGroupedData[cCode] = { compName: it.compName || cCode, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
           }
           globalGroupedData[cCode].compTarget += t;
-          // Đã XÓA dòng: globalGroupedData[cCode].revTarget += calculatedTargetRev; (Gây cộng dồn kép)
 
           if (!globalGroupedData[cCode].skusMap[it.skuCode]) {
               globalGroupedData[cCode].skusMap[it.skuCode] = { code: it.skuCode, name: it.skuName || it.skuCode, target: 0, actual: 0, targetRev: 0, actualRev: 0 };
           }
           globalGroupedData[cCode].skusMap[it.skuCode].target += t;
-          // Dòng dưới đây giữ lại để hiển thị tiền mục tiêu ở cấp độ chi tiết của riêng từng mã SKU
           globalGroupedData[cCode].skusMap[it.skuCode].targetRev += calculatedTargetRev; 
 
           if (sCode === window._chiTieuTargetSalesCode) {
              salesTarget += t;
-             // Đã XÓA dòng: salesRevTarget += calculatedTargetRev; (Gây cộng dồn kép)
              targetItems.push(it);
           }
         });
 
         Object.keys(revenues).forEach(cCode => {
             const rt = Number(revenues[cCode].target || 0);
-            globalRevTarget += rt;
-
             if (!globalGroupedData[cCode]) {
                 globalGroupedData[cCode] = { compName: revenues[cCode].compName || cCode, compTarget: 0, compActual: 0, skusMap: {}, revTarget: 0, revActual: 0 };
             }
