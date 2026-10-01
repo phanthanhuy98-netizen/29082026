@@ -11171,19 +11171,19 @@ window.renderMasterKpiStep2 = function(salesUsers) {
   let htmlContent = window._masterKpiState.companies.map(c => {
      let employeeCardsHtml = salesUsers.map(s => {
         
+        // Render ô nhập Sản lượng (Thùng) với Class và Data-attributes để phục vụ tìm kiếm
         let skuInputsHtml = c.focusSkus.map(sku => {
             return `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-dark); padding:10px 14px; border-radius:10px; border:1px solid var(--card-border); margin-bottom:8px;">
-                <span style="font-size:13.5px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:55%;" title="${sku.skuName}">
+              <div class="s2-sku-item" data-sku-code="${sku.skuCode.toLowerCase()}" data-sku-name="${sku.skuName.toLowerCase()}" style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:10px 14px; border-radius:10px; border:1px solid var(--card-border); margin-bottom:8px;">
+                <span style="font-size:13px; font-weight:800; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:55%;" title="${sku.skuName}">
                   <span style="color:var(--primary);">[${sku.skuCode}]</span> ${sku.skuName}
                 </span>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <!-- Đã sửa this.value thành this -->
                     <input type="text" inputmode="numeric" 
                            value="${window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0}" 
                            oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this)" 
                            placeholder="0"
-                           style="width:80px; padding:8px; text-align:center; border:2px solid var(--card-border); border-radius:8px; font-weight:900; font-size: 15px; color:var(--primary); outline:none; transition:0.2s;"
+                           style="width:80px; padding:8px; text-align:center; border:2px solid var(--card-border); border-radius:8px; font-weight:900; font-size: 15px; color:var(--primary); outline:none; transition:0.2s; background:var(--bg-dark);"
                            onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--card-border)'">
                     <span style="font-size:12px; color:var(--text-muted); font-weight:700;">Thùng</span>
                 </div>
@@ -11200,7 +11200,6 @@ window.renderMasterKpiStep2 = function(salesUsers) {
              
              <div style="margin-bottom: 16px;">
                 <label style="font-size:12px; font-weight:900; color:var(--rose); margin-bottom:8px; display:block;"><i class="fa-solid fa-money-bill-wave"></i> CHỈ TIÊU DOANH SỐ (VNĐ)</label>
-                <!-- Đã sửa this.value thành this -->
                 <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
                        value="${window._masterKpiState.salesAllocations[s.code].companies[c.compCode] > 0 ? window._masterKpiState.salesAllocations[s.code].companies[c.compCode].toLocaleString('vi-VN') : ''}" 
                        oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this)" 
@@ -11209,10 +11208,21 @@ window.renderMasterKpiStep2 = function(salesUsers) {
                        onfocus="this.style.borderColor='var(--rose)'" onblur="this.style.borderColor='var(--card-border)'">
              </div>
 
+             <!-- KHU VỰC SẢN LƯỢNG ĐƯỢC TỐI ƯU (CUỘN + TÌM KIẾM) -->
              ${c.focusSkus.length > 0 ? `
-             <div>
-                <label style="font-size:12px; font-weight:900; color:var(--primary); margin-bottom:8px; display:block;"><i class="fa-solid fa-box-open"></i> CHỈ TIÊU SẢN LƯỢNG (THÙNG)</label>
-                <div style="display:flex; flex-direction:column;">
+             <div style="background: rgba(37,99,235,0.03); padding: 14px; border-radius: 12px; border: 1px dashed rgba(37,99,235,0.3);">
+                <label style="font-size:12px; font-weight:900; color:var(--primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <span><i class="fa-solid fa-box-open"></i> CHỈ TIÊU SẢN LƯỢNG</span>
+                  <span style="background:var(--primary); color:#fff; padding:2px 8px; border-radius:6px; font-size:10px;">${c.focusSkus.length} Mã</span>
+                </label>
+                
+                <!-- Ô tìm kiếm SKU cho riêng nhân viên này -->
+                <input type="text" placeholder="🔍 Tìm nhanh mã hoặc tên SKU..." 
+                       oninput="filterStep2Skus('${s.code}', '${c.compCode}', this.value)" 
+                       style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700; margin-bottom:12px; outline:none; background:var(--card-bg);">
+                
+                <!-- Hộp chứa Scrollable -->
+                <div id="s2_sku_list_${s.code}_${c.compCode}" style="display:flex; flex-direction:column; max-height: 240px; overflow-y: auto; padding-right:6px;">
                    ${skuInputsHtml}
                 </div>
              </div>
@@ -11325,6 +11335,27 @@ window.handleStep2SkuInput = function(salesCode, skuCode, el) {
   }
   
   updateStep2DiffUI();
+};
+  window.filterStep2Skus = function(salesCode, compCode, keyword) {
+    const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+    const container = document.getElementById(`s2_sku_list_${salesCode}_${compCode}`);
+    if (!container) return;
+
+    // Lấy tất cả các dòng SKU trong hộp cuộn đó
+    const items = container.querySelectorAll('.s2-sku-item');
+    
+    items.forEach(item => {
+        const code = item.getAttribute('data-sku-code') || '';
+        const name = item.getAttribute('data-sku-name') || '';
+        const txt = typeof removeAccents === 'function' ? removeAccents(`${code} ${name}`) : `${code} ${name}`;
+        
+        // Khớp từ khóa thì hiện, không thì ẩn
+        if (txt.includes(q)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
 };
 window.updateStep2DiffUI = function() {
   const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false && window._masterKpiState.selectedSalesCodes.includes(u.code)) : [];
