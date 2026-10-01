@@ -9269,7 +9269,7 @@ window.calculateAndRenderTargets = async function() {
     `;
 let salesPerformanceHtml = '';
 if (isAdminOrManager && isTongQuanTab) {
-    let activeSalesList = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+ let activeSalesList = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
     let salesProgressList = [];
     
     activeSalesList.forEach(s => {
@@ -9278,8 +9278,38 @@ if (isAdminOrManager && isTongQuanTab) {
         let sActualRev = 0;
         let sTargetRev = 0;
         let sActualQty = 0;
+
+        // 1. TÌM TRƯỚC CÁC MÃ HÀNG VÀ CÔNG TY MÀ NHÂN VIÊN NÀY ĐƯỢC GIAO KPI
+        let userTargetedComps = new Set();
+        let userTargetedSkus = new Set();
+
+        if (typeof targetsSnap !== 'undefined') {
+            targetsSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                if (data && data.month === window._chiTieuTargetMonth && data.salesCode === sCode) {
+                    // Lấy danh sách SKU có chỉ tiêu
+                    (data.items || []).forEach(it => {
+                        if (Number(it.target || 0) > 0) {
+                            userTargetedSkus.add(it.skuCode);
+                            const pObj = typeof products !== 'undefined' ? products.find(p => p.id === it.skuCode || p.code === it.skuCode) : null;
+                            const ratio = Number(pObj?.tyLeQuyDoi || 50);
+                            const price = Number(pObj?.price || 0);
+                            sTargetRev += Number(it.target || 0) * ratio * price;
+                        }
+                    });
+                    // Lấy danh sách Công ty có chỉ tiêu
+                    const revs = data.companyRevenues || {};
+                    Object.keys(revs).forEach(cCode => {
+                        if (Number(revs[cCode].target || 0) > 0) {
+                            userTargetedComps.add(cCode);
+                            sTargetRev += Number(revs[cCode].target || 0);
+                        }
+                    });
+                }
+            });
+        }
         
-        // 1. TÍNH THỰC ĐẠT CỦA NHÂN VIÊN NÀY
+        // 2. TÍNH THỰC ĐẠT (CHỈ CỘNG TIỀN NẾU MẶT HÀNG NẰM TRONG SET KPI Ở TRÊN)
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
             orders.forEach(o => {
                 if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth) && o.salesCode === sCode) {
@@ -9290,36 +9320,23 @@ if (isAdminOrManager && isTongQuanTab) {
                             const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
                             const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
                             
-                            sActualRev += Number(item.qty || 0) * price;
+                            const skuKey = String(item.code || item.id || '').toUpperCase();
+                            const compCode = getCompCodeFromProductCode(skuKey);
+
+                            // BỘ LỌC CHỐNG LÁCH LUẬT: Chỉ cộng tiền nếu Công ty hoặc SKU có chỉ tiêu
+                            if (userTargetedComps.has(compCode) || userTargetedSkus.has(skuKey)) {
+                                sActualRev += Number(item.qty || 0) * price;
+                            }
+                            
+                            // Tổng sản lượng thùng thì vẫn cộng bình thường để tham khảo
                             sActualQty += qtyThung;
                         });
                     }
                 }
             });
         }
-        
-        // 2. TÍNH CHỈ TIÊU ĐƯỢC GIAO TỪ HỆ THỐNG CỦA NHÂN VIÊN NÀY
-        if (typeof targetsSnap !== 'undefined') {
-            targetsSnap.forEach(docSnap => {
-                const data = docSnap.data();
-                if (data && data.month === window._chiTieuTargetMonth && data.salesCode === sCode) {
-                    // Cộng dồn chỉ tiêu tiền từ SKU
-                    (data.items || []).forEach(it => {
-                        const pObj = typeof products !== 'undefined' ? products.find(p => p.id === it.skuCode || p.code === it.skuCode) : null;
-                        const ratio = Number(pObj?.tyLeQuyDoi || 50);
-                        const price = Number(pObj?.price || 0);
-                        sTargetRev += Number(it.target || 0) * ratio * price;
-                    });
-                    // Cộng dồn chỉ tiêu tiền từ Công ty
-                    const revs = data.companyRevenues || {};
-                    Object.keys(revs).forEach(cCode => {
-                        sTargetRev += Number(revs[cCode].target || 0);
-                    });
-                }
-            });
-        }
 
-        // 3. TÍNH TỶ LỆ HOÀN THÀNH (Tiến độ %)
+        // 3. TÍNH TỶ LỆ HOÀN THÀNH KPI (Chuẩn xác 100%)
         let pct = sTargetRev > 0 ? (sActualRev / sTargetRev) * 100 : (sActualRev > 0 ? 100 : 0);
 
         salesProgressList.push({ 
@@ -9332,8 +9349,8 @@ if (isAdminOrManager && isTongQuanTab) {
         });
     });
 
-    // Xếp hạng theo Doanh số thực đạt mang về cho công ty
-    salesProgressList.sort((a, b) => b.actualRev - a.actualRev);
+    // Xếp hạng dựa trên % Hoàn thành KPI (Thay vì tổng doanh số lộn xộn như cũ)
+    salesProgressList.sort((a, b) => b.pct - a.pct);
 
    salesPerformanceHtml = `
         <div style="background: var(--card-bg); border-radius: 18px; box-shadow: 0 8px 25px rgba(0,0,0,0.06); border: 1px solid var(--amber); margin-top: 20px; margin-bottom: 20px; overflow: hidden;">
