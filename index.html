@@ -9021,26 +9021,14 @@ const targetsSnap = await getDocs(qTargets);
                 window._cachedKpiMonth = window._chiTieuTargetMonth;
             }
             
-            let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
-            
-            // Lọc theo nhân viên ngay trên RAM
-            if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
-                monthlyOrdersForKpi = allMonthOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
-            } else {
-                monthlyOrdersForKpi = allMonthOrders;
-            }
-        }
-    } catch(e) {
-        console.warn("Lỗi tải dữ liệu KPI: ", e);
-        monthlyOrdersForKpi = typeof orders !== 'undefined' ? orders : []; // Fallback
-    }
+     // Rút dữ liệu đã tải từ RAM ra xài (0 tốn reads)
+    let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
 
- if (Array.isArray(monthlyOrdersForKpi)) {
-      monthlyOrdersForKpi.forEach(o => {
+    // CHẠY VÒNG LẶP TRÊN TẤT CẢ ĐƠN HÀNG CỦA CÔNG TY ĐỂ TÍNH SỐ TỔNG
+    if (Array.isArray(allMonthOrders)) {
+      allMonthOrders.forEach(o => {
         // Chỉ cần là đơn trong tháng và không bị hủy là tính hết
         if (o && o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
-          
-          // ĐÃ XÓA DÒNG if (assignedSalesCodes.has(o.salesCode)) Ở ĐÂY
           
           if (Array.isArray(o.items)) {
             let orderRevByComp = {};
@@ -9058,7 +9046,9 @@ const targetsSnap = await getDocs(qTargets);
               const compCode = getCompCodeFromProductCode(skuKey);
               orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
               
-              // 1. CỘNG VÀO TỔNG CÔNG TY (Ai bán cũng được cộng hết)
+              // ==========================================
+              // 1. CỘNG VÀO TỔNG CÔNG TY (Ai bán cũng được cộng)
+              // ==========================================
               globalActual += qtyThung;
               globalRevActual += itemRev; 
               
@@ -9094,7 +9084,9 @@ const targetsSnap = await getDocs(qTargets);
                   };
               }
               
-              // 2. CỘNG VÀO CÁ NHÂN (Chỉ cộng nếu đang chọn đúng nhân viên đó)
+              // ==========================================
+              // 2. CỘNG VÀO CÁ NHÂN (Chỉ cộng nếu đơn của người đang được chọn)
+              // ==========================================
               if (o.salesCode === window._chiTieuTargetSalesCode) {
                 actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
                 salesActual += qtyThung;
@@ -9102,17 +9094,17 @@ const targetsSnap = await getDocs(qTargets);
               }
             });
 
-            Object.keys(orderRevByComp).forEach(cCode => {
-               const rev = orderRevByComp[cCode];
-               if (o.salesCode === window._chiTieuTargetSalesCode) {
+            // Cộng doanh số công ty cho Cá nhân
+            if (o.salesCode === window._chiTieuTargetSalesCode) {
+                Object.keys(orderRevByComp).forEach(cCode => {
+                   const rev = orderRevByComp[cCode];
                    compActualRevenues[cCode] = (compActualRevenues[cCode] || 0) + rev;
-               }
-            });
+                });
+            }
           }
         }
       });
     }
-
     let globalTargetSkusCount = Object.keys(allTargetsMap).length;
     let globalActualSkusCount = Object.values(globalActualMap).filter(v => v > 0).length;
 
