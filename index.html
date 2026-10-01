@@ -538,6 +538,7 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
         osc.stop(ctx.currentTime + 0.15);
       }
     } catch (e) {}
+    console.warn("Đã bỏ qua một lỗi ngầm: ", e);
   };
 
   let wakeLockSentinel = null;
@@ -732,6 +733,7 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
       try {
         currentTabOrder = JSON.parse(savedOrder);
       } catch (e) {
+        console.warn("Không thể khôi phục thứ tự tab từ bộ nhớ, dùng mặc định: ", e);
         currentTabOrder = [...defaultTabOrder];
       }
     } else {
@@ -1216,6 +1218,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       }
       localStorage.setItem('dms_last_cleanup_date', todayStr);
     } catch (e) {}
+    console.warn("Đã bỏ qua một lỗi ngầm: ", e);
   }
 
   window.syncOfflineCheckins = async function() {
@@ -1236,6 +1239,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
             const delTx = idbDb.transaction(["offlineCheckins"], "readwrite");
             delTx.objectStore("offlineCheckins").delete(item.id);
           } catch (e) {}
+          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         }
       }
     };
@@ -1279,6 +1283,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
           } catch (e) {}
+          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         }
 
         const activePane = document.getElementById('tabPane_soGocBH');
@@ -1291,7 +1296,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
   window.addEventListener('online', () => {
     window.syncOfflineCheckins();
-    window.syncOfflineOrders();
   });
 
   if (window.visualViewport) {
@@ -1443,6 +1447,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       const saved = await loadCartDraftAsync(activeVisitedStore.id);
       currentCart = saved || {};
     } catch (e) {
+      console.warn("Đã bỏ qua một lỗi ngầm: ", e);
       currentCart = {};
     }
   }
@@ -1756,6 +1761,7 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
         const pos = await getHighAccuracyPosition();
         currentSalesGPS = { lat: pos.lat, lng: pos.lng };
       } catch (e) {
+        console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         currentSalesGPS = DEFAULT_MAP_CENTER;
       }
       attachListeners();
@@ -3855,14 +3861,17 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 return maxSoCtu;
             });
             return newSeq;
-        } catch (err) {
+     } catch (err) {
             if (attempt === retries - 1) {
-                // Fallback khẩn cấp cấp số cục bộ nếu Firebase bị nghẽn nặng
-                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(o.soCtu) || 0)) : 0;
+                // FALLBACK AN TOÀN: Nối mã NV vào để không bao giờ trùng số với người khác
+                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).replace(/[^0-9]/g, '')) || 0)) : 0;
                 let fallbackVal = localMax + 1;
-                return fallbackVal > 900000 ? 1 : fallbackVal;
+                if (fallbackVal > 900000) fallbackVal = 1;
+                
+                // Trả về chuỗi kết hợp: VD "HCM01-151" thay vì chỉ trả về "151"
+                return `${currentUser.code}-${fallbackVal}`; 
             }
-            // Thời gian chờ tăng dần theo cấp số nhân để nhường đường truyền
+            // Thời gian chờ tăng dần...
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
         }
     }
@@ -3999,12 +4008,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         }
       } else {
         orders.unshift(localRenderOrder);
-      }
-
-      await saveOfflineOrder({
-        id: orderUuid,
-        ...orderData,
-        createdAt: new Date().toISOString()
+    
       });
       
       await clearCartDraftAsync(savedStoreId);
@@ -5198,6 +5202,7 @@ window.openCompanyGpsModal = function() {
             });
           }
         } catch (e) {}
+        console.warn("Đã bỏ qua một lỗi ngầm: ", e);
       }
 
       container.innerHTML = `
