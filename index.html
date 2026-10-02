@@ -4043,7 +4043,7 @@ window.exportSoGocExcel = function() {
   // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
   const exportData = filteredData.map(r => ({
     "So CTu": r.soCtu,
-    "Ngay CTu": r.ngayCtuFormatted,
+    "Ngay CTu__": r.ngayCtuFormatted,
     "Ma DTPNNo": r.maDTPNNo,
     "SoHoaDon": r.maTuyen,
     "Ma DTPNCo": r.maNhanVien,
@@ -4051,11 +4051,11 @@ window.exportSoGocExcel = function() {
     "Ma VTHHCo": r.maVTHHCo,
     "Ten Hang Hoa": r.tenHangHoa,
     "Don Vi Tinh": r.donViTinh,
-    "So Luong": Number(r.soLuong || 0),           // <-- Hàm Number() ép thành số chuẩn
-    "Don Gia": Number(r.donGia || 0),             // <-- Hàm Number() ép thành số chuẩn
-    "VND Thanh Tien": Number(r.thanhTien || 0),   // <-- Hàm Number() ép thành số chuẩn
+    "So Luong": Number(r.soLuong || 0),
+    "Don Gia": Number(r.donGia || 0),
+    "VND Thanh Tien": Number(r.thanhTien || 0),
     "Ghi Chu": r.ghiChu,
-    "GPS CTy": r.khoangCachKm === Infinity ? 0 : Number(r.khoangCachKm.toFixed(2))
+    "GPS Lech (m)": r.gpsLech
   }));
 
   // 4. Tạo file Excel mới
@@ -4064,7 +4064,7 @@ window.exportSoGocExcel = function() {
   // TỰ ĐỘNG ẨN CÁC CỘT THEO YÊU CẦU (CÁC CỘT BÔI ĐỎ)
   ws['!cols'] = [
     { wch: 10 },               // 0: So CTu
-    { wch: 12 },               // 1: Ngay CTu
+    { wch: 12 },               // 1: Ngay CTu__
     { wch: 15 },               // 2: Ma DTPNNo
     { wch: 15 },               // 3: SoHoaDon
     { wch: 15 },               // 4: Ma DTPNCo
@@ -4076,7 +4076,7 @@ window.exportSoGocExcel = function() {
     { wch: 15 },               // 10: Don Gia
     { hidden: true },          // 11: VND Thanh Tien (Đã ẩn)
     { wch: 20 },               // 12: Ghi Chu
-    { wch: 10 }                // 13: GPS CTy
+    { wch: 15 }                // 13: GPS Lech
   ];
 
   const wb = XLSX.utils.book_new();
@@ -5399,38 +5399,43 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
                 if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
               }
 
-         // TÍNH KHOẢNG CÁCH TỪ CÔNG TY TỚI QUẦY HÀNG (CHỈ LẤY GPS GỐC CỦA KHÁCH HÀNG)
-              let dist = Infinity;
+       // TÍNH KHOẢNG CÁCH LỆCH GIỮA VỊ TRÍ CHỐT ĐƠN CỦA NHÂN VIÊN VÀ GPS GHIM CỦA KHÁCH HÀNG
+              let gpsLechVal = "0"; 
               
               // 1. Tìm thông tin khách hàng trong cơ sở dữ liệu gốc
               const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaDTPN));
               
-              // 2. BẮT BUỘC chỉ dùng GPS gốc của quầy để tính (Bỏ qua GPS lúc nhân viên chốt đơn để tránh sai số)
-              if (matchedStore && matchedStore.lat && matchedStore.lng && globalCompanyGps && globalCompanyGps.lat && globalCompanyGps.lng) {
-                dist = calculateDistanceMeters(Number(globalCompanyGps.lat), Number(globalCompanyGps.lng), Number(matchedStore.lat), Number(matchedStore.lng)) / 1000;
+              // 2. Tính khoảng cách lệch (đơn vị: Mét)
+              if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
+                gpsLechVal = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
+              } else if (matchedStore && (!matchedStore.lat || matchedStore.lat == 0)) {
+                gpsLechVal = "Chưa ghim";
+              } else if (!o.lat || o.lat == 0) {
+                gpsLechVal = "K có GPS";
               }
-// Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
-         let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
-          let unitPrice = Number(item.price || productObj?.price || 0);
-          let thanhTienNum = itemQty * unitPrice;
 
-          flatExcelRows.push({
-            soCtu: o.soCtu || 1,
-            ngayCtu: o.ngayCtu || '2026-09-01',
-            ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
-            maDTPNNo: inferredMaDTPN,
-            maTuyen: maTuyenVal,
-            maNhanVien: o.salesCode || '',
-            tenNhanVien: o.salesName || '',
-            maVTHHCo: finalMaVTHHCo,
-            tenHangHoa: finalTenHangHoa,
-            donViTinh: item.dvt || 'hộp',
-            soLuong: itemQty,
-            donGia: unitPrice,           // <-- Bổ sung Đơn Giá để xuất Excel
-            thanhTien: thanhTienNum,     // <-- Bỏ format dấu chấm, giữ nguyên dạng số nguyên (raw)
-            ghiChu: item.note || '',
-            khoangCachKm: dist 
-          });
+              // Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
+              let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
+              let unitPrice = Number(item.price || productObj?.price || 0);
+              let thanhTienNum = itemQty * unitPrice;
+
+              flatExcelRows.push({
+                soCtu: o.soCtu || 1,
+                ngayCtu: o.ngayCtu || '2026-09-01',
+                ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
+                maDTPNNo: inferredMaDTPN,
+                maTuyen: maTuyenVal,
+                maNhanVien: o.salesCode || '',
+                tenNhanVien: o.salesName || '',
+                maVTHHCo: finalMaVTHHCo,
+                tenHangHoa: finalTenHangHoa,
+                donViTinh: item.dvt || 'hộp',
+                soLuong: itemQty,
+                donGia: unitPrice,            
+                thanhTien: thanhTienNum,      
+                ghiChu: item.note || '',
+                gpsLech: gpsLechVal // Đã đồng bộ tên biến chuẩn xác tại đây
+              });
             }
           });
 
@@ -5579,7 +5584,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
             <thead>
               <tr>
                 <th>So CTu</th>
-                <th>Ngay CTu</th>
+                <th>Ngay CTu__</th>
                 <th>Ma DTPNNo</th>
                 <th>SoHoaDon</th>
                 <th>Ma DTPNCo</th>
@@ -5591,7 +5596,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                 <th>Don Gia</th>
                 <th>VND Thanh Tien</th>
                 <th>Ghi Chu</th>
-                <th>GPS CTy</th>
+                <th>GPS Lech</th>
               </tr>
             </thead>
             <tbody>
@@ -5610,7 +5615,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                   <td>${r.donGia}</td>
                   <td>${r.thanhTien}</td>
                   <td>${r.ghiChu}</td>
-                  <td>${r.khoangCachKm === Infinity ? '0' : r.khoangCachKm.toFixed(2)}</td>
+                  <td>${r.gpsLech}</td>
                 </tr>
               `).join('')}
         </tbody>
