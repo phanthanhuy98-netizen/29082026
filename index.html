@@ -4065,9 +4065,10 @@ window.exportSoGocExcel = function() {
   }
 
   // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
+ // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
   const exportData = filteredData.map(r => ({
     "So CTu": r.soCtu,
-    "Ngay CTu": r.ngayCtuFormatted,
+    "Ngay CTu__": r.ngayCtuFormatted,             // Đổi thành Ngay CTu__ (có 2 dấu gạch dưới)
     "Ma DTPNNo": r.maDTPNNo,
     "SoHoaDon": r.maTuyen,
     "Ma DTPNCo": r.maNhanVien,
@@ -4075,11 +4076,11 @@ window.exportSoGocExcel = function() {
     "Ma VTHHCo": r.maVTHHCo,
     "Ten Hang Hoa": r.tenHangHoa,
     "Don Vi Tinh": r.donViTinh,
-    "So Luong": Number(r.soLuong || 0),           // <-- Hàm Number() ép thành số chuẩn
-    "Don Gia": Number(r.donGia || 0),             // <-- Hàm Number() ép thành số chuẩn
-    "VND Thanh Tien": Number(r.thanhTien || 0),   // <-- Hàm Number() ép thành số chuẩn
+    "So Luong": Number(r.soLuong || 0),            
+    "Don Gia": Number(r.donGia || 0),              
+    "VND Thanh Tien": Number(r.thanhTien || 0),    
     "Ghi Chu": r.ghiChu,
-    "GPS CTy": r.khoangCachKm === Infinity ? 0 : Number(r.khoangCachKm.toFixed(2))
+    "GPS Lech": r.gpsLech                          // Đổi thành GPS Lech và lấy giá trị khoảng cách
   }));
 
   // 4. Tạo file Excel mới
@@ -5424,15 +5425,24 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
                 if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
               }
 
-         // TÍNH KHOẢNG CÁCH TỪ CÔNG TY TỚI QUẦY HÀNG (CHỈ LẤY GPS GỐC CỦA KHÁCH HÀNG)
-              let dist = Infinity;
+        // TÍNH KHOẢNG CÁCH LỆCH GIỮA VỊ TRÍ CHỐT ĐƠN CỦA NHÂN VIÊN VÀ GPS GHIM CỦA KHÁCH HÀNG
+              let gpsLechText = '0';
               
               // 1. Tìm thông tin khách hàng trong cơ sở dữ liệu gốc
               const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaDTPN));
               
-              // 2. BẮT BUỘC chỉ dùng GPS gốc của quầy để tính (Bỏ qua GPS lúc nhân viên chốt đơn để tránh sai số)
-              if (matchedStore && matchedStore.lat && matchedStore.lng && globalCompanyGps && globalCompanyGps.lat && globalCompanyGps.lng) {
-                dist = calculateDistanceMeters(Number(globalCompanyGps.lat), Number(globalCompanyGps.lng), Number(matchedStore.lat), Number(matchedStore.lng)) / 1000;
+              // 2. Tính khoảng cách lệch giữa vị trí đơn hàng (o.lat, o.lng) và vị trí của Tiệm
+              if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
+                let distMeters = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                if (distMeters > 1000) {
+                    gpsLechText = (distMeters / 1000).toFixed(1) + ' km';
+                } else {
+                    gpsLechText = Math.round(distMeters) + ' m';
+                }
+              } else if (matchedStore && (!matchedStore.lat || matchedStore.lat == 0)) {
+                gpsLechText = 'Chưa ghim GPS';
+              } else if (!o.lat || o.lat == 0) {
+                gpsLechText = 'Đơn k có GPS';
               }
 // Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
          let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
@@ -5453,8 +5463,8 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
             soLuong: itemQty,
             donGia: unitPrice,           // <-- Bổ sung Đơn Giá để xuất Excel
             thanhTien: thanhTienNum,     // <-- Bỏ format dấu chấm, giữ nguyên dạng số nguyên (raw)
-            ghiChu: item.note || '',
-            khoangCachKm: dist 
+           ghiChu: item.note || '',
+            gpsLech: gpsLechText // Thay thế khoangCachKm bằng độ lệch
           });
             }
           });
@@ -5604,7 +5614,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
             <thead>
               <tr>
                 <th>So CTu</th>
-                <th>Ngay CTu</th>
+                <th>Ngay CTu__</th>
                 <th>Ma DTPNNo</th>
                 <th>SoHoaDon</th>
                 <th>Ma DTPNCo</th>
@@ -5616,7 +5626,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                 <th>Don Gia</th>
                 <th>VND Thanh Tien</th>
                 <th>Ghi Chu</th>
-                <th>GPS CTy</th>
+                <th>GPS Lech</th>
               </tr>
             </thead>
             <tbody>
@@ -5635,7 +5645,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                   <td>${r.donGia}</td>
                   <td>${r.thanhTien}</td>
                   <td>${r.ghiChu}</td>
-                  <td>${r.khoangCachKm === Infinity ? '0' : r.khoangCachKm.toFixed(2)}</td>
+                  <td>${r.gpsLech}</td>
                 </tr>
               `).join('')}
         </tbody>
