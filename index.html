@@ -3499,26 +3499,55 @@ window.loadMoreSoGoc = async function() {
   };
 window.markOrderAsViewedLocal = function(orderId) {
   let viewedOrders = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
-  
-  // KIỂM TRA: Nếu đơn này đã lưu trong máy rồi -> Xóa đi (Hủy xem)
+  let isNowViewed = false;
+
+  // 1. Xử lý logic Thêm/Xóa trạng thái
   if (viewedOrders[orderId]) {
     delete viewedOrders[orderId];
-  } 
-  // Nếu chưa có -> Thêm vào (Đã xem)
-  else {
+    isNowViewed = false;
+  } else {
     viewedOrders[orderId] = new Date().toISOString();
+    isNowViewed = true;
   }
-  
-  // Lưu lại thay đổi
+
+  // Lưu lại vào bộ nhớ máy
   localStorage.setItem('dms_accountant_viewed', JSON.stringify(viewedOrders));
-  
   if (typeof triggerHaptic === 'function') triggerHaptic(20);
-  if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
-  
-  // Load lại giao diện
-  const activePane = document.getElementById('tabPane_soGocBH');
-  if (activePane) {
-    renderTabContent('soGocBH', activePane);
+
+  // 2. KHÔNG ĐÓNG MODAL NỮA - Cập nhật nút Đã xem ngay bên trong Modal để nó đứng im
+  const modalBtn = document.querySelector('.fullscreen-modal button[onclick*="markOrderAsViewedLocal"]');
+  if (modalBtn) {
+      // Fix cứng chiều rộng để nút không bị co giãn giật giật khi đổi chữ dài/ngắn
+      modalBtn.style.minWidth = '175px'; 
+      modalBtn.style.textAlign = 'center';
+      
+      // Chuyển đổi màu và chữ mượt mà
+      if (isNowViewed) {
+          modalBtn.className = 'btn btn-red';
+          modalBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Bỏ đánh dấu xem';
+      } else {
+          modalBtn.className = 'btn btn-green';
+          modalBtn.innerHTML = '<i class="fa-solid fa-check"></i> Đã xem';
+      }
+  }
+
+  // 3. Cập nhật trực tiếp thẻ (Card) bên ngoài nằm chìm dưới màn hình
+  const viewBtn = document.querySelector(`button[onclick*="openOrderDetailsModal('${orderId}')"]`);
+  if (viewBtn) {
+      const card = viewBtn.closest('.so-goc-card-item');
+      if (card) {
+          const badgeContainer = card.querySelector('div[style*="display:inline-flex"]');
+          if (badgeContainer) {
+              const soCtu = card.getAttribute('data-so-ctu') || '1';
+              let newHtml = `<span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:11px; font-weight:800;">CTu #${soCtu}</span>`;
+              
+              if (isNowViewed) {
+                  newHtml += `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap; margin-left:8px;">✅ Đã xem</span>`;
+              }
+              
+              badgeContainer.innerHTML = newHtml;
+          }
+      }
   }
 };
  window.openOrderDetailsModal = function(orderId) {
