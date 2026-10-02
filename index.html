@@ -258,8 +258,9 @@
   input:focus, select:focus { border-color:var(--primary); outline:none; box-shadow:0 0 0 3px rgba(37, 99, 235, 0.15); }
   option { background: var(--card-bg); color: var(--text-main); }
 
- .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0, 0, 0, 0.6);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:99999;padding:10px; overscroll-behavior: none;}
-  .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main); overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch;}
+  .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0, 0, 0, 0.6);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:99999;padding:10px;}
+  .modal-content{background:var(--panel-bg);backdrop-filter:blur(25px);padding:20px;border-radius:18px;width:90%;max-width:540px;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.2);border:1px solid var(--card-border);color: var(--text-main);}
+  
   .modal-content.fullscreen-modal {
     width: 100% !important;
     max-width: 100% !important;
@@ -538,7 +539,6 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
         osc.stop(ctx.currentTime + 0.15);
       }
     } catch (e) {}
-    console.warn("Đã bỏ qua một lỗi ngầm: ", e);
   };
 
   let wakeLockSentinel = null;
@@ -733,7 +733,6 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
       try {
         currentTabOrder = JSON.parse(savedOrder);
       } catch (e) {
-        console.warn("Không thể khôi phục thứ tự tab từ bộ nhớ, dùng mặc định: ", e);
         currentTabOrder = [...defaultTabOrder];
       }
     } else {
@@ -1218,7 +1217,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       }
       localStorage.setItem('dms_last_cleanup_date', todayStr);
     } catch (e) {}
-    console.warn("Đã bỏ qua một lỗi ngầm: ", e);
   }
 
   window.syncOfflineCheckins = async function() {
@@ -1239,7 +1237,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
             const delTx = idbDb.transaction(["offlineCheckins"], "readwrite");
             delTx.objectStore("offlineCheckins").delete(item.id);
           } catch (e) {}
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         }
       }
     };
@@ -1283,7 +1280,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
             const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
             delTx.objectStore("offlineOrders").delete(item.id);
           } catch (e) {}
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         }
 
         const activePane = document.getElementById('tabPane_soGocBH');
@@ -1296,6 +1292,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
   window.addEventListener('online', () => {
     window.syncOfflineCheckins();
+    window.syncOfflineOrders();
   });
 
   if (window.visualViewport) {
@@ -1447,7 +1444,6 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       const saved = await loadCartDraftAsync(activeVisitedStore.id);
       currentCart = saved || {};
     } catch (e) {
-      console.warn("Đã bỏ qua một lỗi ngầm: ", e);
       currentCart = {};
     }
   }
@@ -1668,7 +1664,6 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
       alert("✅ Đã cập nhật dữ liệu thành công!");
       closeSettingsModal();
     } catch (e) {
-       console.warn("Đã bỏ qua một lỗi ngầm: ", e);   
       alert("Lỗi cập nhật: " + e.message);
     }
   };
@@ -1762,7 +1757,6 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
         const pos = await getHighAccuracyPosition();
         currentSalesGPS = { lat: pos.lat, lng: pos.lng };
       } catch (e) {
-        console.warn("Đã bỏ qua một lỗi ngầm: ", e);
         currentSalesGPS = DEFAULT_MAP_CENTER;
       }
       attachListeners();
@@ -3163,8 +3157,6 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
       if (typeof triggerHaptic === 'function') triggerHaptic(20);
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
       alert("Lỗi tải lại dữ liệu: " + e.message);
     }
   };
@@ -3269,8 +3261,6 @@ window.loadMoreSoGoc = async function() {
         }
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi tải thêm: " + e.message);
         if (btn) { btn.innerHTML = 'Tải Thêm Đơn Hàng Cũ Hơn'; btn.disabled = false; }
     }
@@ -3509,45 +3499,26 @@ window.loadMoreSoGoc = async function() {
   };
 window.markOrderAsViewedLocal = function(orderId) {
   let viewedOrders = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
-  let isNowViewed = false;
-
-  // 1. Xử lý logic Thêm/Xóa trạng thái
+  
+  // KIỂM TRA: Nếu đơn này đã lưu trong máy rồi -> Xóa đi (Hủy xem)
   if (viewedOrders[orderId]) {
     delete viewedOrders[orderId];
-    isNowViewed = false;
-  } else {
+  } 
+  // Nếu chưa có -> Thêm vào (Đã xem)
+  else {
     viewedOrders[orderId] = new Date().toISOString();
-    isNowViewed = true;
   }
-
-  // Lưu lại vào bộ nhớ máy
+  
+  // Lưu lại thay đổi
   localStorage.setItem('dms_accountant_viewed', JSON.stringify(viewedOrders));
+  
   if (typeof triggerHaptic === 'function') triggerHaptic(20);
-
-  // 2. Đóng Modal chi tiết
   if (typeof closeOrderDetailsModal === 'function') closeOrderDetailsModal();
-
-  // 3. TỐI ƯU HÓA: Cập nhật trực tiếp thẻ (Card) bên ngoài mà KHÔNG RENDER LẠI TAB
-  // Tìm nút "Xem Chi Tiết" của đơn này để dò ra thẻ gốc chứa nó
-  const viewBtn = document.querySelector(`button[onclick*="${orderId}"]`);
-  if (viewBtn) {
-      const card = viewBtn.closest('.so-goc-card-item');
-      if (card) {
-          // Tìm khu vực chứa nhãn CTu #...
-          const badgeContainer = card.querySelector('div[style*="display:inline-flex"]');
-          if (badgeContainer) {
-              const soCtu = card.getAttribute('data-so-ctu') || '1';
-              
-              // Tiêm trực tiếp mã HTML mới vào đúng chỗ đó ngay lập tức (0 độ trễ)
-              let newHtml = `<span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${soCtu}</span>`;
-              
-              if (isNowViewed) {
-                  newHtml += `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap; margin-left:8px;">✅ Đã xem</span>`;
-              }
-              
-              badgeContainer.innerHTML = newHtml;
-          }
-      }
+  
+  // Load lại giao diện
+  const activePane = document.getElementById('tabPane_soGocBH');
+  if (activePane) {
+    renderTabContent('soGocBH', activePane);
   }
 };
  window.openOrderDetailsModal = function(orderId) {
@@ -3599,8 +3570,8 @@ window.markOrderAsViewedLocal = function(orderId) {
             <div>Mã KH: <b style="color:var(--text-main);">${inferredMaDTPN}</b></div>
             <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || '—'}</b></div>
           </div>
-<div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch;">
-${validItems.length > 0 ? validItems.map(item => {
+          <div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">
+        ${validItems.length > 0 ? validItems.map(item => {
       const productObj = products.find(p => p.id === item.id || p.code === item.code);
       const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
       
@@ -3866,17 +3837,14 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 return maxSoCtu;
             });
             return newSeq;
-     } catch (err) {
+        } catch (err) {
             if (attempt === retries - 1) {
-                // FALLBACK AN TOÀN: Nối mã NV vào để không bao giờ trùng số với người khác
-                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).replace(/[^0-9]/g, '')) || 0)) : 0;
+                // Fallback khẩn cấp cấp số cục bộ nếu Firebase bị nghẽn nặng
+                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(o.soCtu) || 0)) : 0;
                 let fallbackVal = localMax + 1;
-                if (fallbackVal > 900000) fallbackVal = 1;
-                
-                // Trả về chuỗi kết hợp: VD "HCM01-151" thay vì chỉ trả về "151"
-                return `${currentUser.code}-${fallbackVal}`; 
+                return fallbackVal > 900000 ? 1 : fallbackVal;
             }
-            // Thời gian chờ tăng dần...
+            // Thời gian chờ tăng dần theo cấp số nhân để nhường đường truyền
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
         }
     }
@@ -4004,14 +3972,22 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         createdAt: new Date()
       };
 
-     if (editingOrderId) {
-            const idx = orders.findIndex(o => o.id === editingOrderId);
-            if (idx > -1) {
-                orders[idx] = localRenderOrder;
-            }
+      if (editingOrderId) {
+        const idx = orders.findIndex(o => o.id === editingOrderId);
+        if (idx > -1) {
+          orders[idx] = localRenderOrder;
         } else {
-            orders.unshift(localRenderOrder);
+          orders.unshift(localRenderOrder);
         }
+      } else {
+        orders.unshift(localRenderOrder);
+      }
+
+      await saveOfflineOrder({
+        id: orderUuid,
+        ...orderData,
+        createdAt: new Date().toISOString()
+      });
       
       await clearCartDraftAsync(savedStoreId);
       currentCart = {}; 
@@ -4065,10 +4041,9 @@ window.exportSoGocExcel = function() {
   }
 
   // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
- // 3. ÉP KIỂU SỐ (Number) CHO CÁC CỘT TIỀN/SỐ LƯỢNG ĐỂ EXCEL CANH PHẢI CHUẨN XÁC
   const exportData = filteredData.map(r => ({
     "So CTu": r.soCtu,
-    "Ngay CTu__": r.ngayCtuFormatted,             // Đổi thành Ngay CTu__ (có 2 dấu gạch dưới)
+    "Ngay CTu": r.ngayCtuFormatted,
     "Ma DTPNNo": r.maDTPNNo,
     "SoHoaDon": r.maTuyen,
     "Ma DTPNCo": r.maNhanVien,
@@ -4076,11 +4051,11 @@ window.exportSoGocExcel = function() {
     "Ma VTHHCo": r.maVTHHCo,
     "Ten Hang Hoa": r.tenHangHoa,
     "Don Vi Tinh": r.donViTinh,
-    "So Luong": Number(r.soLuong || 0),            
-    "Don Gia": Number(r.donGia || 0),              
-    "VND Thanh Tien": Number(r.thanhTien || 0),    
+    "So Luong": Number(r.soLuong || 0),           // <-- Hàm Number() ép thành số chuẩn
+    "Don Gia": Number(r.donGia || 0),             // <-- Hàm Number() ép thành số chuẩn
+    "VND Thanh Tien": Number(r.thanhTien || 0),   // <-- Hàm Number() ép thành số chuẩn
     "Ghi Chu": r.ghiChu,
-    "GPS Lech(m)": r.gpsLech                          // Đổi thành GPS Lech và lấy giá trị khoảng cách
+    "GPS CTy": r.khoangCachKm === Infinity ? 0 : Number(r.khoangCachKm.toFixed(2))
   }));
 
   // 4. Tạo file Excel mới
@@ -4101,7 +4076,7 @@ window.exportSoGocExcel = function() {
     { wch: 15 },               // 10: Don Gia
     { hidden: true },          // 11: VND Thanh Tien (Đã ẩn)
     { wch: 20 },               // 12: Ghi Chu
-    { wch: 15 }                // 13: GPS Lech
+    { wch: 10 }                // 13: GPS CTy
   ];
 
   const wb = XLSX.utils.book_new();
@@ -5205,7 +5180,6 @@ window.openCompanyGpsModal = function() {
             });
           }
         } catch (e) {}
-        console.warn("Đã bỏ qua một lỗi ngầm: ", e);
       }
 
       container.innerHTML = `
@@ -5424,43 +5398,39 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
                 finalMaVTHHCo = pSplit[0].trim();
                 if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
               }
-// TÍNH KHOẢNG CÁCH LỆCH GIỮA VỊ TRÍ CHỐT ĐƠN CỦA NHÂN VIÊN VÀ GPS GHIM CỦA KHÁCH HÀNG
-              let gpsLechVal = "0"; 
+
+         // TÍNH KHOẢNG CÁCH TỪ CÔNG TY TỚI QUẦY HÀNG (CHỈ LẤY GPS GỐC CỦA KHÁCH HÀNG)
+              let dist = Infinity;
               
               // 1. Tìm thông tin khách hàng trong cơ sở dữ liệu gốc
               const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaDTPN));
               
-              // 2. Tính khoảng cách lệch (đơn vị: Mét)
-              if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
-                gpsLechVal = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
-              } else if (matchedStore && (!matchedStore.lat || matchedStore.lat == 0)) {
-                gpsLechVal = "Chưa ghim";
-              } else if (!o.lat || o.lat == 0) {
-                gpsLechVal = "K có GPS";
+              // 2. BẮT BUỘC chỉ dùng GPS gốc của quầy để tính (Bỏ qua GPS lúc nhân viên chốt đơn để tránh sai số)
+              if (matchedStore && matchedStore.lat && matchedStore.lng && globalCompanyGps && globalCompanyGps.lat && globalCompanyGps.lng) {
+                dist = calculateDistanceMeters(Number(globalCompanyGps.lat), Number(globalCompanyGps.lng), Number(matchedStore.lat), Number(matchedStore.lng)) / 1000;
               }
+// Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
+         let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
+          let unitPrice = Number(item.price || productObj?.price || 0);
+          let thanhTienNum = itemQty * unitPrice;
 
-              // Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
-              let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
-              let unitPrice = Number(item.price || productObj?.price || 0);
-              let thanhTienNum = itemQty * unitPrice;
-
-              flatExcelRows.push({
-                soCtu: o.soCtu || 1,
-                ngayCtu: o.ngayCtu || '2026-09-01',
-                ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
-                maDTPNNo: inferredMaDTPN,
-                maTuyen: maTuyenVal,
-                maNhanVien: o.salesCode || '',
-                tenNhanVien: o.salesName || '',
-                maVTHHCo: finalMaVTHHCo,
-                tenHangHoa: finalTenHangHoa,
-                donViTinh: item.dvt || 'hộp',
-                soLuong: itemQty,
-                donGia: unitPrice,            
-                thanhTien: thanhTienNum,      
-                ghiChu: item.note || '',
-                gpsLech: gpsLechVal // Đã đồng bộ tên biến chuẩn xác tại đây
-              });
+          flatExcelRows.push({
+            soCtu: o.soCtu || 1,
+            ngayCtu: o.ngayCtu || '2026-09-01',
+            ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
+            maDTPNNo: inferredMaDTPN,
+            maTuyen: maTuyenVal,
+            maNhanVien: o.salesCode || '',
+            tenNhanVien: o.salesName || '',
+            maVTHHCo: finalMaVTHHCo,
+            tenHangHoa: finalTenHangHoa,
+            donViTinh: item.dvt || 'hộp',
+            soLuong: itemQty,
+            donGia: unitPrice,           // <-- Bổ sung Đơn Giá để xuất Excel
+            thanhTien: thanhTienNum,     // <-- Bỏ format dấu chấm, giữ nguyên dạng số nguyên (raw)
+            ghiChu: item.note || '',
+            khoangCachKm: dist 
+          });
             }
           });
 
@@ -5609,7 +5579,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
             <thead>
               <tr>
                 <th>So CTu</th>
-                <th>Ngay CTu__</th>
+                <th>Ngay CTu</th>
                 <th>Ma DTPNNo</th>
                 <th>SoHoaDon</th>
                 <th>Ma DTPNCo</th>
@@ -5621,7 +5591,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                 <th>Don Gia</th>
                 <th>VND Thanh Tien</th>
                 <th>Ghi Chu</th>
-                <th>GPS Lech</th>
+                <th>GPS CTy</th>
               </tr>
             </thead>
             <tbody>
@@ -5640,7 +5610,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                   <td>${r.donGia}</td>
                   <td>${r.thanhTien}</td>
                   <td>${r.ghiChu}</td>
-                  <td>${r.gpsLech}</td>
+                  <td>${r.khoangCachKm === Infinity ? '0' : r.khoangCachKm.toFixed(2)}</td>
                 </tr>
               `).join('')}
         </tbody>
@@ -5902,8 +5872,6 @@ else if (tab === 'ctkm') {
             }
             alert("✅ Đã cập nhật thành công!");
         } catch (e) {
-              console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
             alert("Lỗi tải lại CTKM: " + e.message);
         }
     };
@@ -8630,8 +8598,6 @@ window.deleteAllKpiForCurrentMonth = async function() {
         alert(`✅ Đã xóa toàn bộ ${count} bản ghi KPI trong tháng ${currentMonth} thành công!`);
         calculateAndRenderTargets();
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi khi xóa KPI: " + e.message);
     }
 };
@@ -8861,8 +8827,6 @@ const targetDocId = `tgt_${safeCode}_${window._chiTieuTargetMonth}`;
             calculateAndRenderTargets(); 
         }
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi: " + e.message);
         if (btn) { btn.innerHTML = 'LƯU CHỈ TIÊU'; btn.disabled = false; }
     }
@@ -8948,8 +8912,6 @@ const targetDocId = `tgt_${safeCode}_${window._chiTieuTargetMonth}`;
             calculateAndRenderTargets(); 
         }
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi: " + e.message);
         if (btn) { btn.innerHTML = 'LƯU CHỈ TIÊU'; btn.disabled = false; }
     }
@@ -10086,8 +10048,6 @@ const destDocId = `tgt_${safeCode}_${destMonth}`;
         calculateAndRenderTargets();
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-bolt"></i> XÁC NHẬN NHÂN BẢN'; }
         alert("Lỗi nhân bản hàng loạt: " + e.message);
     }
@@ -10319,8 +10279,6 @@ const targetDocId = `tgt_${safeCode}_${rawMonth}`;
         playSystemSound('success');
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi xuất Excel: " + e.message);
     } finally {
         if (btn) {
@@ -11682,8 +11640,6 @@ window.executeTransferKpi = async function(fromUid, fromSalesCode) {
         calculateAndRenderTargets();
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi khi chuyển giao: " + e.message);
     }
 };
@@ -11744,8 +11700,6 @@ window.saveRouteAssignment = async function(uid) {
         if (typeof playSystemSound === 'function') playSystemSound('success');
         alert("✅ Đã lưu cấu hình Phân Tuyến thành công lên máy chủ!");
     } catch (e) { 
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi phân tuyến: " + e.message); 
     }
 };
@@ -11778,8 +11732,6 @@ window.clearAllRouteAssignments = async function(uid) {
         if (activePane) renderChiTieuTab(activePane);
 
     } catch (e) {
-          console.warn("Đã bỏ qua một lỗi ngầm: ", e);
-
         alert("Lỗi khi thu hồi tuyến: " + e.message);
     }
 };
