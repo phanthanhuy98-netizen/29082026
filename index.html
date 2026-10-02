@@ -3137,16 +3137,22 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
     filterSoGocCards();
   };
 
- window.reloadSoGocDataManually = async function() {
+window.reloadSoGocDataManually = async function() {
     try {
       // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
       const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
       if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-      // Tải dữ liệu mới từ Firebase
-     const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100)));
+      // --- BẢN VÁ TỐI ƯU READS SỔ GỐC (KHI BẤM LÀM MỚI) ---
+      let qOrders;
+      if (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'accountant') {
+          qOrders = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100));
+      } else {
+          qOrders = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), orderBy("soCtu", "desc"), limit(100));
+      }
+
+      const snap = await getDocs(qOrders);
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
         hasMoreOrders = snap.docs.length >= 100;
@@ -3185,8 +3191,15 @@ window.loadMoreSoGoc = async function() {
     }
 
     try {
-        let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
-        const snap = await getDocs(q);
+        // --- BẢN VÁ TỐI ƯU READS SỔ GỐC (KHI TẢI THÊM) ---
+        let qOrders;
+        if (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'accountant') {
+            qOrders = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
+        } else {
+            qOrders = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
+        }
+        
+        const snap = await getDocs(qOrders);
         
         if (snap.empty) {
             hasMoreOrders = false;
@@ -5027,8 +5040,16 @@ window.filterUsersList = function(val) {
     selectStoreDirectly(storeId);
   };
 
-  function attachListeners() {
-    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100))).then(snap => {
+ function attachListeners() {
+    // --- BẢN VÁ TỐI ƯU READS SỔ GỐC (LÚC MỞ APP) ---
+    let qOrders;
+    if (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'accountant') {
+        qOrders = query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100));
+    } else {
+        qOrders = query(collection(db, "orders"), where("salesCode", "==", currentUser.code), orderBy("soCtu", "desc"), limit(100));
+    }
+
+    getDocs(qOrders).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
@@ -5041,7 +5062,7 @@ window.filterUsersList = function(val) {
         const activePane = document.getElementById(`tabPane_${currentTab}`);
         if (activePane) renderTabContent(currentTab, activePane);
       }
-    }).catch(e => {});
+    }).catch(e => { console.warn("Lỗi tải Sổ gốc: ", e); });
 
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
