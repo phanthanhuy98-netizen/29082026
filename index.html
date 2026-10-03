@@ -10337,141 +10337,118 @@ window.renderMasterKpiStep1 = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return alert("Không tìm thấy container Modal!");
   
-  const salesUsers = (typeof users !== 'undefined' ? users : []).filter(u => u.role === 'sales' && u.active !== false);
-
   let compHtml = window._masterKpiState.companies.map((c, cIdx) => {
     
-    // 1. TẠO HEADER CỐ ĐỊNH CHO MÃ SẢN PHẨM (SKU)
-    let tableHeaderSkus = c.focusSkus.map(sku => `
-        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 12px 8px; border-bottom: 2px solid var(--primary); border-right: 1px solid var(--card-border); min-width: 120px; max-width: 150px; text-align: center; vertical-align: top;">
-            <div style="font-size: 11px; font-weight: 900; background: var(--primary); color: #fff; border-radius: 4px; padding: 2px 6px; display: inline-block; margin-bottom: 4px;">[${sku.skuCode}]</div><br>
-            <div style="font-size: 11.5px; font-weight: 700; color: var(--text-main); white-space: normal; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${sku.skuName}">${sku.skuName}</div>
-            <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(Thùng)</span>
-        </th>
-    `).join('');
-
-    // 2. TẠO HÀNG CHO TỪNG NHÂN VIÊN
-    let tableRows = salesUsers.map((s, index) => {
-        let rowBg = index % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
-
-        let skuInputsTd = c.focusSkus.map(sku => {
-            if (!window._masterKpiState.salesAllocations.initialized) {
-                if(!window._masterKpiState.salesAllocations[s.code]) window._masterKpiState.salesAllocations[s.code] = { companies: {}, skus: {} };
-            }
-            let allocObj = window._masterKpiState.salesAllocations[s.code] || { skus: {} };
-            let currentVal = allocObj.skus ? (allocObj.skus[sku.skuCode] || 0) : 0;
-
+    // Tạo bảng HTML tĩnh ban đầu (Giống hệt hàm renderMkpiSkuList ở trên)
+    let initialSkuHtml = '';
+    if (c.focusSkus.length === 0) {
+        initialSkuHtml = `
+            <div style="text-align:center; padding:20px; background:var(--card-bg); border-radius:10px; border:1px dashed var(--card-border); color:var(--text-muted);">
+                <i class="fa-solid fa-magnifying-glass-plus" style="margin-bottom:8px; font-size:24px; opacity:0.5;"></i><br>
+                <span style="font-size:13px; font-weight:700;">Chưa có sản phẩm nào. Tìm và thêm ở ô bên dưới.</span>
+            </div>
+        `;
+    } else {
+        let tableRows = c.focusSkus.map((sku, sIdx) => {
+            let rowBg = sIdx % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
             return `
-                <td style="padding: 6px 8px; border-bottom: 1px solid var(--card-border); border-right: 1px dashed var(--card-border); background: ${rowBg}; text-align: center; z-index: 1;">
-                    <input type="text" inputmode="numeric" 
-                           value="${currentVal > 0 ? currentVal.toLocaleString('vi-VN') : ''}" 
-                           oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this)" 
-                           placeholder="0"
-                           style="width: 100%; min-width: 70px; padding: 10px 6px; text-align: center; border: 1px solid var(--card-border); border-radius: 8px; font-weight: 900; font-size: 14px; color: var(--primary); outline: none; background: #fff; transition: 0.2s;"
-                           onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(37,99,235,0.1)';" onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none';">
-                </td>
+                <tr style="background: ${rowBg}; transition: 0.2s;" onmouseover="this.style.background='rgba(37,99,235,0.05)'" onmouseout="this.style.background='${rowBg}'">
+                    <td style="padding: 8px; border-bottom: 1px solid var(--card-border); text-align: center; width: 50px;">
+                        <button type="button" class="btn btn-red btn-sm" onclick="removeCompSku(${cIdx},${sIdx})" style="padding: 6px 10px; border-radius: 6px;" title="Xóa mã này"><i class="fa-solid fa-xmark"></i></button>
+                    </td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--card-border); font-weight: 900; color: var(--primary); font-size: 13px; white-space: nowrap;">
+                        [${sku.skuCode}]
+                    </td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--card-border); font-weight: 700; color: var(--text-main); font-size: 13px;">
+                        ${sku.skuName}
+                    </td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--card-border); text-align: center; width: 120px;">
+                        <input type="text" inputmode="numeric" id="mkpi_sku_inp_${cIdx}_${sIdx}"
+                               value="${sku.qty > 0 ? sku.qty.toLocaleString('vi-VN') : ''}" 
+                               oninput="handleMkpiSkuInput(${cIdx},${sIdx}, this)" 
+                               placeholder="0" 
+                               style="width: 100%; font-weight: 900; font-size: 14px; border-radius: 6px; border: 1px solid var(--card-border); padding: 8px; text-align: center; color: var(--primary); outline: none; background: #fff; transition: 0.2s; margin: 0;"
+                               onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(37,99,235,0.1)';" onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none';">
+                    </td>
+                </tr>
             `;
         }).join('');
 
-        let allocObj = window._masterKpiState.salesAllocations[s.code] || { companies: {} };
-        let compRevVal = allocObj.companies ? (allocObj.companies[c.compCode] || 0) : 0;
-
-        return `
-            <tr>
-                <!-- Cột Tên NV Cố định bên trái khi cuộn ngang -->
-                <td style="position: -webkit-sticky; position: sticky; left: 0; z-index: 10; background: ${rowBg}; padding: 10px; border-bottom: 1px solid var(--card-border); border-right: 2px solid var(--card-border); box-shadow: 2px 0 5px rgba(0,0,0,0.03);">
-                    <div style="font-weight: 900; color: var(--text-main); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${s.name}">${s.name}</div>
-                    <div style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Mã: <span style="color:var(--primary);">${s.code}</span></div>
-                </td>
-                
-                <td style="padding: 6px 10px; border-bottom: 1px solid var(--card-border); border-right: 2px solid var(--card-border); background: ${rowBg}; z-index: 1;">
-                    <input type="text" 
-                           value="${compRevVal > 0 ? compRevVal.toLocaleString('vi-VN') : ''}" 
-                           oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this)" 
-                           placeholder="Nhập VNĐ..."
-                           style="width: 100%; min-width: 110px; padding: 10px 8px; text-align: right; font-weight: 900; color: var(--rose); border: 1px solid var(--card-border); border-radius: 8px; font-size: 14px; outline: none; background: #fff; transition: 0.2s;"
-                           onfocus="this.style.borderColor='var(--rose)'; this.style.boxShadow='0 0 0 3px rgba(225,29,72,0.1)';" onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='none';">
-                </td>
-                ${skuInputsTd}
-            </tr>
+       initialSkuHtml = `
+            <div style="border: 1px solid var(--card-border); border-radius: 10px; overflow: hidden; max-height: 300px; overflow-y: auto; background: var(--card-bg);">
+                <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
+                    <thead>
+                        <tr>
+                            <!-- FIX LỖI ĐỀ NỀN TƯƠNG TỰ Ở LẦN RENDER ĐẦU TIÊN -->
+                            <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--text-muted);"><i class="fa-solid fa-trash"></i></th>
+                            <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Mã SKU</th>
+                            <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Tên Sản Phẩm</th>
+                            <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">SL (Thùng)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            </div>
         `;
-    }).join('');
-
-    let employeeTableHtml = c.focusSkus.length === 0 ? `
-        <div style="text-align:center; padding:20px; background:var(--card-bg); border-radius:10px; border:1px dashed var(--card-border); color:var(--text-muted);">
-            <i class="fa-solid fa-magnifying-glass-plus" style="margin-bottom:8px; font-size:24px; opacity:0.5;"></i><br>
-            <span style="font-size:13px; font-weight:700;">Chưa có sản phẩm trọng tâm nào. Hãy tìm và thêm mã ở bên dưới.</span>
-        </div>
-    ` : `
-        <div style="overflow-x: auto; max-height: 450px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 12px; background: var(--card-bg); position: relative;">
-            <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
-                <thead style="position: -webkit-sticky; position: sticky; top: 0; z-index: 60;">
-                    <tr>
-                        <!-- HEADER CỐ ĐỊNH CẢ TRÊN LẪN TRÁI (Z-index: 70 cao nhất) -->
-                        <th style="position: -webkit-sticky; position: sticky; left: 0; top: 0; z-index: 70; background: var(--card-bg); padding: 12px 10px; border-bottom: 2px solid var(--rose); border-right: 2px solid var(--card-border); box-shadow: 2px 2px 5px rgba(0,0,0,0.05); min-width: 140px; color: var(--text-main); font-size: 12px; font-weight: 900; text-transform: uppercase; vertical-align: bottom;">
-                            <i class="fa-solid fa-user-tie" style="color:var(--primary);"></i> Nhân Viên
-                        </th>
-                        <!-- HEADER CỐ ĐỊNH TRÊN CÙNG -->
-                        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 12px 10px; border-bottom: 2px solid var(--rose); border-right: 2px solid var(--card-border); min-width: 130px; text-align: right; vertical-align: bottom;">
-                            <div style="color: var(--rose); font-size: 12px; font-weight: 900; text-transform: uppercase;">
-                                <i class="fa-solid fa-money-bill-wave"></i> Chỉ Tiêu VNĐ
-                            </div>
-                        </th>
-                        ${tableHeaderSkus}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${tableRows}
-                </tbody>
-            </table>
-        </div>
-    `;
+    }
 
     return `
-      <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left: 6px solid var(--primary); border-radius:16px; padding:20px; margin-bottom:18px; box-shadow:0 6px 20px rgba(0,0,0,0.06);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <div style="font-weight:900; color:var(--text-main); font-size:16px; text-transform:uppercase; display:flex; align-items:center; gap:10px;">
-            <div style="width:32px; height:32px; background:rgba(37,99,235,0.1); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--primary);">
-                <i class="fa-solid fa-building"></i>
-            </div>
-            [${c.compCode}] ${c.compName}
-          </div>
-          <button type="button" class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})" title="Xóa công ty này" style="padding:8px 12px; border-radius:8px;"><i class="fa-solid fa-trash"></i></button>
+  <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left: 6px solid var(--primary); border-radius:16px; padding:20px; margin-bottom:18px; box-shadow:0 6px 20px rgba(0,0,0,0.06); transition: all 0.2s;">
+    
+    <!-- Tiêu đề CTY -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+      <div style="font-weight:900; color:var(--text-main); font-size:16px; text-transform:uppercase; display:flex; align-items:center; gap:10px;">
+        <div style="width:32px; height:32px; background:rgba(37,99,235,0.1); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--primary);">
+            <i class="fa-solid fa-building"></i>
         </div>
-        
-        <div style="margin-bottom:16px;">
-          <label style="font-size:13px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:6px;">Ngân sách tổng giao cho công ty này (VNĐ):</label>
-          <div style="position:relative;">
-            <input type="text" id="mkpi_comp_${cIdx}" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" 
-                   oninput="handleMkpiCompInput(${cIdx}, this)" 
-                   placeholder="VD: 50.000.000"
-                   style="width:100%; padding:14px 14px 14px 44px; border-radius:12px; border:2px solid var(--card-border); font-weight:900; font-size:18px; color:var(--rose); outline:none; background:var(--bg-dark);">
-              <i class="fa-solid fa-money-bill-wave" style="position:absolute; left:16px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:18px;"></i>
-          </div>
-        </div>
-
-        <div style="margin-bottom:16px;">
-           <div style="font-size:14px; font-weight:900; color:var(--primary); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-               <span><i class="fa-solid fa-table-cells"></i> Rải Số Cho Từng Nhân Viên:</span>
-           </div>
-           ${employeeTableHtml}
-        </div>
-        
-        <div style="background:var(--bg-dark); padding:16px; border-radius:14px; border:1px solid var(--card-border);">
-           <div style="font-size:13px; font-weight:900; color:var(--text-muted); margin-bottom:8px;"><i class="fa-solid fa-plus-circle" style="color:var(--primary);"></i> Thêm Mã Sản Phẩm Trọng Tâm Mới:</div>
-           
-           <div style="position:relative;">
-             <input type="text" id="mkpi_search_${cIdx}" placeholder="Gõ mã hoặc tên SP để thêm vào bảng..." 
-                    oninput="searchMkpiSku(${cIdx}, this.value)" 
-                    autocomplete="off" 
-                    style="width:100%; padding:12px 14px 12px 40px; font-size:13.5px; font-weight:800; border-radius:10px; border:1px solid var(--primary); outline:none; margin:0; background:var(--card-bg);">
-             <i class="fa-solid fa-magnifying-glass" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--primary); font-size:15px;"></i>
-             
-             <div id="mkpi_res_${cIdx}" class="hidden" style="position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:100; background:var(--card-bg); max-height:200px; overflow-y:auto; border:1px solid var(--primary); border-radius:10px; box-shadow:0 10px 30px rgba(37,99,235,0.15);"></div>
-           </div>
-        </div>
+        [${c.compCode}] ${c.compName}
       </div>
-    `;
+      <button type="button" class="btn btn-red btn-sm" onclick="removeKpiCompany(${cIdx})" title="Xóa công ty này khỏi danh sách" style="padding:8px 12px; border-radius:8px;"><i class="fa-solid fa-trash"></i></button>
+    </div>
+    
+    <!-- Nhập Ngân Sách -->
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px; font-weight:900; color:var(--text-muted); display:block; margin-bottom:8px;">Ngân sách giao cho công ty này (VNĐ):</label>
+      <div style="position:relative;">
+        <input type="text" id="mkpi_comp_${cIdx}" value="${c.target > 0 ? c.target.toLocaleString('vi-VN') : ''}" 
+               oninput="handleMkpiCompInput(${cIdx}, this)" 
+               placeholder="VD: 50.000.000"
+               style="width:100%; padding:14px 14px 14px 44px; border-radius:12px; border:2px solid var(--card-border); font-weight:900; font-size:18px; color:var(--rose); outline:none; background:var(--bg-dark); transition:0.2s;"
+               onfocus="this.style.borderColor='var(--rose)'" onblur="this.style.borderColor='var(--card-border)'">
+          <i class="fa-solid fa-money-bill-wave" style="position:absolute; left:16px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:18px;"></i>
+      </div>
+    </div>
+    
+    <!-- Quản lý SKU Trọng Tâm -->
+    <div style="background:var(--bg-dark); padding:16px; border-radius:14px; border:1px solid var(--card-border);">
+       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+           <div style="font-size:14px; font-weight:900; color:var(--primary); display:flex; align-items:center; gap:8px;">
+               <i class="fa-solid fa-box-open"></i> Giao Chỉ Tiêu Sản Phẩm Cụ Thể:
+           </div>
+           <span id="mkpi_sku_count_${cIdx}" style="background:var(--primary); color:#fff; font-size:11px; font-weight:800; padding:4px 10px; border-radius:8px; box-shadow:0 2px 4px rgba(37,99,235,0.2);">${c.focusSkus.length} mã đã chọn</span>
+       </div>
+       
+       <!-- Vùng hiển thị SKU đã chọn (Dạng Table) -->
+       <div id="mkpi_sku_list_${cIdx}" style="margin-bottom:16px;">
+         ${initialSkuHtml}
+       </div>
+
+       <!-- Ô tìm kiếm SKU -->
+       <div style="position:relative;">
+         <input type="text" id="mkpi_search_${cIdx}" placeholder="Gõ mã hoặc tên SP để phân bổ chỉ tiêu..." 
+                oninput="searchMkpiSku(${cIdx}, this.value)" 
+                autocomplete="off" 
+                style="width:100%; padding:14px 14px 14px 44px; font-size:14px; font-weight:800; border-radius:12px; border:1px solid var(--primary); outline:none; margin:0; background:var(--card-bg); box-shadow:inset 0 2px 5px rgba(0,0,0,0.02);">
+         <i class="fa-solid fa-magnifying-glass" style="position:absolute; left:16px; top:50%; transform:translateY(-50%); color:var(--primary); font-size:16px;"></i>
+         
+         <!-- Kết quả tìm kiếm trượt xuống -->
+         <div id="mkpi_res_${cIdx}" class="hidden" style="position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:100; background:var(--card-bg); max-height:220px; overflow-y:auto; border:1px solid var(--primary); border-radius:12px; box-shadow:0 10px 30px rgba(37,99,235,0.15);"></div>
+       </div>
+    </div>
+  </div>
+`;
   }).join('');
 
   modalContainer.innerHTML = `
@@ -10479,18 +10456,22 @@ window.renderMasterKpiStep1 = function() {
       <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
         
         <div style="padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
-          <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-bullseye"></i> THIẾT LẬP CHỈ TIÊU (MASTER WIZARD)</h3>
+          <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-bullseye"></i> BƯỚC 1: KHAI BÁO TỔNG CHỈ TIÊU</h3>
           <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="padding:8px 16px; border-radius:8px; font-weight:800;">Đóng</button>
         </div>
 
         <div style="flex:1; overflow-y:auto; padding:20px;">
+         <!-- KHỐI 1: TỔNG DOANH SỐ -->
            <div style="background:var(--card-bg); padding:20px; border-radius:16px; border:2px solid var(--amber); margin-bottom:20px; box-shadow:0 8px 20px rgba(245,158,11,0.05);">
               <label style="font-size:14px; font-weight:900; color:var(--amber); display:block; margin-bottom:8px;">1. TỔNG DOANH SỐ CẦN GIAO THÁNG NÀY (VNĐ):</label>
               <input type="text" id="mkpi_total" value="${window._masterKpiState.totalTarget > 0 ? window._masterKpiState.totalTarget.toLocaleString('vi-VN') : ''}" 
                    oninput="handleMkpiTotalInput(this)"
-                     style="width:100%; padding:16px; font-size:24px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:12px; border:1px solid rgba(225,29,72,0.2); margin:0; text-align:center; outline:none;">
+                     placeholder="" 
+                     style="width:100%; padding:16px; font-size:24px; font-weight:900; color:var(--rose); background:rgba(225,29,72,0.05); border-radius:12px; border:1px solid rgba(225,29,72,0.2); margin:0; text-align:center; outline:none; transition:0.2s;"
+                     onfocus="this.style.boxShadow='0 0 0 4px rgba(225,29,72,0.1)'" onblur="this.style.boxShadow='none'">
            </div>
            
+           <!-- KHỐI 2: CHỌN NHÂN VIÊN NHẬN SỐ -->
            <div style="background:var(--card-bg); padding:16px; border-radius:16px; border:1px solid var(--card-border); margin-bottom:20px; box-shadow:0 4px 15px rgba(0,0,0,0.02);">
                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; flex-direction:column; gap:12px;">
                    <label style="font-size:14px; font-weight:900; color:var(--primary); margin:0;">
@@ -10506,23 +10487,24 @@ window.renderMasterKpiStep1 = function() {
                    </div>
                </div>
 
-               <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:10px; padding: 4px 0;">
+               <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:10px; max-height: 280px; overflow-y: auto; padding: 4px 0; overscroll-behavior: contain;">
                    ${(typeof users !== 'undefined' ? users : []).filter(u => u.role === 'sales' && u.active !== false).map(u => {
                        const isChecked = window._masterKpiState.selectedSalesCodes.includes(u.code);
                        return `
                            <label id="lbl_sales_${u.code}" style="display:flex; align-items:center; gap:8px; padding:12px 14px; background:${isChecked ? 'rgba(16,185,129,0.08)' : 'var(--bg-dark)'}; border:1px solid ${isChecked ? 'var(--emerald)' : 'var(--card-border)'}; border-radius:10px; cursor:pointer; font-size:13.5px; font-weight:800; color:${isChecked ? 'var(--emerald)' : 'var(--text-main)'}; transition:all 0.2s ease; user-select:none; margin:0;">
                                <input type="checkbox" id="cb_sales_${u.code}" value="${u.code}" ${isChecked ? 'checked' : ''} onchange="toggleKpiSales('${u.code}', this.checked)" style="display:none;">
                                <i id="icon_sales_${u.code}" class="${isChecked ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle'}" style="font-size:18px; color:${isChecked ? 'var(--emerald)' : 'var(--text-muted)'}; transition:0.2s; flex-shrink:0;"></i>
-                               <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="[${u.code}]${u.name}">[${u.code}]${u.name}</span>
+                               <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">[${u.code}]${u.name.split(' ').pop()}</span>
                            </label>
                        `;
                    }).join('')}
                </div>
            </div>
            
+           <!-- KHỐI 3: CHỌN CÔNG TY -->
            <div style="margin-bottom:14px;">
-               <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">3. CHỌN CÔNG TY VÀ PHÂN BỔ CHỈ TIÊU:</div>
-               <button type="button" class="btn btn-blue" style="width:100%; justify-content:center; padding:14px; font-weight:900; font-size:14px; border-radius:12px; box-shadow:0 4px 15px rgba(37,99,235,0.2); margin-bottom:16px;" onclick="openCompanySelectorModal()">
+               <div style="font-size:15px; font-weight:900; color:var(--text-main); margin-bottom:8px;">3. CHỌN CÔNG TY ĐỂ CHIA SỐ:</div>
+               <button type="button" class="btn btn-blue" style="width:100%; justify-content:center; padding:14px; font-weight:900; font-size:14px; border-radius:12px; box-shadow:0 4px 15px rgba(37,99,235,0.2);" onclick="openCompanySelectorModal()">
                    <i class="fa-solid fa-list-check"></i> MỞ DANH SÁCH CHỌN CÔNG TY (${window._masterKpiState.companies.length} đã chọn)
                </button>
            </div>
@@ -10533,13 +10515,14 @@ window.renderMasterKpiStep1 = function() {
         </div>
 
         <div style="padding:16px 20px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow:0 -4px 15px rgba(0,0,0,0.03);">
-           <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; box-shadow:0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndSaveMasterKpiDirectly()">
-              <i class="fa-solid fa-floppy-disk"></i> LƯU VÀ HOÀN TẤT GIAO CHỈ TIÊU
+           <button type="button" class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:12px; box-shadow:0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndGoToStep2()">
+              TIẾP TỤC: RẢI SỐ CHO NHÂN VIÊN <i class="fa-solid fa-arrow-right"></i>
            </button>
         </div>
       </div>
     </div>
   `;
+  updateMkpiDiffUI(); 
 };
 // ================= HÀM XỬ LÝ TÌM KIẾM CÔNG TY THÔNG MINH =================
 window.searchMkpiComp = function(keyword) {
@@ -10768,6 +10751,7 @@ window.renderMkpiSkuList = function(cIdx) {
         return;
     }
 
+    // TẠO BẢNG SẢN PHẨM Ở BƯỚC 1
     let tableRows = c.focusSkus.map((sku, sIdx) => {
         let rowBg = sIdx % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
         return `
@@ -10794,14 +10778,15 @@ window.renderMkpiSkuList = function(cIdx) {
     }).join('');
 
     container.innerHTML = `
-        <div style="border: 1px solid var(--card-border); border-radius: 10px; overflow: hidden; max-height: 250px; overflow-y: auto; background: var(--card-bg);">
+        <div style="border: 1px solid var(--card-border); border-radius: 10px; overflow: hidden; max-height: 300px; overflow-y: auto; background: var(--card-bg);">
             <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
-                <thead style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50;">
+                <thead>
                     <tr>
-                        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--text-muted);"><i class="fa-solid fa-trash"></i></th>
-                        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Mã SKU</th>
-                        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Tên Sản Phẩm</th>
-                        <th style="position: -webkit-sticky; position: sticky; top: 0; z-index: 50; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">SL (Thùng)</th>
+                        <!-- FIX LỖI ĐỀ NỀN: Ép cứng z-index: 20 và background: var(--card-bg) cho TẤT CẢ các <th> -->
+                        <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--text-muted);"><i class="fa-solid fa-trash"></i></th>
+                        <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Mã SKU</th>
+                        <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">Tên Sản Phẩm</th>
+                        <th style="position: sticky; top: 0; z-index: 20; background: var(--card-bg); padding: 10px 8px; border-bottom: 2px solid var(--primary); text-align: center; color: var(--primary); font-size: 12px; font-weight: 900; text-transform: uppercase;">SL (Thùng)</th>
                     </tr>
                 </thead>
                 <tbody>
