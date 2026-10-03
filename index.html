@@ -11025,180 +11025,153 @@ window.validateAndGoToStep2 = function() {
   renderMasterKpiStep2(salesUsers);
 };
 // ================= BƯỚC 2: RẢI SỐ CHO SALES (BẢNG EXCEL - FIX LỖI ĐÈ NỀN & CUỘN MƯỢT) =================
+// ================= BƯỚC 2: RẢI SỐ CHO SALES (BẢNG EXCEL MA TRẬN - TỐI ƯU UX/UI) =================
 window.renderMasterKpiStep2 = function(salesUsers) {
     const modalContainer = document.getElementById('dynamicModalContainer');
-    
-    let htmlContent = window._masterKpiState.companies.map(c => {
-        
-        // 1. TẠO CÁC CỘT HEADER CHO MÃ SẢN PHẨM (SKU)
-        let tableHeaderSkus = c.focusSkus.map(sku => `
-            <th style="position: sticky; top: 0; z-index: 40; background: var(--box-bg-custom, #FFFFFF); padding: 12px 8px; border-bottom: 2px solid var(--primary); border-right: 1px solid var(--card-border); min-width: 120px; max-width: 150px; text-align: center; vertical-align: middle;">
-                <div style="font-size: 11px; font-weight: 900; background: var(--prod-code-bg); color: var(--prod-code-color); border-radius: 4px; padding: 2px 6px; display: inline-block; margin-bottom: 4px;">[${sku.skuCode}]</div><br>
-                <div style="font-size: 12px; font-weight: 800; color: var(--text-main); white-space: normal; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${sku.skuName}">${sku.skuName}</div>
-                <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; margin-top: 2px;">(Thùng)</div>
+
+    let theadRow1 = '';
+    let theadRow2 = '';
+
+    // 1. DUYỆT QUA CÁC CÔNG TY ĐỂ TẠO CỘT HEADER (Cột Công Ty & Cột Sản Phẩm)
+    window._masterKpiState.companies.forEach(c => {
+        // Colspan = 1 Cột Doanh số + Số lượng cột SKU
+        let colspan = 1 + c.focusSkus.length;
+
+        // DÒNG HEADER 1: Tên Công ty & Trạng thái khớp số
+        theadRow1 += `
+            <th colspan="${colspan}" style="position: sticky; top: 0; z-index: 40; background: #F8FAFC; padding: 12px; border-bottom: 1px solid var(--card-border); border-right: 2px solid var(--primary); text-align: center; border-top: 4px solid var(--rose);">
+                <div style="font-size: 15px; font-weight: 900; color: var(--rose); text-transform: uppercase; margin-bottom: 8px;">[${c.compCode}] ${c.compName}</div>
+                <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
+                    <span style="font-size: 12px; color: var(--text-muted); font-weight: 800;">Ngân sách: <b style="color:var(--rose);">${(c.target/1000).toLocaleString('vi-VN')}k</b></span>
+                    <span id="s2_diff_comp_header_${c.compCode}" style="font-size: 12px; padding: 4px 10px; border-radius: 6px; font-weight: 900; border: 1px solid transparent;"></span>
+                </div>
             </th>
-        `).join('');
-
-        // 2. TẠO TỪNG HÀNG (ROW) CHO TỪNG NHÂN VIÊN
-        let tableRows = salesUsers.map((s, index) => {
-            let rowBg = index % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
-
-            let skuInputsTd = c.focusSkus.map(sku => {
-                let currentVal = window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0;
-                return `
-                    <td style="padding: 6px; border-bottom: 1px solid var(--card-border); border-right: 1px dashed var(--card-border); background: ${rowBg}; text-align: center; z-index: 1;">
-                        <input type="text" inputmode="numeric" 
-                               value="${currentVal > 0 ? currentVal.toLocaleString('vi-VN') : ''}" 
-                               oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this)" 
-                               placeholder="0"
-                               style="width: 100%; min-width: 70px; padding: 10px 4px; text-align: center; border: 1px solid var(--card-border); border-radius: 6px; font-weight: 900; font-size: 14px; color: var(--primary); outline: none; background: #fff; transition: border-color 0.2s;"
-                               onfocus="this.style.borderColor='var(--primary)';" onblur="this.style.borderColor='var(--card-border)';">
-                    </td>
-                `;
-            }).join('');
-
-            let compRevVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
-
-            return `
-                <tr>
-                    <!-- Cột Tên NV (Cố định bên trái - Sticky Left) -->
-                    <td style="position: sticky; left: 0; z-index: 30; background: var(--box-bg-custom, #FFFFFF); padding: 10px 12px; border-bottom: 1px solid var(--card-border); border-right: 3px solid var(--card-border);">
-                        <div style="font-weight: 900; color: var(--text-main); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px;" title="${s.name}">${s.name}</div>
-                        <div style="font-size: 11px; color: var(--text-muted); font-weight: 800; margin-top: 2px;">Mã: <span style="color:var(--primary);">${s.code}</span></div>
-                    </td>
-                    
-                    <!-- Cột Nhập Doanh Số VNĐ -->
-                    <td style="padding: 6px 8px; border-bottom: 1px solid var(--card-border); border-right: 2px solid var(--card-border); background: ${rowBg}; z-index: 1;">
-                        <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
-                               value="${compRevVal > 0 ? compRevVal.toLocaleString('vi-VN') : ''}" 
-                               oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this)" 
-                               placeholder="VNĐ..."
-                               style="width: 100%; min-width: 110px; padding: 10px 6px; text-align: right; font-weight: 900; color: var(--rose); border: 1px solid var(--card-border); border-radius: 6px; font-size: 14px; outline: none; background: #fff; transition: border-color 0.2s;"
-                               onfocus="this.style.borderColor='var(--rose)';" onblur="this.style.borderColor='var(--card-border)';">
-                    </td>
-
-                    <!-- Các cột Nhập Sản Lượng -->
-                    ${skuInputsTd}
-                </tr>
-            `;
-        }).join('');
-
-        // 3. RÁP BẢNG BÊN TRONG CÔNG TY
-        // FIX: flex: 1 giúp bảng bung hết chiều cao còn lại của khối công ty
-        let employeeTableHtml = `
-            <div style="flex: 1; overflow: auto; border: 1px solid var(--card-border); border-radius: 8px; background: var(--box-bg-custom, #FFFFFF); position: relative; transform: translateZ(0);">
-                <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
-                    <thead>
-                        <tr>
-                            <!-- Góc trên cùng bên trái (Z-index 50) -->
-                            <th style="position: sticky; left: 0; top: 0; z-index: 50; background: var(--box-bg-custom, #FFFFFF); padding: 12px 10px; border-bottom: 2px solid var(--primary); border-right: 3px solid var(--card-border); min-width: 140px; color: var(--text-main); font-size: 12px; font-weight: 900; text-transform: uppercase; vertical-align: middle;">
-                                <i class="fa-solid fa-user-tie" style="color:var(--primary); margin-right: 4px;"></i> Nhân Viên
-                            </th>
-                            
-                            <!-- Tiêu đề Doanh số (Z-index 40) -->
-                            <th style="position: sticky; top: 0; z-index: 40; background: var(--box-bg-custom, #FFFFFF); padding: 12px 8px; border-bottom: 2px solid var(--primary); border-right: 2px solid var(--card-border); min-width: 130px; text-align: right; vertical-align: middle;">
-                                <div style="color: var(--rose); font-size: 12px; font-weight: 900; text-transform: uppercase;">
-                                    <i class="fa-solid fa-money-bill-wave"></i> Chỉ Tiêu VNĐ
-                                </div>
-                            </th>
-                            
-                            <!-- Header Các SKU -->
-                            ${tableHeaderSkus}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows}
-                    </tbody>
-                </table>
-            </div>
-            <div style="margin-top: 8px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); font-weight: 700; text-align: right;">
-                * Cuộn bảng sang phải hoặc xuống dưới để xem toàn bộ thông tin 👉
-            </div>
         `;
 
-        const accId = `s2_acc_comp_${c.compCode}`;
+        // DÒNG HEADER 2: Cột Nhập Doanh số (VNĐ)
+        // Chiều cao dòng 1 xấp xỉ 74px, set top: 74px để dòng 2 dính ngay dưới dòng 1
+        theadRow2 += `
+            <th style="position: sticky; top: 74px; z-index: 39; background: var(--box-bg-custom, #FFFFFF); padding: 12px 10px; border-bottom: 2px solid var(--primary); border-right: 1px dashed var(--card-border); min-width: 140px; text-align: center; vertical-align: middle;">
+                <div style="color: var(--rose); font-size: 13px; font-weight: 900; text-transform: uppercase;"><i class="fa-solid fa-money-bill-wave"></i> Chỉ Tiêu VNĐ</div>
+            </th>
+        `;
 
-        // BỌC CÔNG TY BẰNG FLEX-ITEM ĐỂ TỰ ĐỘNG GIÃN NỞ
-        return `
-         <div id="wrapper_${c.compCode}" style="display: flex; flex-direction: column; flex-shrink: 0; background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; border-left: 6px solid var(--rose); transition: flex 0.3s ease;">
-           
-           <!-- Thanh Tiêu đề Công ty -->
-           <div onclick="
-                 toggleOrderAccordion('${accId}'); 
-                 const wrap = document.getElementById('wrapper_${c.compCode}');
-                 if(wrap.style.flex === '1 1 0%') {
-                     wrap.style.flex = 'none';
-                     wrap.style.minHeight = 'auto';
-                 } else {
-                     wrap.style.flex = '1 1 0%';
-                     wrap.style.minHeight = '350px';
-                 }
-               " 
-               style="padding: 14px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: rgba(225,29,72,0.04); flex-shrink: 0;">
-             <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width:0;">
-                 <div style="width: 38px; height: 38px; background: rgba(225,29,72,0.1); color: var(--rose); border-radius: 8px; display: flex; justify-content: center; align-items: center; font-size: 16px; flex-shrink: 0;">
-                     <i class="fa-solid fa-building"></i>
-                 </div>
-                 <div style="flex: 1; min-width:0;">
-                     <div style="font-size: 15px; font-weight: 900; color: var(--rose); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">[${c.compCode}] ${c.compName}</div>
-                     <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; margin-top: 4px;">
-                         Ngân sách: <b style="color:var(--rose);">${(c.target/1000).toLocaleString('vi-VN')}k</b> 
-                         <span style="margin: 0 6px;">|</span> 
-                         <b style="color:var(--primary);">${c.focusSkus.length} Mã SKU</b>
-                     </div>
-                 </div>
-             </div>
-             <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
-                 <span id="s2_diff_comp_header_${c.compCode}" style="font-size: 11px; padding: 4px 10px; border-radius: 6px; font-weight: 900; border: 1px solid transparent;"></span>
-                 <div style="width:28px; height:28px; border-radius:50%; background:rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:center;">
-                     <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: var(--rose); transition: 0.2s; font-size: 12px;"></i>
-                 </div>
-             </div>
-           </div>
+        // DÒNG HEADER 2: Các cột Nhập Sản lượng (Thùng)
+        c.focusSkus.forEach((sku, sIdx) => {
+            let isLastSku = sIdx === c.focusSkus.length - 1;
+            theadRow2 += `
+                <th style="position: sticky; top: 74px; z-index: 39; background: var(--box-bg-custom, #FFFFFF); padding: 10px 8px; border-bottom: 2px solid var(--primary); border-right: ${isLastSku ? '2px solid var(--primary)' : '1px dashed var(--card-border)'}; min-width: 130px; max-width: 170px; text-align: center; vertical-align: bottom;">
+                    <div style="font-size: 12px; font-weight: 900; background: var(--prod-code-bg); color: var(--prod-code-color); border-radius: 4px; padding: 3px 8px; display: inline-block; margin-bottom: 6px;">[${sku.skuCode}]</div><br>
+                    <div style="font-size: 12.5px; font-weight: 800; color: var(--text-main); white-space: normal; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${sku.skuName}">${sku.skuName}</div>
+                    <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; margin-top: 4px;">(Thùng)</div>
+                </th>
+            `;
+        });
+    });
 
-           <!-- Nội dung Bảng bên trong -->
-           <div id="${accId}" class="hidden" style="flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--card-border); padding: 12px; background: rgba(0,0,0,0.01);">
-              ${employeeTableHtml}
-           </div>
-         </div>
-      `;
+    // 2. TẠO CÁC DÒNG (ROWS) CHO TỪNG NHÂN VIÊN
+    let tbodyRows = salesUsers.map((s, index) => {
+        let rowBg = index % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
+        
+        // Bắt đầu dòng với Cột Tên NV được ghim cứng bên trái
+        let rowHtml = `<tr style="transition: 0.1s;" onmouseover="this.style.filter='brightness(0.95)'" onmouseout="this.style.filter='brightness(1)'">
+            <td style="position: sticky; left: 0; z-index: 30; background: ${rowBg}; padding: 14px 16px; border-bottom: 1px solid var(--card-border); border-right: 2px solid var(--primary); box-shadow: 3px 0 8px rgba(0,0,0,0.04);">
+                <div style="font-weight: 900; color: var(--text-main); font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;" title="${s.name}">${s.name}</div>
+                <div style="font-size: 12px; color: var(--text-muted); font-weight: 800; margin-top: 4px;">Mã: <span style="color:var(--primary);">${s.code}</span></div>
+            </td>`;
+
+        // Lặp qua từng ô nhập liệu của Công ty
+        window._masterKpiState.companies.forEach(c => {
+            let compRevVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
+            
+            // Ô Nhập Doanh số
+            rowHtml += `
+                <td style="padding: 10px; border-bottom: 1px solid var(--card-border); border-right: 1px dashed var(--card-border); background: ${rowBg};">
+                    <input type="text" id="s2_inp_comp_${s.code}_${c.compCode}"
+                           value="${compRevVal > 0 ? compRevVal.toLocaleString('vi-VN') : ''}"
+                           oninput="handleStep2CompInput('${s.code}', '${c.compCode}', this)"
+                           placeholder="VNĐ..."
+                           style="width: 100%; min-width: 120px; padding: 12px 8px; text-align: right; font-weight: 900; color: var(--rose); border: 1px solid var(--card-border); border-radius: 8px; font-size: 15px; outline: none; background: #fff; transition: 0.2s; box-shadow: inset 0 1px 3px rgba(0,0,0,0.02);"
+                           onfocus="this.style.borderColor='var(--rose)'; this.style.boxShadow='0 0 0 3px rgba(225,29,72,0.1)';" onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='inset 0 1px 3px rgba(0,0,0,0.02)';">
+                </td>
+            `;
+
+            // Ô Nhập Sản lượng SKU
+            c.focusSkus.forEach((sku, sIdx) => {
+                let isLastSku = sIdx === c.focusSkus.length - 1;
+                let currentVal = window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0;
+                rowHtml += `
+                    <td style="padding: 10px; border-bottom: 1px solid var(--card-border); border-right: ${isLastSku ? '2px solid var(--primary)' : '1px dashed var(--card-border)'}; background: ${rowBg}; text-align: center;">
+                        <input type="text" inputmode="numeric"
+                               value="${currentVal > 0 ? currentVal.toLocaleString('vi-VN') : ''}"
+                               oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this)"
+                               placeholder="0"
+                               style="width: 100%; min-width: 90px; padding: 12px 6px; text-align: center; border: 1px solid var(--card-border); border-radius: 8px; font-weight: 900; font-size: 15px; color: var(--primary); outline: none; background: #fff; transition: 0.2s; box-shadow: inset 0 1px 3px rgba(0,0,0,0.02);"
+                               onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(37,99,235,0.1)';" onblur="this.style.borderColor='var(--card-border)'; this.style.boxShadow='inset 0 1px 3px rgba(0,0,0,0.02)';">
+                    </td>
+                `;
+            });
+        });
+        rowHtml += `</tr>`;
+        return rowHtml;
     }).join('');
 
-    // LAYOUT TỔNG THỂ MODAL: KHÓA OVERFLOW, CHIỀU CAO 100VH
+    // 3. RÁP TOÀN BỘ KHUNG GIAO DIỆN MODAL
     modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;">
-      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark); overflow:hidden;">
-        
-        <!-- Header: Cố định -->
-        <div style="flex-shrink:0; padding:14px 16px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
-          <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border); color: var(--text-main); padding: 6px 10px;"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
-          <h3 style="font-size:15px; font-weight:900; color:var(--primary); margin:0;">BƯỚC 2: RẢI SỐ CHO NHÂN VIÊN</h3>
-          <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:6px; padding: 6px 12px;">Đóng</button>
-        </div>
-        
-        <!-- Body: Chứa các khối Công ty -->
-        <div style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding:16px;">
-          
-          <div style="flex-shrink:0; background:rgba(245,158,11,0.08); border:1px dashed var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:8px; margin-bottom:16px; text-align:center; line-height: 1.4;">
-            💡 <b>Hệ thống đã tự động chia đều số liệu.</b><br>Nhập trực tiếp số liệu vào bảng. Nút LƯU sẽ sáng lên khi tất cả nhãn báo <span style="color:var(--emerald);">Khớp 100%</span>.
-          </div>
-          
-          <div style="flex:1; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; padding-bottom:10px;">
-             ${htmlContent}
-          </div>
+        <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark); overflow:hidden;">
+            
+            <!-- Header: Cố định trên cùng -->
+            <div style="flex-shrink:0; padding:16px 20px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; box-shadow: 0 4px 15px rgba(0,0,0,0.03); z-index: 60;">
+                <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border); color: var(--text-main); padding: 10px 16px; border-radius: 8px;"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
+                <h3 style="font-size:18px; font-weight:900; color:var(--primary); margin:0; text-transform: uppercase;"><i class="fa-solid fa-table"></i> BƯỚC 2: MA TRẬN RẢI SỐ CHO NHÂN VIÊN</h3>
+                <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:8px; padding: 10px 20px; font-weight: 900;">Đóng</button>
+            </div>
+            
+            <!-- Body: Chứa Bảng Ma Trận -->
+            <div style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding:24px; background: var(--bg-dark);">
+                
+                <div style="flex-shrink:0; background:rgba(245,158,11,0.08); border:1px dashed var(--amber); color:var(--amber); font-weight:800; font-size:14px; padding:16px; border-radius:12px; margin-bottom:20px; text-align:center; line-height: 1.5; box-shadow: 0 4px 10px rgba(245,158,11,0.05);">
+                    💡 <b>Hệ thống đã tự động chia đều số liệu.</b> Dùng phím <kbd style="background:#fff; padding:3px 8px; border-radius:6px; border:1px solid var(--amber); font-family: monospace; color: var(--text-main);">Tab</kbd> trên bàn phím để di chuyển thần tốc giữa các ô.<br>Nút LƯU sẽ sáng lên khi tất cả tiêu đề công ty trên cùng báo <span style="background: rgba(16,185,129,0.15); color:var(--emerald); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--emerald);">Khớp 100%</span>.
+                </div>
+                
+                <!-- VÙNG BẢNG EXCEL CUỘN 2 CHIỀU -->
+                <div style="flex: 1; overflow: auto; border: 1px solid var(--card-border); border-radius: 12px; background: var(--box-bg-custom, #FFFFFF); box-shadow: 0 8px 30px rgba(0,0,0,0.05); position: relative;">
+                    <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
+                        <thead>
+                            <tr>
+                                <!-- Góc chết: Cố định trái & trên -->
+                                <th rowspan="2" style="position: sticky; left: 0; top: 0; z-index: 50; background: var(--panel-bg); padding: 14px 16px; border-bottom: 2px solid var(--primary); border-right: 2px solid var(--primary); min-width: 200px; color: var(--text-main); font-size: 14px; font-weight: 900; text-transform: uppercase; vertical-align: middle; box-shadow: 3px 2px 8px rgba(0,0,0,0.05);">
+                                    <i class="fa-solid fa-users" style="color:var(--primary); margin-right: 6px;"></i> Nhân Viên Sales
+                                </th>
+                                ${theadRow1}
+                            </tr>
+                            <tr>
+                                ${theadRow2}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tbodyRows}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 12px; flex-shrink: 0; font-size: 13px; color: var(--text-muted); font-weight: 800; text-align: right;">
+                    <i class="fa-solid fa-arrows-up-down-left-right"></i> Cuộn ngang hoặc dọc để xem toàn bộ bảng ma trận chỉ tiêu.
+                </div>
+            </div>
 
+            <!-- Footer: Nút Lưu Cố Định -->
+            <div style="flex-shrink:0; padding:20px 24px; background:var(--panel-bg); border-top:1px solid var(--card-border); box-shadow: 0 -4px 20px rgba(0,0,0,0.04); z-index: 60;">
+               <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:20px; font-weight:900; font-size:17px; letter-spacing: 0.5px; border-radius:12px; transition:0.3s; box-shadow: 0 6px 20px rgba(16,185,129,0.3);" onclick="validateAndSaveMasterKpiToDatabase()">
+                  <i class="fa-solid fa-paper-plane"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU XUỐNG THIẾT BỊ
+               </button>
+            </div>
         </div>
-
-        <!-- Footer: Cố định -->
-        <div style="flex-shrink:0; padding:16px; background:var(--panel-bg); border-top:1px solid var(--card-border);">
-           <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:10px; transition:0.2s;" onclick="validateAndSaveMasterKpiToDatabase()">
-              <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU
-           </button>
-        </div>
-      </div>
     </div>
-  `;
-  updateStep2DiffUI();
+    `;
+    
+    // Cập nhật lại UI thông báo lỗi (khớp số/lệch số) ngay lần chạy đầu
+    updateStep2DiffUI();
 };
 window.handleStep2CompInput = function(salesCode, compCode, el) {
   if (!el) return;
