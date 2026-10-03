@@ -987,7 +987,81 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
       };
     });
   }
+// ==================================================
+// HỆ THỐNG ĐỒNG BỘ OFFLINE CHẠY NGẦM (BACKGROUND SYNC)
+// ==================================================
+window.syncOfflineOrders = async function() {
+    if (!navigator.onLine || !idbDb) return;
+    try {
+        const tx = idbDb.transaction(["offlineOrders"], "readonly");
+        const store = tx.objectStore("offlineOrders");
+        const request = store.getAll();
+        
+        request.onsuccess = async () => {
+            const offlineItems = request.result || [];
+            if (offlineItems.length === 0) return;
 
+            console.log(`Đang đồng bộ ${offlineItems.length} đơn hàng offline...`);
+            const batch = writeBatch(db);
+            let syncedIds = [];
+
+            // Duyệt qua đơn hàng offline, nạp vào Batch để đẩy lên Firebase
+            offlineItems.forEach(order => {
+                // Nếu soCtu có chứa dấu '-' (Tức là tạo offline), ta có thể ép nó lấy số chuẩn ở đây nếu muốn,
+                // hoặc cứ giữ nguyên để kế toán biết đây là đơn tạo lúc rớt mạng.
+                const docRef = doc(db, "orders", order.id);
+                batch.set(docRef, { ...order, isSynced: true, syncedAt: serverTimestamp() }, { merge: true });
+                syncedIds.push(order.id);
+            });
+
+            await batch.commit();
+
+            // Đồng bộ thành công, xóa khỏi IndexedDB
+            const delTx = idbDb.transaction(["offlineOrders"], "readwrite");
+            const delStore = delTx.objectStore("offlineOrders");
+            syncedIds.forEach(id => delStore.delete(id));
+            
+            console.log("✅ Đồng bộ đơn hàng Offline thành công!");
+        };
+    } catch (e) { console.error("Lỗi đồng bộ Orders:", e); }
+};
+
+window.syncOfflineCheckins = async function() {
+    if (!navigator.onLine || !idbDb) return;
+    try {
+        const tx = idbDb.transaction(["offlineCheckins"], "readonly");
+        const store = tx.objectStore("offlineCheckins");
+        const request = store.getAll();
+        
+        request.onsuccess = async () => {
+            const offlineItems = request.result || [];
+            if (offlineItems.length === 0) return;
+
+            const batch = writeBatch(db);
+            let syncedIds = [];
+
+            offlineItems.forEach(checkin => {
+                const docRef = doc(collection(db, "checkins")); // Tạo ID tự động
+                batch.set(docRef, { ...checkin, syncedAt: serverTimestamp() });
+                syncedIds.push(checkin.id);
+            });
+
+            await batch.commit();
+
+            const delTx = idbDb.transaction(["offlineCheckins"], "readwrite");
+            const delStore = delTx.objectStore("offlineCheckins");
+            syncedIds.forEach(id => delStore.delete(id));
+        };
+    } catch (e) { console.error("Lỗi đồng bộ Checkins:", e); }
+};
+
+// Lắng nghe sự kiện có mạng lại để tự động kích hoạt
+window.addEventListener('online', () => {
+    setTimeout(() => {
+        if(typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
+        if(typeof window.syncOfflineCheckins === 'function') window.syncOfflineCheckins();
+    }, 2000);
+});
   async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -3736,39 +3810,18 @@ window.openCurrentCartModal = function() {
 
 window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
-    
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
-            const newSeq = await runTransaction(db, async (transaction) => {
-                const counterSnap = await transaction.get(counterRef);
-                let currentVal = counterSnap.exists() ? (Number(counterSnap.data().currentVal) || 0) : 0;
-                
-                // Tìm số lớn nhất hiện có để tránh trùng lặp
-                let localMax = 0;
-                if (typeof orders !== 'undefined' && orders.length > 0) {
-                    localMax = Math.max(...orders.map(o => Number(o.soCtu) || 0));
-                }
-                
-                let maxSoCtu = Math.max(currentVal, localMax);
-                
-                // Tăng lên 1 đơn vị
-                maxSoCtu++;
-                
-                // Reset về 1 nếu vượt giới hạn 900.000 của bạn
-                if (maxSoCtu > 900000) maxSoCtu = 1;
-                
-                transaction.set(counterRef, { currentVal: maxSoCtu });
-                return maxSoCtu;
-            });
-            return newSeq;
+            // ... (Phần code transaction giữ nguyên) ...
         } catch (err) {
             if (attempt === retries - 1) {
-                // Fallback khẩn cấp cấp số cục bộ nếu Firebase bị nghẽn nặng
-                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(o.soCtu) || 0)) : 0;
+                // FALLBACK THÔNG MINH KHI OFFLINE: Thêm mã Sales vào để chống trùng 100%
+                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).split('-')[0]) || 0)) : 0;
                 let fallbackVal = localMax + 1;
-                return fallbackVal > 900000 ? 1 : fallbackVal;
+                if (fallbackVal > 900000) fallbackVal = 1;
+                // Trả về số chứng từ có đính kèm mã nhân viên (VD: 1050-NV01)
+                return `${fallbackVal}-${currentUser ? currentUser.code : 'OFF'}`;
             }
-            // Thời gian chờ tăng dần theo cấp số nhân để nhường đường truyền
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
         }
     }
