@@ -11024,14 +11024,12 @@ window.validateAndGoToStep2 = function() {
   // Chuyển sang hiển thị Bước 2 với ĐÚNG danh sách NV đã chọn
   renderMasterKpiStep2(salesUsers);
 };
-// ================= BƯỚC 2: RẢI SỐ CHO SALES (BẢNG EXCEL MA TRẬN - TỐI ƯU UX/UI) =================
 // ==============================================================================
-// BƯỚC 2: RẢI SỐ CHO SALES (BẢNG EXCEL MA TRẬN ENTERPRISE - CHUẨN TẬP ĐOÀN LỚN)
+// BƯỚC 2: BẢNG EXCEL MA TRẬN TÍCH HỢP TÍNH NĂNG "GROUP COLUMNS" (THU GỌN CỘT)
 // ==============================================================================
 window.renderMasterKpiStep2 = function(salesUsers) {
     const modalContainer = document.getElementById('dynamicModalContainer');
 
-    // 1. TẠO CSS CHUẨN ERP (ĐẶC, VIỀN MỎNG, FREEZE PANES)
     const erpStyles = `
         <style>
             .erp-table-container { width: 100%; height: calc(100vh - 140px); overflow: auto; background: #fff; border: 1px solid #94a3b8; }
@@ -11039,44 +11037,59 @@ window.renderMasterKpiStep2 = function(salesUsers) {
             .erp-table th, .erp-table td { border-right: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; padding: 0; vertical-align: middle; }
             .erp-table th { background: #e2e8f0; color: #0f172a; text-align: center; font-weight: bold; }
             
-            /* Freeze Panes: Đóng băng Header và Cột đầu tiên */
             .erp-table thead { position: sticky; top: 0; z-index: 50; }
             .erp-table thead tr.row-comp th { position: sticky; top: 0; z-index: 51; border-top: 1px solid #cbd5e1; }
-            .erp-table thead tr.row-sku th { position: sticky; top: 45px; z-index: 50; } /* Chiều cao dòng 1 */
+            .erp-table thead tr.row-sku th { position: sticky; top: 45px; z-index: 50; }
             .erp-col-sticky { position: sticky; left: 0; z-index: 40; background: #f8fafc; border-left: 1px solid #cbd5e1; text-align: left !important; padding: 0 10px !important; }
             .erp-table thead .erp-col-sticky { z-index: 60; background: #cbd5e1; }
             
-            /* Dòng Tổng Footer */
             .erp-footer { position: sticky; bottom: 0; z-index: 50; }
             .erp-footer td { background: #f1f5f9; border-top: 2px solid #64748b; font-weight: bold; text-align: right; padding: 6px 8px; }
             .erp-footer .erp-col-sticky { z-index: 60; background: #e2e8f0; border-top: 2px solid #64748b; }
 
-            /* Ô Nhập Liệu Chuẩn Excel */
             .erp-input { width: 100%; height: 32px; border: none; background: transparent; text-align: right; padding: 0 8px; font-family: inherit; font-size: 13px; font-weight: bold; color: #2563eb; outline: none; }
             .erp-input:focus { background: #e0f2fe; box-shadow: inset 0 0 0 2px #0ea5e9; }
             .erp-input::placeholder { color: #cbd5e1; font-weight: normal; }
         </style>
     `;
 
-    // 2. KHỞI TẠO HEADER (DÒNG CÔNG TY & DÒNG SẢN PHẨM)
-    let theadRow1 = `<th class="erp-col-sticky" rowspan="2" style="min-width: 160px; max-width: 200px;">NHÂN VIÊN SALES</th>`;
+    // 1. TẠO NÚT "MỞ RỘNG TẤT CẢ" Ở GÓC TRÁI TRÊN CÙNG
+    let theadRow1 = `<th class="erp-col-sticky" rowspan="2" style="min-width: 180px; max-width: 220px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-right:10px;">
+            <span>NHÂN VIÊN SALES</span>
+            <button id="btn_toggle_all_skus" data-state="closed" class="btn btn-sm" style="background:#0ea5e9; color:#fff; font-size:10px; padding:4px 8px;" onclick="toggleAllSkus()">
+                <i class="fa-solid fa-expand"></i> Mở SKU
+            </button>
+        </div>
+    </th>`;
     let theadRow2 = ``;
 
     window._masterKpiState.companies.forEach(c => {
-        let colspan = 1 + c.focusSkus.length;
-        // Header Dòng 1: Tên Công Ty (Kèm mục tiêu gốc để so sánh)
+        let skuCount = c.focusSkus.length;
+        const safeCompCode = c.compCode.replace(/[^a-zA-Z0-9]/g, '_');
+        
+        // Header Dòng 1: Mặc định colspan = 1 (Chỉ hiện cột VNĐ). Có nút [+] xòe SKU
         theadRow1 += `
-            <th colspan="${colspan}" style="padding: 6px 8px; height: 45px; background: #dbeafe; color: #1e40af; border-bottom: 1px solid #bfdbfe;">
-                <div style="font-size: 13px;">[${c.compCode}] ${c.compName}</div>
-                <div style="font-size: 11px; color: #3b82f6; margin-top: 2px;">Taget: ${(c.target/1000).toLocaleString('vi-VN')}k</div>
+            <th id="th_comp_${safeCompCode}" colspan="1" style="padding: 6px 8px; height: 45px; background: #dbeafe; color: #1e40af; border-bottom: 1px solid #bfdbfe; transition: 0.3s;">
+                <div style="font-size: 13px; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    [${c.compCode}] ${c.compName}
+                    ${skuCount > 0 ? `<button class="btn btn-sm" style="background:#fff; color:#3b82f6; border:1px solid #bfdbfe; font-size:10px; padding:2px 6px;" onclick="toggleCompSkus('${safeCompCode}',${skuCount})">
+                        <i id="icon_toggle_${safeCompCode}" class="fa-solid fa-plus"></i>
+                    </button>` : ''}
+                </div>
+                <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-top: 2px;">
+                    <span style="font-size: 11px; color: #3b82f6;">Taget: ${(c.target/1000).toLocaleString('vi-VN')}k</span>
+                    <span id="s2_diff_comp_header_${c.compCode}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 900; background:rgba(255,255,255,0.5);"></span>
+                </div>
             </th>
         `;
 
-        // Header Dòng 2: Cột VNĐ và Cột SKU
         theadRow2 += `<th style="min-width: 120px; padding: 6px; background: #f1f5f9; color: #dc2626;">Chỉ Tiêu VNĐ</th>`;
+        
         c.focusSkus.forEach(sku => {
+            // MẶC ĐỊNH ẨN CÁC CỘT SKU (display: none)
             theadRow2 += `
-                <th style="min-width: 100px; max-width: 150px; padding: 4px; background: #f1f5f9;">
+                <th class="sku-col-${safeCompCode}" style="display: none; min-width: 100px; max-width: 150px; padding: 4px; background: #f1f5f9;">
                     <div style="font-size: 11px; color: #059669;">[${sku.skuCode}]</div>
                     <div style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${sku.skuName}">${sku.skuName}</div>
                     <div style="font-size: 10px; color: #64748b;">Mục tiêu: ${sku.qty.toLocaleString('vi-VN')}</div>
@@ -11085,20 +11098,23 @@ window.renderMasterKpiStep2 = function(salesUsers) {
         });
     });
 
-    // 3. KHỞI TẠO BODY (TỪNG NHÂN VIÊN LÀ MỘT DÒNG)
+    // 2. KHỞI TẠO BODY
     let tbodyRows = salesUsers.map((s, rIdx) => {
-        let cIdx = 0; // Đếm chỉ số cột để làm phím điều hướng Excel
+        let cIdx = 0; 
+        let rowBg = rIdx % 2 === 0 ? 'var(--card-bg)' : 'var(--bg-dark)';
+        
         let rowHtml = `<tr>
-            <td class="erp-col-sticky">
-                <div style="font-size: 13px; color: #0f172a;">${s.name}</div>
+            <td class="erp-col-sticky" style="background:${rowBg};">
+                <div style="font-size: 13px; color: #0f172a; font-weight: 900;">${s.name}</div>
                 <div style="font-size: 11px; color: #64748b;">${s.code}</div>
             </td>`;
 
         window._masterKpiState.companies.forEach(c => {
-            // Ô nhập Doanh số VNĐ
+            const safeCompCode = c.compCode.replace(/[^a-zA-Z0-9]/g, '_');
             let compRevVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
+            
             rowHtml += `
-                <td>
+                <td style="background:${rowBg};">
                     <input type="text" inputmode="numeric" class="erp-input" style="color: #dc2626;"
                            id="cell_${rIdx}_${cIdx}"
                            value="${compRevVal > 0 ? compRevVal.toLocaleString('vi-VN') : ''}" 
@@ -11109,11 +11125,11 @@ window.renderMasterKpiStep2 = function(salesUsers) {
             `;
             cIdx++;
 
-            // Ô nhập Sản lượng SKU
             c.focusSkus.forEach(sku => {
                 let skuVal = window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0;
+                // MẶC ĐỊNH ẨN CÁC Ô NHẬP SKU
                 rowHtml += `
-                    <td>
+                    <td class="sku-col-${safeCompCode}" style="display: none; background:${rowBg};">
                         <input type="text" inputmode="numeric" class="erp-input" style="color: #059669;"
                                id="cell_${rIdx}_${cIdx}"
                                value="${skuVal > 0 ? skuVal.toLocaleString('vi-VN') : ''}" 
@@ -11129,38 +11145,36 @@ window.renderMasterKpiStep2 = function(salesUsers) {
         return rowHtml;
     }).join('');
 
-    // 4. KHỞI TẠO FOOTER (DÒNG TỔNG CỘNG ĐỂ SO SÁNH VỚI NGÂN SÁCH GỐC)
-    let tfootRow = `<tr class="erp-footer"><td class="erp-col-sticky">TỔNG ĐÃ RẢI SỐ:</td>`;
+    // 3. KHỞI TẠO FOOTER (DÒNG TỔNG)
+    let tfootRow = `<tr class="erp-footer"><td class="erp-col-sticky">TỔNG ĐÃ RẢI:</td>`;
     window._masterKpiState.companies.forEach(c => {
+        const safeCompCode = c.compCode.replace(/[^a-zA-Z0-9]/g, '_');
         tfootRow += `<td id="sum_comp_${c.compCode}">0</td>`;
         c.focusSkus.forEach(sku => {
-            tfootRow += `<td id="sum_sku_${sku.skuCode}">0</td>`;
+            tfootRow += `<td class="sku-col-${safeCompCode}" style="display: none;" id="sum_sku_${sku.skuCode}">0</td>`;
         });
     });
     tfootRow += `</tr>`;
 
-    // 5. RÁP VÀO MODAL GIAO DIỆN
+    // 4. RÁP VÀO GIAO DIỆN
     modalContainer.innerHTML = `
     ${erpStyles}
     <div class="modal" style="display:flex; z-index:999999;">
         <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:#f1f5f9; overflow:hidden; border-radius:0;">
-            
-            <!-- HEADER TOOLBAR CHUẨN ERP -->
             <div style="flex-shrink:0; padding:10px 16px; background:#ffffff; border-bottom:1px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap: 16px;">
                     <button class="btn btn-sm" onclick="renderMasterKpiStep1()" style="background:#e2e8f0; color:#0f172a;"><i class="fa-solid fa-arrow-left"></i> Quay lại Bước 1</button>
-                    <h2 style="margin:0; font-size:16px; color:#0f172a; text-transform:uppercase;"><i class="fa-solid fa-table"></i> Ma Trận Chỉ Tiêu [${window._chiTieuTargetMonth}]</h2>
+                    <h2 style="margin:0; font-size:16px; color:#0f172a; text-transform:uppercase;"><i class="fa-solid fa-table"></i> Ma Trận Rải Số [${window._chiTieuTargetMonth}]</h2>
                 </div>
                 <div style="display:flex; align-items:center; gap: 10px;">
-                    <div style="font-size:12px; color:#64748b; margin-right: 10px;">*Dùng phím <kbd style="background:#e2e8f0; padding:2px 6px; border-radius:4px; font-family:monospace;">Mũi Tên ⬅️ ⬆️ ⬇️ ➡️</kbd> để di chuyển nhanh.</div>
+                    <div style="font-size:12px; color:#64748b; margin-right: 10px;">*Bấm <b style="color:#0ea5e9;">[+]</b> để rải số lượng Thùng. Dùng phím <kbd>Mũi Tên</kbd> di chuyển nhanh.</div>
                     <button id="btn_save_master_kpi" class="btn btn-red" disabled style="padding: 8px 16px; font-weight: bold; opacity:0.5;" onclick="validateAndSaveMasterKpiToDatabase()">
-                        <i class="fa-solid fa-ban"></i> ĐANG LỆCH SỐ CHƯA THỂ LƯU
+                        <i class="fa-solid fa-ban"></i> ĐANG LỆCH SỐ
                     </button>
                     <button class="btn btn-sm" onclick="closeTargetModal()" style="background:#ef4444; color:#fff; padding: 8px 12px;">Đóng</button>
                 </div>
             </div>
             
-            <!-- VÙNG BẢNG EXCEL -->
             <div class="erp-table-container">
                 <table class="erp-table">
                     <thead>
@@ -11175,56 +11189,93 @@ window.renderMasterKpiStep2 = function(salesUsers) {
                     </tfoot>
                 </table>
             </div>
-
         </div>
     </div>
     `;
 
-    // Gọi hàm tính tổng ngay khi vừa render xong để báo đỏ/xanh
     updateMatrixTotals();
 };
 
-// ================= HÀM XỬ LÝ NHẬP LIỆU GỘP (CHO CẢ VNĐ & SKU) =================
-window.handleErpInput = function(salesCode, compCode, skuCode, el) {
-    if (!el) return;
-    let cursor = el.selectionStart;
-    let oldLen = el.value.length;
+// ================= CÁC HÀM XỬ LÝ ĐÓNG/MỞ CỘT THÔNG MINH =================
+window.toggleCompSkus = function(safeCompCode, skuCount) {
+    const els = document.querySelectorAll(`.sku-col-${safeCompCode}`);
+    const thComp = document.getElementById(`th_comp_${safeCompCode}`);
+    const icon = document.getElementById(`icon_toggle_${safeCompCode}`);
 
-    const cleanVal = el.value.replace(/[^0-9]/g, '');
-    const numVal = Number(cleanVal) || 0;
+    if (els.length === 0) return;
+    let isCurrentlyHidden = els[0].style.display === 'none';
 
-    // Phân luồng: Nếu có skuCode thì lưu vào mảng SKU, nếu không thì lưu vào mảng Company VNĐ
-    if (skuCode) {
-        window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = numVal;
+    els.forEach(el => {
+        el.style.display = isCurrentlyHidden ? 'table-cell' : 'none';
+    });
+
+    if (isCurrentlyHidden) {
+        thComp.setAttribute('colspan', 1 + skuCount); // Xòe ra
+        icon.className = 'fa-solid fa-minus';
     } else {
-        window._masterKpiState.salesAllocations[salesCode].companies[compCode] = numVal;
-    }
-
-    // Format lại số có dấu chấm
-    const formattedVal = cleanVal.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-    if (el.value !== formattedVal) {
-        el.value = formattedVal;
-        let newLen = el.value.length;
-        let newCursorPos = cursor + (newLen - oldLen);
-        el.setSelectionRange(newCursorPos, newCursorPos);
+        thComp.setAttribute('colspan', 1); // Thu lại
+        icon.className = 'fa-solid fa-plus';
     }
 };
 
-// ================= ĐIỀU HƯỚNG MA TRẬN BẰNG PHÍM MŨI TÊN (NHƯ EXCEL) =================
-window.handleExcelNavigation = function(e, rIdx, cIdx) {
-    let targetId = null;
-    if (e.key === 'ArrowRight') { targetId = `cell_${rIdx}_${cIdx + 1}`; }
-    else if (e.key === 'ArrowLeft') { targetId = `cell_${rIdx}_${cIdx - 1}`; }
-    else if (e.key === 'ArrowUp') { targetId = `cell_${rIdx - 1}_${cIdx}`; }
-    else if (e.key === 'ArrowDown') { targetId = `cell_${rIdx + 1}_${cIdx}`; }
-
-    if (targetId) {
-        let nextEl = document.getElementById(targetId);
-        if (nextEl) {
-            e.preventDefault(); // Ngăn con trỏ nhảy lung tung trong ô text
-            nextEl.focus();
-            nextEl.select(); // Bôi đen toàn bộ số cũ để gõ đè số mới ngay lập tức
+window.toggleAllSkus = function() {
+    const btn = document.getElementById('btn_toggle_all_skus');
+    const isExpanding = btn.getAttribute('data-state') === 'closed';
+    
+    window._masterKpiState.companies.forEach(c => {
+        if (c.focusSkus.length > 0) {
+            const safeCompCode = c.compCode.replace(/[^a-zA-Z0-9]/g, '_');
+            const thComp = document.getElementById(`th_comp_${safeCompCode}`);
+            const icon = document.getElementById(`icon_toggle_${safeCompCode}`);
+            const els = document.querySelectorAll(`.sku-col-${safeCompCode}`);
+            
+            els.forEach(el => el.style.display = isExpanding ? 'table-cell' : 'none');
+            thComp.setAttribute('colspan', isExpanding ? 1 + c.focusSkus.length : 1);
+            if(icon) icon.className = isExpanding ? 'fa-solid fa-minus' : 'fa-solid fa-plus';
         }
+    });
+    
+    if (isExpanding) {
+        btn.setAttribute('data-state', 'opened');
+        btn.innerHTML = '<i class="fa-solid fa-compress"></i> Thu gọn SKU';
+        btn.style.background = '#f59e0b';
+    } else {
+        btn.setAttribute('data-state', 'closed');
+        btn.innerHTML = '<i class="fa-solid fa-expand"></i> Mở SKU';
+        btn.style.background = '#0ea5e9';
+    }
+};
+
+// ================= ĐIỀU HƯỚNG BẰNG PHÍM MŨI TÊN (BỎ QUA CỘT ĐANG ẨN) =================
+window.handleExcelNavigation = function(e, rIdx, cIdx) {
+    let rDir = 0, cDir = 0;
+    if (e.key === 'ArrowRight') cDir = 1;
+    else if (e.key === 'ArrowLeft') cDir = -1;
+    else if (e.key === 'ArrowUp') rDir = -1;
+    else if (e.key === 'ArrowDown') rDir = 1;
+    else return; // Bỏ qua nếu không phải phím mũi tên
+
+    e.preventDefault();
+    let nextR = rIdx + rDir;
+    let nextC = cIdx + cDir;
+    
+    // Thuật toán quét tìm ô hiển thị tiếp theo
+    while(true) {
+        let targetId = `cell_${nextR}_${nextC}`;
+        let nextEl = document.getElementById(targetId);
+        
+        if (!nextEl) break; // Đụng viền mảng
+        
+        // Nếu ô đó (thẻ <td>) không bị ẩn, focus và bôi đen số cũ
+        if (nextEl.closest('td').style.display !== 'none') {
+            nextEl.focus();
+            nextEl.select(); // Auto-select để gõ đè ngay
+            break;
+        }
+        
+        // Nếu ô đang bị ẩn, tiếp tục quét sang ô tiếp theo cùng chiều
+        if (cDir !== 0) nextC += cDir;
+        else break; // Phím Lên/Xuống không nhảy qua ô ẩn được
     }
 };
 
