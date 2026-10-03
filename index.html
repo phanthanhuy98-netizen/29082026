@@ -10883,7 +10883,6 @@ window.renderMasterKpiStep2 = function(salesUsers) {
     let htmlContent = window._masterKpiState.companies.map(c => {
         
         // 1. TẠO CÁC CỘT HEADER CHO MÃ SẢN PHẨM (SKU)
-        // FIX: z-index: 40, nền đặc, dùng border thay vì box-shadow để chống lag
         let tableHeaderSkus = c.focusSkus.map(sku => `
             <th style="position: sticky; top: 0; z-index: 40; background: var(--box-bg-custom, #FFFFFF); padding: 12px 8px; border-bottom: 2px solid var(--primary); border-right: 1px solid var(--card-border); min-width: 120px; max-width: 150px; text-align: center; vertical-align: middle;">
                 <div style="font-size: 11px; font-weight: 900; background: var(--prod-code-bg); color: var(--prod-code-color); border-radius: 4px; padding: 2px 6px; display: inline-block; margin-bottom: 4px;">[${sku.skuCode}]</div><br>
@@ -10912,7 +10911,6 @@ window.renderMasterKpiStep2 = function(salesUsers) {
 
             let compRevVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
 
-            // FIX: Xóa JS hover, thêm viền đậm (border-right: 3px) cho cột cố định thay vì shadow
             return `
                 <tr>
                     <!-- Cột Tên NV (Cố định bên trái - Sticky Left) -->
@@ -10937,13 +10935,14 @@ window.renderMasterKpiStep2 = function(salesUsers) {
             `;
         }).join('');
 
-        // FIX: Bật Hardware Acceleration (transform: translateZ(0)) để scroll bảng siêu mượt
+        // 3. RÁP BẢNG BÊN TRONG CÔNG TY
+        // FIX: flex: 1 giúp bảng bung hết chiều cao còn lại của khối công ty
         let employeeTableHtml = `
-            <div style="overflow-x: auto; max-height: 50vh; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 8px; background: var(--box-bg-custom, #FFFFFF); position: relative; will-change: transform; transform: translateZ(0);">
+            <div style="flex: 1; overflow: auto; border: 1px solid var(--card-border); border-radius: 8px; background: var(--box-bg-custom, #FFFFFF); position: relative; transform: translateZ(0);">
                 <table style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left;">
                     <thead>
                         <tr>
-                            <!-- Góc trên cùng bên trái (Z-index 50 cao nhất) -->
+                            <!-- Góc trên cùng bên trái (Z-index 50) -->
                             <th style="position: sticky; left: 0; top: 0; z-index: 50; background: var(--box-bg-custom, #FFFFFF); padding: 12px 10px; border-bottom: 2px solid var(--primary); border-right: 3px solid var(--card-border); min-width: 140px; color: var(--text-main); font-size: 12px; font-weight: 900; text-transform: uppercase; vertical-align: middle;">
                                 <i class="fa-solid fa-user-tie" style="color:var(--primary); margin-right: 4px;"></i> Nhân Viên
                             </th>
@@ -10964,16 +10963,30 @@ window.renderMasterKpiStep2 = function(salesUsers) {
                     </tbody>
                 </table>
             </div>
-            <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); font-weight: 700; text-align: right;">
+            <div style="margin-top: 8px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); font-weight: 700; text-align: right;">
                 * Cuộn bảng sang phải hoặc xuống dưới để xem toàn bộ thông tin 👉
             </div>
         `;
 
         const accId = `s2_acc_comp_${c.compCode}`;
 
-      return `
-         <div style="background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; border-left: 6px solid var(--rose);">
-           <div onclick="toggleOrderAccordion('${accId}')" style="padding: 14px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: rgba(225,29,72,0.04);">
+        // BỌC CÔNG TY BẰNG FLEX-ITEM ĐỂ TỰ ĐỘNG GIÃN NỞ
+        return `
+         <div id="wrapper_${c.compCode}" style="display: flex; flex-direction: column; flex-shrink: 0; background: var(--panel-bg); border: 1px solid var(--card-border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; border-left: 6px solid var(--rose); transition: flex 0.3s ease;">
+           
+           <!-- Thanh Tiêu đề Công ty -->
+           <div onclick="
+                 toggleOrderAccordion('${accId}'); 
+                 const wrap = document.getElementById('wrapper_${c.compCode}');
+                 if(wrap.style.flex === '1 1 0%') {
+                     wrap.style.flex = 'none';
+                     wrap.style.minHeight = 'auto';
+                 } else {
+                     wrap.style.flex = '1 1 0%';
+                     wrap.style.minHeight = '350px';
+                 }
+               " 
+               style="padding: 14px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: rgba(225,29,72,0.04); flex-shrink: 0;">
              <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width:0;">
                  <div style="width: 38px; height: 38px; background: rgba(225,29,72,0.1); color: var(--rose); border-radius: 8px; display: flex; justify-content: center; align-items: center; font-size: 16px; flex-shrink: 0;">
                      <i class="fa-solid fa-building"></i>
@@ -10994,33 +11007,42 @@ window.renderMasterKpiStep2 = function(salesUsers) {
                  </div>
              </div>
            </div>
-           <div id="${accId}" class="hidden" style="border-top: 1px solid var(--card-border); padding: 12px; background: rgba(0,0,0,0.01);">
+
+           <!-- Nội dung Bảng bên trong -->
+           <div id="${accId}" class="hidden" style="flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--card-border); padding: 12px; background: rgba(0,0,0,0.01);">
               ${employeeTableHtml}
            </div>
          </div>
       `;
     }).join('');
 
+    // LAYOUT TỔNG THỂ MODAL: KHÓA OVERFLOW, CHIỀU CAO 100VH
     modalContainer.innerHTML = `
     <div class="modal" style="display:flex; z-index:999999;">
-      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark);">
+      <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; padding:0; background:var(--bg-dark); overflow:hidden;">
         
-        <div style="padding:14px 16px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+        <!-- Header: Cố định -->
+        <div style="flex-shrink:0; padding:14px 16px; background:var(--panel-bg); border-bottom:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
           <button type="button" class="btn btn-sm" onclick="renderMasterKpiStep1()" style="font-weight:900; background:var(--card-bg); border:1px solid var(--card-border); color: var(--text-main); padding: 6px 10px;"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
           <h3 style="font-size:15px; font-weight:900; color:var(--primary); margin:0;">BƯỚC 2: RẢI SỐ CHO NHÂN VIÊN</h3>
           <button type="button" class="btn btn-red btn-sm" onclick="closeTargetModal()" style="border-radius:6px; padding: 6px 12px;">Đóng</button>
         </div>
         
-        <div style="flex:1; overflow-y:auto; padding:16px;">
-          <div style="background:rgba(245,158,11,0.08); border:1px dashed var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:8px; margin-bottom:16px; text-align:center; line-height: 1.4;">
-            💡 <b>Hệ thống đã tự động chia đều số liệu.</b><br>Nhập trực tiếp số liệu vào bảng dưới. Nút LƯU sẽ sáng lên khi tất cả nhãn báo <span style="color:var(--emerald);">Khớp 100%</span>.
+        <!-- Body: Chứa các khối Công ty -->
+        <div style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding:16px;">
+          
+          <div style="flex-shrink:0; background:rgba(245,158,11,0.08); border:1px dashed var(--amber); color:var(--amber); font-weight:800; font-size:13px; padding:12px; border-radius:8px; margin-bottom:16px; text-align:center; line-height: 1.4;">
+            💡 <b>Hệ thống đã tự động chia đều số liệu.</b><br>Nhập trực tiếp số liệu vào bảng. Nút LƯU sẽ sáng lên khi tất cả nhãn báo <span style="color:var(--emerald);">Khớp 100%</span>.
           </div>
           
-          ${htmlContent}
-          
+          <div style="flex:1; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; padding-bottom:10px;">
+             ${htmlContent}
+          </div>
+
         </div>
 
-        <div style="padding:16px; background:var(--panel-bg); border-top:1px solid var(--card-border);">
+        <!-- Footer: Cố định -->
+        <div style="flex-shrink:0; padding:16px; background:var(--panel-bg); border-top:1px solid var(--card-border);">
            <button type="button" id="btn_save_master_kpi" class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:10px; transition:0.2s;" onclick="validateAndSaveMasterKpiToDatabase()">
               <i class="fa-solid fa-floppy-disk"></i> XÁC NHẬN CHỐT & GIAO CHỈ TIÊU
            </button>
