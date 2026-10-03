@@ -9040,24 +9040,71 @@ window.calculateAndRenderTargets = async function() {
         salesProgressList.sort((a, b) => b.pct - a.pct);
     }
 
+ // --- KHỞI TẠO NỘI DUNG SMART INSIGHTS TỰ ĐỘNG (AI GENIUS LEVEL) ---
     let insightsList = [];
     const nowInsight = new Date();
     const yyyy_mm_now = nowInsight.toISOString().slice(0, 7);
+    const isCurrentMonth = window._chiTieuTargetMonth === yyyy_mm_now;
+
+    let timePct = 100;
+    let currentDay = 30;
+    let totalDaysInMonth = 30;
     
-    if (window._chiTieuTargetMonth === yyyy_mm_now && globalRevTarget > 0) {
-        const currentDay = nowInsight.getDate();
-        const totalDaysInMonth = new Date(nowInsight.getFullYear(), nowInsight.getMonth() + 1, 0).getDate();
-        const timePct = (currentDay / totalDaysInMonth) * 100;
+    if (isCurrentMonth) {
+        currentDay = nowInsight.getDate();
+        totalDaysInMonth = new Date(nowInsight.getFullYear(), nowInsight.getMonth() + 1, 0).getDate();
+        timePct = (currentDay / totalDaysInMonth) * 100;
+    }
+
+    // 1. DỰ BÁO TỔNG QUAN CÔNG TY (FORECASTING) - DÀNH CHO ADMIN/MANAGER
+    if (isTongQuanTab && globalRevTarget > 0) {
         const globalPct = (globalRevActual / globalRevTarget) * 100;
+        let projectedRev = isCurrentMonth ? (globalRevActual / currentDay) * totalDaysInMonth : globalRevActual;
+        let projectedPct = (projectedRev / globalRevTarget) * 100;
 
         if (globalPct >= timePct) {
-            insightsList.push(`🔥 <b>Nhịp độ tốt:</b> Doanh số toàn cty đạt <b>${globalPct.toFixed(1)}%</b>, bám sát/vượt tiến độ thời gian tháng (${timePct.toFixed(1)}%).`);
+            insightsList.push(`🔥 <b style="color:var(--emerald);">Nhịp độ xuất sắc:</b> Toàn hệ thống đạt <b>${globalPct.toFixed(1)}%</b>, bám sát/vượt thời gian thực. Giữ vững phong độ!`);
         } else {
-            insightsList.push(`⚠️ <b>Cần tăng tốc:</b> Tiến độ toàn cty (${globalPct.toFixed(1)}%) đang chậm hơn thời gian trôi qua (${timePct.toFixed(1)}%).`);
+            insightsList.push(`⚠️ <b style="color:var(--rose);">Cảnh báo nhịp độ:</b> Tiến độ (${globalPct.toFixed(1)}%) đang trễ hơn thời gian (${timePct.toFixed(1)}%). Yêu cầu PUSH số ngay.`);
+        }
+
+        if (isCurrentMonth) {
+            let forecastColor = projectedPct >= 100 ? 'var(--emerald)' : (projectedPct >= 80 ? 'var(--amber)' : 'var(--rose)');
+            insightsList.push(`🔮 <b style="color:var(--purple);">AI Dự báo (Run-rate):</b> Với tốc độ chốt đơn hiện tại, hệ thống sẽ kết thúc tháng ở mức <b style="color:${forecastColor}; font-size:15px;">${projectedPct.toFixed(1)}%</b> (Tương đương ${(projectedRev/1000).toLocaleString('vi-VN')}k).`);
+        }
+    } 
+    // 2. CÁ NHÂN HÓA CHO TỪNG SALES (MICRO-COACHING) - DÀNH CHO NHÂN VIÊN
+    else if (!isTongQuanTab && salesRevTarget > 0) {
+        const sPct = (salesRevActual / salesRevTarget) * 100;
+        let projectedRev = isCurrentMonth ? (salesRevActual / currentDay) * totalDaysInMonth : salesRevActual;
+        let projectedPct = (projectedRev / salesRevTarget) * 100;
+
+        if (isCurrentMonth) {
+             let forecastColor = projectedPct >= 100 ? 'var(--emerald)' : (projectedPct >= 80 ? 'var(--amber)' : 'var(--rose)');
+             insightsList.push(`🔮 <b style="color:var(--purple);">AI Dự báo cá nhân:</b> Với đà nổ đơn này, bạn sẽ về đích cuối tháng ở mức <b style="color:${forecastColor}; font-size:15px;">${projectedPct.toFixed(1)}%</b>.`);
+        }
+
+        // AI Tự động tìm điểm yếu của Sales (Mã hàng bị hụt số nhất)
+        let weakestSku = null;
+        let lowestPct = 999;
+        targetItems.forEach(it => {
+            let a = actuals[it.skuCode] || 0;
+            let t = it.target || 0;
+            if (t > 0) {
+                let p = (a/t)*100;
+                if (p < lowestPct) { lowestPct = p; weakestSku = it; }
+            }
+        });
+
+        if (weakestSku && lowestPct < 50) {
+             insightsList.push(`🎯 <b style="color:var(--amber);">Kê toa hành động:</b> Mã <b style="color:var(--primary);">[${weakestSku.skuCode}] ${weakestSku.skuName}</b> của bạn đang bán cực chậm (Đạt ${lowestPct.toFixed(1)}%). AI Gợi ý: Hãy mang mã này ra tư vấn ở 5 tiệm tạp hóa tiếp theo!`);
+        } else if (sPct >= 100) {
+             insightsList.push(`🏆 <b style="color:var(--emerald);">Phá đảo thành công:</b> Tuyệt vời! Bạn đã vượt 100% KPI. Giờ là lúc cày thêm doanh số để tối đa hóa hoa hồng vượt mức.`);
         }
     }
 
-    if (isAdminOrManager && salesProgressList.length > 0) {
+    // 3. INSIGHTS QUẢN TRỊ ĐỘI NGŨ (Chỉ Admin/Manager thấy)
+    if (isAdminOrManager && isTongQuanTab && typeof salesProgressList !== 'undefined' && salesProgressList.length > 0) {
         let laggingSales = salesProgressList.filter(s => s.targetRev > 0 && s.pct < 50);
         let overSales = salesProgressList.filter(s => s.targetRev > 0 && s.pct >= 100);
         let zeroSales = salesProgressList.filter(s => s.actualRev === 0 && s.targetRev > 0);
@@ -9067,26 +9114,64 @@ window.calculateAndRenderTargets = async function() {
         let lowDropSize = validDropSizes[validDropSizes.length - 1];
 
         if (overSales.length > 0) {
-            insightsList.push(`🎉 <b>Vinh danh:</b> Đã có <b>${overSales.length} nhân viên</b> (${overSales.map(s=>s.name.split(' ').pop()).join(', ')}) phá đảo 100% chỉ tiêu! Hãy chụp ngay Bảng Xếp Hạng này gửi vào nhóm Zalo để khích lệ team.`);
+            insightsList.push(`🎉 <b style="color:var(--emerald);">Vinh danh:</b> Đã có <b>${overSales.length} nhân viên</b> (${overSales.map(s=>s.name.split(' ').pop()).join(', ')}) vỡ bọng 100% chỉ tiêu!`);
         }
         if (laggingSales.length > 0) {
-            insightsList.push(`⚠️ <b>Cứu net:</b> ${laggingSales.length} nhân sự (${laggingSales.map(s=>s.name.split(' ').pop()).join(', ')}) đang đạt dưới 50%. <b>Kê toa:</b> Duyệt ngay ngân sách Trade Promo hoặc phát hàng mẫu (Sampling) cho các bạn này dập xuống đại lý kích số gấp.`);
+            insightsList.push(`🆘 <b style="color:var(--rose);">Cứu net:</b> ${laggingSales.length} nhân sự (${laggingSales.map(s=>s.name.split(' ').pop()).join(', ')}) đang đạt dưới 50%. Hãy duyệt ngay ngân sách Trade Promo hoặc phát Sampling để dập xuống tiệm kích số.`);
         }
         if (zeroSales.length > 0) {
-            insightsList.push(`🚨 <b>Báo động đỏ:</b> ${zeroSales.map(s=>s.name.split(' ').pop()).join(', ')} chưa nổ đơn nào. <b>Kê toa:</b> Quản lý cần đi kiểm tra tuyến thực tế (Joint-visit) cùng nhân sự này vào sáng mai.`);
+            insightsList.push(`🚨 <b style="color:var(--rose);">Báo động đỏ (Chưa nổ đơn):</b> ${zeroSales.map(s=>s.name.split(' ').pop()).join(', ')}. Yêu cầu Quản lý đi kèm tuyến (Joint-visit) cùng nhân sự này sáng mai.`);
         }
         if (topDropSize && lowDropSize && topDropSize.code !== lowDropSize.code && topDropSize.dropSize > 0) {
-            insightsList.push(`💡 <b>Tối ưu Rổ hàng (Drop Size):</b> ${topDropSize.name.split(' ').pop()} đang bán rất tốt (${(topDropSize.dropSize/1000).toLocaleString('vi-VN')}k/đơn). Hãy yêu cầu bạn này chia sẻ kịch bản Upsell chéo sản phẩm cho ${lowDropSize.name.split(' ').pop()} (đang chốt lắt nhắt ${(lowDropSize.dropSize/1000).toLocaleString('vi-VN')}k/đơn).`);
+            insightsList.push(`💡 <b style="color:#0EA5E9;">Tối ưu Độ lớn đơn (Drop Size):</b> ${topDropSize.name.split(' ').pop()} chốt đơn rất tốt (${(topDropSize.dropSize/1000).toLocaleString('vi-VN')}k/đơn). Hãy yêu cầu bạn này chia sẻ kịch bản Upsell (Bán chéo) cho ${lowDropSize.name.split(' ').pop()} (đang chốt lắt nhắt ${(lowDropSize.dropSize/1000).toLocaleString('vi-VN')}k/đơn).`);
         }
     }
 
+    // 4. GIAO DIỆN AI SCI-FI CAO CẤP (RỰC RỠ & CHUYỂN ĐỘNG)
+  // 4. GIAO DIỆN AI SCI-FI CAO CẤP (DẠNG NGĂN KÉO THU GỌN)
     let smartInsightsHtml = `
-        <div style="background: linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(37,99,235,0.05) 100%); border: 1px solid rgba(14,165,233,0.3); border-radius: 16px; padding: 16px 18px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
-            <div style="display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 14px; color: #0284C7; margin-bottom: 10px; text-transform: uppercase;">
-                <i class="fa-solid fa-wand-magic-sparkles"></i> Trợ Lý - cảnh báo Thị Trường
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text-main); line-height: 1.5;">
-                ${insightsList.length > 0 ? insightsList.map(item => `<div>${item}</div>`).join('') : '<div>• Hệ thống đang duy trì vận hành ổn định. Chưa ghi nhận bất thường.</div>'}
+        <style>
+            @keyframes aiBorderGlow {
+                0% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.2); border-color: rgba(139, 92, 246, 0.4); }
+                50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); border-color: rgba(59, 130, 246, 0.9); }
+                100% { box-shadow: 0 0 5px rgba(225, 29, 72, 0.2); border-color: rgba(225, 29, 72, 0.4); }
+            }
+            @keyframes aiTyping {
+                from { opacity: 0.4; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1.05); }
+            }
+        </style>
+        <div style="background: var(--card-bg); border-radius: 18px; padding: 2px; background: linear-gradient(135deg, #3B82F6, #8B5CF6, #E11D48); margin-bottom: 24px; animation: aiBorderGlow 3s infinite alternate;">
+            <div style="background: var(--panel-bg); border-radius: 16px; overflow: hidden;">
+                
+                <!-- THANH TIÊU ĐỀ (CLICK ĐỂ MỞ/ĐÓNG) -->
+                <div onclick="toggleOrderAccordion('acc_ai_insights')" style="padding: 16px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: rgba(139, 92, 246, 0.06); transition: 0.2s;" onmouseover="this.style.background='rgba(139, 92, 246, 0.1)'" onmouseout="this.style.background='rgba(139, 92, 246, 0.06)'">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div style="font-weight: 900; font-size: 15.5px; background: linear-gradient(90deg, #3B82F6, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-transform: uppercase; display:flex; align-items:center; gap:8px;">
+                            <i class="fa-solid fa-robot" style="color: #8B5CF6; animation: aiTyping 0.8s infinite alternate;"></i> AI INSIGHTS
+                        </div>
+                        <span style="font-size:11px; font-weight:900; background:rgba(225,29,72,0.1); color:var(--rose); padding:3px 8px; border-radius:8px; border: 1px solid rgba(225,29,72,0.2); box-shadow: 0 2px 4px rgba(225,29,72,0.1);">
+                            ${insightsList.length} Cảnh báo
+                        </span>
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="width:28px; height:28px; border-radius:50%; background:rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center;">
+                             <i id="icon_acc_ai_insights" class="fa-solid fa-chevron-down" style="color: #8B5CF6; transition: transform 0.3s ease; font-size: 13px;"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NỘI DUNG KÊ TOA (MẶC ĐỊNH ẨN CLASS "hidden") -->
+                <div id="acc_ai_insights" class="hidden" style="padding: 16px 20px; border-top: 1px dashed rgba(139, 92, 246, 0.3); background: rgba(0,0,0,0.01);">
+                    <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; font-weight: 600; color: var(--text-main); line-height: 1.5;">
+                        ${insightsList.length > 0 ? insightsList.map(item => `
+                            <div style="display: flex; gap: 8px; align-items: flex-start; padding: 12px 14px; background: var(--card-bg); border-radius: 12px; border: 1px solid var(--card-border); box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: 0.2s;" onmouseover="this.style.transform='translateX(4px)'; this.style.borderColor='rgba(139,92,246,0.4)';" onmouseout="this.style.transform='translateX(0)'; this.style.borderColor='var(--card-border)';">
+                                <div style="flex:1;">${item}</div>
+                            </div>
+                        `).join('') : '<div style="text-align:center; color:var(--text-muted); font-style:italic; padding: 10px;">Hệ thống đang thu thập thêm dữ liệu để phân tích...</div>'}
+                    </div>
+                </div>
             </div>
         </div>
     `;
