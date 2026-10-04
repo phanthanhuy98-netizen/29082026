@@ -3810,47 +3810,70 @@ window.openCurrentCartModal = function() {
 
 window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
+    
+    // Kiểm tra xem thiết bị có đang kết nối mạng không (navigator.onLine)
+    const isOnline = navigator.onLine;
+
+    // --- TRƯỜNG HỢP 1: ĐANG OFFLINE (MẤT MẠNG) ---
+    if (!isOnline) {
+        let maxExisting = 0;
+        if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+            orders.forEach(o => {
+                // Chỉ quét các số ctu offline cũ của chính nhân viên này để tính tiếp
+                let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
+                if (!isNaN(num) && num > maxExisting) {
+                    maxExisting = num;
+                }
+            });
+        }
+        let nextVal = maxExisting + 1;
+        if (nextVal > 900000) nextVal = 1;
+        
+        // GẮN MÃ NHÂN VIÊN KHI OFFLINE ĐỂ TRIỆT TIÊU HOÀN TOÀN RỦI RO TRÙNG LẶP GIỮA CÁC SALES
+        const currentSalesCode = (typeof currentUser !== 'undefined' && currentUser && currentUser.code) ? currentUser.code : 'OFF';
+        return `${nextVal}-${currentSalesCode}`;
+    }
+
+    // --- TRƯỜNG HỢP 2: ĐANG ONLINE (CÓ MẠNG) ---
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
             const newSoCtu = await runTransaction(db, async (transaction) => {
                 const counterDoc = await transaction.get(counterRef);
                 
-                // 1. TỰ ĐỘNG QUÉT DANH SÁCH ĐƠN HÀNG ĐỂ TÌM SỐ CHỨNG TỪ LỚN NHẤT HIỆN TẠI
                 let maxExisting = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
                     orders.forEach(o => {
-                        let num = Number(String(o.soCtu || '').replace(/[^0-9]/g, ''));
+                        let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > maxExisting) {
                             maxExisting = num;
                         }
                     });
                 }
 
-                // 2. LẤY GIÁ TRỊ TỪ FIRESTORE COUNTER
                 let counterVal = counterDoc.exists() ? Number(counterDoc.data().value || 0) : 0;
-                
-                // 3. ĐỒNG BỘ THÔNG MINH: Lấy mức cao nhất giữa Firestore và mảng đơn hàng thực tế
                 let baseVal = Math.max(counterVal, maxExisting);
                 let currentValue = baseVal + 1;
                 
-                // Quay đầu về 1 nếu vượt quá 900.000
                 if (currentValue > 900000) {
                     currentValue = 1;
                 }
 
-                // Cập nhật lại giá trị chuẩn xác lên Firestore
                 transaction.set(counterRef, { value: currentValue }, { merge: true });
                 return currentValue;
             });
             
+            // ONLINE: TRẢ VỀ SỐ NGUYÊN THUẦN TÚY (Ví dụ: 266, 267...) KHÔNG DÍNH MÃ NHÂN VIÊN
             return newSoCtu;
             
         } catch (err) {
             if (attempt === retries - 1) {
-                // Fallback an toàn khi rớt mạng
+                // Fallback an toàn nếu lỗi transaction mạng
                 let localMax = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    localMax = Math.max(...orders.map(o => Number(String(o.soCtu || '').replace(/[^0-9]/g, '')) || 0), 0);
+                    orders.forEach(o => {
+                        let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
+                        if (!isNaN(num) && num > localMax) localMax = num;
+                    });
                 }
                 let fallbackVal = localMax + 1;
                 if (fallbackVal > 900000) fallbackVal = 1;
