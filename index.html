@@ -11043,6 +11043,9 @@ window.renderMasterKpiStep2 = function(salesUsers) {
     }).join('');
 
     // 3. Dựng Header Bảng (2 Dòng: Dòng Chữ cái Excel & Dòng Tiêu đề)
+ // ... code phía trên giữ nguyên ...
+
+    // 3. Dựng Header Bảng (2 Dòng: Dòng Chữ cái Excel & Dòng Tiêu đề)
     let colIndex = 0;
     
     // Dòng 1: Chữ cái Excel (A, B, C...)
@@ -11063,15 +11066,26 @@ window.renderMasterKpiStep2 = function(salesUsers) {
     
     // Rải cột cho Công ty và SKU
     window._masterKpiState.companies.forEach(c => {
+        // Cột Công ty: Hiển thị tên rõ ràng + Nút Mở/Thu gọn
         excelLetterRow += `<th class="excel-col-letter" style="position: sticky; top: 0; z-index: 40;">${getColumnLetter(colIndex++)}</th>`;
-        titleRowHtml += `<th style="position: sticky; top: 26px; z-index: 40; min-width: 120px; color: var(--rose); background: #fff1f2; white-space: nowrap;">[${c.compCode}] Doanh số</th>`;
-        
-        c.focusSkus.forEach(sku => {
-            excelLetterRow += `<th class="excel-col-letter" style="position: sticky; top: 0; z-index: 40;">${getColumnLetter(colIndex++)}</th>`;
-            titleRowHtml += `<th style="position: sticky; top: 26px; z-index: 40; min-width: 80px; max-width: 120px; color: var(--primary); background: #eff6ff; line-height: 1.2;">
-                <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px;">[${sku.skuCode}]</div>
-                <div style="font-weight:600; font-size:10px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${sku.skuName}">${sku.skuName}</div>
+        titleRowHtml += `
+            <th style="position: sticky; top: 26px; z-index: 40; min-width: 180px; max-width: 250px; color: var(--rose); background: #fff1f2; white-space: nowrap;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <div style="overflow: hidden; text-overflow: ellipsis;" title="[${c.compCode}] ${c.compName}">
+                        [${c.compCode}] ${c.compName}
+                    </div>
+                    ${c.focusSkus.length > 0 ? `<button type="button" class="btn btn-sm" onclick="toggleKpiCols('${c.compCode}', this)" style="padding: 3px 6px; font-size: 10px; font-weight: 800; background: var(--primary); color: #fff; border-radius: 4px; border: none; cursor: pointer; flex-shrink: 0;">+ Hiện SP</button>` : ''}
+                </div>
             </th>`;
+        
+        // Cột SKU: Thêm class kpi-col-{Mã_CTY} và mặc định ẩn (display: none)
+        c.focusSkus.forEach(sku => {
+            excelLetterRow += `<th class="excel-col-letter kpi-col-${c.compCode}" style="position: sticky; top: 0; z-index: 40; display: none;">${getColumnLetter(colIndex++)}</th>`;
+            titleRowHtml += `
+                <th class="kpi-col-${c.compCode}" style="position: sticky; top: 26px; z-index: 40; min-width: 80px; max-width: 120px; color: var(--primary); background: #eff6ff; line-height: 1.2; display: none;">
+                    <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px;">[${sku.skuCode}]</div>
+                    <div style="font-weight:600; font-size:10px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${sku.skuName}">${sku.skuName}</div>
+                </th>`;
         });
     });
     
@@ -11091,7 +11105,7 @@ window.renderMasterKpiStep2 = function(salesUsers) {
         `;
 
         window._masterKpiState.companies.forEach(c => {
-            // Ô Nhập Doanh Số - Mở rộng min-width để chứa đủ số tiền lớn
+            // Ô Nhập Doanh Số Công Ty
             let compRevVal = window._masterKpiState.salesAllocations[s.code].companies[c.compCode] || 0;
             rowHtml += `
                 <td style="padding: 0;">
@@ -11103,11 +11117,11 @@ window.renderMasterKpiStep2 = function(salesUsers) {
                 </td>
             `;
 
-            // Các Ô Nhập Sản Lượng SKU
+            // Các Ô Nhập Sản Lượng SKU (Mặc định ẩn)
             c.focusSkus.forEach(sku => {
                 let currentVal = window._masterKpiState.salesAllocations[s.code].skus[sku.skuCode] || 0;
                 rowHtml += `
-                    <td style="padding: 0;">
+                    <td class="kpi-col-${c.compCode}" style="padding: 0; display: none;">
                         <input type="text" inputmode="numeric"
                                value="${currentVal > 0 ? currentVal.toLocaleString('vi-VN') : ''}"
                                oninput="handleStep2SkuInput('${s.code}', '${sku.skuCode}', this)"
@@ -11620,6 +11634,27 @@ window.clearAllRouteAssignments = async function(uid) {
 
     } catch (e) {
         alert("Lỗi khi thu hồi tuyến: " + e.message);
+    }
+};
+  // Hàm đóng mở các cột SKU theo từng Công ty
+window.toggleKpiCols = function(compCode, btnElement) {
+    // Lấy tất cả các cột SKU thuộc công ty này (bao gồm Dòng A,B,C; Dòng Tên SP; và Dòng nhập liệu)
+    const cols = document.querySelectorAll('.kpi-col-' + compCode);
+    if (cols.length === 0) return;
+    
+    // Kiểm tra trạng thái hiện tại
+    const isHidden = window.getComputedStyle(cols[0]).display === 'none';
+
+    if (isHidden) {
+        // Mở ra
+        cols.forEach(col => col.style.display = 'table-cell');
+        btnElement.innerHTML = "- Ẩn SP";
+        btnElement.style.background = "var(--rose)"; // Đổi màu để làm nổi bật
+    } else {
+        // Thu vào
+        cols.forEach(col => col.style.display = 'none');
+        btnElement.innerHTML = "+ Hiện SP";
+        btnElement.style.background = "var(--primary)";
     }
 };
 </script>
