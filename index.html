@@ -3772,9 +3772,9 @@ window.openCurrentCartModal = function() {
          </div>
          <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
            ${itemsList.length > 0 ? `
-             <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:800; font-size:16px; border-radius:14px; box-shadow: 0 6px 20px rgba(5, 150, 105, 0.3);" onclick="closeCurrentCartModal(); submitOrder();">
-               <i class="fa-solid fa-paper-plane"></i> GỬI ĐƠN HÀNG NGAY
-             </button>
+             <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:800; font-size:16px; border-radius:14px; box-shadow: 0 6px 20px rgba(5, 150, 105, 0.3);" onclick="submitOrder(); closeCurrentCartModal();">
+   <i class="fa-solid fa-paper-plane"></i> GỬI ĐƠN HÀNG NGAY
+</button>
            ` : ''}
          </div>
        </div>
@@ -3812,14 +3812,26 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
-            // ... (Phần code transaction giữ nguyên) ...
+            // THỰC THI GIAO DỊCH LẤY SỐ CHỨNG TỪ TỰ ĐỘNG TĂNG
+            const newSoCtu = await runTransaction(db, async (transaction) => {
+                const counterDoc = await transaction.get(counterRef);
+                let currentValue = 1;
+                if (counterDoc.exists()) {
+                    currentValue = (counterDoc.data().value || 0) + 1;
+                }
+                transaction.set(counterRef, { value: currentValue }, { merge: true });
+                return currentValue;
+            });
+            
+            // Trả về số chứng từ có đính kèm mã NV
+            return `${newSoCtu}-${currentUser ? currentUser.code : 'OFF'}`;
+            
         } catch (err) {
             if (attempt === retries - 1) {
-                // FALLBACK THÔNG MINH KHI OFFLINE: Thêm mã Sales vào để chống trùng 100%
+                // FALLBACK THÔNG MINH KHI OFFLINE (RỚT MẠNG)
                 let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).split('-')[0]) || 0)) : 0;
                 let fallbackVal = localMax + 1;
                 if (fallbackVal > 900000) fallbackVal = 1;
-                // Trả về số chứng từ có đính kèm mã nhân viên (VD: 1050-NV01)
                 return `${fallbackVal}-${currentUser ? currentUser.code : 'OFF'}`;
             }
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
@@ -3915,7 +3927,8 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
           assignedSoCtu = existingOrd ? existingOrd.soCtu : await getNextSoCtuWithRetry();
         }
       } else {
-        orderUuid = crypto.randomUUID ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
+        // ĐÃ SỬA: Thêm typeof crypto !== 'undefined' để chống crash trên mobile
+        orderUuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('ord_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
         assignedSoCtu = await getNextSoCtuWithRetry();
       }
 
