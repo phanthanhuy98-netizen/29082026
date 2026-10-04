@@ -448,7 +448,9 @@ if (getApps().length === 1) {
 }
 const secondaryAuth = getAuth(secondaryApp);
 
-  let currentUser = null;
+let currentUser = null;
+let ctkmListenerUnsub = null; 
+let compListenerUnsub = null;
   let currentTab = localStorage.getItem('dms_last_active_tab') || 'sales';
  let stores = [], orders = [], users = [];
   let lastVisibleOrderDoc = null;
@@ -1054,14 +1056,6 @@ window.syncOfflineCheckins = async function() {
         };
     } catch (e) { console.error("Lỗi đồng bộ Checkins:", e); }
 };
-
-// Lắng nghe sự kiện có mạng lại để tự động kích hoạt
-window.addEventListener('online', () => {
-    setTimeout(() => {
-        if(typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
-        if(typeof window.syncOfflineCheckins === 'function') window.syncOfflineCheckins();
-    }, 2000);
-});
   async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -1674,8 +1668,11 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     } catch(e) {}
    // Đặt đoạn code lắng nghe ở đây (sau khi 'db' đã sẵn sàng)
 try {
+    if (ctkmListenerUnsub) ctkmListenerUnsub();
+    if (compListenerUnsub) compListenerUnsub();
+
     // 1. Lắng nghe thay đổi CTKM
-    onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
+    ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
@@ -1689,13 +1686,12 @@ try {
         }
     });
 
-    // 2. Lắng nghe thay đổi danh sách CÔNG TY (THÊM MỚI ĐOẠN NÀY)
-    onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
+    // 2. Lắng nghe thay đổi danh sách CÔNG TY
+    compListenerUnsub = onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
             const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
             
-            // Nếu phát hiện có người khác cập nhật công ty -> tự động kéo data mới về
             if (serverCompsVersion > localCompsVersion) {
                 const cSnap = await getDocs(collection(db, "companies"));
                 companyList = cSnap.docs.map(d => d.data());
@@ -1706,7 +1702,6 @@ try {
                 }
                 localStorage.setItem("companiesVersion", serverCompsVersion);
                 
-                // Cập nhật giao diện ngay lập tức nếu đang đứng ở tab Công ty
                 if (typeof renderUI === 'function' && currentTab === 'company') {
                     renderUI();
                 }
@@ -1714,7 +1709,6 @@ try {
         }
     });
 } catch(e) {}
-
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     
@@ -1797,6 +1791,8 @@ window.handleLogout = async function() {
       }
 
       // 4. Xóa rỗng các biến tạm trên RAM
+      if (ctkmListenerUnsub) { ctkmListenerUnsub(); ctkmListenerUnsub = null; }
+      if (compListenerUnsub) { compListenerUnsub(); compListenerUnsub = null; }
       currentCart = {};
       activeVisitedStore = null;
       editingOrderId = null;
@@ -3226,14 +3222,18 @@ window.loadMoreSoGoc = async function() {
             // Cập nhật lại bộ lọc nếu có
             if (typeof filterSoGocCards === 'function') {
                 filterSoGocCards(soGocFilterKeyword);
+                
+                // Cập nhật giao diện nút tải thêm nếu lọc xong không thấy đơn nào
+                setTimeout(() => {
+                    const visibleNow = container.querySelectorAll('.so-goc-card-item:not([style*="display: none"])').length;
+                    if (visibleNow === 0 && hasMoreOrders) {
+                        if (btn) {
+                            btn.innerHTML = 'Tải Thêm (Đang bị bộ lọc che khuất)';
+                            btn.disabled = false;
+                        }
+                    }
+                }, 100);
             }
-        }
-
-    } catch (e) {
-        alert("Lỗi tải thêm: " + e.message);
-        if (btn) { btn.innerHTML = 'Tải Thêm Đơn Hàng Cũ Hơn'; btn.disabled = false; }
-    }
-};
 
  window.editOrder = function(orderId) {
   const order = orders.find(o => o.id === orderId);
@@ -3976,6 +3976,8 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         assignedSoCtu = await getNextSoCtuWithRetry();
       }
 
+      const existingOrd = editingOrderId ? orders.find(o => o.id === editingOrderId) : null;
+
       const orderData = {
         orderUuid: orderUuid,
         ngayCtu: todayStr,
@@ -3994,14 +3996,15 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         status: 'Chờ duyệt',
         soCtu: assignedSoCtu,
         id: orderUuid,
-        createdAt: serverTimestamp()
+        // Dùng thời gian cũ nếu là sửa đơn, lưu thêm thời gian cập nhật
+        createdAt: existingOrd ? existingOrd.createdAt : serverTimestamp(),
+        updatedAt: editingOrderId ? serverTimestamp() : null
       };
 
       const savedStoreId = activeVisitedStore.id;
 
     const docRef = doc(db, "orders", orderUuid);
-setDoc(docRef, orderData).catch(e => console.log("Đã đưa vào hàng đợi Offline", e));
-
+setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e));
       const localRenderOrder = {
         ...orderData,
         createdAt: new Date()
@@ -5282,7 +5285,10 @@ ${activeVisitedStore ? `
 
     const isSales = currentUser && currentUser.role === 'sales';
 const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.role === 'accountant');
-      const sortedOrders = [...orders].sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
+      const sortedOrders = [...orders].sort((a, b) => {
+    const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
+    return getNum(b.soCtu) - getNum(a.soCtu);
+});
 
       sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
@@ -8053,7 +8059,8 @@ window.renderGocSalesTab = function(container) {
 window._chiTieuSubTab = 'phanTuyen';
 window._chiTieuTargetSalesCode = '';
 window._chiTieuTargetSalesRouteCode = ''; 
-window._chiTieuTargetMonth = new Date().toISOString().slice(0, 7);
+const _nowKpi = new Date();
+window._chiTieuTargetMonth = _nowKpi.getFullYear() + "-" + String(_nowKpi.getMonth() + 1).padStart(2, '0');
 window._chiTieuPendingSkus = []; 
 window._chiTieuDashboardSubTab = 'tongQuan'; // Tab con mặc định trong KPI: 'tongQuan' hoặc 'caNhan'
 
