@@ -3812,30 +3812,46 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
-            // THỰC THI GIAO DỊCH LẤY SỐ TỰ ĐỘNG TĂNG VÀ QUAY ĐẦU KHI CHẠM 900.000
             const newSoCtu = await runTransaction(db, async (transaction) => {
                 const counterDoc = await transaction.get(counterRef);
-                let currentValue = 1;
-                if (counterDoc.exists()) {
-                    currentValue = Number(counterDoc.data().value || 0) + 1;
-                }
                 
-                // QUAY ĐẦU VỀ 1 NẾU VƯỢT QUÁ 900.000
+                // 1. TỰ ĐỘNG QUÉT DANH SÁCH ĐƠN HÀNG ĐỂ TÌM SỐ CHỨNG TỪ LỚN NHẤT HIỆN TẠI
+                let maxExisting = 0;
+                if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+                    orders.forEach(o => {
+                        let num = Number(String(o.soCtu || '').replace(/[^0-9]/g, ''));
+                        if (!isNaN(num) && num > maxExisting) {
+                            maxExisting = num;
+                        }
+                    });
+                }
+
+                // 2. LẤY GIÁ TRỊ TỪ FIRESTORE COUNTER
+                let counterVal = counterDoc.exists() ? Number(counterDoc.data().value || 0) : 0;
+                
+                // 3. ĐỒNG BỘ THÔNG MINH: Lấy mức cao nhất giữa Firestore và mảng đơn hàng thực tế
+                let baseVal = Math.max(counterVal, maxExisting);
+                let currentValue = baseVal + 1;
+                
+                // Quay đầu về 1 nếu vượt quá 900.000
                 if (currentValue > 900000) {
                     currentValue = 1;
                 }
 
+                // Cập nhật lại giá trị chuẩn xác lên Firestore
                 transaction.set(counterRef, { value: currentValue }, { merge: true });
                 return currentValue;
             });
             
-            // TRẢ VỀ ĐÚNG MỘT CON SỐ NGUYÊN (Ví dụ: 1, 2, 3... Không dính đuôi rườm rà)
             return newSoCtu;
             
         } catch (err) {
             if (attempt === retries - 1) {
-                // FALLBACK KHI OFFLINE: Vẫn đảm bảo quay đầu về 1 khi vượt 900.000
-                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).replace(/[^0-9]/g, '')) || 0)) : 0;
+                // Fallback an toàn khi rớt mạng
+                let localMax = 0;
+                if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+                    localMax = Math.max(...orders.map(o => Number(String(o.soCtu || '').replace(/[^0-9]/g, '')) || 0), 0);
+                }
                 let fallbackVal = localMax + 1;
                 if (fallbackVal > 900000) fallbackVal = 1;
                 return fallbackVal;
@@ -3844,7 +3860,6 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         }
     }
 };
-
   window.submitOrder = async function() {
     if (isSubmittingOrder) return;
     
