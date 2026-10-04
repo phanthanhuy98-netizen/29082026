@@ -3812,27 +3812,33 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
-            // THỰC THI GIAO DỊCH LẤY SỐ CHỨNG TỪ TỰ ĐỘNG TĂNG
+            // THỰC THI GIAO DỊCH LẤY SỐ TỰ ĐỘNG TĂNG VÀ QUAY ĐẦU KHI CHẠM 900.000
             const newSoCtu = await runTransaction(db, async (transaction) => {
                 const counterDoc = await transaction.get(counterRef);
                 let currentValue = 1;
                 if (counterDoc.exists()) {
-                    currentValue = (counterDoc.data().value || 0) + 1;
+                    currentValue = Number(counterDoc.data().value || 0) + 1;
                 }
+                
+                // QUAY ĐẦU VỀ 1 NẾU VƯỢT QUÁ 900.000
+                if (currentValue > 900000) {
+                    currentValue = 1;
+                }
+
                 transaction.set(counterRef, { value: currentValue }, { merge: true });
                 return currentValue;
             });
             
-            // Trả về số chứng từ có đính kèm mã NV
-            return `${newSoCtu}-${currentUser ? currentUser.code : 'OFF'}`;
+            // TRẢ VỀ ĐÚNG MỘT CON SỐ NGUYÊN (Ví dụ: 1, 2, 3... Không dính đuôi rườm rà)
+            return newSoCtu;
             
         } catch (err) {
             if (attempt === retries - 1) {
-                // FALLBACK THÔNG MINH KHI OFFLINE (RỚT MẠNG)
-                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).split('-')[0]) || 0)) : 0;
+                // FALLBACK KHI OFFLINE: Vẫn đảm bảo quay đầu về 1 khi vượt 900.000
+                let localMax = orders.length > 0 ? Math.max(...orders.map(o => Number(String(o.soCtu).replace(/[^0-9]/g, '')) || 0)) : 0;
                 let fallbackVal = localMax + 1;
                 if (fallbackVal > 900000) fallbackVal = 1;
-                return `${fallbackVal}-${currentUser ? currentUser.code : 'OFF'}`;
+                return fallbackVal;
             }
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
         }
