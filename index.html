@@ -1702,11 +1702,13 @@ try {
     if (compListenerUnsub) compListenerUnsub();
 
     // 1. Lắng nghe thay đổi CTKM
+// 1. Lắng nghe thay đổi CTKM
     ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
-            if (serverVersion > localVersion && currentUser && currentUser.role !== 'admin') {
+            // TỐI ƯU 3: Thêm điều kiện localVersion !== 0
+            if (serverVersion > localVersion && localVersion !== 0 && currentUser && currentUser.role !== 'admin') {
                 localStorage.setItem("localCtkmVersion", serverVersion);
                 const snap = await getDocs(collection(db, "promotions"));
                 window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -1722,7 +1724,8 @@ try {
             const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
             const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
             
-            if (serverCompsVersion > localCompsVersion) {
+            // TỐI ƯU 3: Thêm điều kiện localCompsVersion !== 0
+            if (serverCompsVersion > localCompsVersion && localCompsVersion !== 0) {
                 const cSnap = await getDocs(collection(db, "companies"));
                 companyList = cSnap.docs.map(d => d.data());
                 window.allCompanies = companyList;
@@ -4966,23 +4969,35 @@ window.filterUsersList = function(val) {
   window.selectUnsubmittedDraftStore = function(storeId) {
     selectStoreDirectly(storeId);
   };
-
 function attachListeners() {
-    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100))).then(snap => {
+    // TỐI ƯU 1: Chỉ tải 30 đơn thay vì 100 đơn lúc khởi động (Tiết kiệm 70% Reads)
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 100;
+        hasMoreOrders = snap.docs.length >= 30;
       } else {
         hasMoreOrders = false;
       }
-
       if (currentTab === 'soGocBH' || currentTab === 'sales') {
         const activePane = document.getElementById(`tabPane_${currentTab}`);
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => {});
 
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+      // TỐI ƯU 2: Chỉ tải danh sách NV nếu mảng users đang rỗng
+      if (users.length === 0) {
+          getDocs(collection(db, "users")).then(snap => {
+            users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+            if (currentTab === 'users') {
+              const activePane = document.getElementById('tabPane_users');
+              if (activePane) renderTabContent(currentTab, activePane);
+            }
+          }).catch(e => {});
+      }
+    }
+}
     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
         users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
@@ -8451,10 +8466,11 @@ ${isAdminOrManager ? `
     calculateAndRenderTargets();
   }
 };
- window.forceRefreshKpi = async function() {
+window.forceRefreshKpi = async function() {
     // 1. Xóa rỗng cache của tháng hiện tại để ép tải lại từ đầu
     delete window._cachedKpiOrders[window._chiTieuTargetMonth];
-    window._cachedKpiMonth = ''; 
+    delete window._cachedMonthlyTargets[window._chiTieuTargetMonth]; // <--- THÊM DÒNG NÀY VÀO HÀM forceRefreshKpi
+    window._cachedKpiMonth = '';
 
     // 2. Hiệu ứng đang tải cho nút
     const btn = document.getElementById('btnForceRefreshKpi');
@@ -8835,6 +8851,8 @@ const targetDocId = `tgt_${window._chiTieuTargetSalesCode}_${window._chiTieuTarg
 };
 window._cachedKpiOrders = {};
 window._cachedKpiMonth = '';  
+window._cachedMonthlyTargets = {}; // <--- THÊM BIẾN NÀY ĐỂ CACHE CHỈ TIÊU
+
 window.calculateAndRenderTargets = async function() {
   const container = document.getElementById('targetDashboardContainer');
   if (!container) return;
@@ -8855,18 +8873,26 @@ window.calculateAndRenderTargets = async function() {
     let globalGroupedData = {};
     let assignedSalesCodes = new Set(); 
 
-    const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
-    const targetsSnap = await getDocs(qTargets);
+    // --- TỐI ƯU ĐỘT PHÁ TẠI ĐÂY: KHÔNG GỌI FIREBASE NẾU ĐÃ CÓ CACHE ---
+    let targetsData = [];
+    if (window._cachedMonthlyTargets[window._chiTieuTargetMonth]) {
+        targetsData = window._cachedMonthlyTargets[window._chiTieuTargetMonth];
+    } else {
+        const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
+        const targetsSnap = await getDocs(qTargets);
+        targetsData = targetsSnap.docs.map(d => d.data());
+        window._cachedMonthlyTargets[window._chiTieuTargetMonth] = targetsData; // Lưu vào RAM ngay lập tức
+    }
+
     let targetDocFound = false;
     
-    targetsSnap.forEach(doc => {
-      const data = doc.data();
+    // Đổi tên targetsSnap.forEach thành targetsData.forEach vì ta đang dùng mảng Cache
+    targetsData.forEach(data => {
       if(data && data.month === window._chiTieuTargetMonth) {
         targetDocFound = true;
         const items = data.items || [];
         const revenues = data.companyRevenues || {};
-        const sCode = data.salesCode;
-        
+        const sCode = data.salesCode; 
         const hasItems = items && items.length > 0;
         const hasRevenues = revenues && Object.keys(revenues).length > 0;
         if (sCode && (hasItems || hasRevenues)) {
