@@ -6,6 +6,7 @@
 <title>DMS ĐẠI ĐÔNG - SALES PRO ENTERPRISE</title>
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="DMS SFA">
 
@@ -421,7 +422,8 @@ import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebase
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
     getFirestore, collection, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot
+    serverTimestamp, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot,
+    initializeFirestore, persistentLocalCache, persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -436,9 +438,9 @@ import {
 
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
-const db = getFirestore(app);
-enableIndexedDbPersistence(db).catch(() => {});
-
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+});
 
 let secondaryApp;
 if (getApps().length === 1) { 
@@ -1056,35 +1058,36 @@ window.syncOfflineCheckins = async function() {
         };
     } catch (e) { console.error("Lỗi đồng bộ Checkins:", e); }
 };
-  async function saveProductsToLocalCache(list) {
+ async function saveProductsToLocalCache(list) {
+    if (!list || list.length === 0) return; // Chống mất dữ liệu nếu tải rỗng do lỗi mạng
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const transaction = idbDb.transaction(["localProducts"], "readwrite");
       const store = transaction.objectStore("localProducts");
-      store.clear();
-      list.forEach(p => store.put(p));
+      
+      list.forEach(p => store.put(p)); // Cập nhật hoặc thêm mới
+      
+      // Xóa an toàn các vật tư không còn trên server
+      const newIds = new Set(list.map(p => String(p.id || p.code)));
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+         request.result.forEach(key => {
+            if (!newIds.has(String(key))) store.delete(key);
+         });
+      };
+      
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
   }
 
-  async function loadProductsFromLocalCache() {
-    if (!idbDb) await initIndexedDB();
-    return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localProducts"], "readonly");
-      const store = transaction.objectStore("localProducts");
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(transaction.error);
-    });
-  }
-
   async function saveStoresToLocalCache(list) {
+    if (!list || list.length === 0) return;
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const transaction = idbDb.transaction(["localStores"], "readwrite");
       const store = transaction.objectStore("localStores");
-      store.clear();
+      
       list.forEach(s => {
         const storeItem = {
           id: String(s.id || s.code || ('kh_' + Math.random().toString(36).slice(2, 7))),
@@ -1092,6 +1095,59 @@ window.syncOfflineCheckins = async function() {
         };
         store.put(storeItem);
       });
+
+      const newIds = new Set(list.map(s => String(s.id || s.code)));
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+         request.result.forEach(key => {
+            if (!newIds.has(String(key))) store.delete(key);
+         });
+      };
+      
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function saveRoutesToLocalCache(list) {
+    if (!list || list.length === 0) return;
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localRoutes"], "readwrite");
+      const store = transaction.objectStore("localRoutes");
+      
+      list.forEach(r => store.put(r));
+      
+      const newIds = new Set(list.map(r => String(r.id)));
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+         request.result.forEach(key => {
+            if (!newIds.has(String(key))) store.delete(key);
+         });
+      };
+      
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function saveCompaniesToLocalCache(list) {
+    if (!list || list.length === 0) return;
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localCompanies"], "readwrite");
+      const store = transaction.objectStore("localCompanies");
+      
+      list.forEach(c => store.put(c));
+      
+      const newIds = new Set(list.map(c => String(c.maCtu)));
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+         request.result.forEach(key => {
+            if (!newIds.has(String(key))) store.delete(key);
+         });
+      };
+      
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
