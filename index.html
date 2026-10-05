@@ -6797,8 +6797,23 @@ window._renderHistoryResultsOnly = function() {
         groupedByCompany[ctyKey].push(tp);
       });
 
-      let groupHtmlArr = [];
       Object.keys(groupedByCompany).sort().forEach(ctyCode => {
+        const prods = groupedByCompany[ctyCode];
+        
+        // --- THÊM MỚI: Tính tổng doanh số của Công ty này ---
+        let compTotalRev = 0;
+        prods.forEach(p => {
+           // Tìm giá của sản phẩm trong mảng gốc để nhân với tổng số lượng
+           const pObj = products.find(x => x.code === p.code || x.id === p.code);
+           const pPrice = Number(pObj?.price || 0);
+           compTotalRev += (p.totalQty * pPrice);
+        });
+        const compRevStr = compTotalRev > 0 ? `<span style="color:var(--rose); font-weight:900; margin-right:8px;">${(compTotalRev/1000).toLocaleString('vi-VN')}K</span>` : '';
+        // ----------------------------------------------------
+
+        let displayName = `Công Ty ${ctyCode}`;
+        const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
+        if (found && found.tenCtu) { displayName = found.tenCtu; }
         const prods = groupedByCompany[ctyCode];
         let displayName = `Công Ty ${ctyCode}`;
         const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
@@ -6830,13 +6845,15 @@ window._renderHistoryResultsOnly = function() {
         }).join('');
 
         groupHtmlArr.push(`
-          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0; transform: translateZ(0);">
+         <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0; transform: translateZ(0);">
             <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
               <div style="display:flex; gap:10px; align-items:center; flex:1;">
                 <span style="font-size:15px; font-weight:800; color:var(--primary); flex-shrink:0;"><i class="fa-solid fa-building"></i></span>
                 <span style="font-size:15px; font-weight:800; color:var(--primary); word-break:break-word; flex:1;">${displayName}</span>
                 <span style="font-size:12px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:10px; flex-shrink:0;">${prods.length} SP</span>
               </div>
+              <!-- CHÈN TỔNG DOANH SỐ CÔNG TY VÀO ĐÂY -->
+              ${compRevStr}
               <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s; flex-shrink:0;"></i>
             </div>
             <div id="${groupAccordionId}" class="hidden" style="padding:10px 12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:8px; background:var(--card-bg);">
@@ -6951,11 +6968,21 @@ window._renderHistoryResultsOnly = function() {
               </div>
           </div>
         `;
-      } else {
+     } else {
         htmlOutput = diaryOrders.map(o => {
             const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
             const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
             const accordionId = `acc_order_${o.id}`;
+
+            // --- THÊM MỚI: Tính tổng tiền của hóa đơn này ---
+            let orderTotalRev = 0;
+            validItems.forEach(i => {
+                const pObj = products.find(p => p.id === i.id || p.code === i.code);
+                const iPrice = Number(i.price || pObj?.price || 0);
+                orderTotalRev += (Number(i.qty || 0) * iPrice);
+            });
+            const orderRevStr = orderTotalRev > 0 ? `<span style="font-size:15px; font-weight:900; color:var(--rose); margin-right: 10px;">${(orderTotalRev/1000).toLocaleString('vi-VN')}K</span>` : '';
+            // ------------------------------------------------
 
             let validItemsHtml = validItems.map(item => {
                 const productObj = products.find(p => p.id === item.id || p.code === item.code);
@@ -6980,13 +7007,15 @@ window._renderHistoryResultsOnly = function() {
 
             return `
               <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; flex-shrink: 0; margin-bottom:8px; transform: translateZ(0);">
-                <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+                <div onclick="toggleOrderAccordion('${accordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg); flex-wrap: wrap; gap: 8px;">
                   <div style="display:flex; gap:10px; align-items:center;">
                     <span style="font-size:15px; font-weight:800; background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 8px; border-radius:6px;">#${o.soCtu}</span>
                     <span style="font-size:14px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
                   </div>
                   <div style="display:flex; gap:10px; align-items:center;">
-                      <span style="font-size:15px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
+                      <!-- CHÈN TỔNG TIỀN VÀO ĐÂY -->
+                      ${orderRevStr}
+                      <span style="font-size:14px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
                       <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('${o.id}')" style="padding:4px 8px; font-size:11px;">Bốc Đơn</button>
                       <i class="fa-solid fa-chevron-down" id="icon_${accordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s;"></i>
                   </div>
