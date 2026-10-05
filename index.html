@@ -422,7 +422,7 @@ import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebase
 import {
     getFirestore, collection, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
     serverTimestamp, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot,
-    initializeFirestore, persistentLocalCache, persistentMultipleTabManager
+    initializeFirestore, persistentLocalCache, persistentMultipleTabManager, increment // <--- THÊM CHỮ NÀY
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -1703,11 +1703,11 @@ try {
 
     // 1. Lắng nghe thay đổi CTKM
 // 1. Lắng nghe thay đổi CTKM
+   // TÌM VÀ XÓA BỎ ĐOẠN NÀY ĐỂ MÁY NHÂN VIÊN KHÔNG BỊ TRIGGER TỰ ĐỘNG
     ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
-            // TỐI ƯU 3: Thêm điều kiện localVersion !== 0
             if (serverVersion > localVersion && localVersion !== 0 && currentUser && currentUser.role !== 'admin') {
                 localStorage.setItem("localCtkmVersion", serverVersion);
                 const snap = await getDocs(collection(db, "promotions"));
@@ -4054,6 +4054,41 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
 
     const docRef = doc(db, "orders", orderUuid);
 setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e));
+      // (Dòng cũ của anh: setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e)); )
+      
+      // --- THÊM MỚI: TỰ ĐỘNG TÍNH TỔNG KPI BẰNG INCREMENT (CHỐNG BÃO READ VỀ SAU) ---
+      try {
+          let compRevUpdates = {};
+          let skuQtyUpdates = {};
+          
+          items.forEach(item => {
+              const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
+              const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+              const price = Number(item.price || pObj?.price || 0);
+              const itemRev = Number(item.qty || 0) * price;
+              const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
+              
+              const skuKey = String(item.code || item.id).toUpperCase();
+              let compCode = "KHAC";
+              if (skuKey.startsWith('11') || skuKey.includes('TLSG')) compCode = '11';
+              else if (skuKey.length >= 2) compCode = skuKey.substring(0, 2);
+              
+              compRevUpdates[`rev_${compCode}`] = increment(itemRev);
+              skuQtyUpdates[`qty_${skuKey}`] = increment(qtyThung);
+          });
+
+          // Lưu thẳng vào bảng monthlyStats
+          const statRef = doc(db, "monthlyStats", `stat_${currentUser.code}_${todayStr.slice(0,7)}`);
+          setDoc(statRef, {
+              salesCode: currentUser.code,
+              month: todayStr.slice(0,7),
+              totalOrders: increment(1),
+              ...compRevUpdates,
+              ...skuQtyUpdates
+          }, { merge: true }).catch(e => console.log("Lỗi lưu stats", e));
+      } catch (statErr) {
+          console.log("Bỏ qua lỗi stats: ", statErr);
+      }
       const localRenderOrder = {
         ...orderData,
         createdAt: new Date()
@@ -5844,24 +5879,20 @@ else if (tab === 'ctkm') {
         container.innerHTML = groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào phù hợp.</div>';
     };
 
-    window.reloadCtkmDataManually = async function() {
+   window.reloadCtkmDataManually = async function() {
         try {
-            if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-                alert("⏳ Đang cập nhật dữ liệu CTKM mới nhất lên hệ thống cho tất cả mọi người...");
-                const versionVal = Date.now();
-                await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: versionVal }, { merge: true });
-            } else {
-                alert("⏳ Đang tải dữ liệu CTKM mới nhất về máy...");
-            }
+            const btn = document.querySelector('button[onclick="reloadCtkmDataManually()"]');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
+            // Kéo dữ liệu duy nhất cho máy này
             const snap = await getDocs(collection(db, "promotions"));
             window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
             window.promotionsLoaded = true;
             
-            if (typeof drawCtkmUI === 'function') {
-                drawCtkmUI();
-            }
-            alert("✅ Đã cập nhật thành công!");
+            if (typeof drawCtkmUI === 'function') drawCtkmUI();
+            
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
+            alert("✅ Đã cập nhật CTKM mới nhất về máy!");
         } catch (e) {
             alert("Lỗi tải lại CTKM: " + e.message);
         }
@@ -8945,12 +8976,22 @@ window.calculateAndRenderTargets = async function() {
         if (targetDocFound) { 
             const startOfMonth = window._chiTieuTargetMonth + "-01";
             const endOfMonth = window._chiTieuTargetMonth + "-31";
-            
-            if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
-                const q = query(collection(db, "orders"), 
-                    where("ngayCtu", ">=", startOfMonth), 
-                    where("ngayCtu", "<=", endOfMonth)
-                );
+           if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+                let q;
+                if (isAdminOrManager) {
+                    // ADMIN & MANAGER: Kéo toàn bộ đơn để xem bảng xếp hạng tổng
+                    q = query(collection(db, "orders"), 
+                        where("ngayCtu", ">=", startOfMonth), 
+                        where("ngayCtu", "<=", endOfMonth)
+                    );
+                } else {
+                    // SALES: CHỈ KÉO ĐƠN CỦA CHÍNH MÌNH (Cắt giảm cực lớn chi phí Read)
+                    q = query(collection(db, "orders"), 
+                        where("ngayCtu", ">=", startOfMonth), 
+                        where("ngayCtu", "<=", endOfMonth),
+                        where("salesCode", "==", currentUser.code)
+                    );
+                }
                 const mSnap = await getDocs(q);
                 window._cachedKpiOrders[window._chiTieuTargetMonth] = mSnap.docs.map(d => d.data());
                 window._cachedKpiMonth = window._chiTieuTargetMonth;
