@@ -6744,7 +6744,11 @@ window._renderHistoryResultsOnly = function() {
     const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
     return (matchId || matchCode) && o.status !== 'Đã hủy';
   });
-  customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
+  
+  customerOrders.sort((a, b) => {
+      const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
+      return getNum(b.soCtu) - getNum(a.soCtu);
+  });
 
   const isTopTab = window._historyModalTab === 'top';
 
@@ -6797,24 +6801,23 @@ window._renderHistoryResultsOnly = function() {
         groupedByCompany[ctyKey].push(tp);
       });
 
+      let groupHtmlArr = [];
       Object.keys(groupedByCompany).sort().forEach(ctyCode => {
         const prods = groupedByCompany[ctyCode];
         
-        // --- THÊM MỚI: Tính tổng doanh số của Công ty này ---
+        // --- THÊM TỔNG DOANH SỐ CHO TỪNG CÔNG TY ---
         let compTotalRev = 0;
         prods.forEach(p => {
-           // Tìm giá của sản phẩm trong mảng gốc để nhân với tổng số lượng
            const pObj = products.find(x => x.code === p.code || x.id === p.code);
            const pPrice = Number(pObj?.price || 0);
            compTotalRev += (p.totalQty * pPrice);
         });
         const compRevStr = compTotalRev > 0 ? `<span style="color:var(--rose); font-weight:900; margin-right:8px;">${(compTotalRev/1000).toLocaleString('vi-VN')}K</span>` : '';
-        // ----------------------------------------------------
 
         let displayName = `Công Ty ${ctyCode}`;
         const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
         if (found && found.tenCtu) { displayName = found.tenCtu; }
-        const prods = groupedByCompany[ctyCode];
+
         const groupAccordionId = `acc_company_${ctyCode}`;
 
         let prodListHtml = prods.map(tp => {
@@ -6841,14 +6844,13 @@ window._renderHistoryResultsOnly = function() {
         }).join('');
 
         groupHtmlArr.push(`
-         <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0; transform: translateZ(0);">
+          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0; transform: translateZ(0);">
             <div onclick="toggleOrderAccordion('${groupAccordionId}')" style="padding:12px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
               <div style="display:flex; gap:10px; align-items:center; flex:1;">
                 <span style="font-size:15px; font-weight:800; color:var(--primary); flex-shrink:0;"><i class="fa-solid fa-building"></i></span>
                 <span style="font-size:15px; font-weight:800; color:var(--primary); word-break:break-word; flex:1;">${displayName}</span>
                 <span style="font-size:12px; font-weight:700; background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:10px; flex-shrink:0;">${prods.length} SP</span>
               </div>
-              <!-- CHÈN TỔNG DOANH SỐ CÔNG TY VÀO ĐÂY -->
               ${compRevStr}
               <i class="fa-solid fa-chevron-down" id="icon_${groupAccordionId}" style="font-size:14px; color:var(--text-muted); transition:transform 0.2s; flex-shrink:0;"></i>
             </div>
@@ -6859,6 +6861,7 @@ window._renderHistoryResultsOnly = function() {
         `);
       });
       contentEl.innerHTML = groupHtmlArr.join('');
+
   } else {
       let diaryOrders = [...customerOrders];
       
@@ -6903,13 +6906,10 @@ window._renderHistoryResultsOnly = function() {
         });
 
         let consolidatedList = Array.from(aggregatedItems.values());
-
-        // GOM NHÓM VÀ SẮP XẾP DỰA TRÊN 2 KÝ TỰ ĐẦU CỦA MÃ SẢN PHẨM
         let groupedByCompany = {};
         consolidatedList.forEach(item => {
           let cleanCode = String(item.code || '').trim();
           let ctyKey = cleanCode.length >= 2 ? cleanCode.substring(0, 2).toUpperCase() : 'KHAC';
-
           if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
           groupedByCompany[ctyKey].push(item);
         });
@@ -6919,7 +6919,7 @@ window._renderHistoryResultsOnly = function() {
 
         Object.keys(groupedByCompany).sort().forEach(ctyCode => {
           let prods = groupedByCompany[ctyCode];
-          prods.sort((a, b) => b.qty - a.qty); // Sắp xếp sản phẩm theo số lượng giảm dần trong từng nhóm
+          prods.sort((a, b) => b.qty - a.qty); 
 
           let displayName = `Công Ty ${ctyCode}`;
           const found = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctyCode);
@@ -6964,13 +6964,13 @@ window._renderHistoryResultsOnly = function() {
               </div>
           </div>
         `;
-     } else {
+      } else {
         htmlOutput = diaryOrders.map(o => {
             const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
             const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
             const accordionId = `acc_order_${o.id}`;
 
-            // --- THÊM MỚI: Tính tổng tiền của hóa đơn này ---
+            // --- THÊM TỔNG TIỀN CHO TỪNG ĐƠN HÀNG ---
             let orderTotalRev = 0;
             validItems.forEach(i => {
                 const pObj = products.find(p => p.id === i.id || p.code === i.code);
@@ -6978,7 +6978,6 @@ window._renderHistoryResultsOnly = function() {
                 orderTotalRev += (Number(i.qty || 0) * iPrice);
             });
             const orderRevStr = orderTotalRev > 0 ? `<span style="font-size:15px; font-weight:900; color:var(--rose); margin-right: 10px;">${(orderTotalRev/1000).toLocaleString('vi-VN')}K</span>` : '';
-            // ------------------------------------------------
 
             let validItemsHtml = validItems.map(item => {
                 const productObj = products.find(p => p.id === item.id || p.code === item.code);
@@ -7009,7 +7008,6 @@ window._renderHistoryResultsOnly = function() {
                     <span style="font-size:14px; font-weight:700; color:var(--text-muted);">${formatDateDDMMYYYY(o.ngayCtu)} ${formatOrderTime(o.createdAt)}</span>
                   </div>
                   <div style="display:flex; gap:10px; align-items:center;">
-                      <!-- CHÈN TỔNG TIỀN VÀO ĐÂY -->
                       ${orderRevStr}
                       <span style="font-size:14px; font-weight:800; color:var(--emerald);">SL: ${totalSL}</span>
                       <button class="btn btn-amber btn-sm" onclick="event.stopPropagation(); cloneOrderToCart('${o.id}')" style="padding:4px 8px; font-size:11px;">Bốc Đơn</button>
