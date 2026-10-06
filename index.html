@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>DMS ĐẠI ĐÔNG - SALES PRO ENTERPRISE</title>
 <meta name="theme-color" content="#000000">
-<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="DMS SFA">
 
@@ -421,8 +421,7 @@ import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebase
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
     getFirestore, collection, addDoc, deleteDoc, doc, setDoc, updateDoc, getDoc, getDocs,
-    serverTimestamp, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot,
-    initializeFirestore, persistentLocalCache, persistentMultipleTabManager, increment // <--- THÊM CHỮ NÀY
+    serverTimestamp, enableIndexedDbPersistence, query, orderBy, limit, startAfter, writeBatch, where, runTransaction, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -437,9 +436,9 @@ import {
 
   const app = initializeApp(firebaseConfig);
   const authSvc = getAuth(app);
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
-});
+const db = getFirestore(app);
+enableIndexedDbPersistence(db).catch(() => {});
+
 
 let secondaryApp;
 if (getApps().length === 1) { 
@@ -1057,56 +1056,18 @@ window.syncOfflineCheckins = async function() {
         };
     } catch (e) { console.error("Lỗi đồng bộ Checkins:", e); }
 };
- async function saveProductsToLocalCache(list) {
-    if (!list || list.length === 0) return; // Chống mất dữ liệu nếu tải rỗng do lỗi mạng
+  async function saveProductsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
       const transaction = idbDb.transaction(["localProducts"], "readwrite");
       const store = transaction.objectStore("localProducts");
-      
-      list.forEach(p => store.put(p)); // Cập nhật hoặc thêm mới
-      
-      // Xóa an toàn các vật tư không còn trên server
-      const newIds = new Set(list.map(p => String(p.id || p.code)));
-      const request = store.getAllKeys();
-      request.onsuccess = () => {
-         request.result.forEach(key => {
-            if (!newIds.has(String(key))) store.delete(key);
-         });
-      };
-      
+      store.clear();
+      list.forEach(p => store.put(p));
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
   }
 
- async function saveStoresToLocalCache(list) {
-    if (!list || list.length === 0) return;
-    if (!idbDb) await initIndexedDB();
-    return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localStores"], "readwrite");
-      const store = transaction.objectStore("localStores");
-      
-      list.forEach(s => {
-        const storeItem = {
-          id: String(s.id || s.code || ('kh_' + Math.random().toString(36).slice(2, 7))),
-          ...s
-        };
-        store.put(storeItem);
-      });
-
-      const newIds = new Set(list.map(s => String(s.id || s.code)));
-      const request = store.getAllKeys();
-      request.onsuccess = () => {
-         request.result.forEach(key => {
-            if (!newIds.has(String(key))) store.delete(key);
-         });
-      };
-      
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
-  }
   async function loadProductsFromLocalCache() {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -1117,45 +1078,20 @@ window.syncOfflineCheckins = async function() {
       request.onerror = () => reject(transaction.error);
     });
   }
- async function saveRoutesToLocalCache(list) {
-    if (!list || list.length === 0) return;
-    if (!idbDb) await initIndexedDB();
-    return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localRoutes"], "readwrite");
-      const store = transaction.objectStore("localRoutes");
-      
-      list.forEach(r => store.put(r));
-      
-      const newIds = new Set(list.map(r => String(r.id)));
-      const request = store.getAllKeys();
-      request.onsuccess = () => {
-         request.result.forEach(key => {
-            if (!newIds.has(String(key))) store.delete(key);
-         });
-      };
-      
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
-  }
 
-  async function saveCompaniesToLocalCache(list) {
-    if (!list || list.length === 0) return;
+  async function saveStoresToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localCompanies"], "readwrite");
-      const store = transaction.objectStore("localCompanies");
-      
-      list.forEach(c => store.put(c));
-      
-      const newIds = new Set(list.map(c => String(c.maCtu)));
-      const request = store.getAllKeys();
-      request.onsuccess = () => {
-         request.result.forEach(key => {
-            if (!newIds.has(String(key))) store.delete(key);
-         });
-      };
-      
+      const transaction = idbDb.transaction(["localStores"], "readwrite");
+      const store = transaction.objectStore("localStores");
+      store.clear();
+      list.forEach(s => {
+        const storeItem = {
+          id: String(s.id || s.code || ('kh_' + Math.random().toString(36).slice(2, 7))),
+          ...s
+        };
+        store.put(storeItem);
+      });
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -1172,6 +1108,18 @@ window.syncOfflineCheckins = async function() {
     });
   }
 
+  async function saveRoutesToLocalCache(list) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localRoutes"], "readwrite");
+      const store = transaction.objectStore("localRoutes");
+      store.clear();
+      list.forEach(r => store.put(r));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
   async function loadRoutesFromLocalCache() {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
@@ -1180,6 +1128,18 @@ window.syncOfflineCheckins = async function() {
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function saveCompaniesToLocalCache(list) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localCompanies"], "readwrite");
+      const store = transaction.objectStore("localCompanies");
+      store.clear();
+      list.forEach(c => store.put(c));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 
@@ -1245,17 +1205,15 @@ window.syncOfflineCheckins = async function() {
     });
   }
 
-async function cleanupExpiredOrdersOptimized() {
-    // KHẮC PHỤC: Chặn đứng tài khoản Sales/Viewer chạy lệnh này để chống đốt Read
-    if (!currentUser || currentUser.role !== 'admin') return;
-
+  async function cleanupExpiredOrdersOptimized() {
     const lastCleanup = localStorage.getItem('dms_last_cleanup_date');
     const todayStr = new Date().toISOString().slice(0, 10);
     if (lastCleanup === todayStr) return;
 
     try {
-      const pastDate = new Date(Date.now() - (60 * 24 * 60 * 60 * 1000));
-      const thresholdDateStr = pastDate.toISOString().slice(0, 10);
+     // Đặt ngưỡng thời gian dọn dẹp là 60 ngày trước
+const pastDate = new Date(Date.now() - (60 * 24 * 60 * 60 * 1000));
+const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
       const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(50));
       const snap = await getDocs(q);
@@ -1712,44 +1670,40 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
 try {
     if (ctkmListenerUnsub) ctkmListenerUnsub();
     if (compListenerUnsub) compListenerUnsub();
-// 1. Lắng nghe thay đổi CTKM (TỐI ƯU CHỐNG BÃO READ)
+
+    // 1. Lắng nghe thay đổi CTKM
     ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
-            if (serverVersion > localVersion && localVersion !== 0 && currentUser && currentUser.role !== 'admin') {
+            if (serverVersion > localVersion && currentUser && currentUser.role !== 'admin') {
                 localStorage.setItem("localCtkmVersion", serverVersion);
-                
-                // NẾU ĐANG MỞ TAB CTKM THÌ MỚI TẢI XUỐNG NGAY
-                if (currentTab === 'ctkm') {
-                    const snap = await getDocs(collection(db, "promotions"));
-                    window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                    window.promotionsLoaded = true;
-                    if (typeof drawCtkmUI === 'function') drawCtkmUI();
-                } else {
-                    // NẾU KHÔNG Ở TAB CTKM, CHỈ ĐÁNH DẤU LÀ DỮ LIỆU ĐÃ CŨ ĐỂ TẢI LẠI KHI CẦN
-                    window.promotionsLoaded = false; 
-                }
+                const snap = await getDocs(collection(db, "promotions"));
+                window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                window.promotionsLoaded = true;
+                if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') drawCtkmUI();
             }
         }
     });
 
-    // 2. Lắng nghe thay đổi danh sách CÔNG TY (TỐI ƯU CHỐNG BÃO READ)
+    // 2. Lắng nghe thay đổi danh sách CÔNG TY
     compListenerUnsub = onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
             const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
             
-            if (serverCompsVersion > localCompsVersion && localCompsVersion !== 0) {
+            if (serverCompsVersion > localCompsVersion) {
+                const cSnap = await getDocs(collection(db, "companies"));
+                companyList = cSnap.docs.map(d => d.data());
+                window.allCompanies = companyList;
+                
+                if (typeof saveCompaniesToLocalCache === 'function') {
+                    await saveCompaniesToLocalCache(companyList);
+                }
                 localStorage.setItem("companiesVersion", serverCompsVersion);
                 
-                // CHỈ TẢI NẾU USER ĐANG MỞ TAB CÔNG TY, NẾU KHÔNG CỨ ĐỂ YÊN
-                if (currentTab === 'company') {
-                    const cSnap = await getDocs(collection(db, "companies"));
-                    companyList = cSnap.docs.map(d => d.data());
-                    window.allCompanies = companyList;
-                    if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(companyList);
-                    if (typeof renderUI === 'function') renderUI();
+                if (typeof renderUI === 'function' && currentTab === 'company') {
+                    renderUI();
                 }
             }
         }
@@ -1872,16 +1826,10 @@ window.handleLogout = async function() {
   };
 
   window.refreshStoresGPSData = async function() {
-  const now = Date.now();
-  const lastGpsRefresh = Number(localStorage.getItem('dms_cooldown_gps') || 0);
-  if (now - lastGpsRefresh < 300000) { 
-      const remain = Math.ceil((300000 - (now - lastGpsRefresh)) / 60000);
-      return alert(`⏳ Dữ liệu GPS đã được cập nhật gần đây. Thử lại sau ${remain} phút nữa!`);
-  }
-  localStorage.setItem('dms_cooldown_gps', now);
-
   try {
     alert("⏳ Đang cập nhật dữ liệu ghim GPS mới nhất từ hệ thống...");
+    
+    // Chỉ truy vấn bảng stores để lấy thông tin GPS (tiết kiệm băng thông và tối ưu tốc độ)
     const storeSnap = await getDocs(collection(db, "stores"));
     let updatedCount = 0;
 
@@ -3142,19 +3090,13 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
   };
 
  window.reloadSoGocDataManually = async function() {
-    // THÊM COOLDOWN 30 GIÂY
-    const now = Date.now();
-    const lastReload = Number(localStorage.getItem('dms_cooldown_sogoc') || 0);
-    if (now - lastReload < 30000) {
-        return alert("⏳ Vui lòng đợi 30 giây giữa các lần làm mới để tránh quá tải hệ thống!");
-    }
-    localStorage.setItem('dms_cooldown_sogoc', now);
-
     try {
+      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
       const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
       if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-      const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100)));
+      // Tải dữ liệu mới từ Firebase
+     const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100)));
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       if (!snap.empty) {
@@ -3892,7 +3834,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     if (!isOnline) {
         let maxExisting = 0;
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-      kpiOrdersData.forEach(o => {
+            orders.forEach(o => {
                 // Chỉ quét các số ctu offline cũ của chính nhân viên này để tính tiếp
                 let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                 if (!isNaN(num) && num > maxExisting) {
@@ -3916,7 +3858,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 
                 let maxExisting = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-              kpiOrdersData.forEach(o => {
+                    orders.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > maxExisting) {
                             maxExisting = num;
@@ -3944,7 +3886,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 // Fallback an toàn nếu lỗi transaction mạng
                 let localMax = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-              kpiOrdersData.forEach(o => {
+                    orders.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > localMax) localMax = num;
                     });
@@ -4075,54 +4017,10 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         updatedAt: editingOrderId ? serverTimestamp() : null
       };
 
-     const savedStoreId = activeVisitedStore.id;
+      const savedStoreId = activeVisitedStore.id;
 
-      // --- BỔ SUNG FIX BÁN OFFLINE: ĐƯA ĐƠN VÀO HÀNG ĐỢI NẾU MẤT MẠNG ---
-      if (!navigator.onLine) {
-          try {
-              if (!idbDb) await initIndexedDB();
-              const tx = idbDb.transaction(["offlineOrders"], "readwrite");
-              // Đưa vào kho offlineOrders để hàm syncOfflineOrders của anh có cái mà đồng bộ
-              tx.objectStore("offlineOrders").put({ ...orderData, id: orderUuid });
-          } catch (err) {
-              console.log("Lỗi lưu đơn offline vào IndexedDB:", err);
-          }
-      }
-
-      const docRef = doc(db, "orders", orderUuid);
-      setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi Firebase", e));
-      try {
-          let compRevUpdates = {};
-          let skuQtyUpdates = {};
-          
-          items.forEach(item => {
-              const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
-              const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
-              const price = Number(item.price || pObj?.price || 0);
-              const itemRev = Number(item.qty || 0) * price;
-              const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
-              
-              const skuKey = String(item.code || item.id).toUpperCase();
-              let compCode = "KHAC";
-              if (skuKey.startsWith('11') || skuKey.includes('TLSG')) compCode = '11';
-              else if (skuKey.length >= 2) compCode = skuKey.substring(0, 2);
-              
-              compRevUpdates[`rev_${compCode}`] = increment(itemRev);
-              skuQtyUpdates[`qty_${skuKey}`] = increment(qtyThung);
-          });
-
-          // Lưu thẳng vào bảng monthlyStats
-          const statRef = doc(db, "monthlyStats", `stat_${currentUser.code}_${todayStr.slice(0,7)}`);
-          setDoc(statRef, {
-              salesCode: currentUser.code,
-              month: todayStr.slice(0,7),
-              totalOrders: increment(1),
-              ...compRevUpdates,
-              ...skuQtyUpdates
-          }, { merge: true }).catch(e => console.log("Lỗi lưu stats", e));
-      } catch (statErr) {
-          console.log("Bỏ qua lỗi stats: ", statErr);
-      }
+    const docRef = doc(db, "orders", orderUuid);
+setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e));
       const localRenderOrder = {
         ...orderData,
         createdAt: new Date()
@@ -5038,35 +4936,33 @@ window.filterUsersList = function(val) {
   window.selectUnsubmittedDraftStore = function(storeId) {
     selectStoreDirectly(storeId);
   };
+
 function attachListeners() {
-    // TỐI ƯU 1: Chỉ tải 30 đơn thay vì 100 đơn lúc khởi động (Tiết kiệm 70% Reads)
-    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(30))).then(snap => {
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100))).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 30;
+        hasMoreOrders = snap.docs.length >= 100;
       } else {
         hasMoreOrders = false;
       }
+
       if (currentTab === 'soGocBH' || currentTab === 'sales') {
         const activePane = document.getElementById(`tabPane_${currentTab}`);
         if (activePane) renderTabContent(currentTab, activePane);
       }
     }).catch(e => {});
 
- if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
-      // TỐI ƯU 2: Chỉ tải danh sách NV nếu mảng users đang rỗng
-      if (users.length === 0) {
-          getDocs(collection(db, "users")).then(snap => {
-            users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
-            if (currentTab === 'users') {
-              const activePane = document.getElementById('tabPane_users');
-              if (activePane) renderTabContent(currentTab, activePane);
-            }
-          }).catch(e => {});
-      }
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+      getDocs(collection(db, "users")).then(snap => {
+        users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+        if (currentTab === 'users') {
+          const activePane = document.getElementById('tabPane_users');
+          if (activePane) renderTabContent(currentTab, activePane);
+        }
+      }).catch(e => {});
     }
-}
+  }
 
   window.switchTab = function(tabName) {
     currentTab = tabName;
@@ -5913,20 +5809,24 @@ else if (tab === 'ctkm') {
         container.innerHTML = groupHtmlArr.length > 0 ? groupHtmlArr.join('') : '<div style="text-align:center; color:var(--text-muted); font-size:14px; padding:30px 0; font-weight:800;">Không có CTKM nào phù hợp.</div>';
     };
 
-   window.reloadCtkmDataManually = async function() {
+    window.reloadCtkmDataManually = async function() {
         try {
-            const btn = document.querySelector('button[onclick="reloadCtkmDataManually()"]');
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+            if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+                alert("⏳ Đang cập nhật dữ liệu CTKM mới nhất lên hệ thống cho tất cả mọi người...");
+                const versionVal = Date.now();
+                await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: versionVal }, { merge: true });
+            } else {
+                alert("⏳ Đang tải dữ liệu CTKM mới nhất về máy...");
+            }
 
-            // Kéo dữ liệu duy nhất cho máy này
             const snap = await getDocs(collection(db, "promotions"));
             window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
             window.promotionsLoaded = true;
             
-            if (typeof drawCtkmUI === 'function') drawCtkmUI();
-            
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
-            alert("✅ Đã cập nhật CTKM mới nhất về máy!");
+            if (typeof drawCtkmUI === 'function') {
+                drawCtkmUI();
+            }
+            alert("✅ Đã cập nhật thành công!");
         } catch (e) {
             alert("Lỗi tải lại CTKM: " + e.message);
         }
@@ -6205,7 +6105,7 @@ else if (tab === 'kpi') {
         let prevWeekEnd = new Date(firstDay); prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
         prevStart = prevWeekStart.toISOString().slice(0, 10);
         prevEnd = prevWeekEnd.toISOString().slice(0, 10);
- } else if (window._kpiDateFilter === 'custom') {
+      } else if (window._kpiDateFilter === 'custom') {
         filterStart = window._kpiDateFrom;
         filterEnd = window._kpiDateTo || todayStr;
         if (filterStart && filterEnd) {
@@ -6222,44 +6122,6 @@ else if (tab === 'kpi') {
         }
       }
 
-      // --- BẮT ĐẦU FIX LỖI 4: CHỐNG TRẮNG TAB VÀ LỖI INDEX FIRESTORE ---
-      const isAdminOrManagerKpi = currentUser.role === 'admin' || currentUser.role === 'manager';
-
-      let minDate = (prevStart && prevStart < filterStart) ? prevStart : filterStart;
-      let maxDate = (prevEnd && prevEnd > filterEnd) ? prevEnd : filterEnd;
-      if (!minDate) minDate = "2020-01-01"; 
-      if (!maxDate) maxDate = todayStr;
-
-      let cacheKey = `${minDate}_${maxDate}`;
-      window._cachedKpiOrdersObj = window._cachedKpiOrdersObj || {};
-
-      let kpiOrdersData = [];
-      if (window._cachedKpiOrdersObj[cacheKey]) {
-          kpiOrdersData = window._cachedKpiOrdersObj[cacheKey];
-      } else {
-          try {
-              // Chỉ query ngày để KHÔNG bị lỗi Composite Index của Firebase
-              const qKpi = query(collection(db, "orders"), 
-                  where("ngayCtu", ">=", minDate), 
-                  where("ngayCtu", "<=", maxDate)
-              );
-              const kpiSnap = await getDocs(qKpi);
-              let allFetched = kpiSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-              
-              // Tự động lọc tại máy cho nhân viên Sales
-              if (!isAdminOrManagerKpi) {
-                  allFetched = allFetched.filter(o => o.salesUid === currentUser.uid);
-              }
-              
-              kpiOrdersData = allFetched;
-              window._cachedKpiOrdersObj[cacheKey] = kpiOrdersData; 
-          } catch (error) {
-              console.error("Lỗi tải đơn hàng KPI:", error);
-              kpiOrdersData = orders; // Fallback an toàn nếu lỗi mạng
-          }
-      }
-      // --- KẾT THÚC FIX ---
-
       let kpiMap = new Map();
       let globalSkuMap = new Map();
       let globalStoreStatsMap = new Map(); 
@@ -6267,8 +6129,7 @@ else if (tab === 'kpi') {
       let currentStats = { kien: 0, don: 0, doanhSo: 0, tiems: new Set() };
       let prevStats = { kien: 0, don: 0, doanhSo: 0 }; 
 
-      // Mảng cũ đã được đổi tên thành kpiOrdersData
-      kpiOrdersData.forEach(o => {
+      orders.forEach(o => {
         if (o.status === 'Đã hủy') return;
 
         if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
@@ -6472,7 +6333,7 @@ else if (tab === 'kpi') {
 
               ${(() => {
                   let taiQuayAll = 0, tuXaAll = 0;
-            kpiOrdersData.forEach(o => {
+                  orders.forEach(o => {
                       if (o.status === 'Đã hủy') return;
                       if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
                       
@@ -6631,7 +6492,7 @@ else if (tab === 'kpi') {
             const accId = `kpi_acc_${rep.code}`;
 
             let repTaiQuay = 0, repTuXa = 0;
-      kpiOrdersData.forEach(o => {
+            orders.forEach(o => {
               if (o.status === 'Đã hủy') return;
               if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
               if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -6683,7 +6544,7 @@ else if (tab === 'kpi') {
                     <div style="display:flex; flex-direction:column; gap:5px; max-height:160px; overflow-y:auto; padding-right:6px;">
                       ${(() => {
                         const repSkusMap = {};
-                  kpiOrdersData.forEach(o => {
+                        orders.forEach(o => {
                           if (o.status === 'Đã hủy') return;
                           if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
                           if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -8560,13 +8421,12 @@ ${isAdminOrManager ? `
     calculateAndRenderTargets();
   }
 };
-window.forceRefreshKpi = async function() {
+ window.forceRefreshKpi = async function() {
     // 1. Xóa rỗng cache của tháng hiện tại để ép tải lại từ đầu
-    delete window._cachedKpiStats; // Bỏ chữ Orders đi, thay bằng Stats
-    delete window._cachedMonthlyTargets[window._chiTieuTargetMonth];
-    window._cachedKpiMonth = '';
-    window._cachedKpiOrdersObj = {};
+    delete window._cachedKpiOrders[window._chiTieuTargetMonth];
+    window._cachedKpiMonth = ''; 
 
+    // 2. Hiệu ứng đang tải cho nút
     const btn = document.getElementById('btnForceRefreshKpi');
     if (btn) {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG CẬP NHẬT...';
@@ -8574,15 +8434,19 @@ window.forceRefreshKpi = async function() {
     }
 
     try {
+        // 3. Gọi lại hàm tính toán để lấy data mới
         await calculateAndRenderTargets();
+
         if (typeof playSystemSound === 'function') playSystemSound('success');
         if (typeof triggerHaptic === 'function') triggerHaptic(30);
     } catch (error) {
         console.error("Lỗi làm mới KPI:", error);
         alert("Lỗi khi tải dữ liệu mới: " + error.message);
     } finally {
+        // 4. BẮT BUỘC KHÔI PHỤC LẠI NÚT DÙ THÀNH CÔNG HAY THẤT BẠI
         const resetBtn = document.getElementById('btnForceRefreshKpi');
         if (resetBtn) {
+            // [ĐÃ SỬA]: Trả lại đúng chữ "LÀM MỚI" ngắn gọn như ban đầu
             resetBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> LÀM MỚI';
             resetBtn.disabled = false;
         }
@@ -8941,8 +8805,6 @@ const targetDocId = `tgt_${window._chiTieuTargetSalesCode}_${window._chiTieuTarg
 };
 window._cachedKpiOrders = {};
 window._cachedKpiMonth = '';  
-window._cachedMonthlyTargets = {}; // <--- THÊM BIẾN NÀY ĐỂ CACHE CHỈ TIÊU
-
 window.calculateAndRenderTargets = async function() {
   const container = document.getElementById('targetDashboardContainer');
   if (!container) return;
@@ -8952,32 +8814,29 @@ window.calculateAndRenderTargets = async function() {
     
     let globalTarget = 0; let globalActual = 0; 
     let salesTarget = 0; let salesActual = 0; 
+
     let globalRevTarget = 0; let globalRevActual = 0;
     let salesRevTarget = 0; let salesRevActual = 0;
+
     let targetItems = [];
     let companyRevenuesMap = {}; 
+
     let allTargetsMap = {}; 
     let globalGroupedData = {};
     let assignedSalesCodes = new Set(); 
 
-    let targetsData = [];
-    if (window._cachedMonthlyTargets[window._chiTieuTargetMonth]) {
-        targetsData = window._cachedMonthlyTargets[window._chiTieuTargetMonth];
-    } else {
-        const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
-        const targetsSnap = await getDocs(qTargets);
-        targetsData = targetsSnap.docs.map(d => d.data());
-        window._cachedMonthlyTargets[window._chiTieuTargetMonth] = targetsData;
-    }
-
+    const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
+    const targetsSnap = await getDocs(qTargets);
     let targetDocFound = false;
     
-    targetsData.forEach(data => {
+    targetsSnap.forEach(doc => {
+      const data = doc.data();
       if(data && data.month === window._chiTieuTargetMonth) {
         targetDocFound = true;
         const items = data.items || [];
         const revenues = data.companyRevenues || {};
-        const sCode = data.salesCode; 
+        const sCode = data.salesCode;
+        
         const hasItems = items && items.length > 0;
         const hasRevenues = revenues && Object.keys(revenues).length > 0;
         if (sCode && (hasItems || hasRevenues)) {
@@ -9033,116 +8892,132 @@ window.calculateAndRenderTargets = async function() {
     let actuals = {}; 
     let globalActualMap = {}; 
     let compActualRevenues = {}; 
-    let salesOrderCountMap = {}; 
+    let salesOrderCountMap = {}; // Biến lưu đếm số đơn (Tính Drop Size)
 
-    let monthlyStatsForKpi = [];
+    let monthlyOrdersForKpi = [];
     try {
         if (targetDocFound) { 
-            if (window._cachedKpiMonth !== window._chiTieuTargetMonth || !window._cachedKpiStats) {
-                let qStats;
-                if (isAdminOrManager) {
-                    qStats = query(collection(db, "monthlyStats"), where("month", "==", window._chiTieuTargetMonth));
-                } else {
-                    qStats = query(collection(db, "monthlyStats"), 
-                        where("month", "==", window._chiTieuTargetMonth), 
-                        where("salesCode", "==", currentUser.code)
-                    );
-                }
-                const mSnap = await getDocs(qStats);
-                window._cachedKpiStats = mSnap.docs.map(d => d.data());
+            const startOfMonth = window._chiTieuTargetMonth + "-01";
+            const endOfMonth = window._chiTieuTargetMonth + "-31";
+            
+            if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+                const q = query(collection(db, "orders"), 
+                    where("ngayCtu", ">=", startOfMonth), 
+                    where("ngayCtu", "<=", endOfMonth)
+                );
+                const mSnap = await getDocs(q);
+                window._cachedKpiOrders[window._chiTieuTargetMonth] = mSnap.docs.map(d => d.data());
                 window._cachedKpiMonth = window._chiTieuTargetMonth;
             }
             
+            let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
+            
             if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
-                monthlyStatsForKpi = window._cachedKpiStats.filter(s => s.salesCode === window._chiTieuTargetSalesCode);
+                monthlyOrdersForKpi = allMonthOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
             } else {
-                monthlyStatsForKpi = window._cachedKpiStats;
+                monthlyOrdersForKpi = allMonthOrders;
             }
         }
     } catch(e) {
-        console.warn("Lỗi tải dữ liệu Stats: ", e);
+        console.warn("Lỗi tải dữ liệu KPI: ", e);
+        monthlyOrdersForKpi = typeof orders !== 'undefined' ? orders : [];
     }
 
-    if (Array.isArray(monthlyStatsForKpi)) {
-      monthlyStatsForKpi.forEach(stat => {
-        if (!stat) return;
-        
-        const sCode = stat.salesCode;
-        salesOrderCountMap[sCode] = (salesOrderCountMap[sCode] || 0) + Number(stat.totalOrders || 0);
+    if (Array.isArray(monthlyOrdersForKpi)) {
+      monthlyOrdersForKpi.forEach(o => {
+        if (o && o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
+          
+          // Đếm số đơn (Drop Size)
+          if (!salesOrderCountMap[o.salesCode]) salesOrderCountMap[o.salesCode] = new Set();
+          salesOrderCountMap[o.salesCode].add(o.id || o.soCtu || o.orderId);
 
-        if (assignedSalesCodes.has(sCode)) {
-            Object.keys(stat).forEach(key => {
-                if (key.startsWith("rev_")) {
-                    const compCode = key.replace("rev_", "");
-                    if (sCode === window._chiTieuTargetSalesCode) {
-                        compActualRevenues[compCode] = (compActualRevenues[compCode] || 0) + Number(stat[key] || 0);
-                    }
-                } 
-                else if (key.startsWith("qty_")) {
-                    const skuKey = key.replace("qty_", "");
-                    const qtyThung = Number(stat[key] || 0);
-                    if (qtyThung <= 0) return;
+          if (assignedSalesCodes.has(o.salesCode)) {
+            if (Array.isArray(o.items)) {
+              let orderRevByComp = {};
 
-                    const compCode = getCompCodeFromProductCode(skuKey);
-                    const pObj = findProductObj(skuKey);
-                    const ratio = Number(pObj?.tyLeQuyDoi || 50);
-                    const price = Number(pObj?.price || 0);
-                    const itemRev = qtyThung * ratio * price;
+              o.items.forEach(item => {
+                if (!item) return;
+                const pObj = findProductObj(item.code || item.id);
+                const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+                const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
+                const skuKey = String(item.code || item.id || '').toUpperCase();
 
-                    let isTargetedGlobally = false;
-                    if (globalGroupedData[compCode] && (globalGroupedData[compCode].compTarget > 0 || globalGroupedData[compCode].revTarget > 0)) {
-                        isTargetedGlobally = true;
-                    }
-                    
-                    if (isTargetedGlobally) {
-                        globalActual += qtyThung;
-                        globalRevActual += itemRev; 
-                    }
-                    
-                    globalActualMap[`${sCode}_${skuKey}`] = (globalActualMap[`${sCode}_${skuKey}`] || 0) + qtyThung;
+                const itemPrice = Number(item.price || pObj?.price || 0);
+                const itemRev = Number(item.qty || 0) * itemPrice;
+                
+                const compCode = getCompCodeFromProductCode(skuKey);
+                orderRevByComp[compCode] = (orderRevByComp[compCode] || 0) + itemRev;
+                
+                let isTargetedGlobally = false;
+                if (globalGroupedData[compCode] && (globalGroupedData[compCode].compTarget > 0 || globalGroupedData[compCode].revTarget > 0)) {
+                    isTargetedGlobally = true;
+                }
+                
+                if (isTargetedGlobally) {
+                    globalActual += qtyThung;
+                    globalRevActual += itemRev; 
+                }
+                
+                globalActualMap[`${o.salesCode}_${skuKey}`] = (globalActualMap[`${o.salesCode}_${skuKey}`] || 0) + qtyThung;
 
-                    if (globalGroupedData[compCode]) {
-                        globalGroupedData[compCode].compActual += qtyThung;
-                        globalGroupedData[compCode].revActual += itemRev;
-                        if (globalGroupedData[compCode].skusMap[skuKey]) {
-                            globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
-                            globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
-                        } else {
-                            globalGroupedData[compCode].skusMap[skuKey] = {
-                                code: skuKey, name: pObj?.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev
-                            };
-                        }
+                if (globalGroupedData[compCode]) {
+                    globalGroupedData[compCode].compActual += qtyThung;
+                    globalGroupedData[compCode].revActual += itemRev;
+                    if (globalGroupedData[compCode].skusMap[skuKey]) {
+                        globalGroupedData[compCode].skusMap[skuKey].actual += qtyThung;
+                        globalGroupedData[compCode].skusMap[skuKey].actualRev += itemRev;
                     } else {
-                        let foundComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode) : null;
-                        globalGroupedData[compCode] = {
-                            compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
-                            compTarget: 0, compActual: qtyThung,
-                            skusMap: {
-                                [skuKey]: { code: skuKey, name: pObj?.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
-                            },
-                            revTarget: 0, revActual: itemRev
+                        globalGroupedData[compCode].skusMap[skuKey] = {
+                            code: skuKey,
+                            name: item.name || skuKey,
+                            target: 0,
+                            actual: qtyThung,
+                            targetRev: 0,
+                            actualRev: itemRev
                         };
                     }
-                    
-                    if (sCode === window._chiTieuTargetSalesCode) {
-                        let isTargetedForSales = false;
-                        if (companyRevenuesMap[compCode] && Number(companyRevenuesMap[compCode].target) > 0) isTargetedForSales = true;
-                        if (allTargetsMap[`${sCode}_${skuKey}`]) isTargetedForSales = true;
+                } else {
+                    let foundComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === compCode) : null;
+                    globalGroupedData[compCode] = {
+                        compName: foundComp ? foundComp.tenCtu : `Công Ty ${compCode}`,
+                        compTarget: 0,
+                        compActual: qtyThung,
+                        skusMap: {
+                            [skuKey]: { code: skuKey, name: item.name || skuKey, target: 0, actual: qtyThung, targetRev: 0, actualRev: itemRev }
+                        },
+                        revTarget: 0,
+                        revActual: itemRev
+                    };
+                }
+                
+                if (o.salesCode === window._chiTieuTargetSalesCode) {
+                    let isTargetedForSales = false;
+                    if (companyRevenuesMap[compCode] && Number(companyRevenuesMap[compCode].target) > 0) isTargetedForSales = true;
+                    if (allTargetsMap[`${o.salesCode}_${skuKey}`]) isTargetedForSales = true;
 
-                        if (isTargetedForSales) {
-                            actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
-                            salesActual += qtyThung;
-                            salesRevActual += itemRev; 
-                        }
+                    if (isTargetedForSales) {
+                        actuals[skuKey] = (actuals[skuKey] || 0) + qtyThung;
+                        salesActual += qtyThung;
+                        salesRevActual += itemRev; 
                     }
                 }
-            });
+              });
+
+              Object.keys(orderRevByComp).forEach(cCode => {
+                 const rev = orderRevByComp[cCode];
+                 if (o.salesCode === window._chiTieuTargetSalesCode) {
+                     compActualRevenues[cCode] = (compActualRevenues[cCode] || 0) + rev;
+                 }
+              });
+            }
+          }
         }
       });
     }
 
     let globalTargetSkusCount = Object.keys(allTargetsMap).length;
-    let globalActualSkusCount = Object.keys(globalActualMap).length; 
+    let globalActualSkusCount = Object.values(globalActualMap).filter(v => v > 0).length;
+
     let personalTargetSkusCount = targetItems.length;
     let personalActualSkusCount = targetItems.filter(it => (actuals[it.skuCode] || 0) > 0).length;
 
@@ -9266,8 +9141,9 @@ window.calculateAndRenderTargets = async function() {
             let userTargetedComps = new Set();
             let userTargetedSkus = new Set();
 
-            if (typeof targetsData !== 'undefined') {
-                targetsData.forEach(data => {
+            if (typeof targetsSnap !== 'undefined') {
+                targetsSnap.forEach(docSnap => {
+                    const data = docSnap.data();
                     if (data && data.month === window._chiTieuTargetMonth && data.salesCode === sCode) {
                         (data.items || []).forEach(it => {
                             if (Number(it.target || 0) > 0) {
@@ -9289,33 +9165,31 @@ window.calculateAndRenderTargets = async function() {
                 });
             }
             
-            if (typeof window._cachedKpiStats !== 'undefined' && Array.isArray(window._cachedKpiStats)) {
-                window._cachedKpiStats.forEach(stat => {
-                    if (stat.salesCode === sCode) {
-                        Object.keys(stat).forEach(key => {
-                            if (key.startsWith("qty_")) {
-                                const skuKey = key.replace("qty_", "");
-                                const qtyThung = Number(stat[key] || 0);
-                                if (qtyThung <= 0) return;
-
+            if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+                orders.forEach(o => {
+                    if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth) && o.salesCode === sCode) {
+                        if (Array.isArray(o.items)) {
+                            o.items.forEach(item => {
+                                const pObj = typeof products !== 'undefined' ? products.find(p => p.id === (item.id||item.code) || p.code === (item.id||item.code)) : null;
+                                const price = Number(item.price || pObj?.price || 0);
+                                const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+                                const qtyThung = Number(item.qty || 0) / (ratio > 0 ? ratio : 50);
+                                
+                                const skuKey = String(item.code || item.id || '').toUpperCase();
                                 const compCode = getCompCodeFromProductCode(skuKey);
-                                const pObj = typeof products !== 'undefined' ? products.find(p => p.id === skuKey || p.code === skuKey) : null;
-                                const ratio = Number(pObj?.tyLeQuyDoi || 50);
-                                const price = Number(pObj?.price || 0);
-                                const itemRev = qtyThung * ratio * price;
 
                                 if (userTargetedComps.has(compCode) || userTargetedSkus.has(skuKey)) {
-                                    sActualRev += itemRev;
+                                    sActualRev += Number(item.qty || 0) * price;
                                 }
                                 sActualQty += qtyThung;
-                            }
-                        });
+                            });
+                        }
                     }
                 });
             }
 
             let pct = sTargetRev > 0 ? (sActualRev / sTargetRev) * 100 : (sActualRev > 0 ? 100 : 0);
-            let sOrderCount = salesOrderCountMap[sCode] || 0; 
+            let sOrderCount = salesOrderCountMap[sCode] ? salesOrderCountMap[sCode].size : 0;
             let sDropSize = sOrderCount > 0 ? (sActualRev / sOrderCount) : 0;
 
             salesProgressList.push({ 
@@ -9333,6 +9207,7 @@ window.calculateAndRenderTargets = async function() {
         salesProgressList.sort((a, b) => b.pct - a.pct);
     }
 
+ // --- KHỞI TẠO NỘI DUNG SMART INSIGHTS TỰ ĐỘNG (AI GENIUS LEVEL) ---
     let insightsList = [];
     const nowInsight = new Date();
     const yyyy_mm_now = nowInsight.toISOString().slice(0, 7);
@@ -9348,6 +9223,7 @@ window.calculateAndRenderTargets = async function() {
         timePct = (currentDay / totalDaysInMonth) * 100;
     }
 
+    // 1. DỰ BÁO TỔNG QUAN CÔNG TY (FORECASTING) - DÀNH CHO ADMIN/MANAGER
     if (isTongQuanTab && globalRevTarget > 0) {
         const globalPct = (globalRevActual / globalRevTarget) * 100;
         let projectedRev = isCurrentMonth ? (globalRevActual / currentDay) * totalDaysInMonth : globalRevActual;
@@ -9364,6 +9240,7 @@ window.calculateAndRenderTargets = async function() {
             insightsList.push(`🔮 <b style="color:var(--purple);">AI Dự báo (Run-rate):</b> Với tốc độ chốt đơn hiện tại, hệ thống sẽ kết thúc tháng ở mức <b style="color:${forecastColor}; font-size:15px;">${projectedPct.toFixed(1)}%</b> (Tương đương ${(projectedRev/1000).toLocaleString('en-US')}k).`);
         }
     } 
+    // 2. CÁ NHÂN HÓA CHO TỪNG SALES (MICRO-COACHING) - DÀNH CHO NHÂN VIÊN
     else if (!isTongQuanTab && salesRevTarget > 0) {
         const sPct = (salesRevActual / salesRevTarget) * 100;
         let projectedRev = isCurrentMonth ? (salesRevActual / currentDay) * totalDaysInMonth : salesRevActual;
@@ -9374,6 +9251,7 @@ window.calculateAndRenderTargets = async function() {
              insightsList.push(`🔮 <b style="color:var(--purple);">AI Dự báo cá nhân:</b> Với đà nổ đơn này, bạn sẽ về đích cuối tháng ở mức <b style="color:${forecastColor}; font-size:15px;">${projectedPct.toFixed(1)}%</b>.`);
         }
 
+        // AI Tự động tìm điểm yếu của Sales (Mã hàng bị hụt số nhất)
         let weakestSku = null;
         let lowestPct = 999;
         targetItems.forEach(it => {
@@ -9392,6 +9270,7 @@ window.calculateAndRenderTargets = async function() {
         }
     }
 
+    // 3. INSIGHTS QUẢN TRỊ ĐỘI NGŨ (Chỉ Admin/Manager thấy)
     if (isAdminOrManager && isTongQuanTab && typeof salesProgressList !== 'undefined' && salesProgressList.length > 0) {
         let laggingSales = salesProgressList.filter(s => s.targetRev > 0 && s.pct < 50);
         let overSales = salesProgressList.filter(s => s.targetRev > 0 && s.pct >= 100);
@@ -9415,6 +9294,8 @@ window.calculateAndRenderTargets = async function() {
         }
     }
 
+    // 4. GIAO DIỆN AI SCI-FI CAO CẤP (RỰC RỠ & CHUYỂN ĐỘNG)
+  // 4. GIAO DIỆN AI SCI-FI CAO CẤP (DẠNG NGĂN KÉO THU GỌN)
     let smartInsightsHtml = `
         <style>
             @keyframes aiBorderGlow {
@@ -9430,6 +9311,7 @@ window.calculateAndRenderTargets = async function() {
         <div style="background: var(--card-bg); border-radius: 18px; padding: 2px; background: linear-gradient(135deg, #3B82F6, #8B5CF6, #E11D48); margin-bottom: 24px; animation: aiBorderGlow 3s infinite alternate;">
             <div style="background: var(--panel-bg); border-radius: 16px; overflow: hidden;">
                 
+                <!-- THANH TIÊU ĐỀ (CLICK ĐỂ MỞ/ĐÓNG) -->
                 <div onclick="toggleOrderAccordion('acc_ai_insights')" style="padding: 16px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: rgba(139, 92, 246, 0.06); transition: 0.2s;" onmouseover="this.style.background='rgba(139, 92, 246, 0.1)'" onmouseout="this.style.background='rgba(139, 92, 246, 0.06)'">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div style="font-weight: 900; font-size: 15.5px; background: linear-gradient(90deg, #3B82F6, #8B5CF6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-transform: uppercase; display:flex; align-items:center; gap:8px;">
@@ -9447,6 +9329,7 @@ window.calculateAndRenderTargets = async function() {
                     </div>
                 </div>
 
+                <!-- NỘI DUNG KÊ TOA (MẶC ĐỊNH ẨN CLASS "hidden") -->
                 <div id="acc_ai_insights" class="hidden" style="padding: 16px 20px; border-top: 1px dashed rgba(139, 92, 246, 0.3); background: rgba(0,0,0,0.01);">
                     <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; font-weight: 600; color: var(--text-main); line-height: 1.5;">
                         ${insightsList.length > 0 ? insightsList.map(item => `
@@ -10210,7 +10093,7 @@ const targetDocId = `tgt_${safeCode}_${rawMonth}`;
             let userActuals = {}; 
             let compActualRevenues = {};
 
-      kpiOrdersData.forEach(o => {
+            orders.forEach(o => {
                 if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(rawMonth) && o.salesCode === sCode) {
                     if (Array.isArray(o.items)) {
                         o.items.forEach(item => {
@@ -11489,33 +11372,6 @@ window.toggleKpiCols = function(compCode, btnElement) {
     }
 };
 
-// Cập nhật hàm nhập số liệu SKU: Đã thêm code tính tổng (Real-time Grand Total)
-window.handleStep2SkuInput = function(salesCode, skuCode, el) {
-    if (!el) return;
-    let cursor = el.selectionStart;
-    let oldLen = el.value.length;
-
-    const cleanVal = el.value.replace(/[^0-9]/g, '');
-    window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
-    
-    const formattedVal = cleanVal.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    if (el.value !== formattedVal) {
-        el.value = formattedVal;
-        let newLen = el.value.length;
-        let newCursorPos = cursor + (newLen - oldLen);
-        el.setSelectionRange(newCursorPos, newCursorPos);
-    }
-    
-    // Tính lại Dòng Tổng (Grand Total)
-    let skuTotal = 0;
-    window._masterKpiState.selectedSalesCodes.forEach(code => {
-        skuTotal += (window._masterKpiState.salesAllocations[code]?.skus[skuCode] || 0);
-    });
-    const totalEl = document.getElementById(`total_sku_${skuCode}`);
-    if(totalEl) totalEl.innerText = skuTotal > 0 ? skuTotal.toLocaleString('en-US') : '0';
-
-    updateStep2DiffUI();
-};
 // Cập nhật hàm nhập số liệu: Đã thêm code tính tổng (Real-time Grand Total)
 window.handleStep2CompInput = function(salesCode, compCode, el) {
     if (!el) return;
@@ -11542,6 +11398,75 @@ window.handleStep2CompInput = function(salesCode, compCode, el) {
     if(totalEl) totalEl.innerText = compTotal > 0 ? compTotal.toLocaleString('en-US') : '0';
 
     updateStep2DiffUI();
+};
+
+window.handleStep2SkuInput = function(salesCode, skuCode, el) {
+    if (!el) return;
+    let cursor = el.selectionStart;
+    let oldLen = el.value.length;
+
+    const cleanVal = el.value.replace(/[^0-9]/g, '');
+    window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
+    
+    const formattedVal = cleanVal.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    if (el.value !== formattedVal) {
+        el.value = formattedVal;
+        let newLen = el.value.length;
+        let newCursorPos = cursor + (newLen - oldLen);
+        el.setSelectionRange(newCursorPos, newCursorPos);
+    }
+    
+    // Tính lại Dòng Tổng (Grand Total)
+    let skuTotal = 0;
+    window._masterKpiState.selectedSalesCodes.forEach(code => {
+        skuTotal += (window._masterKpiState.salesAllocations[code]?.skus[skuCode] || 0);
+    });
+    const totalEl = document.getElementById(`total_sku_${skuCode}`);
+    if(totalEl) totalEl.innerText = skuTotal > 0 ? skuTotal.toLocaleString('en-US') : '0';
+
+    updateStep2DiffUI();
+};
+window.handleStep2CompInput = function(salesCode, compCode, el) {
+  if (!el) return;
+  
+  let cursor = el.selectionStart;
+  let oldLen = el.value.length;
+
+  const cleanVal = el.value.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].companies[compCode] = Number(cleanVal) || 0;
+  
+  const formattedVal = cleanVal.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  
+  // Chỉ can thiệp DOM nếu giá trị thực sự có sự thay đổi
+  if (el.value !== formattedVal) {
+      el.value = formattedVal;
+      let newLen = el.value.length;
+      let newCursorPos = cursor + (newLen - oldLen);
+      el.setSelectionRange(newCursorPos, newCursorPos);
+  }
+  
+  updateStep2DiffUI();
+};
+
+window.handleStep2SkuInput = function(salesCode, skuCode, el) {
+  if (!el) return;
+
+  let cursor = el.selectionStart;
+  let oldLen = el.value.length;
+
+  const cleanVal = el.value.replace(/[^0-9]/g, '');
+  window._masterKpiState.salesAllocations[salesCode].skus[skuCode] = Number(cleanVal) || 0;
+  
+  const formattedVal = cleanVal.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  
+  if (el.value !== formattedVal) {
+      el.value = formattedVal;
+      let newLen = el.value.length;
+      let newCursorPos = cursor + (newLen - oldLen);
+      el.setSelectionRange(newCursorPos, newCursorPos);
+  }
+  
+  updateStep2DiffUI();
 };
   window.filterStep2Skus = function(salesCode, compCode, keyword) {
     const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
