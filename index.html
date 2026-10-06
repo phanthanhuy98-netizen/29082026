@@ -1107,6 +1107,16 @@ window.syncOfflineCheckins = async function() {
       transaction.onerror = () => reject(transaction.error);
     });
   }
+  async function loadProductsFromLocalCache() {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve, reject) => {
+      const transaction = idbDb.transaction(["localProducts"], "readonly");
+      const store = transaction.objectStore("localProducts");
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(transaction.error);
+    });
+  }
  async function saveRoutesToLocalCache(list) {
     if (!list || list.length === 0) return;
     if (!idbDb) await initIndexedDB();
@@ -4065,13 +4075,22 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         updatedAt: editingOrderId ? serverTimestamp() : null
       };
 
-      const savedStoreId = activeVisitedStore.id;
+     const savedStoreId = activeVisitedStore.id;
 
-    const docRef = doc(db, "orders", orderUuid);
-setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e));
-      // (Dòng cũ của anh: setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi", e)); )
-      
-      // --- THÊM MỚI: TỰ ĐỘNG TÍNH TỔNG KPI BẰNG INCREMENT (CHỐNG BÃO READ VỀ SAU) ---
+      // --- BỔ SUNG FIX BÁN OFFLINE: ĐƯA ĐƠN VÀO HÀNG ĐỢI NẾU MẤT MẠNG ---
+      if (!navigator.onLine) {
+          try {
+              if (!idbDb) await initIndexedDB();
+              const tx = idbDb.transaction(["offlineOrders"], "readwrite");
+              // Đưa vào kho offlineOrders để hàm syncOfflineOrders của anh có cái mà đồng bộ
+              tx.objectStore("offlineOrders").put({ ...orderData, id: orderUuid });
+          } catch (err) {
+              console.log("Lỗi lưu đơn offline vào IndexedDB:", err);
+          }
+      }
+
+      const docRef = doc(db, "orders", orderUuid);
+      setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa vào hàng đợi Firebase", e));
       try {
           let compRevUpdates = {};
           let skuQtyUpdates = {};
