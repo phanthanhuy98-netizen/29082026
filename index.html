@@ -1520,45 +1520,92 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
 
       let cachedComps, cachedPrds, cachedRoutes, cachedStores;
 
-      if (!forceCloud && localCompsVersion === serverCompsVersion) {
-        cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : null;
-      }
-      if (!cachedComps || cachedComps.length === 0) {
-        const cSnap = await getDocs(collection(db, "companies"));
-        cachedComps = cSnap.docs.map(d => d.data());
-        if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(cachedComps);
-        localStorage.setItem("companiesVersion", serverCompsVersion);
-      }
+if (!cachedComps || cachedComps.length === 0) {
+    cachedComps = typeof loadCompaniesFromLocalCache === 'function' ? await loadCompaniesFromLocalCache() : [];
+}
+const lastSyncComp = localStorage.getItem("dms_last_sync_comps") || "2000-01-01T00:00:00.000Z";
+const qComp = query(collection(db, "companies"), where("updatedAt", ">", lastSyncComp));
+const cSnap = await getDocs(qComp);
 
-      if (!forceCloud && localProductsVersion === serverProductsVersion) {
-        cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : null;
-      }
+if (!cSnap.empty) {
+    const updatedComps = cSnap.docs.map(d => d.data());
+    updatedComps.forEach(newC => {
+        const idx = cachedComps.findIndex(c => String(c.maCtu) === String(newC.maCtu));
+        if (idx > -1) cachedComps[idx] = newC;
+        else cachedComps.push(newC);
+    });
+    if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(cachedComps);
+}
+localStorage.setItem("dms_last_sync_comps", new Date().toISOString());
+
       if (!cachedPrds || cachedPrds.length === 0) {
-        const pSnap = await getDocs(collection(db, "products"));
-        cachedPrds = pSnap.docs.map(d => d.data());
-        if (typeof saveProductsToLocalCache === 'function') await saveProductsToLocalCache(cachedPrds);
-        localStorage.setItem("productsVersion", serverProductsVersion);
-      }
+    cachedPrds = typeof loadProductsFromLocalCache === 'function' ? await loadProductsFromLocalCache() : [];
+}
+const lastSyncProduct = localStorage.getItem("dms_last_sync_products") || "2000-01-01T00:00:00.000Z";
+const qProd = query(collection(db, "products"), where("updatedAt", ">", lastSyncProduct));
+const pSnap = await getDocs(qProd);
 
-      if (!forceCloud && localRoutesVersion === serverRoutesVersion) {
-        cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : null;
-      }
+if (!pSnap.empty) {
+    const updatedProds = pSnap.docs.map(d => d.data());
+    updatedProds.forEach(newP => {
+        const idx = cachedPrds.findIndex(p => String(p.id || p.code) === String(newP.id || newP.code));
+        if (idx > -1) cachedPrds[idx] = newP;
+        else cachedPrds.push(newP);
+    });
+    if (typeof saveProductsToLocalCache === 'function') await saveProductsToLocalCache(cachedPrds);
+}
+localStorage.setItem("dms_last_sync_products", new Date().toISOString());
+
       if (!cachedRoutes || cachedRoutes.length === 0) {
-        const rSnap = await getDocs(collection(db, "routes"));
-        cachedRoutes = rSnap.docs.map(d => d.data());
-        if (typeof saveRoutesToLocalCache === 'function') await saveRoutesToLocalCache(cachedRoutes);
-        localStorage.setItem("routesVersion", serverRoutesVersion);
-      }
+    cachedRoutes = typeof loadRoutesFromLocalCache === 'function' ? await loadRoutesFromLocalCache() : [];
+}
+const lastSyncRoute = localStorage.getItem("dms_last_sync_routes") || "2000-01-01T00:00:00.000Z";
+const qRoute = query(collection(db, "routes"), where("updatedAt", ">", lastSyncRoute));
+const rSnap = await getDocs(qRoute);
 
-      if (!forceCloud && localStoresVersion === serverStoresVersion) {
-        cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : null;
-      }
-      if (!cachedStores || cachedStores.length === 0) {
-        const sSnap = await getDocs(collection(db, "stores"));
-        cachedStores = sSnap.docs.map(d => d.data());
-        if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(cachedStores);
-        localStorage.setItem("storesVersion", serverStoresVersion);
-      }
+if (!rSnap.empty) {
+    const updatedRoutes = rSnap.docs.map(d => d.data());
+    updatedRoutes.forEach(newR => {
+        const idx = cachedRoutes.findIndex(r => String(r.id) === String(newR.id));
+        if (idx > -1) cachedRoutes[idx] = newR;
+        else cachedRoutes.push(newR);
+    });
+    if (typeof saveRoutesToLocalCache === 'function') await saveRoutesToLocalCache(cachedRoutes);
+}
+localStorage.setItem("dms_last_sync_routes", new Date().toISOString());
+
+      // 1. Luôn tải dữ liệu sẵn có từ bộ nhớ đệm máy (IndexedDB) lên trước để hiển thị ngay lập tức không cần chờ mạng
+if (!cachedStores || cachedStores.length === 0) {
+    cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
+}
+
+// 2. Lấy mốc thời gian đồng bộ lần cuối (Nếu chưa có, mặc định lấy mốc năm 2000)
+const lastSyncStore = localStorage.getItem("dms_last_sync_stores") || "2000-01-01T00:00:00.000Z";
+
+// 3. THAY ĐỔI QUAN TRỌNG: Chỉ lấy những khách hàng có trường updatedAt lớn hơn lần đồng bộ cuối
+const qStore = query(collection(db, "stores"), where("updatedAt", ">", lastSyncStore));
+const sSnap = await getDocs(qStore);
+
+// 4. Nếu có tiệm mới hoặc tiệm bị sửa đổi, tiến hành gộp (Merge) vào cache hiện tại
+if (!sSnap.empty) {
+    const updatedStores = sSnap.docs.map(d => d.data());
+    
+    updatedStores.forEach(newStore => {
+        const index = cachedStores.findIndex(s => String(s.id) === String(newStore.id));
+        if (index > -1) {
+            cachedStores[index] = newStore; // Cập nhật đè thông tin tiệm cũ bị sửa
+        } else {
+            cachedStores.push(newStore);   // Thêm mới nếu là tiệm mới tạo
+        }
+    });
+
+    if (typeof saveStoresToLocalCache === 'function') {
+        await saveStoresToLocalCache(cachedStores);
+    }
+}
+
+// 5. Lưu lại mốc thời gian đồng bộ mới nhất của thời điểm hiện tại
+localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
 
       window.allCompanies = cachedComps || [];
       window.allProducts = cachedPrds || [];
@@ -1933,6 +1980,7 @@ window.handleLogout = async function() {
         pinnedByCode: currentUser.code || 'NV',
         pinnedByName: currentUser.name || 'Nhân viên',
         pinnedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         pinnedHistory: [...existingHistory, newHistoryItem]
       };
 
@@ -1970,7 +2018,7 @@ window.handleLogout = async function() {
 
     try {
       const storeRef = doc(db, "stores", String(storeId));
-      const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [] };
+      const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [], updatedAt: new Date().toISOString() };
       await updateDoc(storeRef, resetPayload);
       const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
       if (storeIndex > -1) {
@@ -4275,7 +4323,8 @@ window.importProductsExcel = function(event) {
           name: name, 
           dvt: dvt,
           price: Number(priceStr) || 0,
-          tyLeQuyDoi: tyLe || 50
+          tyLeQuyDoi: tyLe || 50,
+          updatedAt: new Date().toISOString()
         });
       }
 
@@ -4396,7 +4445,7 @@ window.importProductsExcel = function(event) {
           const maCtu = r[0] ? String(r[0]).trim() : '';
           const tenCtu = r[1] ? String(r[1]).trim() : '';
           if (maCtu && maCtu !== 'MaCTu') {
-            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở" });
+            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() });
           }
         }
         let newList = Array.from(uniqueMap.values());
@@ -4443,7 +4492,7 @@ window.importProductsExcel = function(event) {
           if (nhomVal && nhomVal !== 'Nhóm đối tượng') {
             let intVal = parseInt(nhomVal, 10);
             if (!isNaN(intVal) && intVal >= 10) {
-              uniqueMap.set(String(intVal), { id: `route_${intVal}_${i}`, nhomDoiTuong: String(intVal), noiDung, ghiChu });
+              uniqueMap.set(String(intVal), { id: `route_${intVal}_${i}`, nhomDoiTuong: String(intVal), noiDung, ghiChu, updatedAt: new Date().toISOString() });
             }
           }
         }
@@ -4479,7 +4528,7 @@ window.importProductsExcel = function(event) {
     const tenCtu = prompt("Nhập tên công ty (TenCTu):");
     if (!tenCtu) return;
     
-    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: [], status: "Mở" };
+    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() };
     try {
       await setDoc(doc(db, "companies", maCtu.trim()), newC);
       companyList.push(newC);
@@ -4503,7 +4552,7 @@ window.importProductsExcel = function(event) {
     const ghiChu = prompt("Nhập ghi chú:") || "";
     
     const newRouteId = `route_${intVal}_${Date.now()}`;
-    const newRouteObj = { id: newRouteId, nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim() };
+    const newRouteObj = { id: newRouteId, nhomDoiTuong: String(intVal), noiDung: noiDung.trim(), ghiChu: ghiChu.trim(), updatedAt: new Date().toISOString() };
 
     try {
       await setDoc(doc(db, "routes", newRouteId), newRouteObj);
@@ -4580,7 +4629,10 @@ window.updateCompanyField = async function(index, field, val) {
   companyList[index][field] = val;
   const c = companyList[index];
   try {
-    await updateDoc(doc(db, "companies", String(c.maCtu)), { [field]: val });
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+  [field]: val, 
+  updatedAt: new Date().toISOString() 
+});
     await saveCompaniesToLocalCache(companyList);
     const newVersion = Date.now();
     await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
@@ -4595,7 +4647,10 @@ window.toggleCompanyStatus = async function(index) {
   const newStatus = c.status === 'Đóng' ? 'Mở' : 'Đóng';
   c.status = newStatus;
   try {
-    await updateDoc(doc(db, "companies", String(c.maCtu)), { status: newStatus });
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+  status: newStatus, 
+  updatedAt: new Date().toISOString() 
+});
     await saveCompaniesToLocalCache(companyList);
     const newVersion = Date.now();
     await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
@@ -4615,7 +4670,10 @@ window.toggleCompanyDvtStatus = async function(companyIndex, dvtIndex) {
     c.dvtDetails[dvtIndex].status = currentStatus === 'Đóng' ? 'Mở' : 'Đóng';
     try {
       const docRef = doc(db, "companies", String(c.maCtu));
-      await updateDoc(docRef, { dvtDetails: c.dvtDetails });
+      await updateDoc(docRef, { 
+  dvtDetails: c.dvtDetails, 
+  updatedAt: new Date().toISOString() 
+});
       await saveCompaniesToLocalCache(companyList);
       const newVersion = Date.now();
       await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
@@ -4635,7 +4693,10 @@ window.addCompanyDvtPrompt = async function(companyIndex) {
   if (!c.dvtDetails) c.dvtDetails = [];
   c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
   try {
-    await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+  dvtDetails: c.dvtDetails, 
+  updatedAt: new Date().toISOString() 
+});
     await saveCompaniesToLocalCache(companyList);
     refreshCompanyListUI();
   } catch (err) {
@@ -4651,7 +4712,10 @@ window.removeCompanyDvt = async function(companyIndex, dvtIndex) {
   if (c.dvtDetails) {
     c.dvtDetails.splice(dvtIndex, 1);
     try {
-      await updateDoc(doc(db, "companies", String(c.maCtu)), { dvtDetails: c.dvtDetails });
+      await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+  dvtDetails: c.dvtDetails, 
+  updatedAt: new Date().toISOString() 
+});
       await saveCompaniesToLocalCache(companyList);
       refreshCompanyListUI();
     } catch (err) {
@@ -4671,7 +4735,10 @@ window.updateRouteField = async function(index, field, val) {
   }
   const r = routeGroupsList[index];
   try {
-    await updateDoc(doc(db, "routes", String(r.id)), { [field]: routeGroupsList[index][field] });
+    await updateDoc(doc(db, "routes", String(r.id)), { 
+  [field]: routeGroupsList[index][field], 
+  updatedAt: new Date().toISOString() 
+});
     await saveRoutesToLocalCache(routeGroupsList);
   } catch (err) {}
   renderUI();
@@ -7134,7 +7201,9 @@ window.deleteAllAndImportProductsExcel = async function(e) {
               name: name, 
               dvt: dvt,
               price: price,
-              tyLeQuyDoi: tyLe
+              tyLeQuyDoi: tyLe,
+              updatedAt: new Date().toISOString()
+
             });
           }
         }
@@ -7277,6 +7346,7 @@ window.deleteAllAndImportCustomersExcel = async function(e) {
           phone: String(item.phone || item.sdt || '').trim(),
           lat: Number(item.lat || 0),
           lng: Number(item.lng || 0)
+          updatedAt: new Date().toISOString()
         }));
 
         let uploadBatches = [];
