@@ -3424,12 +3424,12 @@ window.loadMoreSoGoc = async function() {
   switchTab('sales');
 };
 
-  window.deleteSingleOrder = async function(orderId) {
+window.deleteSingleOrder = async function(orderId) {
     const order = orders.find(o => o.id === orderId);
     if (!order) return alert("Không tìm thấy thông tin đơn hàng!");
 
     const isOwner = currentUser.code === order.salesCode || currentUser.uid === order.salesUid;
-    const isManagerOrAdmin = currentUser.role === 'admin' 
+    const isManagerOrAdmin = currentUser.role === 'admin' || currentUser.role === 'manager'; // Fixed condition
     const todayStr = new Date().toISOString().slice(0, 10);
 
     if (order.ngayCtu !== todayStr && !isManagerOrAdmin) {
@@ -3441,17 +3441,24 @@ window.loadMoreSoGoc = async function() {
     }
 
     const confirmDel = await window.showCustomConfirm(
-      "Xóa Đơn Hàng",
-      "Bạn có chắc chắn muốn xóa vĩnh viễn đơn hàng này không?",
+      "Hủy Đơn Hàng",
+      "Bạn có chắc chắn muốn hủy đơn hàng này không? Số liệu sẽ tự động trừ khỏi KPI.",
       "fa-trash",
-      "Xóa đơn",
-      "Hủy"
+      "Hủy đơn",
+      "Đóng"
     );
     if (!confirmDel) return;
 
     try {
-      await deleteDoc(doc(db, "orders", orderId));
-      orders = orders.filter(o => o.id !== orderId);
+      // DÙNG XÓA MỀM (SOFT DELETE) ĐỂ ĐẢM BẢO ĐỒNG BỘ OFFLINE CHUẨN 100%
+      await updateDoc(doc(db, "orders", orderId), { 
+          status: "Đã hủy", 
+          updatedAt: new Date().toISOString() 
+      });
+      
+      // Cập nhật lại mảng hiển thị trên màn hình hiện tại
+      const idx = orders.findIndex(o => o.id === orderId);
+      if (idx > -1) orders[idx].status = 'Đã hủy';
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -3460,12 +3467,11 @@ window.loadMoreSoGoc = async function() {
         filterSoGocCards();
       }
       
-      alert("✅ Đã xóa đơn hàng thành công!");
+      alert("✅ Đã hủy đơn hàng thành công!");
     } catch (err) {
-      alert("Lỗi khi xóa đơn hàng: " + err.message);
+      alert("Lỗi khi hủy đơn hàng: " + err.message);
     }
   };
-
 // ==========================================
   // 1. MỞ MODAL CHỌN KHOẢNG NGÀY CẦN XÓA ĐƠN
   // ==========================================
@@ -3526,35 +3532,35 @@ window.loadMoreSoGoc = async function() {
     if (!fromDate || !toDate) return alert("Vui lòng chọn đầy đủ Từ ngày và Đến ngày!");
     if (fromDate > toDate) return alert("Lỗi: 'Từ ngày' không được lớn hơn 'Đến ngày'!");
 
-    // Lọc ra các đơn hàng nằm trong khoảng ngày
-    const targetOrders = orders.filter(o => o.ngayCtu >= fromDate && o.ngayCtu <= toDate);
-
-    // Format ngày sang DD/MM/YYYY để hiển thị cho đẹp
+    const targetOrders = orders.filter(o => o.ngayCtu >= fromDate && o.ngayCtu <= toDate && o.status !== 'Đã hủy');
     const formatVN = (dateStr) => dateStr.split('-').reverse().join('/');
 
     if (targetOrders.length === 0) {
-      return alert(`Không tìm thấy đơn hàng nào từ ${formatVN(fromDate)} đến ${formatVN(toDate)} để xóa!`);
+      return alert(`Không tìm thấy đơn hàng hợp lệ nào từ ${formatVN(fromDate)} đến ${formatVN(toDate)} để hủy!`);
     }
 
     const confirmDel = await window.showCustomConfirm(
-      "XÁC NHẬN XÓA HÀNG LOẠT",
-      `⚠️ CẢNH BÁO: Bạn sắp xóa VĨNH VIỄN ${targetOrders.length} đơn hàng từ ngày ${formatVN(fromDate)} đến ${formatVN(toDate)}!\n\nHành động này không thể hoàn tác. Bạn có thực sự chắc chắn không?`,
+      "XÁC NHẬN HỦY HÀNG LOẠT",
+      `⚠️ CẢNH BÁO: Bạn sắp HỦY BỎ ${targetOrders.length} đơn hàng từ ngày ${formatVN(fromDate)} đến ${formatVN(toDate)}!\n\nSố liệu sẽ tự động trừ khỏi KPI của toàn bộ nhân viên. Bạn có thực sự chắc chắn không?`,
       "fa-triangle-exclamation",
-      "Đồng ý Xóa",
-      "Hủy"
+      "Đồng ý Hủy",
+      "Quay lại"
     );
     if (!confirmDel) return;
 
     try {
-      alert("⏳ Đang tiến hành xóa dữ liệu trên đám mây. Vui lòng chờ...");
+      alert("⏳ Đang tiến hành hủy dữ liệu trên đám mây. Vui lòng chờ...");
       
-      // Chia nhỏ ra từng batch 400 document để tránh lỗi giới hạn của Firebase khi xóa số lượng lớn
       let batches = [];
       let currentBatch = writeBatch(db);
       let count = 0;
 
       targetOrders.forEach(o => {
-        currentBatch.delete(doc(db, "orders", o.id));
+        // DÙNG XÓA MỀM BẰNG BATCH UPDATE
+        currentBatch.update(doc(db, "orders", o.id), { 
+            status: "Đã hủy", 
+            updatedAt: new Date().toISOString() 
+        });
         count++;
         if (count >= 400) {
           batches.push(currentBatch.commit());
@@ -3567,7 +3573,10 @@ window.loadMoreSoGoc = async function() {
       await Promise.all(batches);
 
       // Cập nhật lại mảng dữ liệu trên máy & Giao diện
-      orders = orders.filter(o => o.ngayCtu < fromDate || o.ngayCtu > toDate);
+      targetOrders.forEach(to => {
+          const idx = orders.findIndex(o => o.id === to.id);
+          if (idx > -1) orders[idx].status = 'Đã hủy';
+      });
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -3576,18 +3585,16 @@ window.loadMoreSoGoc = async function() {
         filterSoGocCards();
       }
 
-      // Đóng modal
       document.getElementById('dynamicModalContainer').classList.add('hidden');
       document.getElementById('dynamicModalContainer').innerHTML='';
 
       if (typeof playSystemSound === 'function') playSystemSound('success');
-      alert(`✅ Đã xóa thành công ${targetOrders.length} đơn hàng (Từ ${formatVN(fromDate)} - ${formatVN(toDate)})!`);
+      alert(`✅ Đã hủy thành công ${targetOrders.length} đơn hàng (Từ ${formatVN(fromDate)} - ${formatVN(toDate)})!`);
       
     } catch (err) {
-      alert("Lỗi khi xóa hàng loạt: " + err.message);
+      alert("Lỗi khi hủy hàng loạt: " + err.message);
     }
   };
-
   window.cancelEditOrder = function() {
     editingOrderId = null;
     existingOrderSoCtu = null;
