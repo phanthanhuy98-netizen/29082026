@@ -1596,60 +1596,35 @@ if (!rSnap.empty) {
 localStorage.setItem("dms_last_sync_routes", new Date().toISOString());
 
       // 1. Luôn tải dữ liệu sẵn có từ bộ nhớ đệm máy (IndexedDB) lên trước để hiển thị ngay lập tức không cần chờ mạng
+// 1. Tải dữ liệu từ bộ nhớ đệm máy lên trước
 if (!cachedStores || cachedStores.length === 0) {
     cachedStores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
 }
 
-// 2. Lấy mốc thời gian đồng bộ lần cuối (Nếu chưa có, mặc định lấy mốc năm 2000)
+// 2. Lấy mốc thời gian đồng bộ lần cuối
 const lastSyncStore = localStorage.getItem("dms_last_sync_stores") || "2000-01-01T00:00:00.000Z";
 
-// 3. THAY ĐỔI QUAN TRỌNG: Chỉ lấy những khách hàng có trường updatedAt lớn hơn lần đồng bộ cuối
+// 3. Query lấy dữ liệu mới từ Firebase
+const qStore = query(collection(db, "stores"), where("updatedAt", ">", lastSyncStore));
+const sSnap = await getDocs(qStore);
+
+// 4. Gộp dữ liệu an toàn bằng Map (Chống trùng lặp, không bao giờ bị về 0)
 if (!sSnap.empty) {
     const updatedStores = sSnap.docs.map(d => d.data());
     
-    // NẾU TẢI TỪ CLOUD (LÀM MỚI HOÀN TOÀN), BẮT BUỘC XÓA SẠCH CACHE CŨ ĐỂ KHÔNG BỊ CỘNG DỒN
-    if (forceCloud) {
-        cachedStores = []; 
-    }
-
-    updatedStores.forEach(newStore => {
-        const index = cachedStores.findIndex(s => String(s.id) === String(newStore.id));
-        if (index > -1) {
-            cachedStores[index] = newStore; // Cập nhật đè thông tin tiệm cũ bị sửa
-        } else {
-            cachedStores.push(newStore);   // Thêm mới nếu là tiệm mới tạo
-        }
-    });
+    // Dùng Map để gom nhóm theo ID, tự động loại bỏ các bản ghi bị nhân đôi
+    const storeMap = new Map();
+    cachedStores.forEach(s => storeMap.set(String(s.id || s.code), s));
+    updatedStores.forEach(s => storeMap.set(String(s.id || s.code), s)); // Ghi đè bản mới nhất
+    
+    cachedStores = Array.from(storeMap.values());
 
     if (typeof saveStoresToLocalCache === 'function') {
         await saveStoresToLocalCache(cachedStores);
     }
 }
 
-// 4. Nếu có tiệm mới hoặc tiệm bị sửa đổi, tiến hành gộp (Merge) vào cache hiện tại
-if (!sSnap.empty) {
-    const updatedStores = sSnap.docs.map(d => d.data());
-    
-    // BẮT BỆNH NHÂN ĐÔI: Nếu Admin bấm Làm Mới (forceCloud) hoặc nhận thấy có cục dữ liệu Excel úp lên quá lớn (> 1000 dòng), tự động xóa sạch bộ nhớ tạm cũ để không bị cộng dồn
-    if (forceCloud || updatedStores.length > 1000) {
-        cachedStores = []; 
-    }
-
-    updatedStores.forEach(newStore => {
-        const index = cachedStores.findIndex(s => String(s.id) === String(newStore.id));
-        if (index > -1) {
-            cachedStores[index] = newStore; // Cập nhật đè
-        } else {
-            cachedStores.push(newStore);   // Nạp mới
-        }
-    });
-
-    if (typeof saveStoresToLocalCache === 'function') {
-        await saveStoresToLocalCache(cachedStores);
-    }
-}
-
-// 5. Lưu lại mốc thời gian đồng bộ mới nhất của thời điểm hiện tại
+// 5. Lưu lại mốc thời gian đồng bộ
 localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
 
       window.allCompanies = cachedComps || [];
