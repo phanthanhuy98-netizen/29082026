@@ -1822,22 +1822,26 @@ window.handleLogout = async function() {
     } catch (err) { alert("⛔ Mật khẩu cũ không đúng."); }
   };
 
-  window.refreshStoresGPSData = async function() {
-  try {
-    alert("⏳ Đang cập nhật dữ liệu ghim GPS mới nhất từ hệ thống...");
-    
-    // Chỉ truy vấn bảng stores để lấy thông tin GPS (tiết kiệm băng thông và tối ưu tốc độ)
-    const storeSnap = await getDocs(collection(db, "stores"));
-    let updatedCount = 0;
+ window.refreshStoresGPSData = async function() {
+  const btn = document.querySelector('button[onclick="refreshStoresGPSData()"]');
+  if(btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
+  try {
+    // 1. Lấy mốc thời gian của lần đồng bộ trước đó (Mặc định năm 2000 nếu chưa từng bấm)
+    const lastSync = localStorage.getItem('dms_last_gps_refresh') || "2000-01-01T00:00:00.000Z";
+    
+    // 2. QUERY THÔNG MINH: Chỉ tải những khách hàng có cập nhật GPS sau mốc thời gian lastSync
+    const q = query(collection(db, "stores"), where("pinnedAt", ">", lastSync));
+    const storeSnap = await getDocs(q);
+    
+    let updatedCount = 0;
     storeSnap.forEach(docSnap => {
       const serverData = docSnap.data();
       const sId = String(serverData.id || docSnap.id);
       
-      // Tìm khách hàng tương ứng trong mảng stores hiện tại trên máy
+      // Tìm khách hàng tương ứng trên máy và ghi đè GPS mới
       const localStore = stores.find(s => String(s.id) === sId);
       if (localStore) {
-        // Cập nhật thông tin GPS mới nhất
         localStore.lat = serverData.lat || 0;
         localStore.lng = serverData.lng || 0;
         localStore.pinnedByCode = serverData.pinnedByCode || '';
@@ -1845,29 +1849,32 @@ window.handleLogout = async function() {
         localStore.pinnedAt = serverData.pinnedAt || '';
         localStore.pinnedHistory = serverData.pinnedHistory || [];
         updatedCount++;
+      } else {
+        // Nếu là tiệm mới hoàn toàn, đẩy luôn vào mảng stores
+        stores.push(serverData);
+        updatedCount++;
       }
     });
 
-    // Lưu lại vào bộ nhớ đệm IndexedDB cục bộ của máy người dùng
-    if (typeof saveStoresToLocalCache === 'function') {
-      await saveStoresToLocalCache(stores);
-    }
-    
-    // Tái tạo lại bộ chỉ mục tìm kiếm
-    if (typeof buildStoreIndex === 'function') {
-      buildStoreIndex();
+    // 3. Ghi nhận lại mốc thời gian hiện tại cho lần bấm tiếp theo
+    localStorage.setItem('dms_last_gps_refresh', new Date().toISOString());
+
+    if (updatedCount > 0) {
+      if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
+      if (typeof buildStoreIndex === 'function') buildStoreIndex();
+      if (typeof filterTabCustomers === 'function') filterTabCustomers(tabCustomerSearchKey);
+      
+      alert(`✅ Đã cập nhật thành công dữ liệu GPS mới nhất cho ${updatedCount} điểm bán!`);
+    } else {
+      alert("✅ Dữ liệu GPS trên máy bạn hiện đã là mới nhất, không tốn data tải lại!");
     }
 
-    // Làm mới lại giao diện hiển thị nếu đang ở tab khách hàng
-    if (typeof filterTabCustomers === 'function') {
-      filterTabCustomers(tabCustomerSearchKey);
-    }
-
-    alert(`✅ Đã cập nhật thành công dữ liệu GPS mới nhất cho ${updatedCount} điểm bán!`);
     if (typeof triggerHaptic === 'function') triggerHaptic(30);
 
   } catch (err) {
     alert("⛔ Lỗi khi làm mới GPS: " + err.message);
+  } finally {
+    if(btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới GPS';
   }
 };
   window.handleCustomerLocationAction = async function(storeId) {
@@ -8415,12 +8422,7 @@ ${isAdminOrManager ? `
     calculateAndRenderTargets();
   }
 };
- window.forceRefreshKpi = async function() {
-    // 1. Xóa rỗng cache của tháng hiện tại để ép tải lại từ đầu
-    delete window._cachedKpiOrders[window._chiTieuTargetMonth];
-    window._cachedKpiMonth = ''; 
-
-    // 2. Hiệu ứng đang tải cho nút
+window.forceRefreshKpi = async function() {
     const btn = document.getElementById('btnForceRefreshKpi');
     if (btn) {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG CẬP NHẬT...';
@@ -8428,21 +8430,88 @@ ${isAdminOrManager ? `
     }
 
     try {
-        // 3. Gọi lại hàm tính toán để lấy data mới
+        const currentMonth = window._chiTieuTargetMonth;
+        
+        if (!window._cachedKpiOrders[currentMonth]) {
+            // LẦN TẢI ĐẦU TIÊN CỦA THÁNG: Tải toàn bộ để làm móng dữ liệu
+            const startOfMonth = currentMonth + "-01";
+            const endOfMonth = currentMonth + "-31";
+            const q = query(collection(db, "orders"), 
+                where("ngayCtu", ">=", startOfMonth), 
+                where("ngayCtu", "<=", endOfMonth)
+            );
+            const mSnap = await getDocs(q);
+            window._cachedKpiOrders[currentMonth] = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            
+            // Lưu lại mốc thời gian vừa tải xong
+            localStorage.setItem(`dms_kpi_last_sync_${currentMonth}`, new Date().toISOString());
+        } else {
+            // CÁC LẦN TẢI SAU: Đồng bộ gia tăng tuyệt đối chính xác (Timestamp Sync)
+            const lastSyncTime = localStorage.getItem(`dms_kpi_last_sync_${currentMonth}`) || "2000-01-01T00:00:00.000Z";
+            
+            // Lấy các đơn hàng MỚI ĐƯỢC TẠO SAU mốc lastSyncTime
+            const qNew = query(collection(db, "orders"), 
+                where("ngayCtu", ">=", currentMonth + "-01"),
+                where("ngayCtu", "<=", currentMonth + "-31"),
+                where("createdAt", ">", new Date(lastSyncTime))
+            );
+            const snapNew = await getDocs(qNew);
+            
+            // Lấy các đơn hàng CŨ BỊ SỬA LẠI SAU mốc lastSyncTime
+            const qEdited = query(collection(db, "orders"), 
+                where("ngayCtu", ">=", currentMonth + "-01"),
+                where("ngayCtu", "<=", currentMonth + "-31"),
+                where("updatedAt", ">", new Date(lastSyncTime))
+            );
+            const snapEdited = await getDocs(qEdited);
+            
+            // Gom chung đơn mới và đơn bị sửa lại
+            let changedOrders = [];
+            snapNew.forEach(d => changedOrders.push({ id: d.id, ...d.data() }));
+            snapEdited.forEach(d => {
+                // Kiểm tra trùng lặp giữa 2 truy vấn
+                if (!changedOrders.find(o => o.id === d.id)) {
+                    changedOrders.push({ id: d.id, ...d.data() });
+                }
+            });
+            
+            // Gộp (Merge) vào cache hiện tại của tháng
+            let cachedList = window._cachedKpiOrders[currentMonth];
+            changedOrders.forEach(newOrd => {
+                const idx = cachedList.findIndex(o => o.id === newOrd.id || o.soCtu === newOrd.soCtu);
+                if (idx > -1) {
+                    cachedList[idx] = newOrd; // Ghi đè đơn cũ vừa bị Edit
+                } else {
+                    cachedList.push(newOrd); // Bổ sung đơn mới tinh
+                }
+            });
+            
+            // Cập nhật lại mốc thời gian mới nhất
+            localStorage.setItem(`dms_kpi_last_sync_${currentMonth}`, new Date().toISOString());
+            
+            // Bộ lọc cuối: Loại bỏ các đơn đã bị Hủy để KPI chính xác
+            window._cachedKpiOrders[currentMonth] = cachedList.filter(o => o.status !== 'Đã hủy');
+        }
+
+        // Gọi lại hàm vẽ biểu đồ KPI
         await calculateAndRenderTargets();
 
         if (typeof playSystemSound === 'function') playSystemSound('success');
         if (typeof triggerHaptic === 'function') triggerHaptic(30);
     } catch (error) {
         console.error("Lỗi làm mới KPI:", error);
-        alert("Lỗi khi tải dữ liệu mới: " + error.message);
+        
+        // CẢNH BÁO BẢO MẬT FIREBASE INDEX:
+        // Lần đầu chạy có thể Firebase yêu cầu tạo Composite Index (Bảng mục lục ghép)
+        if (error.message.includes("requires an index")) {
+            alert("⚠️️ Cảnh báo từ máy chủ: Vui lòng mở F12 (Console), copy đường link xanh dương của Firebase dán vào trình duyệt để tạo Index đồng bộ dữ liệu. Chờ 5 phút sau đó F5 tải lại là hệ thống sẽ chạy mượt vĩnh viễn!");
+        } else {
+            alert("Lỗi khi tải dữ liệu mới: " + error.message);
+        }
     } finally {
-        // 4. BẮT BUỘC KHÔI PHỤC LẠI NÚT DÙ THÀNH CÔNG HAY THẤT BẠI
-        const resetBtn = document.getElementById('btnForceRefreshKpi');
-        if (resetBtn) {
-            // [ĐÃ SỬA]: Trả lại đúng chữ "LÀM MỚI" ngắn gọn như ban đầu
-            resetBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> LÀM MỚI';
-            resetBtn.disabled = false;
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> LÀM MỚI';
+            btn.disabled = false;
         }
     }
 };
