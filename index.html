@@ -3882,7 +3882,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     if (!isOnline) {
         let maxExisting = 0;
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-            orders.forEach(o => {
+      kpiOrdersData.forEach(o => {
                 // Chỉ quét các số ctu offline cũ của chính nhân viên này để tính tiếp
                 let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                 if (!isNaN(num) && num > maxExisting) {
@@ -3906,7 +3906,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 
                 let maxExisting = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    orders.forEach(o => {
+              kpiOrdersData.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > maxExisting) {
                             maxExisting = num;
@@ -3934,7 +3934,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 // Fallback an toàn nếu lỗi transaction mạng
                 let localMax = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    orders.forEach(o => {
+              kpiOrdersData.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > localMax) localMax = num;
                     });
@@ -6188,6 +6188,49 @@ else if (tab === 'kpi') {
         prevEnd = prevWeekEnd.toISOString().slice(0, 10);
       } else if (window._kpiDateFilter === 'custom') {
         filterStart = window._kpiDateFrom;
+        // --- BẮT ĐẦU FIX LỖI 4: TẢI ĐẦY ĐỦ ĐƠN HÀNG THEO BỘ LỌC ĐỂ TÍNH KPI CHÍNH XÁC 100% ---
+let minDate = (prevStart && prevStart < filterStart) ? prevStart : filterStart;
+let maxDate = (prevEnd && prevEnd > filterEnd) ? prevEnd : filterEnd;
+if (!minDate) minDate = "2020-01-01"; 
+if (!maxDate) maxDate = todayStr;
+
+let cacheKey = `${minDate}_${maxDate}`;
+window._cachedKpiOrdersObj = window._cachedKpiOrdersObj || {};
+
+let kpiOrdersData = [];
+// Chống đốt Read: Nếu đã tải dữ liệu của khoảng ngày này rồi thì dùng lại bộ nhớ đệm
+if (window._cachedKpiOrdersObj[cacheKey]) {
+    kpiOrdersData = window._cachedKpiOrdersObj[cacheKey];
+} else {
+    try {
+        let qKpi;
+        if (isAdminOrManager) {
+            // Admin/Manager: Tải toàn bộ đơn của công ty trong khoảng ngày
+            qKpi = query(collection(db, "orders"), 
+                where("ngayCtu", ">=", minDate), 
+                where("ngayCtu", "<=", maxDate)
+            );
+        } else {
+            // Sales: Chỉ tải đơn của chính mình
+            qKpi = query(collection(db, "orders"), 
+                where("ngayCtu", ">=", minDate), 
+                where("ngayCtu", "<=", maxDate),
+                where("salesUid", "==", currentUser.uid)
+            );
+        }
+        const kpiSnap = await getDocs(qKpi);
+        kpiOrdersData = kpiSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        window._cachedKpiOrdersObj[cacheKey] = kpiOrdersData; // Lưu vào Cache
+    } catch (error) {
+        console.error("Lỗi tải đơn hàng KPI:", error);
+        kpiOrdersData = orders; // Fallback an toàn nếu lỗi mạng
+    }
+}
+// --- KẾT THÚC FIX LỖI 4 ---
+
+let kpiMap = new Map();
+let globalSkuMap = new Map();
+// ...
         filterEnd = window._kpiDateTo || todayStr;
         if (filterStart && filterEnd) {
             const sDate = new Date(filterStart);
@@ -6210,7 +6253,7 @@ else if (tab === 'kpi') {
       let currentStats = { kien: 0, don: 0, doanhSo: 0, tiems: new Set() };
       let prevStats = { kien: 0, don: 0, doanhSo: 0 }; 
 
-      orders.forEach(o => {
+      kpiOrdersData.forEach(o => {
         if (o.status === 'Đã hủy') return;
 
         if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
@@ -6414,7 +6457,7 @@ else if (tab === 'kpi') {
 
               ${(() => {
                   let taiQuayAll = 0, tuXaAll = 0;
-                  orders.forEach(o => {
+            kpiOrdersData.forEach(o => {
                       if (o.status === 'Đã hủy') return;
                       if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
                       
@@ -6573,7 +6616,7 @@ else if (tab === 'kpi') {
             const accId = `kpi_acc_${rep.code}`;
 
             let repTaiQuay = 0, repTuXa = 0;
-            orders.forEach(o => {
+      kpiOrdersData.forEach(o => {
               if (o.status === 'Đã hủy') return;
               if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
               if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -6625,7 +6668,7 @@ else if (tab === 'kpi') {
                     <div style="display:flex; flex-direction:column; gap:5px; max-height:160px; overflow-y:auto; padding-right:6px;">
                       ${(() => {
                         const repSkusMap = {};
-                        orders.forEach(o => {
+                  kpiOrdersData.forEach(o => {
                           if (o.status === 'Đã hủy') return;
                           if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
                           if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -8507,6 +8550,7 @@ window.forceRefreshKpi = async function() {
     delete window._cachedKpiStats; // Bỏ chữ Orders đi, thay bằng Stats
     delete window._cachedMonthlyTargets[window._chiTieuTargetMonth];
     window._cachedKpiMonth = '';
+    window._cachedKpiOrdersObj = {};
 
     const btn = document.getElementById('btnForceRefreshKpi');
     if (btn) {
@@ -10151,7 +10195,7 @@ const targetDocId = `tgt_${safeCode}_${rawMonth}`;
             let userActuals = {}; 
             let compActualRevenues = {};
 
-            orders.forEach(o => {
+      kpiOrdersData.forEach(o => {
                 if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(rawMonth) && o.salesCode === sCode) {
                     if (Array.isArray(o.items)) {
                         o.items.forEach(item => {
