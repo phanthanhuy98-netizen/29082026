@@ -1417,6 +1417,29 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       productIndexMap.set(p.id || p.code, { product: p, searchableText: textTokens });
     });
   }
+  // Lưu cục bộ KPI Orders để chống bão Read khi F5
+  async function saveKpiOrdersToLocal(month, data) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve) => {
+      try {
+        const tx = idbDb.transaction(["metaInfo"], "readwrite");
+        tx.objectStore("metaInfo").put({ key: 'kpi_orders_' + month, value: data });
+        tx.oncomplete = resolve;
+      } catch(e) { resolve(); }
+    });
+  }
+
+  async function loadKpiOrdersFromLocal(month) {
+    if (!idbDb) await initIndexedDB();
+    return new Promise((resolve) => {
+      try {
+        const tx = idbDb.transaction(["metaInfo"], "readonly");
+        const req = tx.objectStore("metaInfo").get('kpi_orders_' + month);
+        req.onsuccess = () => resolve(req.result ? req.result.value : null);
+        req.onerror = () => resolve(null);
+      } catch(e) { resolve(null); }
+    });
+  }
 
 window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     // Đã xóa ngoại lệ của Admin/Manager ở đây. Tất cả đều bị chặn công bằng.
@@ -8625,6 +8648,7 @@ window.forceRefreshKpi = async function() {
             
             // Bộ lọc cuối: Loại bỏ các đơn đã bị Hủy để KPI chính xác
             window._cachedKpiOrders[currentMonth] = cachedList.filter(o => o.status !== 'Đã hủy');
+            await saveKpiOrdersToLocal(currentMonth, window._cachedKpiOrders[currentMonth]);
         }
 
         // Gọi lại hàm vẽ biểu đồ KPI
@@ -9097,27 +9121,27 @@ window.calculateAndRenderTargets = async function() {
             const startOfMonth = window._chiTieuTargetMonth + "-01";
             const endOfMonth = window._chiTieuTargetMonth + "-31";
             
-            if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
-                const q = query(collection(db, "orders"), 
-                    where("ngayCtu", ">=", startOfMonth), 
-                    where("ngayCtu", "<=", endOfMonth)
-                );
+           if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+                // 1. ĐỌC TỪ Ổ CỨNG MÁY (INDEXEDDB) -> TỐN 0 READ SERVER DÙ CÓ ẤN F5
+                let cachedData = await loadKpiOrdersFromLocal(window._chiTieuTargetMonth);
                 
-                try {
-                    // 1. ÉP ĐỌC TỪ BỘ NHỚ ĐỆM MÁY (CACHE) -> TỐN 0 READ SERVER
-                    const mSnap = await getDocsFromCache(q);
-                    
-                    if (!mSnap.empty) {
-                        window._cachedKpiOrders[window._chiTieuTargetMonth] = mSnap.docs.map(d => d.data());
-                        window._cachedKpiMonth = window._chiTieuTargetMonth;
-                    } else {
-                        throw new Error("Cache rỗng");
-                    }
-                } catch (errCache) {
-                    // 2. CHỈ TẢI TỪ SERVER KHI LÀ LẦN ĐẦU TIÊN CÀI APP HOẶC MẤT CACHE
-                    const mSnap = await getDocs(q);
-                    window._cachedKpiOrders[window._chiTieuTargetMonth] = mSnap.docs.map(d => d.data());
+                if (cachedData && cachedData.length > 0) {
+                    window._cachedKpiOrders[window._chiTieuTargetMonth] = cachedData;
                     window._cachedKpiMonth = window._chiTieuTargetMonth;
+                } else {
+                    // 2. CHỈ TẢI TỪ SERVER 1 LẦN DUY NHẤT KHI CÀI APP
+                    const q = query(collection(db, "orders"), 
+                        where("ngayCtu", ">=", startOfMonth), 
+                        where("ngayCtu", "<=", endOfMonth)
+                    );
+                    const mSnap = await getDocs(q);
+                    const data = mSnap.docs.map(d => d.data());
+                    
+                    window._cachedKpiOrders[window._chiTieuTargetMonth] = data;
+                    window._cachedKpiMonth = window._chiTieuTargetMonth;
+                    
+                    // Lưu ngay vào ổ cứng để vĩnh viễn không bị kéo lại
+                    await saveKpiOrdersToLocal(window._chiTieuTargetMonth, data);
                     localStorage.setItem(`dms_kpi_last_sync_${window._chiTieuTargetMonth}`, new Date().toISOString());
                 }
             }
