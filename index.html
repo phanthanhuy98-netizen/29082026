@@ -9528,25 +9528,52 @@ window.calculateAndRenderTargets = async function() {
         return nameA.localeCompare(nameB);
     });
 
-    const detailHtml = sortedCompCodes.map(compCode => {
+ const detailHtml = sortedCompCodes.map(compCode => {
       const g = activeGrouped[compCode];
       
-      const pct = g.compTarget > 0 ? (g.compActual / g.compTarget) * 100 : (g.compActual > 0 ? 100 : 0);
-      let colorClass = 'var(--rose)'; let barColor = 'var(--rose-gradient)'; let iconHtml = '<i class="fa-solid fa-triangle-exclamation" style="color:var(--rose);"></i>';
-      if (pct >= 100) { colorClass = 'var(--emerald)'; barColor = 'var(--emerald-gradient)'; iconHtml = '<i class="fa-solid fa-trophy" style="color:var(--emerald);"></i>'; } 
-      else if (pct >= 70) { colorClass = 'var(--amber)'; barColor = 'var(--amber-gradient)'; iconHtml = '<i class="fa-solid fa-person-running" style="color:var(--amber);"></i>'; }
+      // FIX LỖI TOÁN HỌC: Xử lý hiển thị thông minh khi Target = 0 (Chưa giao KPI nhưng bán vượt)
+      let finalPctDisplay = '';
+      let finalBarWidth = 0;
+      let finalColorClass = 'var(--rose)';
+      let finalBarColor = 'var(--rose-gradient)';
 
-      const revPct = g.revTarget > 0 ? (g.revActual / g.revTarget) * 100 : (g.revActual > 0 ? 100 : 0);
-      let revColor = 'var(--rose)'; let revBar = 'var(--rose-gradient)';
-      if(revPct >= 100) { revColor = 'var(--emerald)'; revBar = 'var(--emerald-gradient)'; }
-      else if(revPct >= 70) { revColor = 'var(--amber)'; revBar = 'var(--amber-gradient)'; }
+      const hasTarget = g.revTarget > 0 || g.compTarget > 0;
+
+      if (hasTarget) {
+          // Ưu tiên tính % theo Doanh số (Tiền), nếu không có thì tính theo Sản lượng (Thùng)
+          const targetToUse = g.revTarget > 0 ? g.revTarget : g.compTarget;
+          const actualToUse = g.revTarget > 0 ? g.revActual : g.compActual;
+          const calculatedPct = (actualToUse / targetToUse) * 100;
+          
+          finalPctDisplay = formatQtySmart(calculatedPct) + '%';
+          finalBarWidth = Math.min(calculatedPct, 100);
+          
+          if (calculatedPct >= 100) { 
+              finalColorClass = 'var(--emerald)'; finalBarColor = 'var(--emerald-gradient)'; 
+          } else if (calculatedPct >= 70) { 
+              finalColorClass = 'var(--amber)'; finalBarColor = 'var(--amber-gradient)'; 
+          }
+      } else {
+          // Trường hợp KHÔNG giao KPI nhưng vẫn có phát sinh số bán ra (Organic Sales)
+          if (g.revActual > 0 || g.compActual > 0) {
+              finalPctDisplay = 'Ngoài KPI'; // Bán dôi dư / Không nằm trong chỉ tiêu
+              finalBarWidth = 100;
+              finalColorClass = '#0EA5E9'; // Màu Xanh Dương Bích
+              finalBarColor = 'linear-gradient(135deg, #3B82F6 0%, #0284C7 100%)';
+          } else {
+              finalPctDisplay = '0%';
+              finalBarWidth = 0;
+              finalColorClass = 'var(--text-muted)';
+              finalBarColor = 'var(--card-border)';
+          }
+      }
 
       const compAccordionId = `kpi_comp_${compCode.replace(/[^a-zA-Z0-9]/g, '_')}`;
       const canEditIndividual = isAdminOrManager && !isTongQuanTab && window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL';
       const formatQtySmart = (num) => Number.isInteger(Number(num||0)) ? Number(num||0).toString() : Number(num||0).toFixed(1);
 
-     return `
-        <div style="background: var(--card-bg); border-radius: 14px; box-shadow: 0 3px 12px rgba(0,0,0,0.03); border: 1px solid var(--card-border); border-left: 5px solid ${colorClass}; overflow: hidden; margin-bottom: 10px; transition: all 0.2s ease;">
+      return `
+        <div style="background: var(--card-bg); border-radius: 14px; box-shadow: 0 3px 12px rgba(0,0,0,0.03); border: 1px solid var(--card-border); border-left: 5px solid ${finalColorClass}; overflow: hidden; margin-bottom: 10px; transition: all 0.2s ease;">
           
           <div onclick="toggleOrderAccordion('${compAccordionId}')" style="padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.015) 0%, transparent 100%);">
               <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
@@ -9570,8 +9597,8 @@ window.calculateAndRenderTargets = async function() {
 
               <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
                   <div style="text-align: right;">
-                      <span style="font-size: 15px; font-weight: 900; color: ${g.revTarget > 0 ? revColor : colorClass}; display: block; line-height: 1.1;">
-                          ${g.revTarget > 0 ? formatQtySmart(revPct) : formatQtySmart(pct)}%
+                      <span style="font-size: 15px; font-weight: 900; color: ${finalColorClass}; display: block; line-height: 1.1;">
+                          ${finalPctDisplay}
                       </span>
                   </div>
                   <div style="width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,0.04); display: flex; align-items: center; justify-content: center;">
@@ -9588,14 +9615,14 @@ window.calculateAndRenderTargets = async function() {
                         <div>
                             <div style="font-size:11px; font-weight:900; color:var(--amber); margin-bottom:4px; letter-spacing:0.5px;">💰 MỤC TIÊU DOANH SỐ</div>
                             <div style="font-size:16px; font-weight:900; color:var(--text-main);">
-                                <span style="color:${revColor};">${(g.revActual/1000).toLocaleString('en-US')}k</span> 
+                                <span style="color:${finalColorClass};">${(g.revActual/1000).toLocaleString('en-US')}k</span> 
                                 <span style="color:var(--text-muted); font-size:13px;">/ ${(g.revTarget/1000).toLocaleString('en-US')}k</span>${canEditIndividual ? `<button class="btn btn-sm" onclick="event.stopPropagation(); editIndividualCompRevKpi('${compCode}', ${g.revTarget})" style="margin-left:6px; padding:3px 8px; font-size:11px; background:var(--amber); color:#fff; border-radius:6px; vertical-align:middle;"><i class="fa-solid fa-pen"></i> Sửa</button>` : ''}
                             </div>
                         </div>
-                        <div style="font-size:18px; font-weight:900; color:${revColor};">${formatQtySmart(revPct)}%</div>
+                        <div style="font-size:18px; font-weight:900; color:${finalColorClass};">${finalPctDisplay}</div>
                      </div>
                      <div style="width: 100%; height: 7px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
-                        <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(revPct, 100)}\%; background:${revBar}; border-radius: 4px; transition:width 0.5s;"></div>
+                        <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${finalBarWidth}\%; background:${finalBarColor}; border-radius: 4px; transition:width 0.5s;"></div>
                      </div>
                 </div>
               ` : ''}
@@ -9621,10 +9648,10 @@ window.calculateAndRenderTargets = async function() {
                       </div>
                       <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
                           <span style="font-size:11.5px; font-weight:900; color:var(--text-muted); text-transform:uppercase;">Tiến độ sản phẩm</span>
-                          <span style="font-size: 16px; font-weight: 900; color: ${colorClass}; line-height:1;">${formatQtySmart(pct)}%</span>
+                          <span style="font-size: 16px; font-weight: 900; color: ${finalColorClass}; line-height:1;">${finalPctDisplay}</span>
                       </div>
                       <div style="width: 100%; height: 7px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative;">
-                          <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${Math.min(pct, 100)}%; background: ${barColor}; border-radius: 4px; transition:width 0.5s;"></div>
+                          <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${finalBarWidth}%; background: ${finalBarColor}; border-radius: 4px; transition:width 0.5s;"></div>
                       </div>
                       `;
                   })()}
@@ -9638,11 +9665,32 @@ window.calculateAndRenderTargets = async function() {
                   </div>
                   <div style="display: flex; flex-direction: column; gap: 10px;">
                       ${g.skus.sort((a,b)=>b.target-a.target).map((sku) => {
-                          const skuPct = sku.target > 0 ? (sku.actual / sku.target) * 100 : (sku.actual > 0 ? 100 : 0);
+                          
+                          // FIX LỖI TOÁN HỌC BÊN TRONG CẤP ĐỘ SKU
+                          let skuPctText = '';
+                          let skuBarW = 0;
                           let sColor = 'var(--rose)'; let sBar = 'var(--rose-gradient)';
-                          let sBgTint = 'rgba(225,29,72,0.03)';
-                          if (skuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; sBgTint = 'rgba(16,185,129,0.03)';} 
-                          else if (skuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; sBgTint = 'rgba(245,158,11,0.03)';}
+
+                          if (sku.target > 0) {
+                              const calculatedSkuPct = (sku.actual / sku.target) * 100;
+                              skuPctText = formatQtySmart(calculatedSkuPct) + '%';
+                              skuBarW = Math.min(calculatedSkuPct, 100);
+                              
+                              if (calculatedSkuPct >= 100) { sColor = 'var(--emerald)'; sBar = 'var(--emerald-gradient)'; } 
+                              else if (calculatedSkuPct >= 70) { sColor = 'var(--amber)'; sBar = 'var(--amber-gradient)'; }
+                          } else {
+                              if (sku.actual > 0) {
+                                  skuPctText = 'Ngoài KPI';
+                                  skuBarW = 100;
+                                  sColor = '#0EA5E9';
+                                  sBar = 'linear-gradient(135deg, #3B82F6 0%, #0284C7 100%)';
+                              } else {
+                                  skuPctText = '0%';
+                                  skuBarW = 0;
+                                  sColor = 'var(--text-muted)';
+                                  sBar = 'var(--text-muted)';
+                              }
+                          }
 
                           const canDelete = isAdminOrManager && !isTongQuanTab;
                           const formatRevSku = (val) => ((Number(val) || 0) / 1000).toLocaleString('en-US');
@@ -9662,7 +9710,7 @@ window.calculateAndRenderTargets = async function() {
                                     <span style="color: var(--text-muted); font-size:11.5px; font-weight:700;">${formatQtySmart(sku.target)} Thùng</span>
                                   </div>
                                   <div style="flex:1; background:var(--bg-dark); padding:8px 10px; border-radius:8px; border:1px solid ${sColor}; display:flex; flex-direction:column; justify-content:center; position:relative;">
-                                    <div style="position:absolute; top:-6px; right:-6px; background:${sColor}; color:#fff; font-size:10px; font-weight:900; padding:2px 6px; border-radius:6px;">${formatQtySmart(skuPct)}%</div>
+                                    <div style="position:absolute; top:-6px; right:-6px; background:${sColor}; color:#fff; font-size:10px; font-weight:900; padding:2px 6px; border-radius:6px; white-space:nowrap;">${skuPctText}</div>
                                     <span style="color: ${sColor}; font-size:10.5px; font-weight:900; margin-bottom:2px;">THỰC ĐẠT</span>
                                     <b style="color: ${sColor}; font-size:14.5px;">${formatRevSku(sku.actualRev)}k</b>
                                     <span style="color: var(--text-main); font-size:11.5px; font-weight:700;">${formatQtySmart(sku.actual)} Thùng</span>
@@ -9670,7 +9718,7 @@ window.calculateAndRenderTargets = async function() {
                               </div>
                               
                               <div style="width: 100%; height: 5px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden;">
-                                  <div style="height: 100%; width: ${Math.min(skuPct, 100)}%; background:${sBar}; border-radius: 3px;"></div>
+                                  <div style="height: 100%; width: ${skuBarW}%; background:${sBar}; border-radius: 3px;"></div>
                               </div>
                           </div>
                           `;
