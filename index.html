@@ -1235,15 +1235,17 @@ window.syncOfflineCheckins = async function() {
     });
   }
 
-  async function cleanupExpiredOrdersOptimized() {
+async function cleanupExpiredOrdersOptimized() {
+    // KHẮC PHỤC: Chặn đứng tài khoản Sales/Viewer chạy lệnh này để chống đốt Read
+    if (!currentUser || currentUser.role !== 'admin') return;
+
     const lastCleanup = localStorage.getItem('dms_last_cleanup_date');
     const todayStr = new Date().toISOString().slice(0, 10);
     if (lastCleanup === todayStr) return;
 
     try {
-     // Đặt ngưỡng thời gian dọn dẹp là 60 ngày trước
-const pastDate = new Date(Date.now() - (60 * 24 * 60 * 60 * 1000));
-const thresholdDateStr = pastDate.toISOString().slice(0, 10);
+      const pastDate = new Date(Date.now() - (60 * 24 * 60 * 60 * 1000));
+      const thresholdDateStr = pastDate.toISOString().slice(0, 10);
 
       const q = query(collection(db, "orders"), where("ngayCtu", "<", thresholdDateStr), limit(50));
       const snap = await getDocs(q);
@@ -1700,43 +1702,44 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
 try {
     if (ctkmListenerUnsub) ctkmListenerUnsub();
     if (compListenerUnsub) compListenerUnsub();
-
-    // 1. Lắng nghe thay đổi CTKM
-// 1. Lắng nghe thay đổi CTKM
-   // TÌM VÀ XÓA BỎ ĐOẠN NÀY ĐỂ MÁY NHÂN VIÊN KHÔNG BỊ TRIGGER TỰ ĐỘNG
+// 1. Lắng nghe thay đổi CTKM (TỐI ƯU CHỐNG BÃO READ)
     ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
             if (serverVersion > localVersion && localVersion !== 0 && currentUser && currentUser.role !== 'admin') {
                 localStorage.setItem("localCtkmVersion", serverVersion);
-                const snap = await getDocs(collection(db, "promotions"));
-                window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                window.promotionsLoaded = true;
-                if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') drawCtkmUI();
+                
+                // NẾU ĐANG MỞ TAB CTKM THÌ MỚI TẢI XUỐNG NGAY
+                if (currentTab === 'ctkm') {
+                    const snap = await getDocs(collection(db, "promotions"));
+                    window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                    window.promotionsLoaded = true;
+                    if (typeof drawCtkmUI === 'function') drawCtkmUI();
+                } else {
+                    // NẾU KHÔNG Ở TAB CTKM, CHỈ ĐÁNH DẤU LÀ DỮ LIỆU ĐÃ CŨ ĐỂ TẢI LẠI KHI CẦN
+                    window.promotionsLoaded = false; 
+                }
             }
         }
     });
 
-    // 2. Lắng nghe thay đổi danh sách CÔNG TY
+    // 2. Lắng nghe thay đổi danh sách CÔNG TY (TỐI ƯU CHỐNG BÃO READ)
     compListenerUnsub = onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
             const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
             
-            // TỐI ƯU 3: Thêm điều kiện localCompsVersion !== 0
             if (serverCompsVersion > localCompsVersion && localCompsVersion !== 0) {
-                const cSnap = await getDocs(collection(db, "companies"));
-                companyList = cSnap.docs.map(d => d.data());
-                window.allCompanies = companyList;
-                
-                if (typeof saveCompaniesToLocalCache === 'function') {
-                    await saveCompaniesToLocalCache(companyList);
-                }
                 localStorage.setItem("companiesVersion", serverCompsVersion);
                 
-                if (typeof renderUI === 'function' && currentTab === 'company') {
-                    renderUI();
+                // CHỈ TẢI NẾU USER ĐANG MỞ TAB CÔNG TY, NẾU KHÔNG CỨ ĐỂ YÊN
+                if (currentTab === 'company') {
+                    const cSnap = await getDocs(collection(db, "companies"));
+                    companyList = cSnap.docs.map(d => d.data());
+                    window.allCompanies = companyList;
+                    if (typeof saveCompaniesToLocalCache === 'function') await saveCompaniesToLocalCache(companyList);
+                    if (typeof renderUI === 'function') renderUI();
                 }
             }
         }
@@ -1859,10 +1862,16 @@ window.handleLogout = async function() {
   };
 
   window.refreshStoresGPSData = async function() {
+  const now = Date.now();
+  const lastGpsRefresh = Number(localStorage.getItem('dms_cooldown_gps') || 0);
+  if (now - lastGpsRefresh < 300000) { 
+      const remain = Math.ceil((300000 - (now - lastGpsRefresh)) / 60000);
+      return alert(`⏳ Dữ liệu GPS đã được cập nhật gần đây. Thử lại sau ${remain} phút nữa!`);
+  }
+  localStorage.setItem('dms_cooldown_gps', now);
+
   try {
     alert("⏳ Đang cập nhật dữ liệu ghim GPS mới nhất từ hệ thống...");
-    
-    // Chỉ truy vấn bảng stores để lấy thông tin GPS (tiết kiệm băng thông và tối ưu tốc độ)
     const storeSnap = await getDocs(collection(db, "stores"));
     let updatedCount = 0;
 
@@ -3123,13 +3132,19 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
   };
 
  window.reloadSoGocDataManually = async function() {
+    // THÊM COOLDOWN 30 GIÂY
+    const now = Date.now();
+    const lastReload = Number(localStorage.getItem('dms_cooldown_sogoc') || 0);
+    if (now - lastReload < 30000) {
+        return alert("⏳ Vui lòng đợi 30 giây giữa các lần làm mới để tránh quá tải hệ thống!");
+    }
+    localStorage.setItem('dms_cooldown_sogoc', now);
+
     try {
-      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
       const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
       if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-      // Tải dữ liệu mới từ Firebase
-     const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100)));
+      const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(100)));
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       if (!snap.empty) {
