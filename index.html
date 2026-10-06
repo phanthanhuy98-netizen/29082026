@@ -7338,6 +7338,9 @@ window.deleteAllAndImportCustomersExcel = async function(e) {
         await Promise.all(batches);
 
         // Thêm mới dữ liệu từ file Excel
+     // ... (phía trên giữ nguyên phần đọc Excel) ...
+
+        // Thêm mới dữ liệu từ file Excel
         const newStoresList = jsonData.map((item, idx) => ({
           id: String(item.id || item.maKH || ('kh_' + Date.now() + '_' + idx)),
           code: String(item.code || item.maKH || '').trim(),
@@ -7349,24 +7352,36 @@ window.deleteAllAndImportCustomersExcel = async function(e) {
           updatedAt: new Date().toISOString()
         }));
 
-        let uploadBatches = [];
+        // --- BẮT ĐẦU ĐOẠN CODE SỬA LẠI TỪ ĐÂY ---
         let uploadBatch = writeBatch(db);
         let upCount = 0;
 
-        newStoresList.forEach(s => {
-          const docRef = doc(collection(db, "stores"), s.id);
-          uploadBatch.set(docRef, s);
-          upCount++;
-          if (upCount >= 400) {
-            uploadBatches.push(uploadBatch.commit());
-            uploadBatch = writeBatch(db);
-            upCount = 0;
-          }
-        });
-        if (upCount > 0) {
-          uploadBatches.push(uploadBatch.commit());
+        for (let i = 0; i < newStoresList.length; i++) {
+            const s = newStoresList[i];
+            
+            // LỌC DỮ LIỆU RÁC: Xóa sạch các trường 'undefined' (nếu có do Excel sinh ra) để Firebase không báo lỗi 400
+            const cleanData = JSON.parse(JSON.stringify(s));
+
+            const docRef = doc(collection(db, "stores"), String(s.id));
+            uploadBatch.set(docRef, cleanData);
+            upCount++;
+
+            // Khi gom đủ 400 tiệm
+            if (upCount >= 400) {
+                await uploadBatch.commit(); // ĐỢI Firebase lưu xong 400 tiệm này...
+                uploadBatch = writeBatch(db); // ...mới tạo gói mới
+                upCount = 0;
+                
+                // Cho hệ thống nghỉ ngơi 100ms để không bị nghẽn mạng (Anti-DDoS)
+                await new Promise(resolve => setTimeout(resolve, 100)); 
+            }
         }
-        await Promise.all(uploadBatches);
+        
+        // Lưu nốt số tiệm bị lẻ ở cuối cùng
+        if (upCount > 0) {
+            await uploadBatch.commit();
+        }
+        // --- KẾT THÚC ĐOẠN CODE SỬA LẠI ---
 
         stores = newStoresList;
         await saveStoresToLocalCache(stores);
