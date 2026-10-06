@@ -963,9 +963,9 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
   let currentSalesGPS = null;
 
   let idbDb = null;
-  function initIndexedDB() {
+ function initIndexedDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("DMS_OfflineDB", 37);
+      const request = indexedDB.open("DMS_OfflineDB", 38); // TĂNG LÊN 38 ĐỂ UPDATE DNA
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { idbDb = request.result; resolve(idbDb); };
       request.onupgradeneeded = (e) => {
@@ -984,6 +984,10 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
         dbInstance.createObjectStore("offlineCheckins", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localRoutes")) dbInstance.createObjectStore("localRoutes", { keyPath: "id" });
         if (!dbInstance.objectStoreNames.contains("localCompanies")) dbInstance.createObjectStore("localCompanies", { keyPath: "maCtu" });
+        
+        // THÊM DÒNG NÀY ĐỂ TẠO NƠI LƯU TRỮ CTKM VÀO MÁY:
+        if (!dbInstance.objectStoreNames.contains("localPromotions")) dbInstance.createObjectStore("localPromotions", { keyPath: "id" });
+
         if (!dbInstance.objectStoreNames.contains("metaInfo")) dbInstance.createObjectStore("metaInfo", { keyPath: "key" });
         if (!dbInstance.objectStoreNames.contains("cartDrafts")) dbInstance.createObjectStore("cartDrafts", { keyPath: "storeId" });
       };
@@ -1055,12 +1059,11 @@ window.syncOfflineCheckins = async function() {
             syncedIds.forEach(id => delStore.delete(id));
         };
     } catch (e) { console.error("Lỗi đồng bộ Checkins:", e); }
-};
-  async function saveProductsToLocalCache(list) {
+};async function savePromotionsToLocalCache(list) {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localProducts"], "readwrite");
-      const store = transaction.objectStore("localProducts");
+      const transaction = idbDb.transaction(["localPromotions"], "readwrite");
+      const store = transaction.objectStore("localPromotions");
       store.clear();
       list.forEach(p => store.put(p));
       transaction.oncomplete = () => resolve();
@@ -1068,11 +1071,11 @@ window.syncOfflineCheckins = async function() {
     });
   }
 
-  async function loadProductsFromLocalCache() {
+  async function loadPromotionsFromLocalCache() {
     if (!idbDb) await initIndexedDB();
     return new Promise((resolve, reject) => {
-      const transaction = idbDb.transaction(["localProducts"], "readonly");
-      const store = transaction.objectStore("localProducts");
+      const transaction = idbDb.transaction(["localPromotions"], "readonly");
+      const store = transaction.objectStore("localPromotions");
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(transaction.error);
@@ -1567,6 +1570,25 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
       if (typeof stores !== 'undefined') stores = window.allStores;
       if (typeof routeGroupsList !== 'undefined') routeGroupsList = window.allRoutes;
 
+      // ---- THÊM ĐOẠN NÀY ĐỂ XỬ LÝ CACHE CHO CTKM ----
+      const ctkmMetaRef = doc(db, "systemMeta", "ctkmVersion");
+      const ctkmMetaSnap = await getDoc(ctkmMetaRef);
+      const serverCtkmVersion = ctkmMetaSnap.exists() ? Number(ctkmMetaSnap.data().version || 1) : 1;
+      const localCtkmVersion = Number(localStorage.getItem("localCtkmVersion") || 0);
+
+      let cachedPromos;
+      if (!forceCloud && localCtkmVersion === serverCtkmVersion) {
+        cachedPromos = typeof loadPromotionsFromLocalCache === 'function' ? await loadPromotionsFromLocalCache() : null;
+      }
+      if (!cachedPromos || cachedPromos.length === 0) {
+        const promoSnap = await getDocs(collection(db, "promotions"));
+        cachedPromos = promoSnap.docs.map(d => ({id: d.id, ...d.data()}));
+        if (typeof savePromotionsToLocalCache === 'function') await savePromotionsToLocalCache(cachedPromos);
+        localStorage.setItem("localCtkmVersion", serverCtkmVersion);
+      }
+      window.promotionsList = cachedPromos || [];
+      window.promotionsLoaded = true;
+      // -----------------------------------------------
       if (typeof buildProductIndex === 'function') buildProductIndex();
       if (typeof buildStoreIndex === 'function') buildStoreIndex();
       if (typeof renderUI === 'function') renderUI();
@@ -5853,20 +5875,6 @@ else if (tab === 'ctkm') {
             <div style="text-align:center; padding:35px; color:var(--text-muted); font-size:14px; font-weight:800;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu CTKM...</div>
         </div>
     `;
-
-    // Tải dữ liệu ngay khi mở tab và tự động render
-    if (!window.promotionsLoaded) {
-        getDocs(collection(db, "promotions")).then(snap => {
-            window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-            window.promotionsLoaded = true;
-            // TỰ ĐỘNG VẼ GIAO DIỆN NGAY KHI TẢI XONG
-            if (typeof drawCtkmUI === 'function') drawCtkmUI();
-        }).catch(e => {
-            window.promotionsLoaded = true;
-            document.getElementById('ctkmDynamicContentArea').innerHTML = `<div style="text-align:center; padding:35px; color:var(--rose); font-weight:800;">Lỗi tải dữ liệu CTKM. Vui lòng bấm Làm mới.</div>`;
-        });
-    } else {
-        // Đã load từ trước thì vẽ luôn
         drawCtkmUI();
     }
   }
