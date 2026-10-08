@@ -12349,7 +12349,7 @@ window.toggleSalesPanel = function() {
     }
 };
 // ==========================================
-// HỆ THỐNG GỢI Ý ĐƠN HÀNG TỐI ƯU (BẤM NẠP LÀ CHẠY THẲNG)
+// HỆ THỐNG GỢI Ý ĐƠN HÀNG THÔNG MINH (TỰ ĐỘNG ẨN Ô LẺ KHI LÀ MÃ THÙNG)
 // ==========================================
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
@@ -12408,14 +12408,22 @@ window.openAiSmartOrderModal = function() {
         }
 
         const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
-        let ratio = pObj?.tyLeQuyDoi || 50;
-        let kien = ratio > 0 ? Math.floor(avgPerOrder / ratio) : 0;
-        let le = ratio > 0 ? avgPerOrder % ratio : avgPerOrder;
+        let ratio = Number(pObj?.tyLeQuyDoi || 50);
+        
+        // Nếu mã hàng không có quy cách hoặc quy cách = 1 thì coi như bán nguyên thùng, ẩn lẻ
+        let kien = ratio > 1 ? Math.floor(avgPerOrder / ratio) : avgPerOrder;
+        let le = ratio > 1 ? avgPerOrder % ratio : 0;
+        
+        // Nếu số lượng ít hơn 1 thùng nhưng có lịch sử mua lẻ thì đưa vào lẻ, ngược lại đưa vào thùng
+        if (kien === 0 && le > 0 && ratio <= 1) {
+            kien = 0;
+        }
 
         suggestedOrderList.push({
             code: prod.code,
             name: prod.name,
             dvt: prod.dvt,
+            ratio: ratio,
             kien: kien,
             le: le,
             ghiChu: `Đã nhập ${prod.purchaseCount} lần (Chu kỳ ~${averageCycleDays} ngày)`
@@ -12442,7 +12450,9 @@ window.openAiSmartOrderModal = function() {
                 </div>
 
                 <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:12px; padding-right:6px;">
-                    ${suggestedOrderList.map((item, idx) => `
+                    ${suggestedOrderList.map((item, idx) => {
+                        const showLooseInput = item.ratio > 1; // Chỉ hiện ô lẻ khi tỷ lệ quy cách > 1
+                        return `
                         <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:14px; padding:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
                             
                             <div style="display:flex; align-items:center; gap:14px; flex:1; min-width:0;">
@@ -12459,16 +12469,19 @@ window.openAiSmartOrderModal = function() {
                             <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
                                 <div style="display:flex; flex-direction:column; align-items:center;">
                                     <span style="font-size:11px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">THÙNG</span>
-                                    <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:60px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
+                                    <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:65px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
                                 </div>
+                                ${showLooseInput ? `
                                 <div style="display:flex; flex-direction:column; align-items:center;">
                                     <span style="font-size:11px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">LẺ (${item.dvt})</span>
-                                    <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:60px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
+                                    <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:65px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
                                 </div>
+                                ` : ''}
                             </div>
 
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
 
                 <div style="margin-top:16px; padding-top:14px; border-top:2px solid #e2e8f0; flex-shrink:0;">
