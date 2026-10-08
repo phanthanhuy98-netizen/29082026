@@ -12349,7 +12349,7 @@ window.toggleSalesPanel = function() {
     }
 };
 // ==========================================
-// HỆ THỐNG TRỢ LÝ AI GỢI Ý ĐƠN HÀNG CHUẨN ENTERPRISE (HOÀN THIỆN)
+// HỆ THỐNG TRỢ LÝ AI PHÂN TÍCH CHUYÊN SÂU & GỢI Ý ĐƠN HÀNG (THUẦN VIỆT)
 // ==========================================
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước khi sử dụng trợ lý AI!");
@@ -12357,6 +12357,7 @@ window.openAiSmartOrderModal = function() {
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
+    // 1. Lọc lịch sử đơn hàng của khách hàng này
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12368,11 +12369,40 @@ window.openAiSmartOrderModal = function() {
     });
 
     if (storeOrders.length === 0) {
-        return alert("Tiệm này chưa có lịch sử mua hàng. Vui lòng chọn danh mục thủ công để mở đơn đầu tiên!");
+        return alert("Tiệm này chưa có lịch sử mua hàng để AI phân tích!");
     }
 
+    // Sắp xếp đơn hàng từ mới nhất đến cũ nhất
     storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
 
+    // 2. PHÂN TÍCH CHUYÊN SÂU THỜI GIAN & HÀNH VI KHÁCH HÀNG
+    let totalOrdersCount = storeOrders.length;
+    let firstOrderDate = new Date(storeOrders[storeOrders.length - 1].ngayCtu || Date.now());
+    let lastOrderDate = new Date(storeOrders[0].ngayCtu || Date.now());
+    let todayTime = new Date().getTime();
+    
+    // Tính khoảng cách ngày từ đơn hàng gần nhất
+    let daysSinceLastOrder = Math.max(0, Math.round((todayTime - lastOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
+    
+    // Tính tổng số ngày hoạt động từ đơn đầu tiên đến nay để ra tần suất ghé mua trung bình
+    let totalSpanDays = Math.max(1, Math.round((todayTime - firstOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
+    let averageCycleDays = Math.max(1, Math.round(totalSpanDays / totalOrdersCount));
+
+    // Đánh giá hành vi khách hàng
+    let customerBehaviorText = "";
+    let behaviorColor = "var(--primary)";
+    if (daysSinceLastOrder > averageCycleDays * 1.5) {
+        customerBehaviorText = `⚠️ <b>Khách đang có dấu hiệu chậm nhập hàng:</b> Đã ${daysSinceLastOrder} ngày chưa thấy nhập lại (Chu kỳ trung bình của tiệm là ${averageCycleDays} ngày/lần). Có nguy cơ bị đứt hàng hoặc đối thủ chèn chân.`;
+        behaviorColor = "var(--rose)";
+    } else if (daysSinceLastOrder <= averageCycleDays * 0.7) {
+        customerBehaviorText = `⚡ <b>Khách nhập hàng dồn dập (Sức bán tốt):</b> Tiệm vừa lấy đơn cách đây ${daysSinceLastOrder} ngày nhưng tần suất đang ngắn hơn chu kỳ thường (${averageCycleDays} ngày). Khả năng cao hàng đang bán rất chạy.`;
+        behaviorColor = "var(--emerald)";
+    } else {
+        customerBehaviorText = `✅ <b>Khách duy trì nhịp độ ổn định:</b> Đang bám rất sát chu kỳ nhập hàng đều đặn (${averageCycleDays} ngày/lần).`;
+        behaviorColor = "var(--primary)";
+    }
+
+    // 3. Phân tích chi tiết nhu cầu từng sản phẩm
     let productHistoryMap = {};
     let allPurchasedSkuCodes = new Set();
 
@@ -12391,7 +12421,7 @@ window.openAiSmartOrderModal = function() {
                             dvt: item.dvt || 'hộp',
                             totalQty: 0,
                             purchaseCount: 0,
-                            lastOrderDate: o.ngayCtu
+                            lastQty: q
                         };
                     }
                     productHistoryMap[code].totalQty += q;
@@ -12401,130 +12431,122 @@ window.openAiSmartOrderModal = function() {
         }
     });
 
-    let replenishmentList = [];
-    let steadyList = [];
-    const todayTime = new Date().getTime();
+    let suggestedOrderList = [];
 
     Object.values(productHistoryMap).forEach(prod => {
+        // Lượng trung bình một lần mua
         let avgPerOrder = Math.round(prod.totalQty / prod.purchaseCount);
-        let lastTime = new Date(prod.lastOrderDate || todayTime).getTime();
-        let daysDiff = Math.max(1, Math.round((todayTime - lastTime) / (1000 * 60 * 60 * 24)));
-        let estimatedCycleDays = Math.round(30 / Math.max(1, prod.purchaseCount));
+        
+        // Hệ số điều chỉnh dựa trên thời gian thực tế khách chưa nhập
+        let adjustedQty = avgPerOrder;
+        let lyDoPhanTich = `Mã quay vòng đều đặn (${prod.purchaseCount} lần đã nhập).`;
 
-        // Lấy tỷ lệ quy cách của sản phẩm để tính Thùng / Lẻ
+        if (daysSinceLastOrder > averageCycleDays * 1.3) {
+            // Nếu lâu ngày chưa nhập, gợi ý bù dư thêm một chút để tránh đứt hàng
+            adjustedQty = Math.round(avgPerOrder * 1.2);
+            lyDoPhanTich = `Đã cách ${daysSinceLastOrder} ngày (quá chu kỳ ${averageCycleDays} ngày). Cần châm bù số lượng cao hơn bình thường.`;
+        }
+
         const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
         let ratio = pObj?.tyLeQuyDoi || 50;
-        let kien = ratio > 0 ? Math.floor(avgPerOrder / ratio) : 0;
-        let le = ratio > 0 ? avgPerOrder % ratio : avgPerOrder;
+        let kien = ratio > 0 ? Math.floor(adjustedQty / ratio) : 0;
+        let le = ratio > 0 ? adjustedQty % ratio : adjustedQty;
 
-        let suggestionItem = {
+        suggestedOrderList.push({
             code: prod.code,
             name: prod.name,
             dvt: prod.dvt,
-            totalQty: avgPerOrder,
             kien: kien,
             le: le,
-            lyDo: ''
-        };
-
-        if (daysDiff >= estimatedCycleDays * 0.8) {
-            suggestionItem.lyDo = `Đã ${daysDiff} ngày chưa nhập lại (Chu kỳ ~${estimatedCycleDays} ngày)`;
-            replenishmentList.push(suggestionItem);
-        } else {
-            suggestionItem.lyDo = `Mã chủ lực thường xuyên (${prod.purchaseCount} lần nhập)`;
-            steadyList.push(suggestionItem);
-        }
-    });
-
-    let crossSellingList = [];
-    let purchasedCompanyPrefixes = new Set();
-    allPurchasedSkuCodes.forEach(code => {
-        if (code.length >= 2) purchasedCompanyPrefixes.add(code.substring(0, 2).toUpperCase());
-    });
-
-    if (typeof products !== 'undefined' && Array.isArray(products)) {
-        products.forEach(p => {
-            let pCode = String(p.code || '').trim().toUpperCase();
-            if (pCode.length >= 2) {
-                let prefix = pCode.substring(0, 2);
-                if (purchasedCompanyPrefixes.has(prefix) && !allPurchasedSkuCodes.has(pCode)) {
-                    if (typeof isProductAllowedByCompanyDvt === 'function' && isProductAllowedByCompanyDvt(p)) {
-                        let ratio = p.tyLeQuyDoi || 50;
-                        crossSellingList.push({
-                            code: p.code,
-                            name: p.name,
-                            dvt: p.dvt || 'hộp',
-                            totalQty: ratio,
-                            kien: 1,
-                            le: 0,
-                            lyDo: 'Gợi ý mở rộng thêm mặt hàng mới cùng hãng'
-                        });
-                    }
-                }
-            }
+            lyDo: lyDoPhanTich
         });
-    }
+    });
 
-    replenishmentList = replenishmentList.slice(0, 5);
-    steadyList = steadyList.slice(0, 4);
-    crossSellingList = crossSellingList.slice(0, 3);
+    // Giới hạn top 8 sản phẩm trọng tâm nhất
+    suggestedOrderList = suggestedOrderList.slice(0, 8);
 
+    // 4. Dựng giao diện Modal phân tích chuyên sâu
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
-            <div class="modal-content fullscreen-modal" style="max-width: 680px; display:flex; flex-direction:column;">
+            <div class="modal-content fullscreen-modal" style="max-width: 700px; display:flex; flex-direction:column;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px; flex-shrink:0;">
                     <div>
                         <h3 style="font-size:17px; font-weight:900; color:var(--primary); display:flex; align-items:center; gap:8px; margin:0;">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> Trợ Lý Gợi Ý Đơn Hàng Thông Minh
+                            <i class="fa-solid fa-chart-line"></i> Phân Tích Hành Vi & Gợi Ý Đơn Hàng Thông Minh
                         </h3>
-                        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Khách hàng: <b>${activeVisitedStore.name}</b> (${activeVisitedStore.code || 'KH'})</p>
+                        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Cửa hàng: <b>${activeVisitedStore.name}</b> (${activeVisitedStore.code || 'KH'})</p>
                     </div>
                     <button class="btn btn-red" onclick="closeAiModal()" style="font-size:13px; padding:8px 16px;">Đóng</button>
                 </div>
 
-                <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:14px; padding-right:4px;">
+                <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:16px; padding-right:4px;">
                     
-                    ${replenishmentList.length > 0 ? `
-                        <div>
-                            <div style="font-size:13px; font-weight:900; color:var(--rose); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                                <i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO SẮP CẠN KHO (CẦN CHÂM HÀNG GẤP)
+                    <!-- KHUNG BÁO CÁO NHẬN ĐỊNH HÀNH VI (CHUYÊN SÂU) -->
+                    <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-left: 5px solid ${behaviorColor}; border-radius: 14px; padding: 14px 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+                        <div style="font-size: 13px; font-weight: 900; color: var(--text-main); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-user-clock" style="color: ${behaviorColor};"></i> ĐÁNH GIÁ CHU KỲ VÀ THỜI GIAN NHẬP HÀNG
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-main); line-height: 1.5; margin-bottom: 10px;">
+                            ${customerBehaviorText}
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px dashed var(--card-border); pt-3; margin-top: 8px;">
+                            <div style="background: var(--bg-dark); padding: 8px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 10px; font-weight: 800; color: var(--text-muted);">TỔNG SỐ ĐƠN</div>
+                                <div style="font-size: 15px; font-weight: 900; color: var(--primary);">${totalOrdersCount} đơn</div>
                             </div>
-                            <div style="display:flex; flex-direction:column; gap:8px;">
-                                ${replenishmentList.map((item, idx) => renderAiCardItem(item, idx, 'replenishment')).join('')}
+                            <div style="background: var(--bg-dark); padding: 8px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 10px; font-weight: 800; color: var(--text-muted);">CHU KỲ TRUNG BÌNH</div>
+                                <div style="font-size: 15px; font-weight: 900; color: var(--amber);">${averageCycleDays} ngày/đơn</div>
+                            </div>
+                            <div style="background: var(--bg-dark); padding: 8px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 10px; font-weight: 800; color: var(--text-muted);">CÁCH ĐƠN GẦN NHẤT</div>
+                                <div style="font-size: 15px; font-weight: 900; color: ${behaviorColor};">${daysSinceLastOrder} ngày</div>
                             </div>
                         </div>
-                    ` : ''}
+                    </div>
 
-                    ${steadyList.length > 0 ? `
-                        <div>
-                            <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                                <i class="fa-solid fa-rotate"></i> SẢN PHẨM CHỦ LỰC ĐỊNH KỲ
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:8px;">
-                                ${steadyList.map((item, idx) => renderAiCardItem(item, idx, 'steady')).join('')}
-                            </div>
+                    <!-- DANH SÁCH MÃ HÀNG GỢI Ý THỰC THI -->
+                    <div>
+                        <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                            <i class="fa-solid fa-clipboard-list"></i> TOA HÀNG ĐỀ XUẤT TỐI ƯU DỰA TRÊN THỜI GIAN VÀ NHU CẦU
                         </div>
-                    ` : ''}
-
-                    ${crossSellingList.length > 0 ? `
-                        <div>
-                            <div style="font-size:13px; font-weight:900; color:var(--emerald); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                                <i class="fa-solid fa-lightbulb"></i> ĐỀ XUẤT MỞ RỘNG SẢN PHẨM MỚI CÙNG HÃNG
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:8px;">
-                                ${crossSellingList.map((item, idx) => renderAiCardItem(item, idx, 'cross')).join('')}
-                            </div>
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                            ${suggestedOrderList.map((item, idx) => `
+                                <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                                    <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                                        <input type="checkbox" id="ai_chk_${idx}" checked style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer; flex-shrink:0;">
+                                        <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+                                            <div style="font-size:13.5px; font-weight:900; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="[${item.code}]${item.name}">
+                                                <span style="color:var(--primary);">[${item.code}]</span>${item.name}
+                                            </div>
+                                            <div style="font-size:11px; color:var(--text-muted); font-weight:700; margin-top:2px;">
+                                                <i class="fa-solid fa-circle-info"></i> ${item.lyDo}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                                        <div style="display:flex; flex-direction:column; align-items:center;">
+                                            <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Thùng</span>
+                                            <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
+                                        </div>
+                                        <div style="display:flex; flex-direction:column; align-items:center;">
+                                            <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Lẻ</span>
+                                            <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
                         </div>
-                    ` : ''}
+                    </div>
 
                 </div>
 
                 <div style="margin-top:14px; pt-3; border-top:1px solid var(--card-border); flex-shrink:0;">
                     <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:14px; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3);" onclick="applyAllAiRecommendations()">
-                        <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TẤT CẢ ĐỀ XUẤT VÀO GIỎ HÀNG
+                        <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TOÀN BỘ TOA ĐỀ XUẤT VÀO GIỎ HÀNG
                     </button>
                 </div>
             </div>
@@ -12532,40 +12554,6 @@ window.openAiSmartOrderModal = function() {
     `;
     modalContainer.classList.remove('hidden');
 };
-
-function renderAiCardItem(item, idx, type) {
-    let borderColor = 'var(--card-border)';
-    let badgeColor = 'var(--primary)';
-    
-    if (type === 'replenishment') { borderColor = 'var(--rose)'; badgeColor = 'var(--rose)'; }
-    else if (type === 'cross') { borderColor = 'var(--emerald)'; badgeColor = 'var(--emerald)'; }
-
-    return `
-        <div style="background:var(--panel-bg); border:1px solid ${borderColor}; border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
-                <input type="checkbox" id="ai_chk_${type}_${idx}" checked style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer; flex-shrink:0;">
-                <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-                    <div style="font-size:13.5px; font-weight:900; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="[${item.code}] ${item.name}">
-                        <span style="color:${badgeColor};">[${item.code}]</span> ${item.name}
-                    </div>
-                    <div style="font-size:11px; color:var(--text-muted); font-weight:700; margin-top:2px;">
-                        <i class="fa-solid fa-circle-info"></i> ${item.lyDo}
-                    </div>
-                </div>
-            </div>
-            <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                <div style="display:flex; flex-direction:column; align-items:center;">
-                    <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Thùng</span>
-                    <input type="text" id="ai_kien_${type}_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
-                </div>
-                <div style="display:flex; flex-direction:column; align-items:center;">
-                    <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Lẻ</span>
-                    <input type="text" id="ai_le_${type}_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
-                </div>
-            </div>
-        </div>
-    `;
-}
 
 window.closeAiModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
