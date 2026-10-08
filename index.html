@@ -4546,10 +4546,11 @@ window.importProductsExcel = function(event) {
     reader.readAsArrayBuffer(file);
   };
 
-  window.importCompanyExcel = function(event) {
+window.importCompanyExcel = function(event) {
   if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
   const file = event.target.files[0];
   if (!file) return;
+  
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
@@ -4557,39 +4558,70 @@ window.importProductsExcel = function(event) {
       const workbook = XLSX.read(data, { type: 'array' });
       const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
       
-      let uniqueMap = new Map();
+      let newOrUpdatedComps = [];
+      let addedCount = 0;
+      let updatedCount = 0;
+
       for (let i = 0; i < jsonRows.length; i++) {
         const r = jsonRows[i];
         const maCtu = r[0] ? String(r[0]).trim() : '';
         const tenCtu = r[1] ? String(r[1]).trim() : '';
+        
         if (maCtu && maCtu !== 'MaCTu') {
-          uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() });
+          // TÌM XEM CÔNG TY ĐÃ CÓ TRONG HỆ THỐNG CHƯA
+          let existingCompIndex = companyList.findIndex(c => c.maCtu === maCtu);
+          
+          if (existingCompIndex > -1) {
+            // NẾU ĐÃ CÓ: Giữ nguyên ĐVT và Trạng thái Đóng/Mở, chỉ cập nhật Tên
+            companyList[existingCompIndex].tenCtu = tenCtu;
+            companyList[existingCompIndex].updatedAt = new Date().toISOString();
+            newOrUpdatedComps.push(companyList[existingCompIndex]);
+            updatedCount++;
+          } else {
+            // NẾU CHƯA CÓ: Tạo mới hoàn toàn
+            let newComp = { 
+              id: `${window.currentWorkingTenant}_${maCtu}`, 
+              maDonVi: window.currentWorkingTenant, 
+              maCtu: maCtu, 
+              tenCtu: tenCtu, 
+              dvtDetails: [], 
+              status: "Mở", 
+              updatedAt: new Date().toISOString() 
+            };
+            companyList.push(newComp); // Thêm nối tiếp vào danh sách cũ
+            newOrUpdatedComps.push(newComp);
+            addedCount++;
+          }
         }
       }
-      let newList = Array.from(uniqueMap.values());
-      if (newList.length > 0) {
+
+      if (newOrUpdatedComps.length > 0) {
+        // Đẩy lên Firebase bằng Batch
         const batch = writeBatch(db);
-        newList.forEach(c => {
-          const docRef = doc(db, "companies", String(c.maCtu));
-          batch.set(docRef, c, { merge: true });
+        newOrUpdatedComps.forEach(c => {
+          const docRef = doc(db, "companies", String(c.id || c.maCtu));
+          batch.set(docRef, c, { merge: true }); // Giữ lại các trường cũ trên Firebase nếu có
         });
         await batch.commit();
 
-        // ĐÁNH THỨC CÁC MÁY KHÁC ĐỒNG BỘ (Bản vá lỗi nhầm bảng)
+        // Kích hoạt đồng bộ cho các máy khác
         const newVersion = Date.now();
         await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
         localStorage.setItem("companiesVersion", newVersion);
-
-        companyList = newList;
-        await saveCompaniesToLocalCache(companyList);
+        
+        // Lưu lại bộ nhớ máy toàn bộ danh sách (Cũ + Mới)
+        await saveCompaniesToLocalCache(companyList); 
         renderUI();
-        alert("✅ Đã nhập danh sách công ty thành công với danh sách ĐVT trống!");
+        alert(`✅ Đã nhập Excel thành công!\n- Thêm mới: ${addedCount} công ty\n- Cập nhật tên: ${updatedCount} công ty\n(Các thiết lập ĐVT và trạng thái cũ được giữ nguyên).`);
       } else {
         alert("Không tìm thấy dữ liệu hợp lệ trong file!");
       }
-    } catch (err) {}
+    } catch (err) {
+      alert("Lỗi khi xử lý file Excel: " + err.message);
+    }
   };
   reader.readAsArrayBuffer(file);
+  event.target.value = ''; // Reset input file để có thể chọn lại cùng 1 file
 };
   window.importRoutesExcel = function(event) {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file này!");
