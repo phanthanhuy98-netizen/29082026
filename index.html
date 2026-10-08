@@ -1482,13 +1482,30 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     return false;
   };
 
-  window.isProductAllowedByCompanyDvt = function(p) {
-    // Đã xóa ngoại lệ của Admin/Manager
-    if (window.isDvtHiddenForCurrentCompany(p.dvt, p.code, p.name)) {
-      return false;
+ window.isProductAllowedByCompanyDvt = function(p) {
+    // Lấy 2 ký tự đầu của mã sản phẩm làm mã công ty (hoặc theo cấu trúc hiện tại)
+    let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+    
+    // Tìm công ty trong danh sách companyList
+    let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+    
+    // 1. Nếu sản phẩm không có mã công ty trong danh sách tab Công ty -> Chặn tuyệt đối
+    if (!matchedComp) {
+        return false;
     }
+
+    // 2. Nếu công ty đang ở trạng thái "Đóng" (bị khóa) -> Chặn tuyệt đối
+    if (matchedComp.status === 'Đóng' || matchedComp.status === 'STOP' || matchedComp.status === 'Khoá' || matchedComp.status === 'CLOSED') {
+        return false;
+    }
+
+    // 3. Kiểm tra chi tiết trạng thái ĐVT (nếu có cấu hình riêng)
+    if (window.isDvtHiddenForCurrentCompany && window.isDvtHiddenForCurrentCompany(p.dvt, p.code, p.name)) {
+        return false;
+    }
+
     return true;
-  };
+};
 
   window.handleLogin = async function(e) {
     e.preventDefault();
@@ -12521,6 +12538,7 @@ window.openAiSmartOrderModal = function() {
                 let pComp = getCompCodeStrict(pCode);
                 
                 // CHỐT CHẶN 2: Hàng mồi cũng phải thuộc Cty đang mở
+              if (!isProductAllowedByCompanyDvt(p)) return;
                 if (!openCompCodes.has(pComp)) return;
 
                 if (hookItemsAdded < 6 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
@@ -12619,6 +12637,12 @@ window.closeAiModal = function() {
     if (modalContainer) {
         modalContainer.innerHTML = '';
         modalContainer.classList.add('hidden');
+    }
+};
+  window.backToAiModal = function() {
+    window._promoModalSource = 'normal';
+    if (typeof openAiSmartOrderModal === 'function') {
+        openAiSmartOrderModal();
     }
 };
 
