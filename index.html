@@ -5940,8 +5940,11 @@ else if (tab === 'company') {
       
       // --- TÍNH TOÁN SỐ LIỆU THỐNG KÊ (DASHBOARD) ---
       let totalComps = companyList.length;
-      let openComps = companyList.filter(c => c.status !== 'Đóng').length;
-      let closedComps = companyList.filter(c => c.status === 'Đóng').length;
+      let openCompsList = companyList.filter(c => c.status !== 'Đóng');
+      let closedCompsList = companyList.filter(c => c.status === 'Đóng');
+      
+      let openComps = openCompsList.length;
+      let closedComps = closedCompsList.length;
       
       // Tổng hợp các ĐVT đang bị khóa trên toàn hệ thống công ty
       let lockedDvtsSummary = [];
@@ -5954,6 +5957,52 @@ else if (tab === 'company') {
               });
           }
       });
+
+      // Hàm render danh sách công ty theo nhóm
+      const renderCompanyGroupCards = (list, isClosedGroup = false) => {
+          if (list.length === 0) {
+              return `<div style="text-align:center; padding:15px; color:var(--text-muted); font-size:13px; font-style:italic; background:var(--card-bg); border-radius:10px;">Không có công ty nào trong nhóm này.</div>`;
+          }
+          return list.map((c) => {
+              // Tìm đúng vị trí index thực tế trong mảng gốc companyList để các nút bấm (Sửa, Xóa, Đóng/Mở) hoạt động chính xác
+              const index = companyList.findIndex(item => item.maCtu === c.maCtu);
+              const isClosed = c.status === 'Đóng';
+              const dvtDetails = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
+
+              return `
+                <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosed ? 'var(--rose)' : 'var(--card-border)'}; opacity: ${isClosed ? '0.75' : '1'};">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <input type="text" value="${c.maCtu || ''}" readonly style="width:100px; margin:0; padding:6px; font-weight:800; font-size:14px; background:var(--panel-bg);">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                      <button class="btn btn-sm" style="background:${isClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-weight:800;" onclick="toggleCompanyStatus(${index})">${c.status || 'Mở'}</button>
+                      ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteCompanyItem(${index})"><i class="fa-solid fa-trash"></i></button>` : ''}
+                    </div>
+                  </div>
+
+                  <input type="text" value="${(c.tenCtu || '').replace(/'/g, "&apos;")}" onchange="updateCompanyField(${index}, 'tenCtu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px; font-weight:700; font-size:14px;">
+
+                  <div style="background:var(--panel-bg); padding:8px; border-radius:8px; border:1px solid var(--card-border);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                      <span style="font-size:12px; font-weight:800; color:var(--primary);">Trạng thái ĐVT theo Công Ty:</span>
+                      ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="font-size:10px; padding:3px 8px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
+                    </div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                      ${dvtDetails.length > 0 ? dvtDetails.map((d, dIdx) => {
+                          const isDvtClosed = d.status === 'Đóng';
+                          return `
+                            <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
+                              <span style="font-size:12px; font-weight:700;">${d.name}</span>
+                              <button class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-size:10px; padding:2px 6px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${d.status || 'Mở'}</button>
+                              ${isAdminOrManager ? `<button class="btn btn-sm btn-red" style="font-size:9px; padding:1px 4px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>` : ''}
+                            </div>
+                          `;
+                      }).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa cấu hình ĐVT riêng.</span>'}
+                    </div>
+                  </div>
+                </div>
+              `;
+          }).join('');
+      };
 
       container.innerHTML = `
         <div class="tab-header-actions">
@@ -5971,18 +6020,18 @@ else if (tab === 'company') {
           </div>
         </div>
 
-        <!-- KHUNG THỐNG KÊ NHANH (DASHBOARD) -->
+        <!-- KHUNG THỐNG KÊ NHANH (CLICK ĐỂ CUỘN NHANH ĐẾN NHÓM) -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px;">
             <div style="background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px 12px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
                 <div style="font-size: 11px; font-weight: 800; color: var(--text-muted);">TỔNG SỐ CTY</div>
                 <div style="font-size: 18px; font-weight: 900; color: var(--primary); margin-top: 2px;">${totalComps}</div>
             </div>
-            <div style="background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.2); padding: 10px 12px; border-radius: 12px; text-align: center;">
-                <div style="font-size: 11px; font-weight: 800; color: var(--emerald);">ĐANG MỞ</div>
+            <div onclick="document.getElementById('groupOpenSection').scrollIntoView({behavior: 'smooth'})" style="background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.2); padding: 10px 12px; border-radius: 12px; text-align: center; cursor: pointer;" title="Bấm để xem danh sách mở">
+                <div style="font-size: 11px; font-weight: 800; color: var(--emerald);">🟢 ĐANG MỞ</div>
                 <div style="font-size: 18px; font-weight: 900; color: var(--emerald); margin-top: 2px;">${openComps}</div>
             </div>
-            <div style="background: rgba(225,29,72,0.06); border: 1px solid rgba(225,29,72,0.2); padding: 10px 12px; border-radius: 12px; text-align: center;">
-                <div style="font-size: 11px; font-weight: 800; color: var(--rose);">ĐANG ĐÓNG</div>
+            <div onclick="document.getElementById('groupClosedSection').scrollIntoView({behavior: 'smooth'})" style="background: rgba(225,29,72,0.06); border: 1px solid rgba(225,29,72,0.2); padding: 10px 12px; border-radius: 12px; text-align: center; cursor: pointer;" title="Bấm để xem danh sách khóa">
+                <div style="font-size: 11px; font-weight: 800; color: var(--rose);">🔴 ĐANG KHÓA</div>
                 <div style="font-size: 18px; font-weight: 900; color: var(--rose); margin-top: 2px;">${closedComps}</div>
             </div>
         </div>
@@ -5999,48 +6048,30 @@ else if (tab === 'company') {
             </div>
         </div>
 
-        <div class="card" style="margin-bottom:10px; padding:10px;">
+        <div class="card" style="margin-bottom:12px; padding:10px;">
           <input type="text" placeholder="🔍 Tìm kiếm công ty..." oninput="filterCompanyTable(this.value)" style="margin:0; padding:12px; font-size: 14px;">
         </div>
 
-        <div id="companyCardsContainer" style="display:flex; flex-direction:column; gap:10px;">
-          ${companyList.map((c, index) => {
-            const isClosed = c.status === 'Đóng';
-            const dvtDetails = Array.isArray(c.dvtDetails) ? c.dvtDetails : [];
+        <!-- NHÓM 1: CÔNG TY ĐANG MỞ (HOẠT ĐỘNG) -->
+        <div id="groupOpenSection" style="margin-bottom: 20px;">
+            <div onclick="toggleOrderAccordion('acc_comp_open')" style="padding: 12px 16px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 900; color: var(--emerald); font-size: 14px;"><i class="fa-solid fa-circle-check"></i> CÔNG TY ĐANG MỞ HOẠT ĐỘNG (${openComps})</span>
+                <i id="icon_acc_comp_open" class="fa-solid fa-chevron-down" style="color: var(--emerald); transition: transform 0.3s;"></i>
+            </div>
+            <div id="acc_comp_open" style="display: flex; flex-direction: column; gap: 10px;">
+                ${renderCompanyGroupCards(openCompsList, false)}
+            </div>
+        </div>
 
-            return `
-              <div class="mobile-item-card company-card-item" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosed ? 'var(--rose)' : 'var(--card-border)'};">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <input type="text" value="${c.maCtu || ''}" readonly style="width:100px; margin:0; padding:6px; font-weight:800; font-size:14px; background:var(--panel-bg);">
-                  <div style="display:flex; gap:6px; align-items:center;">
-                    <button class="btn btn-sm" style="background:${isClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-weight:800;" onclick="toggleCompanyStatus(${index})">${c.status || 'Mở'}</button>
-                    ${isAdminOrManager ? `<button class="btn btn-red btn-sm" onclick="deleteCompanyItem(${index})"><i class="fa-solid fa-trash"></i></button>` : ''}
-                  </div>
-                </div>
-
-                <input type="text" value="${c.tenCtu || ''}" onchange="updateCompanyField(${index}, 'tenCtu', this.value)" ${isAdminOrManager ? '' : 'readonly'} placeholder="Tên công ty..." style="margin:0; padding:8px; font-weight:700; font-size:14px;">
-
-                <div style="background:var(--panel-bg); padding:8px; border-radius:8px; border:1px solid var(--card-border);">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:12px; font-weight:800; color:var(--primary);">Trạng thái ĐVT theo Công Ty:</span>
-                    ${isAdminOrManager ? `<button class="btn btn-amber btn-sm" style="font-size:10px; padding:3px 8px;" onclick="addCompanyDvtPrompt(${index})"><i class="fa-solid fa-plus"></i> Thêm ĐVT</button>` : ''}
-                  </div>
-                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    ${dvtDetails.length > 0 ? dvtDetails.map((d, dIdx) => {
-                      const isDvtClosed = d.status === 'Đóng';
-                      return `
-                        <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
-                          <span style="font-size:12px; font-weight:700;">${d.name}</span>
-                          <button class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-size:10px; padding:2px 6px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${d.status || 'Mở'}</button>
-                          ${isAdminOrManager ? `<button class="btn btn-sm btn-red" style="font-size:9px; padding:1px 4px;" onclick="removeCompanyDvt(${index},${dIdx})">×</button>` : ''}
-                        </div>
-                      `;
-                    }).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa cấu hình ĐVT riêng.</span>'}
-                  </div>
-                </div>
-              </div>
-            `;
-          }).join('')}
+        <!-- NHÓM 2: CÔNG TY ĐANG KHÓA (ĐÓNG) -->
+        <div id="groupClosedSection" style="margin-bottom: 20px;">
+            <div onclick="toggleOrderAccordion('acc_comp_closed')" style="padding: 12px 16px; background: rgba(225,29,72,0.08); border: 1px solid rgba(225,29,72,0.25); border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 900; color: var(--rose); font-size: 14px;"><i class="fa-solid fa-ban"></i> CÔNG TY ĐANG KHÓA / ĐÓNG (${closedComps})</span>
+                <i id="icon_acc_comp_closed" class="fa-solid fa-chevron-down" style="color: var(--rose); transition: transform 0.3s;"></i>
+            </div>
+            <div id="acc_comp_closed" class="hidden" style="display: flex; flex-direction: column; gap: 10px;">
+                ${renderCompanyGroupCards(closedCompsList, true)}
+            </div>
         </div>
       `;
     }
