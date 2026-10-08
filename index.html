@@ -12349,15 +12349,14 @@ window.toggleSalesPanel = function() {
     }
 };
 // ==========================================
-// ENTERPRISE AI ORDER ENGINE (ĐỈNH CAO CHUYÊN NGHIỆP)
+// HỆ THỐNG TRỢ LÝ AI GỢI Ý ĐƠN HÀNG CHUẨN ENTERPRISE (HOÀN THIỆN)
 // ==========================================
 window.openAiSmartOrderModal = function() {
-    if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước khi sử dụng AI tư vấn!");
+    if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước khi sử dụng trợ lý AI!");
     
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-    // 1. Thu thập toàn bộ lịch sử đơn hàng của khách hàng này
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12369,17 +12368,15 @@ window.openAiSmartOrderModal = function() {
     });
 
     if (storeOrders.length === 0) {
-        return alert("Tiệm này chưa có dữ liệu lịch sử. Vui lòng sử dụng danh mục thủ công để mở mã đầu tiên cho khách!");
+        return alert("Tiệm này chưa có lịch sử mua hàng. Vui lòng chọn danh mục thủ công để mở đơn đầu tiên!");
     }
 
-    // Sắp xếp đơn hàng theo thời gian mới nhất đến cũ nhất
     storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
 
-    // 2. Phân tích tần suất, tốc độ tiêu thụ (Velocity)
     let productHistoryMap = {};
     let allPurchasedSkuCodes = new Set();
 
-    storeOrders.forEach((o, index) => {
+    storeOrders.forEach((o) => {
         if (Array.isArray(o.items)) {
             o.items.forEach(item => {
                 const q = Number(item.qty || 0);
@@ -12394,75 +12391,73 @@ window.openAiSmartOrderModal = function() {
                             dvt: item.dvt || 'hộp',
                             totalQty: 0,
                             purchaseCount: 0,
-                            lastOrderDate: o.ngayCtu,
-                            historyEntries: []
+                            lastOrderDate: o.ngayCtu
                         };
                     }
                     productHistoryMap[code].totalQty += q;
                     productHistoryMap[code].purchaseCount += 1;
-                    productHistoryMap[code].historyEntries.push({ date: o.ngayCtu, qty: q });
                 }
             });
         }
     });
 
-    // 3. Phân loại đề xuất theo chuẩn doanh nghiệp
-    let replenishmentList = []; // Cần châm hàng (Sắp hết)
-    let steadyList = [];        // Đều đặn theo chu kỳ
-
+    let replenishmentList = [];
+    let steadyList = [];
     const todayTime = new Date().getTime();
 
     Object.values(productHistoryMap).forEach(prod => {
-        // Tính lượng tiêu thụ trung bình mỗi đơn
         let avgPerOrder = Math.round(prod.totalQty / prod.purchaseCount);
-        
-        // Tính khoảng cách ngày từ lần mua gần nhất
         let lastTime = new Date(prod.lastOrderDate || todayTime).getTime();
         let daysDiff = Math.max(1, Math.round((todayTime - lastTime) / (1000 * 60 * 60 * 24)));
-        
-        // Giả định chu kỳ mua lặp lại dựa trên tần suất
         let estimatedCycleDays = Math.round(30 / Math.max(1, prod.purchaseCount));
+
+        // Lấy tỷ lệ quy cách của sản phẩm để tính Thùng / Lẻ
+        const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
+        let ratio = pObj?.tyLeQuyDoi || 50;
+        let kien = ratio > 0 ? Math.floor(avgPerOrder / ratio) : 0;
+        let le = ratio > 0 ? avgPerOrder % ratio : avgPerOrder;
 
         let suggestionItem = {
             code: prod.code,
             name: prod.name,
             dvt: prod.dvt,
-            recommendedQty: avgPerOrder,
-            reason: ''
+            totalQty: avgPerOrder,
+            kien: kien,
+            le: le,
+            lyDo: ''
         };
 
         if (daysDiff >= estimatedCycleDays * 0.8) {
-            suggestionItem.reason = `Đã ${daysDiff} ngày chưa nhập lại (Chu kỳ ~${estimatedCycleDays} ngày)`;
+            suggestionItem.lyDo = `Đã ${daysDiff} ngày chưa nhập lại (Chu kỳ ~${estimatedCycleDays} ngày)`;
             replenishmentList.push(suggestionItem);
         } else {
-            suggestionItem.reason = `Mã chủ lực hay tái đặt hàng (${prod.purchaseCount} lần nhập)`;
+            suggestionItem.lyDo = `Mã chủ lực thường xuyên (${prod.purchaseCount} lần nhập)`;
             steadyList.push(suggestionItem);
         }
     });
 
-    // 4. Tìm kiếm các sản phẩm "White-space" (Sản phẩm cùng công ty mà tiệm chưa bao giờ nhập)
     let crossSellingList = [];
-    // Lấy các tiền tố công ty mà tiệm này đã từng mua
     let purchasedCompanyPrefixes = new Set();
     allPurchasedSkuCodes.forEach(code => {
         if (code.length >= 2) purchasedCompanyPrefixes.add(code.substring(0, 2).toUpperCase());
     });
 
-    // Quét trong kho sản phẩm toàn hệ thống để tìm các mã thuộc các hãng đó nhưng tiệm chưa mua
     if (typeof products !== 'undefined' && Array.isArray(products)) {
         products.forEach(p => {
             let pCode = String(p.code || '').trim().toUpperCase();
             if (pCode.length >= 2) {
                 let prefix = pCode.substring(0, 2);
                 if (purchasedCompanyPrefixes.has(prefix) && !allPurchasedSkuCodes.has(pCode)) {
-                    // Kiểm tra xem sản phẩm có đang được phép bán không
                     if (typeof isProductAllowedByCompanyDvt === 'function' && isProductAllowedByCompanyDvt(p)) {
+                        let ratio = p.tyLeQuyDoi || 50;
                         crossSellingList.push({
                             code: p.code,
                             name: p.name,
                             dvt: p.dvt || 'hộp',
-                            recommendedQty: Number(p.tyLeQuyDoi || 50), // Gợi ý mặc định 1 thùng
-                            reason: '🔥 Gợi ý mở rộng danh mục hãng quen thuộc (White-space)'
+                            totalQty: ratio,
+                            kien: 1,
+                            le: 0,
+                            lyDo: 'Gợi ý mở rộng thêm mặt hàng mới cùng hãng'
                         });
                     }
                 }
@@ -12470,22 +12465,20 @@ window.openAiSmartOrderModal = function() {
         });
     }
 
-    // Giới hạn số lượng hiển thị hợp lý tránh quá tải
     replenishmentList = replenishmentList.slice(0, 5);
     steadyList = steadyList.slice(0, 4);
     crossSellingList = crossSellingList.slice(0, 3);
 
-    // 5. Dựng giao diện Modal AI Đẳng cấp Doanh nghiệp
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
-            <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column;">
+            <div class="modal-content fullscreen-modal" style="max-width: 680px; display:flex; flex-direction:column;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px; flex-shrink:0;">
                     <div>
-                        <h3 style="font-size:17px; font-weight:900; color:#8B5CF6; display:flex; align-items:center; gap:8px; margin:0;">
-                            <i class="fa-solid fa-brain"></i> AI Business Advisor & Reorder Engine
+                        <h3 style="font-size:17px; font-weight:900; color:var(--primary); display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Trợ Lý Gợi Ý Đơn Hàng Thông Minh
                         </h3>
                         <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Khách hàng: <b>${activeVisitedStore.name}</b> (${activeVisitedStore.code || 'KH'})</p>
                     </div>
@@ -12494,11 +12487,10 @@ window.openAiSmartOrderModal = function() {
 
                 <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:14px; padding-right:4px;">
                     
-                    <!-- NHÓM 1: CẦN CHÂM HÀNG GẤP -->
                     ${replenishmentList.length > 0 ? `
                         <div>
                             <div style="font-size:13px; font-weight:900; color:var(--rose); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                                <i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO SẮP CẠN KHO (CẦN CHÂM GẤP)
+                                <i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO SẮP CẠN KHO (CẦN CHÂM HÀNG GẤP)
                             </div>
                             <div style="display:flex; flex-direction:column; gap:8px;">
                                 ${replenishmentList.map((item, idx) => renderAiCardItem(item, idx, 'replenishment')).join('')}
@@ -12506,7 +12498,6 @@ window.openAiSmartOrderModal = function() {
                         </div>
                     ` : ''}
 
-                    <!-- NHÓM 2: MÃ CHỦ LỰC TÁI ĐẶT HÀNG -->
                     ${steadyList.length > 0 ? `
                         <div>
                             <div style="font-size:13px; font-weight:900; color:var(--primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
@@ -12518,11 +12509,10 @@ window.openAiSmartOrderModal = function() {
                         </div>
                     ` : ''}
 
-                    <!-- NHÓM 3: GỢI Ý MỞ RỘNG DANH MỤC (CROSS-SELLING) -->
                     ${crossSellingList.length > 0 ? `
                         <div>
                             <div style="font-size:13px; font-weight:900; color:var(--emerald); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                                <i class="fa-solid fa-lightbulb"></i> ĐỀ XUẤT MỞ RỘNG MÃ HÀNG MỚI (CROSS-SELLING)
+                                <i class="fa-solid fa-lightbulb"></i> ĐỀ XUẤT MỞ RỘNG SẢN PHẨM MỚI CÙNG HÃNG
                             </div>
                             <div style="display:flex; flex-direction:column; gap:8px;">
                                 ${crossSellingList.map((item, idx) => renderAiCardItem(item, idx, 'cross')).join('')}
@@ -12533,8 +12523,8 @@ window.openAiSmartOrderModal = function() {
                 </div>
 
                 <div style="margin-top:14px; pt-3; border-top:1px solid var(--card-border); flex-shrink:0;">
-                    <button class="btn btn-purple" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:14px; box-shadow: 0 6px 20px rgba(124, 58, 237, 0.3);" onclick="applyAllAiRecommendations()">
-                        <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TOÀN BỘ ĐỀ XUẤT VÀO GIỎ HÀNG
+                    <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:14px; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3);" onclick="applyAllAiRecommendations()">
+                        <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TẤT CẢ ĐỀ XUẤT VÀO GIỎ HÀNG
                     </button>
                 </div>
             </div>
@@ -12545,28 +12535,33 @@ window.openAiSmartOrderModal = function() {
 
 function renderAiCardItem(item, idx, type) {
     let borderColor = 'var(--card-border)';
-    let badgeBg = 'rgba(37, 99, 235, 0.1)';
     let badgeColor = 'var(--primary)';
     
-    if (type === 'replenishment') { borderColor = 'var(--rose)'; badgeBg = 'rgba(225, 29, 72, 0.1)'; badgeColor = 'var(--rose)'; }
-    else if (type === 'cross') { borderColor = 'var(--emerald)'; badgeBg = 'rgba(16, 185, 129, 0.1)'; badgeColor = 'var(--emerald)'; }
+    if (type === 'replenishment') { borderColor = 'var(--rose)'; badgeColor = 'var(--rose)'; }
+    else if (type === 'cross') { borderColor = 'var(--emerald)'; badgeColor = 'var(--emerald)'; }
 
     return `
         <div style="background:var(--panel-bg); border:1px solid ${borderColor}; border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
             <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
                 <input type="checkbox" id="ai_chk_${type}_${idx}" checked style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer; flex-shrink:0;">
                 <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-                    <div style="font-size:14px; font-weight:900; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="[${item.code}] ${item.name}">
+                    <div style="font-size:13.5px; font-weight:900; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="[${item.code}] ${item.name}">
                         <span style="color:${badgeColor};">[${item.code}]</span> ${item.name}
                     </div>
-                    <div style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin-top:2px;">
-                        <i class="fa-solid fa-circle-info"></i> ${item.reason}
+                    <div style="font-size:11px; color:var(--text-muted); font-weight:700; margin-top:2px;">
+                        <i class="fa-solid fa-circle-info"></i> ${item.lyDo}
                     </div>
                 </div>
             </div>
             <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                <input type="text" id="ai_qty_${type}_${idx}" value="${item.recommendedQty}" data-code="${item.code}" class="ai-rec-qty-input" style="width:70px; margin:0; padding:6px; text-align:center; font-weight:900; font-size:14px; border-radius:8px; border:1px solid var(--card-border);">
-                <span style="font-size:12px; font-weight:800; color:var(--text-muted);">${item.dvt}</span>
+                <div style="display:flex; flex-direction:column; align-items:center;">
+                    <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Thùng</span>
+                    <input type="text" id="ai_kien_${type}_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:center;">
+                    <span style="font-size:9.5px; font-weight:800; color:var(--text-muted);">Lẻ</span>
+                    <input type="text" id="ai_le_${type}_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:45px; margin:0; padding:6px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border);">
+                </div>
             </div>
         </div>
     `;
@@ -12581,28 +12576,32 @@ window.closeAiModal = function() {
 };
 
 window.applyAllAiRecommendations = function() {
-    const inputs = document.querySelectorAll('.ai-rec-qty-input');
+    const kiens = document.querySelectorAll('.ai-rec-kien-input');
     let addedCount = 0;
 
-    inputs.forEach(inp => {
-        const code = inp.getAttribute('data-code');
-        const qty = Number(inp.value.replace(/[^0-9]/g, '')) || 0;
-        
-        // Kiểm tra xem checkbox tương ứng có được check không
-        const container = inp.closest('div[style*="display:flex"]');
+    kiens.forEach(kienInp => {
+        const code = kienInp.getAttribute('data-code');
+        const container = kienInp.closest('div[style*="display:flex"]');
         const chk = container ? container.querySelector('input[type="checkbox"]') : null;
+        const leInp = container ? container.querySelector('.ai-rec-le-input') : null;
 
-        if (chk && chk.checked && qty > 0) {
+        if (chk && chk.checked) {
             const p = products.find(x => x.id === code || x.code === code);
             if (p) {
-                const keyId = p.id || p.code;
                 const ratio = p.tyLeQuyDoi || 50;
-                
-                if (!currentCart[keyId]) currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
-                currentCart[keyId].qty += qty; // Cộng dồn nếu đã có trong giỏ
-                currentCart[keyId].kien = ratio > 0 ? Math.floor(currentCart[keyId].qty / ratio) : 0;
-                currentCart[keyId].le = ratio > 0 ? currentCart[keyId].qty % ratio : currentCart[keyId].qty;
-                addedCount++;
+                const kienVal = Number(kienInp.value.replace(/[^0-9]/g, '')) || 0;
+                const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+                const totalQ = (kienVal * ratio) + leVal;
+
+                if (totalQ > 0) {
+                    const keyId = p.id || p.code;
+                    if (!currentCart[keyId]) currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
+                    
+                    currentCart[keyId].qty += totalQ;
+                    currentCart[keyId].kien = ratio > 0 ? Math.floor(currentCart[keyId].qty / ratio) : 0;
+                    currentCart[keyId].le = ratio > 0 ? currentCart[keyId].qty % ratio : currentCart[keyId].qty;
+                    addedCount++;
+                }
             }
         }
     });
@@ -12618,7 +12617,7 @@ window.applyAllAiRecommendations = function() {
 
     if (typeof playSystemSound === 'function') playSystemSound('success');
     if (typeof triggerHaptic === 'function') triggerHaptic(30);
-    alert(`✅ Đã nạp thành công ${addedCount} nhóm sản phẩm từ hệ thống AI vào giỏ hàng!`);
+    alert(`✅ Đã nạp thành công ${addedCount} nhóm sản phẩm đề xuất vào giỏ hàng!`);
 };
   // ==========================================
 // CÁC HÀM XỬ LÝ LỌC & TƯƠNG TÁC TAB CTY
