@@ -10246,20 +10246,42 @@ window.closePromoModal = function() {
 };
 
 window.filterModalPromos = function(keyword) {
-    const q = removeAccents(keyword.trim()).toLowerCase();
+    const rawInput = keyword.trim();
+    const q = removeAccents(rawInput).toLowerCase();
     const cards = document.querySelectorAll('#modalPromoListContainer .promo-item-card');
+    
+    let matchedCards = [];
+
     cards.forEach(card => {
         const text = card.getAttribute('data-search') || '';
-        if (text.includes(q)) {
+        const ctuMatch = card.getAttribute('data-ctu') || ''; // Lấy mã Cty chuẩn
+        
+        let isMatch = false;
+        let isPriority = false;
+
+        // ƯU TIÊN TUYỆT ĐỐI: Nếu gõ đúng mã Cty (Ví dụ gõ "11" khớp mã Cty "11")
+        if (rawInput !== '' && ctuMatch.toLowerCase() === q.toLowerCase()) {
+            isMatch = true;
+            isPriority = true; // Đánh dấu để đẩy lên trên cùng
+        } else if (text.includes(q)) {
+            isMatch = true;
+        }
+
+        if (isMatch) {
             card.style.display = 'flex';
+            matchedCards.push({ card, isPriority });
         } else {
             card.style.display = 'none';
         }
     });
+
+    // Sắp xếp lại DOM: Đưa các thẻ ưu tiên (Khớp chính xác mã Cty) lên đầu danh sách hiển thị
+    const container = document.getElementById('modalPromoListContainer');
+    if (container) {
+        matchedCards.sort((a, b) => (b.isPriority ? 1 : 0) - (a.isPriority ? 1 : 0));
+        matchedCards.forEach(item => container.appendChild(item.card));
+    }
 };
-  // ==========================================
-// CÁC HÀM XỬ LÝ CHO TAB CTKM (EXCEL & MODAL 2 CHẾ ĐỘ)
-// ==========================================
 
 window.deleteCtkm = async function(id) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
@@ -12403,16 +12425,13 @@ window.toggleSalesPanel = function() {
         toggleBtn.style.borderColor = 'var(--card-border)';
     }
 };
-// ==========================================
-// 1. CẬP NHẬT MODAL GỢI Ý AI (CÓ NÚT XÓA NHANH TỪNG SẢN PHẨM)
-// ==========================================
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
     
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-    // 1. LẤY CHÍNH XÁC DANH SÁCH MÃ CÔNG TY ĐANG MỞ TAB
+    // Lấy danh sách chính xác các mã Cty đang MỞ (So sánh chuẩn không phân biệt hoa thường)
     let openCompCodes = new Set();
     if (typeof companyList !== 'undefined' && Array.isArray(companyList)) {
         companyList.forEach(c => {
@@ -12465,10 +12484,10 @@ window.openAiSmartOrderModal = function() {
                 if (q > 0) {
                     const code = String(item.code || item.id || '').trim();
                     
-                    // KIỂM TRA: Sản phẩm lịch sử phải thuộc công ty đang mở tab
-                    let cCode = getCompCodeFromProductCode(code);
-                    if (openCompCodes.size > 0 && !openCompCodes.has(cCode.toUpperCase())) {
-                        return; // Bỏ qua nếu công ty của sản phẩm này đang đóng tab
+                    // CHỐT CHẶN 2 KÝ TỰ ĐẦU: Lấy 2 ký tự đầu của mã sản phẩm làm mã Cty
+                    let cCode = code.slice(0, 2).toUpperCase();
+                    if (openCompCodes.size > 0 && !openCompCodes.has(cCode)) {
+                        return; // Bỏ qua nếu công ty này đang đóng tab
                     }
 
                     purchasedSkuCodes.add(code.toUpperCase());
@@ -12506,22 +12525,21 @@ window.openAiSmartOrderModal = function() {
         });
     });
 
-    // Lọc thêm hàng mồi (chỉ lấy sản phẩm thuộc công ty đang mở tab)
+    // Lọc hàng mồi: BẮT BUỘC 2 ký tự đầu của SKU phải thuộc công ty đang mở tab
     let hookItemsAdded = 0;
     if (typeof products !== 'undefined' && Array.isArray(products) && window.promotionsList) {
         window.promotionsList.forEach(km => {
             if (km.status === 'Stop' || !km.hangHoa) return;
             
-            // Kiểm tra CTKM có thuộc công ty mở không
             let kmCtu = String(km.maCtu || '').trim().toUpperCase();
             if (kmCtu && openCompCodes.size > 0 && !openCompCodes.has(kmCtu)) return;
 
             products.forEach(p => {
                 const pCode = String(p.code || p.id || '').trim();
-                let pComp = getCompCodeFromProductCode(pCode);
+                let pComp = pCode.slice(0, 2).toUpperCase();
                 
-                // BẮT BUỘC: Sản phẩm phải thuộc công ty đang mở tab
-                if (openCompCodes.size > 0 && !openCompCodes.has(pComp.toUpperCase())) return;
+                // CHỐT CHẶN 2 KÝ TỰ ĐẦU CHO SẢN PHẨM MỚI
+                if (openCompCodes.size > 0 && !openCompCodes.has(pComp)) return;
 
                 if (hookItemsAdded < 6 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
                     if (km.hangHoa.toUpperCase().includes(pCode.toUpperCase())) {
