@@ -12409,7 +12409,7 @@ window.openAiSmartOrderModal = function() {
 
     let suggestedOrderList = [];
 
-    // --- NHÓM 1: HÀNG RUỘT (Đã tự động đôn số ngầm +12%) ---
+    // --- NHÓM 1: HÀNG RUỘT (Đã đôn số ngầm +12%) ---
     Object.values(productHistoryMap).forEach(prod => {
         let avgPerOrder = prod.totalQty / prod.purchaseCount;
         let scaledQty = Math.round(avgPerOrder * 1.12); 
@@ -12429,50 +12429,52 @@ window.openAiSmartOrderModal = function() {
             kien: kien,
             le: le,
             tag: 'CORE',
-            ghiChu: `Đã nhập ${prod.purchaseCount} lần gần đây` // Dùng câu chữ trung tính, lịch sự
+            ghiChu: `Đã nhập ${prod.purchaseCount} lần gần đây`
         });
     });
 
-    // --- NHÓM 2: HÀNG MỚI / HÀNG ƯU ĐÃI (Dùng ký hiệu 🌟 thay cho chữ thô) ---
+    // --- NHÓM 2: MỞ RỘNG KHO "HÀNG MỒI / KHUYẾN MÃI" (Lấy tối đa tới 6 mã chưa từng mua) ---
     let hookItemsAdded = 0;
-    if (typeof products !== 'undefined' && Array.isArray(products)) {
-        products.forEach(p => {
-            const pCode = String(p.code || p.id || '').trim();
-            if (hookItemsAdded < 2 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
-                let hasPromo = false;
-                if (window.promotionsList && window.promotionsList.length > 0) {
-                    hasPromo = window.promotionsList.some(km => km.status !== 'Stop' && km.hangHoa && km.hangHoa.toUpperCase().includes(pCode.toUpperCase()));
-                }
+    if (typeof products !== 'undefined' && Array.isArray(products) && window.promotionsList) {
+        window.promotionsList.forEach(km => {
+            if (km.status === 'Stop' || !km.hangHoa) return;
+            
+            // Quét tìm các sản phẩm nằm trong chương trình KM mà tiệm này chưa nhập
+            products.forEach(p => {
+                const pCode = String(p.code || p.id || '').trim();
+                if (hookItemsAdded < 6 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
+                    if (km.hangHoa.toUpperCase().includes(pCode.toUpperCase())) {
+                        let ratio = Number(p.tyLeQuyDoi || 50);
+                        let defaultKien = ratio > 1 ? 1 : 5;
 
-                if (hasPromo) {
-                    let ratio = Number(p.tyLeQuyDoi || 50);
-                    let defaultKien = ratio > 1 ? 1 : 5;
-
-                    suggestedOrderList.push({
-                        code: pCode,
-                        name: p.name,
-                        dvt: p.dvt || 'hộp',
-                        ratio: ratio,
-                        kien: defaultKien,
-                        le: 0,
-                        tag: 'HOOK',
-                        ghiChu: `🌟 Sản phẩm ưu đãi / Đang chạy chương trình` // Ký hiệu lịch sự
-                    });
-                    hookItemsAdded++;
+                        // Kiểm tra xem mã này đã có trong danh sách gợi ý chưa để tránh trùng lặp
+                        if (!suggestedOrderList.some(s => s.code.toUpperCase() === pCode.toUpperCase())) {
+                            suggestedOrderList.push({
+                                code: pCode,
+                                name: p.name,
+                                dvt: p.dvt || 'hộp',
+                                ratio: ratio,
+                               kien: defaultKien,
+                                le: 0,
+                                tag: 'HOOK',
+                                ghiChu: `🎁 [Ưu đãi đặc biệt] ${km.noiDung || 'Đang chạy CTKM lớn'}`
+                            });
+                            hookItemsAdded++;
+                        }
+                    }
                 }
-            }
+            });
         });
     }
 
+    // Đưa hàng mồi lên trên cùng để Sales dễ chào
     suggestedOrderList.sort((a, b) => {
         if (a.tag === 'HOOK' && b.tag !== 'HOOK') return -1;
         if (a.tag !== 'HOOK' && b.tag === 'HOOK') return 1;
         return 0;
     });
 
-    suggestedOrderList = suggestedOrderList.slice(0, 15);
-
-    // 3. Render Modal Giao diện Tinh tế, Bảo mật thông tin nội bộ
+    // 3. Render Modal Giao diện tích hợp nút Show danh sách CTKM
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
@@ -12487,7 +12489,10 @@ window.openAiSmartOrderModal = function() {
                         </h3>
                         <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Tiệm: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
                     </div>
-                    <button class="btn btn-red" onclick="closeAiModal()" style="font-size:13px; padding:8px 16px; font-weight:900; border-radius:8px;">Đóng</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-amber btn-sm" onclick="openAllPromosModal()" style="font-weight:900; padding:8px 12px; border-radius:8px;"><i class="fa-solid fa-bullhorn"></i> Show DS CTKM</button>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-size:13px; padding:8px 12px; font-weight:900; border-radius:8px;">Đóng</button>
+                    </div>
                 </div>
 
                 <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
@@ -12536,7 +12541,6 @@ window.openAiSmartOrderModal = function() {
     `;
     modalContainer.classList.remove('hidden');
 };
-
 window.closeAiModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
