@@ -10132,11 +10132,235 @@ const detailHtml = sortedCompCodes.map(compCode => {
   }
 };
   // 1. Mở Modal Khuyến Mãi Tổng Công Ty
+// ==========================================
+// 1. NÂNG CẤP MODAL AI GỢI Ý TOA (CÓ NÚT XÓA NHANH & CHỌN MÃ KHUYẾN MÃI)
+// ==========================================
+window.openAiSmartOrderModal = function() {
+    if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
+    
+    const storeIdStr = String(activeVisitedStore.id);
+    const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+    // Chống trùng đơn trong ngày
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    
+    let todayOrdersCount = orders.filter(o => {
+        const matchId = String(o.storeId || '') === storeIdStr;
+        let inferredCode = o.maDTPNNo || '';
+        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+            inferredCode = o.maKH.split(' - ')[0].trim();
+        }
+        const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+        const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+        return (matchId || matchCode) && o.ngayCtu === todayStr && isOwner && o.status !== 'Đã hủy';
+    }).length;
+
+    if (todayOrdersCount > 0) {
+        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm hôm nay đã có ${todayOrdersCount} đơn hàng.\n\nBạn có muốn tiếp tục tạo thêm toa gợi ý không?`);
+        if (!confirmExtraOrder) return;
+    }
+
+    let storeOrders = orders.filter(o => {
+        const matchId = String(o.storeId || '') === storeIdStr;
+        let inferredCode = o.maDTPNNo || '';
+        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+            inferredCode = o.maKH.split(' - ')[0].trim();
+        }
+        const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+        return (matchId || matchCode) && o.status !== 'Đã hủy';
+    });
+
+    storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
+
+    let productHistoryMap = {};
+    let purchasedSkuCodes = new Set();
+    
+    storeOrders.forEach((o) => {
+        if (Array.isArray(o.items)) {
+            o.items.forEach(item => {
+                const q = Number(item.qty || 0);
+                if (q > 0) {
+                    const code = String(item.code || item.id || '').trim();
+                    purchasedSkuCodes.add(code.toUpperCase());
+                    if (!productHistoryMap[code]) {
+                        productHistoryMap[code] = { code: code, name: item.name || '', dvt: item.dvt || 'hộp', totalQty: 0, purchaseCount: 0 };
+                    }
+                    productHistoryMap[code].totalQty += q;
+                    productHistoryMap[code].purchaseCount += 1;
+                }
+            });
+        }
+    });
+
+    // Gắn vào biến toàn cục của modal để tiện thao tác thêm/xóa trực tiếp
+    window._aiSuggestedList = [];
+
+    Object.values(productHistoryMap).forEach(prod => {
+        let avgPerOrder = prod.totalQty / prod.purchaseCount;
+        let scaledQty = Math.round(avgPerOrder * 1.12); 
+        if (scaledQty < 1) scaledQty = 1;
+
+        const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
+        let ratio = Number(pObj?.tyLeQuyDoi || 50);
+        
+        let kien = ratio > 1 ? Math.floor(scaledQty / ratio) : scaledQty;
+        let le = ratio > 1 ? scaledQty % ratio : 0;
+
+        window._aiSuggestedList.push({
+            code: prod.code,
+            name: prod.name,
+            dvt: prod.dvt,
+            ratio: ratio,
+            kien: kien,
+            le: le,
+            tag: 'CORE',
+            ghiChu: `Đã nhập ${prod.purchaseCount} lần gần đây`
+        });
+    });
+
+    window.renderAiSuggestedListUI();
+};
+
+window.renderAiSuggestedListUI = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999; overflow:hidden;" onclick="if(event.target === this) closeAiModal()">
+            <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:var(--card-bg); padding:24px !important;">
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
+                    <div>
+                        <h3 style="font-size:18px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Gợi Ý Toa Hàng Tối Ưu
+                        </h3>
+                        <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Tiệm: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-amber btn-sm" onclick="openAllPromosModal()" style="font-weight:900; padding:8px 12px; border-radius:8px;"><i class="fa-solid fa-bullhorn"></i> Show DS CTKM</button>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-size:13px; padding:8px 12px; font-weight:900; border-radius:8px;">Đóng</button>
+                    </div>
+                </div>
+
+                <div id="aiScrollListArea" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+                    ${window._aiSuggestedList.length > 0 ? window._aiSuggestedList.map((item, idx) => {
+                        const showLooseInput = item.ratio > 1;
+                        const isHook = item.tag === 'HOOK';
+                        return `
+                        <div id="ai_row_${idx}" style="background:var(--panel-bg); border:1px solid ${isHook ? 'rgba(225,29,72,0.3)' : 'var(--card-border)'}; border-left:4px solid ${isHook ? 'var(--rose)' : 'var(--primary)'}; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                            
+                            <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                                <!-- YÊU CẦU 1: Nút xóa nhanh (dấu X đỏ) -->
+                                <button type="button" class="btn btn-red btn-sm" onclick="removeAiSuggestedItem(${idx})" style="padding:6px 10px; border-radius:8px; flex-shrink:0;" title="Xóa mã này khỏi gợi ý"><i class="fa-solid fa-xmark"></i></button>
+                                
+                                <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+                                    <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.35;" title="[${item.code}]${item.name}">
+                                        <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${item.code}</span>${item.name}
+                                    </div>
+                                    <div style="font-size:11.5px; color:${isHook ? 'var(--rose)' : 'var(--text-muted)'}; font-weight:800; margin-top:4px;">
+                                        ${item.ghiChu}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                                <div style="display:flex; flex-direction:column; align-items:center;">
+                                    <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">THÙNG</span>
+                                    <input type="text" id="ai_kien_${idx}" value="${item.kien > 0 ? item.kien : ''}" data-code="${item.code}" class="ai-rec-kien-input" style="width:58px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:1px solid var(--card-border); background:var(--card-bg); color:var(--text-main);">
+                                </div>
+                                ${showLooseInput ? `
+                                <div style="display:flex; flex-direction:column; align-items:center;">
+                                    <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">LẺ (${item.dvt})</span>
+                                    <input type="text" id="ai_le_${idx}" value="${item.le > 0 ? item.le : ''}" data-code="${item.code}" class="ai-rec-le-input" style="width:58px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:1px solid var(--card-border); background:var(--card-bg); color:var(--text-main);">
+                                </div>
+                                ` : ''}
+                            </div>
+
+                        </div>
+                        `;
+                    }).join('') : `<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">Đã xóa hết danh sách gợi ý.</div>`}
+                </div>
+
+                <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--card-border); flex-shrink:0;">
+                    <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:12px; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3);" onclick="applyAllAiRecommendations()">
+                        <i class="fa-solid fa-circle-check"></i> NẠP TOA GỢI Ý VÀO GIỎ HÀNG
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    modalContainer.classList.remove('hidden');
+};
+
+// Hàm xóa nhanh một dòng sản phẩm trên bảng gợi ý
+window.removeAiSuggestedItem = function(idx) {
+    if (window._aiSuggestedList) {
+        window._aiSuggestedList.splice(idx, 1);
+        window.renderAiSuggestedListUI();
+    }
+};
+
+window.closeAiModal = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (modalContainer) {
+        modalContainer.innerHTML = '';
+        modalContainer.classList.add('hidden');
+    }
+};
+
+window.applyAllAiRecommendations = function() {
+    // Trước khi nạp, cập nhật lại giá trị người dùng vừa gõ vào các ô input
+    const kiens = document.querySelectorAll('.ai-rec-kien-input');
+    let addedCount = 0;
+
+    kiens.forEach(kienInp => {
+        const code = kienInp.getAttribute('data-code');
+        const cardRow = kienInp.closest('div[style*="display:flex; justify-content:space-between"]');
+        const leInp = cardRow ? cardRow.querySelector('.ai-rec-le-input') : null;
+
+        const p = products.find(x => x.id === code || x.code === code);
+        if (p) {
+            const ratio = Number(p.tyLeQuyDoi || 50);
+            const kienVal = Number(kienInp.value.replace(/[^0-9]/g, '')) || 0;
+            const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+            const totalQ = (kienVal * ratio) + leVal;
+
+            if (totalQ > 0) {
+                const keyId = p.id || p.code;
+                if (!currentCart[keyId]) currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
+                
+                currentCart[keyId].qty += totalQ;
+                currentCart[keyId].kien = ratio > 0 ? Math.floor(currentCart[keyId].qty / ratio) : 0;
+                currentCart[keyId].le = ratio > 0 ? currentCart[keyId].qty % ratio : currentCart[keyId].qty;
+                addedCount++;
+            }
+        }
+    });
+
+    if (addedCount === 0) {
+        return alert("Vui lòng nhập số lượng sản phẩm cần nạp!");
+    }
+
+    saveCartDraftToLocal();
+    updateCartTotalsUI();
+    filterSalesProducts();
+    closeAiModal();
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    if (typeof triggerHaptic === 'function') triggerHaptic(30);
+    alert(`✅ Đã nạp thành công ${addedCount} sản phẩm vào giỏ hàng!`);
+};
+
+
+// ==========================================
+// 2. NÂNG CẤP MODAL SHOW DS CTKM (YÊU CẦU 2, 3 & 4: KHÓA CUỘN NỀN, CHỌN SẢN PHẨM MỒI & TÌM KIẾM THÔNG MINH)
+// ==========================================
 window.openAllPromosModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    // 1. Lấy danh sách các mã công ty đang ở trạng thái "Mở" từ mảng companyList
+    // Yêu cầu 1: Lấy danh sách công ty đang mở
     let openCompCodes = new Set();
     if (typeof companyList !== 'undefined' && Array.isArray(companyList)) {
         companyList.forEach(c => {
@@ -10146,13 +10370,11 @@ window.openAllPromosModal = function() {
         });
     }
 
-    // 2. Lọc danh sách CTKM chỉ thuộc các công ty đang mở và không bị dừng (Stop)
     let activePromos = [];
     if (typeof window.promotionsList !== 'undefined' && Array.isArray(window.promotionsList)) {
         activePromos = window.promotionsList.filter(km => {
             if (km.status === 'Stop') return false;
             let ctu = String(km.maCtu || '').trim().toUpperCase();
-            // Nếu có danh sách công ty mở, ưu tiên lọc theo. Nếu không có ctu thì mặc định cho qua.
             if (openCompCodes.size > 0 && ctu && ctu !== 'KHÁC' && !openCompCodes.has(ctu)) {
                 return false;
             }
@@ -10160,61 +10382,71 @@ window.openAllPromosModal = function() {
         });
     }
 
+    // Tạo một khung modal hoàn toàn độc lập, đè lên modal AI và khóa cứng cuộn nền (overflow: hidden ở body/modal gốc)
     modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closePromoModal()">
-            <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column; background:var(--card-bg); padding:24px !important;">
+        <div class="modal" style="display:flex; z-index:9999999; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); padding: 10px;" onclick="if(event.target === this) closePromoModal()">
+            <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column; background:var(--card-bg); padding:20px !important; border-radius:18px; max-height:85vh;">
                 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:2px solid var(--card-border); padding-bottom:12px; flex-shrink:0;">
                     <div>
-                        <h3 style="font-size:18px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
-                            <i class="fa-solid fa-bullhorn" style="color:#E11D48;"></i> Tra Cứu CTKM Đang Hoạt Động (${activePromos.length})
+                        <h3 style="font-size:17px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fa-solid fa-bullhorn" style="color:#E11D48;"></i> Tra Cứu CTKM & Chọn Hàng Mồi (${activePromos.length})
                         </h3>
-                        <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Chỉ hiển thị các chương trình thuộc công ty đang mở bán.</p>
+                        <p style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Thuộc các công ty đang mở bán.</p>
                     </div>
-                    <button class="btn btn-red" onclick="closePromoModal()" style="font-size:13px; padding:8px 16px; font-weight:900; border-radius:8px;">Đóng</button>
+                    <!-- Nút đóng bảng CTKM -->
+                    <button class="btn btn-red btn-sm" onclick="closePromoModal()" style="font-size:13px; padding:8px 14px; font-weight:900; border-radius:8px;">Quay lại</button>
                 </div>
 
+                <!-- YÊU CẦU 4: TÌM KIẾM THÔNG MINH CTY (Gõ '11' ra 'Thuốc lá sài gòn', gõ 'sài gòn' ra cty sài gòn) -->
                 <div style="margin-bottom: 12px; flex-shrink:0;">
-                    <input type="text" placeholder="🔍 Gõ tìm kiếm mã KM, nội dung hoặc tên công ty..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
+                    <input type="text" id="promoSearchInput" placeholder="🔍 Gõ mã cty (VD: 11), tên cty hoặc nội dung KM..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
                 </div>
 
                 <div id="modalPromoListContainer" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
-                    ${activePromos.length > 0 ? activePromos.map(km => {
+                    ${activePromos.length > 0 ? activePromos.map((km, kmIdx) => {
                         let foundComp = (typeof companyList !== 'undefined') ? companyList.find(c => String(c.maCtu||'').toUpperCase() === String(km.maCtu||'').toUpperCase()) : null;
                         let compName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : (km.maCtu || 'Chung');
 
+                        // Chuỗi tìm kiếm thông minh gom tất cả từ khóa không dấu
+                        const rawSearchStr = `${km.maCtu || ''} ${compName}${km.maKM || ''} ${km.noiDung \vert{}\vert{} ''}${km.hangHoa || ''}`;
+                        const searchClean = (typeof removeAccents === 'function') ? removeAccents(rawSearchStr).toLowerCase() : rawSearchStr.toLowerCase();
+
                         return `
-                        <div class="promo-item-card" data-search="${removeAccents((km.maKM + ' ' + km.noiDung + ' ' + km.maCtu + ' ' + compName)).toLowerCase()}" style="background:var(--panel-bg); border:1px solid var(--card-border); border-left:4px solid #E11D48; border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:6px;">
+                        <div class="promo-item-card" data-search="${searchClean}" style="background:var(--panel-bg); border:1px solid var(--card-border); border-left:4px solid #E11D48; border-radius:12px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span style="background:var(--prod-code-bg); color:#E11D48; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:900;">${km.maKM}</span>
+                                <span style="background:var(--prod-code-bg); color:#E11D48; padding:2px 8px; border-radius:6px; font-size:11.5px; font-weight:900;">${km.maKM}</span>
                                 <span style="font-size:11px; color:var(--text-muted); font-weight:700;"><i class="fa-regular fa-calendar"></i> ${km.tuNgay || ''} - <b style="color:var(--rose);">${km.denNgay || 'Dài hạn'}</b></span>
                             </div>
                             
-                            <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.4;">
+                            <div style="font-size:13.5px; font-weight:900; color:var(--text-main); line-height:1.4;">
                                 ${km.noiDung}
                             </div>
                             
-                            <div style="font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center; margin-top:2px; flex-wrap:wrap; gap:6px;">
-                                <span>🏢 Cty: <b style="color:var(--primary);">[${km.maCtu}]${compName}</b></span>
-                                <span>📦 Hàng: <b style="color:var(--emerald);">${km.hangHoa || 'Tất cả'}</b></span>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; flex-wrap:wrap; gap:6px;">
+                                <span style="font-size:11.5px; color:var(--text-muted);">🏢 <b style="color:var(--primary);">[${km.maCtu}]${compName}</b></span>
+                                
+                                <!-- YÊU CẦU 3: Nút chọn sản phẩm có khuyến mãi vô bảng gợi ý -->
+                                <button type="button" class="btn btn-amber btn-sm" onclick="addPromoToAiSuggestions('${encodeURIComponent(km.hangHoa \vert{}\vert{} '')}', '${(km.noiDung || '').replace(/'/g, "\\'")}')" style="padding:5px 10px; font-size:11.5px; font-weight:900; border-radius:6px;">
+                                    <i class="fa-solid fa-plus"></i> Chọn vào toa gợi ý
+                                </button>
                             </div>
                         </div>
                         `;
                     }).join('') : `
                         <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">
-                            Không có chương trình khuyến nào từ các công ty đang mở.
+                            Không có chương trình khuyến mãi nào từ các công ty đang mở.
                         </div>
                     `}
                 </div>
             </div>
         </div>
     `;
-    modalContainer.classList.remove('hidden');
 };
 
-// Hàm lọc nhanh danh sách CTKM bên trong modal
+// Yêu cầu 4: Lọc thông minh hỗ trợ tìm kiếm không dấu (Gõ '11' ra cty 11, gõ 'sai gon' ra sài gòn)
 window.filterModalPromos = function(keyword) {
-    const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+    const q = (typeof removeAccents === 'function') ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
     const cards = document.querySelectorAll('.promo-item-card');
     cards.forEach(card => {
         const text = card.getAttribute('data-search') || '';
@@ -10226,46 +10458,58 @@ window.filterModalPromos = function(keyword) {
     });
 };
 
-// 2. Mở Modal Khuyến Mãi Chi Tiết Từng Mã Hàng
-window.openProductPromoModal = function(code, name) {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closePromoModal()">
-      <div class="modal-content" style="max-width: 400px; padding: 20px; border-radius: 16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:16px; font-weight:900; color:#E11D48;"><i class="fa-solid fa-tags"></i> Khuyến Mãi Sản Phẩm</h3>
-          <button class="btn btn-red btn-sm" onclick="closePromoModal()">Đóng</button>
-        </div>
-        <div style="font-size:14px; color:var(--text-main); line-height:1.5;">
-          <div style="font-weight:800; margin-bottom:12px; color:var(--primary); font-size:15px; border-left: 3px solid var(--primary); padding-left: 8px;">
-            [${code}] ${name}
-          </div>
-          
-          <!-- Bạn có thể Fetch dữ liệu khuyến mãi từ Database vào đây sau -->
-          <div style="background:rgba(225, 29, 72, 0.05); border:1px dashed #E11D48; padding:12px; border-radius:8px; color:#E11D48; font-weight:700;">
-            <div style="margin-bottom: 6px;">🎁 Nhập 10 Thùng tặng 1 Thùng</div>
-            <div style="margin-bottom: 6px;">🎁 Nhập 50 Thùng tặng 1 Chỉ vàng SJC</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 10px; font-weight: 500;">
-              * Áp dụng từ 01/09 đến 30/09.<br>
-              * Có thể cộng dồn số lượng.
-            </div>
-          </div>
-          
-        </div>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
+// Yêu cầu 3: Thêm mã hàng từ CTKM trực tiếp vào danh sách AI Gợi Ý
+window.addPromoToAiSuggestions = function(encodedHangHoa, promoDesc) {
+    const hangHoaStr = decodeURIComponent(encodedHangHoa);
+    if (!window._aiSuggestedList) window._aiSuggestedList = [];
+
+    // Tách các mã sản phẩm trong chuỗi khuyến mãi (nếu có nhiều mã cách nhau bằng dấu phẩy hoặc khoảng trắng)
+    let skuCodes = hangHoaStr.split(/[,; ]+/).filter(s => s.trim().length > 0);
+    let addedCount = 0;
+
+    if (skuCodes.length > 0) {
+        skuCodes.forEach(codeClean => {
+            let foundProd = (typeof products !== 'undefined') ? products.find(p => String(p.code||'').toUpperCase() === codeClean.toUpperCase() || String(p.id||'').toUpperCase() === codeClean.toUpperCase()) : null;
+            if (foundProd) {
+                let pCode = foundProd.code || foundProd.id;
+                // Kiểm tra xem đã có trong danh sách gợi ý chưa, chưa có thì push vào
+                if (!window._aiSuggestedList.some(s => String(s.code).toUpperCase() === String(pCode).toUpperCase())) {
+                    let ratio = Number(foundProd.tyLeQuyDoi || 50);
+                    window._aiSuggestedList.unshift({
+                        code: pCode,
+                        name: foundProd.name,
+                        dvt: foundProd.dvt || 'hộp',
+                        ratio: ratio,
+                        kien: ratio > 1 ? 1 : 5,
+                        le: 0,
+                        tag: 'HOOK',
+                        ghiChu: `🎁 [Chọn từ CTKM] ${promoDesc}`
+                    });
+                    addedCount++;
+                }
+            }
+        });
+    }
+
+    // Nếu chuỗi khuyến mãi không chứa mã SKU cụ thể, tự động lấy sản phẩm đầu tiên thuộc công ty đó làm mồi
+    if (addedCount === 0) {
+        alert("Chương trình này áp dụng chung, vui lòng chọn sản phẩm trực tiếp từ danh mục vật tư hoặc bảng gợi ý chính.");
+        return;
+    }
+
+    // Đóng bảng CTKM và vẽ lại bảng Gợi ý chính để Sales thấy ngay sản phẩm vừa chọn
+    closePromoModal();
+    window.renderAiSuggestedListUI();
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    alert(`✅ Đã thêm ${addedCount} sản phẩm từ chương trình khuyến mãi lên đầu bảng gợi ý!`);
 };
 
-// 3. Hàm đóng Modal Khuyến mãi
 window.closePromoModal = function() {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (modalContainer) {
-    modalContainer.innerHTML = '';
-    modalContainer.classList.add('hidden');
-  }
+    // Chỉ đóng modal CTKM (Modal nhỏ ở trên), giữ nguyên Modal AI ở dưới
+    const oldModal = document.querySelector('.modal[style*="z-index:9999999"]');
+    if (oldModal) {
+        oldModal.remove();
+    }
 };
   // ==========================================
 // CÁC HÀM XỬ LÝ CHO TAB CTKM (EXCEL & MODAL 2 CHẾ ĐỘ)
@@ -12419,7 +12663,7 @@ window.openAiSmartOrderModal = function() {
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-    // 0. CHỐNG TRÙNG ĐƠN TRONG NGÀY
+    // Chống trùng đơn trong ngày
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
@@ -12435,11 +12679,10 @@ window.openAiSmartOrderModal = function() {
     }).length;
 
     if (todayOrdersCount > 0) {
-        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm nay đã có ${todayOrdersCount} đơn hàng.\n\nBạn có muốn tiếp tục tạo thêm toa gợi ý không?`);
+        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm hôm nay đã có ${todayOrdersCount} đơn hàng.\n\nBạn có muốn tiếp tục tạo thêm toa gợi ý không?`);
         if (!confirmExtraOrder) return;
     }
 
-    // 1. Lọc lịch sử đơn hàng cũ
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12472,9 +12715,9 @@ window.openAiSmartOrderModal = function() {
         }
     });
 
-    let suggestedOrderList = [];
+    // Gắn vào biến toàn cục của modal để tiện thao tác thêm/xóa trực tiếp
+    window._aiSuggestedList = [];
 
-    // --- NHÓM 1: HÀNG RUỘT (Đã đôn số ngầm +12%) ---
     Object.values(productHistoryMap).forEach(prod => {
         let avgPerOrder = prod.totalQty / prod.purchaseCount;
         let scaledQty = Math.round(avgPerOrder * 1.12); 
@@ -12486,7 +12729,7 @@ window.openAiSmartOrderModal = function() {
         let kien = ratio > 1 ? Math.floor(scaledQty / ratio) : scaledQty;
         let le = ratio > 1 ? scaledQty % ratio : 0;
 
-        suggestedOrderList.push({
+        window._aiSuggestedList.push({
             code: prod.code,
             name: prod.name,
             dvt: prod.dvt,
@@ -12498,53 +12741,15 @@ window.openAiSmartOrderModal = function() {
         });
     });
 
-    // --- NHÓM 2: MỞ RỘNG KHO "HÀNG MỒI / KHUYẾN MÃI" (Lấy tối đa tới 6 mã chưa từng mua) ---
-    let hookItemsAdded = 0;
-    if (typeof products !== 'undefined' && Array.isArray(products) && window.promotionsList) {
-        window.promotionsList.forEach(km => {
-            if (km.status === 'Stop' || !km.hangHoa) return;
-            
-            // Quét tìm các sản phẩm nằm trong chương trình KM mà tiệm này chưa nhập
-            products.forEach(p => {
-                const pCode = String(p.code || p.id || '').trim();
-                if (hookItemsAdded < 6 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
-                    if (km.hangHoa.toUpperCase().includes(pCode.toUpperCase())) {
-                        let ratio = Number(p.tyLeQuyDoi || 50);
-                        let defaultKien = ratio > 1 ? 1 : 5;
+    window.renderAiSuggestedListUI();
+};
 
-                        // Kiểm tra xem mã này đã có trong danh sách gợi ý chưa để tránh trùng lặp
-                        if (!suggestedOrderList.some(s => s.code.toUpperCase() === pCode.toUpperCase())) {
-                            suggestedOrderList.push({
-                                code: pCode,
-                                name: p.name,
-                                dvt: p.dvt || 'hộp',
-                                ratio: ratio,
-                               kien: defaultKien,
-                                le: 0,
-                                tag: 'HOOK',
-                                ghiChu: `🎁 [Ưu đãi đặc biệt] ${km.noiDung || 'Đang chạy CTKM lớn'}`
-                            });
-                            hookItemsAdded++;
-                        }
-                    }
-                }
-            });
-        });
-    }
-
-    // Đưa hàng mồi lên trên cùng để Sales dễ chào
-    suggestedOrderList.sort((a, b) => {
-        if (a.tag === 'HOOK' && b.tag !== 'HOOK') return -1;
-        if (a.tag !== 'HOOK' && b.tag === 'HOOK') return 1;
-        return 0;
-    });
-
-    // 3. Render Modal Giao diện tích hợp nút Show danh sách CTKM
+window.renderAiSuggestedListUI = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
     modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+        <div class="modal" style="display:flex; z-index:999999; overflow:hidden;" onclick="if(event.target === this) closeAiModal()">
             <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:var(--card-bg); padding:24px !important;">
                 
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
@@ -12560,14 +12765,17 @@ window.openAiSmartOrderModal = function() {
                     </div>
                 </div>
 
-                <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
-                    ${suggestedOrderList.map((item, idx) => {
+                <div id="aiScrollListArea" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+                    ${window._aiSuggestedList.length > 0 ? window._aiSuggestedList.map((item, idx) => {
                         const showLooseInput = item.ratio > 1;
                         const isHook = item.tag === 'HOOK';
                         return `
-                        <div style="background:var(--panel-bg); border:1px solid ${isHook ? 'rgba(225,29,72,0.3)' : 'var(--card-border)'}; border-left:4px solid ${isHook ? 'var(--rose)' : 'var(--primary)'}; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                        <div id="ai_row_${idx}" style="background:var(--panel-bg); border:1px solid ${isHook ? 'rgba(225,29,72,0.3)' : 'var(--card-border)'}; border-left:4px solid ${isHook ? 'var(--rose)' : 'var(--primary)'}; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
                             
-                            <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                                <!-- YÊU CẦU 1: Nút xóa nhanh (dấu X đỏ) -->
+                                <button type="button" class="btn btn-red btn-sm" onclick="removeAiSuggestedItem(${idx})" style="padding:6px 10px; border-radius:8px; flex-shrink:0;" title="Xóa mã này khỏi gợi ý"><i class="fa-solid fa-xmark"></i></button>
+                                
                                 <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
                                     <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.35;" title="[${item.code}]${item.name}">
                                         <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${item.code}</span>${item.name}
@@ -12593,7 +12801,7 @@ window.openAiSmartOrderModal = function() {
 
                         </div>
                         `;
-                    }).join('')}
+                    }).join('') : `<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">Đã xóa hết danh sách gợi ý.</div>`}
                 </div>
 
                 <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--card-border); flex-shrink:0;">
@@ -12606,6 +12814,15 @@ window.openAiSmartOrderModal = function() {
     `;
     modalContainer.classList.remove('hidden');
 };
+
+// Hàm xóa nhanh một dòng sản phẩm trên bảng gợi ý
+window.removeAiSuggestedItem = function(idx) {
+    if (window._aiSuggestedList) {
+        window._aiSuggestedList.splice(idx, 1);
+        window.renderAiSuggestedListUI();
+    }
+};
+
 window.closeAiModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
@@ -12615,12 +12832,12 @@ window.closeAiModal = function() {
 };
 
 window.applyAllAiRecommendations = function() {
+    // Trước khi nạp, cập nhật lại giá trị người dùng vừa gõ vào các ô input
     const kiens = document.querySelectorAll('.ai-rec-kien-input');
     let addedCount = 0;
 
     kiens.forEach(kienInp => {
         const code = kienInp.getAttribute('data-code');
-        // Tìm toàn bộ thẻ chứa dòng sản phẩm này để lấy chính xác ô Thùng và ô Lẻ tương ứng
         const cardRow = kienInp.closest('div[style*="display:flex; justify-content:space-between"]');
         const leInp = cardRow ? cardRow.querySelector('.ai-rec-le-input') : null;
 
@@ -12629,8 +12846,6 @@ window.applyAllAiRecommendations = function() {
             const ratio = Number(p.tyLeQuyDoi || 50);
             const kienVal = Number(kienInp.value.replace(/[^0-9]/g, '')) || 0;
             const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
-            
-            // Tính tổng số lượng quy đổi chuẩn xác (Thùng * Tỷ lệ + Lẻ)
             const totalQ = (kienVal * ratio) + leVal;
 
             if (totalQ > 0) {
