@@ -10149,19 +10149,20 @@ window.openAllPromosModal = function(fromSource = 'normal') {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    // 1. Lấy danh sách các mã công ty đang MỞ (Tab công ty không ở trạng thái 'Đóng')
+    // 1. Lấy chính xác danh sách mã công ty đang MỞ (Tab công ty hoạt động)
     let openCompCodes = new Set();
     if (typeof companyList !== 'undefined' && Array.isArray(companyList)) {
         companyList.forEach(c => {
             const status = String(c.status || '').trim();
-            // Chỉ nhận công ty đang mở (hoặc không bị đóng)
-            if (status !== 'Đóng' && status !== 'STOP' && status !== 'Khoá') {
-                openCompCodes.add(String(c.maCtu || '').trim().toUpperCase());
+            const maCtu = String(c.maCtu || '').trim().toUpperCase();
+            // Chỉ lấy các công ty không bị đóng / khóa
+            if (maCtu && status !== 'Đóng' && status !== 'STOP' && status !== 'Khoá' && status !== 'CLOSED') {
+                openCompCodes.add(maCtu);
             }
         });
     }
 
-    // 2. Lọc chỉ lấy các CTKM thuộc các công ty đang mở tab
+    // 2. Lọc danh sách CTKM: BẮT BUỘC mã công ty của CTKM phải nằm trong danh sách tab đang mở
     let activePromos = [];
     if (typeof window.promotionsList !== 'undefined' && Array.isArray(window.promotionsList)) {
         activePromos = window.promotionsList.filter(km => {
@@ -10169,12 +10170,16 @@ window.openAllPromosModal = function(fromSource = 'normal') {
             
             let ctu = String(km.maCtu || '').trim().toUpperCase();
             
-            // Nếu CTKM có gán mã công ty, bắt buộc mã công ty đó phải đang được MỞ tab
-            if (ctu && ctu !== 'KHÁC' && ctu !== 'ALL') {
-                if (!openCompCodes.has(ctu)) {
-                    return false; // Loại bỏ nếu công ty đang đóng tab
-                }
+            // Nếu CTKM có gán mã công ty, phải kiểm tra xem cty đó có đang mở tab hay không
+            if (!ctu || ctu === 'KHÁC' || ctu === 'ALL') {
+                return false; // Loại bỏ các CTKM không rõ công ty hoặc ngoài lề
             }
+            
+            // Nếu công ty tương ứng KHÔNG được mở tab -> loại bỏ ngay lập tức
+            if (!openCompCodes.has(ctu)) {
+                return false;
+            }
+            
             return true;
         });
     }
@@ -10183,25 +10188,25 @@ window.openAllPromosModal = function(fromSource = 'normal') {
     document.body.style.overflow = 'hidden';
 
     modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closePromoModal()">
-            <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column; background:var(--card-bg); padding:24px !important; overflow:hidden;">
+        <div id="promoModalOverlay" class="modal" style="display:flex; z-index:999999; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;" onclick="if(event.target === this) closePromoModal()">
+            <div class="modal-content fullscreen-modal" style="width:100%; max-width: 650px; height:85vh; display:flex; flex-direction:column; background:var(--card-bg); padding:20px !important; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
                 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:2px solid var(--card-border); padding-bottom:12px; flex-shrink:0;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         ${window._promoModalSource === 'ai' ? `
-                            <button class="btn btn-sm" onclick="backToAiModal()" style="font-weight:900; padding:6px 10px; border-radius:6px; background:var(--bg-dark); color:var(--text-main);"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
+                            <button type="button" class="btn btn-sm" onclick="backToAiModal()" style="font-weight:900; padding:6px 10px; border-radius:6px; background:var(--bg-dark); color:var(--text-main); cursor:pointer;"><i class="fa-solid fa-arrow-left"></i> Quay lại</button>
                         ` : ''}
                         <div>
-                            <h3 style="font-size:16px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:6px; margin:0;">
+                            <h3 style="font-size:15px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:6px; margin:0;">
                                 <i class="fa-solid fa-bullhorn" style="color:#E11D48;"></i> CTKM Các Công Ty Đang Mở (${activePromos.length})
                             </h3>
                         </div>
                     </div>
-                    <button class="btn btn-red btn-sm" onclick="closePromoModal()" style="font-size:13px; padding:8px 14px; font-weight:900; border-radius:8px;">Đóng</button>
+                    <button type="button" class="btn btn-red btn-sm" onclick="closePromoModal()" style="font-size:13px; padding:8px 16px; font-weight:900; border-radius:8px; cursor:pointer;">Đóng</button>
                 </div>
 
                 <div style="margin-bottom: 12px; flex-shrink:0;">
-                    <input type="text" placeholder="🔍 Tìm kiếm nhanh mã KM, nội dung..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
+                    <input type="text" placeholder="🔍 Tìm kiếm nhanh mã KM, nội dung..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border); background:var(--panel-bg); color:var(--text-main);">
                 </div>
 
                 <div id="modalPromoListContainer" style="overflow-y:auto; -webkit-overflow-scrolling:touch; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
@@ -10230,18 +10235,27 @@ window.openAllPromosModal = function(fromSource = 'normal') {
     modalContainer.classList.remove('hidden');
 };
 
-window.backToAiModal = function() {
-    // Mở lại bảng Gợi ý AI thay vì đóng hẳn
-    openAiSmartOrderModal();
-};
-
+// Đảm bảo hàm đóng modal chạy chuẩn xác và trả lại thanh cuộn
 window.closePromoModal = function() {
-    document.body.style.overflow = ''; // Trả lại quyền cuộn cho trang chính
+    document.body.style.overflow = ''; 
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
         modalContainer.innerHTML = '';
         modalContainer.classList.add('hidden');
     }
+};
+
+window.filterModalPromos = function(keyword) {
+    const q = removeAccents(keyword.trim()).toLowerCase();
+    const cards = document.querySelectorAll('#modalPromoListContainer .promo-item-card');
+    cards.forEach(card => {
+        const text = card.getAttribute('data-search') || '';
+        if (text.includes(q)) {
+            card.style.display = 'flex';
+        } else {
+            card.style.display = 'none';
+        }
+    });
 };
   // ==========================================
 // CÁC HÀM XỬ LÝ CHO TAB CTKM (EXCEL & MODAL 2 CHẾ ĐỘ)
