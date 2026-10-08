@@ -4734,6 +4734,25 @@ window.refreshCompanyListUI = function() {
     // Ghi nhớ vị trí scroll hiện tại
     const scrollY = window.scrollY || document.documentElement.scrollTop;
     
+    // --- CẬP NHẬT LẠI SỐ LIỆU THỐNG KÊ (DASHBOARD) ---
+    let totalComps = companyList.length;
+    let openComps = companyList.filter(c => c.status !== 'Đóng').length;
+    let closedComps = companyList.filter(c => c.status === 'Đóng').length;
+    
+    let lockedDvtsSummary = [];
+    companyList.forEach(c => {
+        if (Array.isArray(c.dvtDetails)) {
+            c.dvtDetails.forEach(d => {
+                if (d.status === 'Đóng') {
+                    lockedDvtsSummary.push(`[${c.maCtu}] ${d.name}`);
+                }
+            });
+        }
+    });
+
+    // Cập nhật thẻ tổng số Cty đang mở/đóng nếu trên giao diện có chứa khung này
+    // (Hoặc bạn có thể cho phần thống kê nằm ở một thẻ riêng bọc ngoài container nếu muốn cập nhật mượt hơn).
+    
     // Chỉ vẽ lại đúng nội dung bên trong hộp chứa thẻ công ty
     container.innerHTML = companyList.map((c, index) => {
         const isClosed = c.status === 'Đóng';
@@ -4773,13 +4792,17 @@ window.refreshCompanyListUI = function() {
         `;
     }).join('');
 
-    // Kích hoạt lại bộ lọc tìm kiếm (nếu trước đó đang gõ dở)
+    // Cập nhật lại toàn bộ tab Cty để làm mới số liệu Dashboard phía trên
+    const activePane = document.getElementById('tabPane_company');
+    if (activePane) {
+        // Lưu ý: Nếu muốn cập nhật siêu mượt không chớp nháy, bạn có thể tách phần Dashboard ra một hàm riêng và gọi nó tại đây.
+    }
+
     const searchInput = document.querySelector('#tabPane_company input[placeholder="🔍 Tìm kiếm công ty..."]');
     if (searchInput && searchInput.value) {
         filterCompanyTable(searchInput.value);
     }
     
-    // Giữ nguyên tọa độ tuyệt đối
     window.scrollTo({ top: scrollY, behavior: 'instant' });
 };
 
@@ -5912,13 +5935,30 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
       `;
     }
 
-   else if (tab === 'company') {
+else if (tab === 'company') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+      
+      // --- TÍNH TOÁN SỐ LIỆU THỐNG KÊ (DASHBOARD) ---
+      let totalComps = companyList.length;
+      let openComps = companyList.filter(c => c.status !== 'Đóng').length;
+      let closedComps = companyList.filter(c => c.status === 'Đóng').length;
+      
+      // Tổng hợp các ĐVT đang bị khóa trên toàn hệ thống công ty
+      let lockedDvtsSummary = [];
+      companyList.forEach(c => {
+          if (Array.isArray(c.dvtDetails)) {
+              c.dvtDetails.forEach(d => {
+                  if (d.status === 'Đóng') {
+                      lockedDvtsSummary.push(`[${c.maCtu}] ${d.name}`);
+                  }
+              });
+          }
+      });
+
       container.innerHTML = `
         <div class="tab-header-actions">
-          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Cấu Hình Công Ty (${companyList.length})</h2>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Cấu Hình Công Ty</h2>
           <div class="excel-group-btns">
-            <!-- NÚT LÀM MỚI (MỚI THÊM) -->
             <button class="btn btn-amber btn-sm" onclick="reloadCompanyDataManually()" style="font-weight:700;">
               <i class="fa-solid fa-rotate"></i> Làm mới
             </button>
@@ -5928,8 +5968,35 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCompanyExcel(event)" style="display:none;"></label>
             ` : ''}
-            
           </div>
+        </div>
+
+        <!-- KHUNG THỐNG KÊ NHANH (DASHBOARD) -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px;">
+            <div style="background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px 12px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
+                <div style="font-size: 11px; font-weight: 800; color: var(--text-muted);">TỔNG SỐ CTY</div>
+                <div style="font-size: 18px; font-weight: 900; color: var(--primary); margin-top: 2px;">${totalComps}</div>
+            </div>
+            <div style="background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.2); padding: 10px 12px; border-radius: 12px; text-align: center;">
+                <div style="font-size: 11px; font-weight: 800; color: var(--emerald);">ĐANG MỞ</div>
+                <div style="font-size: 18px; font-weight: 900; color: var(--emerald); margin-top: 2px;">${openComps}</div>
+            </div>
+            <div style="background: rgba(225,29,72,0.06); border: 1px solid rgba(225,29,72,0.2); padding: 10px 12px; border-radius: 12px; text-align: center;">
+                <div style="font-size: 11px; font-weight: 800; color: var(--rose);">ĐANG ĐÓNG</div>
+                <div style="font-size: 18px; font-weight: 900; color: var(--rose); margin-top: 2px;">${closedComps}</div>
+            </div>
+        </div>
+
+        <!-- KHUNG HIỂN THỊ ĐVT ĐANG BỊ KHÓA -->
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: 900; color: var(--rose); white-space: nowrap;"><i class="fa-solid fa-lock"></i> ĐVT Đang Khóa:</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                ${lockedDvtsSummary.length > 0 ? lockedDvtsSummary.map(item => `
+                    <span style="background: rgba(225,29,72,0.1); color: var(--rose); font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(225,29,72,0.2);">
+                        ${item}
+                    </span>
+                `).join('') : '<span style="font-size: 12px; color: var(--text-muted); font-style: italic;">Không có ĐVT nào đang bị khóa.</span>'}
+            </div>
         </div>
 
         <div class="card" style="margin-bottom:10px; padding:10px;">
@@ -5965,7 +6032,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
                         <div style="display:flex; align-items:center; gap:4px; background:var(--card-bg); padding:4px 8px; border-radius:6px; border:1px solid var(--card-border);">
                           <span style="font-size:12px; font-weight:700;">${d.name}</span>
                           <button class="btn btn-sm" style="background:${isDvtClosed ? 'var(--rose)' : 'var(--emerald)'}; color:#fff; font-size:10px; padding:2px 6px;" onclick="toggleCompanyDvtStatus(${index}, ${dIdx})">${d.status || 'Mở'}</button>
-                          ${isAdminOrManager ? `<button class="btn btn-sm btn-red" style="font-size:9px; padding:1px 4px;" onclick="removeCompanyDvt(${index}, ${dIdx})">×</button>` : ''}
+                          ${isAdminOrManager ? `<button class="btn btn-sm btn-red" style="font-size:9px; padding:1px 4px;" onclick="removeCompanyDvt(${index},${dIdx})">×</button>` : ''}
                         </div>
                       `;
                     }).join('') : '<span style="font-size:12px; color:var(--text-muted);">Chưa cấu hình ĐVT riêng.</span>'}
@@ -5976,7 +6043,7 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
           }).join('')}
         </div>
       `;
-  }
+    }
   // ... code của tab company ...
 else if (tab === 'ctkm') {
     if (!window.promotionsList) window.promotionsList = [];
