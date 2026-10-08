@@ -3267,6 +3267,44 @@ if (inputTo) inputTo.value = soGocFilterDateTo ? soGocFilterDateTo.split('-').re
       alert("Lỗi tải lại dữ liệu: " + e.message);
     }
   };
+  window.reloadCompanyDataManually = async function() {
+  try {
+    const btn = document.querySelector('button[onclick="reloadCompanyDataManually()"]');
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+
+    // Kéo dữ liệu mới nhất từ Firebase về
+    const cSnap = await getDocs(collection(db, "companies"));
+    companyList = cSnap.docs.map(d => d.data());
+    window.allCompanies = companyList;
+
+    // Lưu vào Cache
+    if (typeof saveCompaniesToLocalCache === 'function') {
+      await saveCompaniesToLocalCache(companyList);
+    }
+    
+    // Cập nhật local version bằng với server để không bị tải lặp
+    const serverMetaSnap = await getDoc(doc(db, "systemMeta", "version"));
+    if (serverMetaSnap.exists()) {
+      localStorage.setItem("companiesVersion", serverMetaSnap.data().companiesVersion || Date.now());
+    }
+
+    // Load lại giao diện
+    const activePane = document.getElementById('tabPane_company');
+    if (activePane) {
+      renderTabContent('company', activePane);
+    } else {
+      refreshCompanyListUI();
+    }
+
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+    alert("✅ Đã làm mới dữ liệu Công ty thành công!");
+  } catch (err) {
+    alert("Lỗi tải lại dữ liệu: " + err.message);
+  } finally {
+    const btn = document.querySelector('button[onclick="reloadCompanyDataManually()"]');
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
+  }
+};
 window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
     
@@ -4509,49 +4547,50 @@ window.importProductsExcel = function(event) {
   };
 
   window.importCompanyExcel = function(event) {
-    if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
-        
-        let uniqueMap = new Map();
-        for (let i = 0; i < jsonRows.length; i++) {
-          const r = jsonRows[i];
-          const maCtu = r[0] ? String(r[0]).trim() : '';
-          const tenCtu = r[1] ? String(r[1]).trim() : '';
-          if (maCtu && maCtu !== 'MaCTu') {
-            uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() });
-          }
+  if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+      
+      let uniqueMap = new Map();
+      for (let i = 0; i < jsonRows.length; i++) {
+        const r = jsonRows[i];
+        const maCtu = r[0] ? String(r[0]).trim() : '';
+        const tenCtu = r[1] ? String(r[1]).trim() : '';
+        if (maCtu && maCtu !== 'MaCTu') {
+          uniqueMap.set(maCtu, { maCtu, tenCtu, dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() });
         }
-        let newList = Array.from(uniqueMap.values());
-        if (newList.length > 0) {
-          const batch = writeBatch(db);
-          newList.forEach(c => {
-            const docRef = doc(db, "companies", String(c.maCtu));
-            batch.set(docRef, c, { merge: true });
-          });
-          await batch.commit();
+      }
+      let newList = Array.from(uniqueMap.values());
+      if (newList.length > 0) {
+        const batch = writeBatch(db);
+        newList.forEach(c => {
+          const docRef = doc(db, "companies", String(c.maCtu));
+          batch.set(docRef, c, { merge: true });
+        });
+        await batch.commit();
 
-          const metaRef = doc(db, "systemCounters", "globalMetadata");
-          await setDoc(metaRef, { version: serverTimestamp() }, { merge: true });
+        // ĐÁNH THỨC CÁC MÁY KHÁC ĐỒNG BỘ (Bản vá lỗi nhầm bảng)
+        const newVersion = Date.now();
+        await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+        localStorage.setItem("companiesVersion", newVersion);
 
-          companyList = newList;
-          await saveCompaniesToLocalCache(companyList);
-          renderUI();
-          alert("✅ Đã nhập danh sách công ty thành công với danh sách ĐVT trống!");
-        } else {
-          alert("Không tìm thấy dữ liệu hợp lệ trong file!");
-        }
-      } catch (err) {}
-    };
-    reader.readAsArrayBuffer(file);
+        companyList = newList;
+        await saveCompaniesToLocalCache(companyList);
+        renderUI();
+        alert("✅ Đã nhập danh sách công ty thành công với danh sách ĐVT trống!");
+      } else {
+        alert("Không tìm thấy dữ liệu hợp lệ trong file!");
+      }
+    } catch (err) {}
   };
-
+  reader.readAsArrayBuffer(file);
+};
   window.importRoutesExcel = function(event) {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file này!");
     const file = event.target.files[0];
@@ -4601,24 +4640,32 @@ window.importProductsExcel = function(event) {
     reader.readAsArrayBuffer(file);
   };
 
-  window.addNewCompany = async function() {
-    if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ Admin hoặc Manager mới có quyền thêm mới công ty!");
-    const maCtu = prompt("Nhập mã công ty (MaCTu):");
-    if (!maCtu) return;
-    const tenCtu = prompt("Nhập tên công ty (TenCTu):");
-    if (!tenCtu) return;
+ window.deleteCompanyItem = async function(index) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+  
+  const c = companyList[index];
+  try {
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+        isDeleted: true, 
+        updatedAt: new Date().toISOString() 
+    });
     
-    const newC = { maCtu: maCtu.trim(), tenCtu: tenCtu.trim(), dvtDetails: [], status: "Mở", updatedAt: new Date().toISOString() };
-    try {
-      await setDoc(doc(db, "companies", maCtu.trim()), newC);
-      companyList.push(newC);
-      await saveCompaniesToLocalCache(companyList);
-      renderUI();
-      alert("✅ Thêm công ty thành công với danh sách ĐVT trống!");
-    } catch (err) {
-      alert("Lỗi: " + err.message);
-    }
-  };
+    companyList.splice(index, 1);
+    await saveCompaniesToLocalCache(companyList);
+
+    // ĐÁNH THỨC CÁC MÁY KHÁC ĐỒNG BỘ
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+    localStorage.setItem("companiesVersion", newVersion);
+
+    refreshCompanyListUI();
+    alert("✅ Đã xóa thành công!");
+  } catch (err) {
+    alert("Lỗi: " + err.message);
+  }
+};
 
   window.addNewRoute = async function() {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền thêm mới tuyến!");
@@ -4774,10 +4821,16 @@ window.addCompanyDvtPrompt = async function(companyIndex) {
   c.dvtDetails.push({ name: newName.trim(), status: 'Mở' });
   try {
     await updateDoc(doc(db, "companies", String(c.maCtu)), { 
-  dvtDetails: c.dvtDetails, 
-  updatedAt: new Date().toISOString() 
-});
+      dvtDetails: c.dvtDetails, 
+      updatedAt: new Date().toISOString() 
+    });
     await saveCompaniesToLocalCache(companyList);
+    
+    // ĐÁNH THỨC CÁC MÁY KHÁC ĐỒNG BỘ
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+    localStorage.setItem("companiesVersion", newVersion);
+
     refreshCompanyListUI();
   } catch (err) {
     alert("Lỗi: " + err.message);
@@ -4793,17 +4846,22 @@ window.removeCompanyDvt = async function(companyIndex, dvtIndex) {
     c.dvtDetails.splice(dvtIndex, 1);
     try {
       await updateDoc(doc(db, "companies", String(c.maCtu)), { 
-  dvtDetails: c.dvtDetails, 
-  updatedAt: new Date().toISOString() 
-});
+        dvtDetails: c.dvtDetails, 
+        updatedAt: new Date().toISOString() 
+      });
       await saveCompaniesToLocalCache(companyList);
+
+      // ĐÁNH THỨC CÁC MÁY KHÁC ĐỒNG BỘ
+      const newVersion = Date.now();
+      await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+      localStorage.setItem("companiesVersion", newVersion);
+
       refreshCompanyListUI();
     } catch (err) {
       alert("Lỗi: " + err.message);
     }
   }
 };
-
 window.updateRouteField = async function(index, field, val) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
   if (field === 'nhomDoiTuong') {
@@ -5822,12 +5880,17 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
       `;
     }
 
-    else if (tab === 'company') {
+   else if (tab === 'company') {
       const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
       container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-weight:800;"><i class="fa-solid fa-building" style="color:#DB2777;"></i> Cấu Hình Công Ty (${companyList.length})</h2>
           <div class="excel-group-btns">
+            <!-- NÚT LÀM MỚI (MỚI THÊM) -->
+            <button class="btn btn-amber btn-sm" onclick="reloadCompanyDataManually()" style="font-weight:700;">
+              <i class="fa-solid fa-rotate"></i> Làm mới
+            </button>
+            
             ${isAdminOrManager ? `
               <button class="btn btn-amber btn-sm" onclick="addNewCompany()"><i class="fa-solid fa-plus"></i> Thêm Cty</button>
               <button class="btn btn-green btn-sm" onclick="exportCompanyExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
