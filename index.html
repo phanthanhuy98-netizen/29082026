@@ -10133,32 +10133,97 @@ const detailHtml = sortedCompCodes.map(compCode => {
 };
   // 1. Mở Modal Khuyến Mãi Tổng Công Ty
 window.openAllPromosModal = function() {
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closePromoModal()">
-      <div class="modal-content" style="max-width: 500px; padding: 20px; border-radius: 16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-          <h3 style="font-size:16px; font-weight:900; color:#E11D48;"><i class="fa-solid fa-bullhorn"></i> CTKM Toàn Công Ty</h3>
-          <button class="btn btn-red btn-sm" onclick="closePromoModal()">Đóng</button>
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    // 1. Lấy danh sách các mã công ty đang ở trạng thái "Mở" từ mảng companyList
+    let openCompCodes = new Set();
+    if (typeof companyList !== 'undefined' && Array.isArray(companyList)) {
+        companyList.forEach(c => {
+            if (c.status !== 'Đóng') {
+                openCompCodes.add(String(c.maCtu || '').trim().toUpperCase());
+            }
+        });
+    }
+
+    // 2. Lọc danh sách CTKM chỉ thuộc các công ty đang mở và không bị dừng (Stop)
+    let activePromos = [];
+    if (typeof window.promotionsList !== 'undefined' && Array.isArray(window.promotionsList)) {
+        activePromos = window.promotionsList.filter(km => {
+            if (km.status === 'Stop') return false;
+            let ctu = String(km.maCtu || '').trim().toUpperCase();
+            // Nếu có danh sách công ty mở, ưu tiên lọc theo. Nếu không có ctu thì mặc định cho qua.
+            if (openCompCodes.size > 0 && ctu && ctu !== 'KHÁC' && !openCompCodes.has(ctu)) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closePromoModal()">
+            <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column; background:var(--card-bg); padding:24px !important;">
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
+                    <div>
+                        <h3 style="font-size:18px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fa-solid fa-bullhorn" style="color:#E11D48;"></i> Tra Cứu CTKM Đang Hoạt Động (${activePromos.length})
+                        </h3>
+                        <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Chỉ hiển thị các chương trình thuộc công ty đang mở bán.</p>
+                    </div>
+                    <button class="btn btn-red" onclick="closePromoModal()" style="font-size:13px; padding:8px 16px; font-weight:900; border-radius:8px;">Đóng</button>
+                </div>
+
+                <div style="margin-bottom: 12px; flex-shrink:0;">
+                    <input type="text" placeholder="🔍 Gõ tìm kiếm mã KM, nội dung hoặc tên công ty..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
+                </div>
+
+                <div id="modalPromoListContainer" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+                    ${activePromos.length > 0 ? activePromos.map(km => {
+                        let foundComp = (typeof companyList !== 'undefined') ? companyList.find(c => String(c.maCtu||'').toUpperCase() === String(km.maCtu||'').toUpperCase()) : null;
+                        let compName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : (km.maCtu || 'Chung');
+
+                        return `
+                        <div class="promo-item-card" data-search="${removeAccents((km.maKM + ' ' + km.noiDung + ' ' + km.maCtu + ' ' + compName)).toLowerCase()}" style="background:var(--panel-bg); border:1px solid var(--card-border); border-left:4px solid #E11D48; border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:6px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="background:var(--prod-code-bg); color:#E11D48; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:900;">${km.maKM}</span>
+                                <span style="font-size:11px; color:var(--text-muted); font-weight:700;"><i class="fa-regular fa-calendar"></i> ${km.tuNgay || ''} - <b style="color:var(--rose);">${km.denNgay || 'Dài hạn'}</b></span>
+                            </div>
+                            
+                            <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.4;">
+                                ${km.noiDung}
+                            </div>
+                            
+                            <div style="font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center; margin-top:2px; flex-wrap:wrap; gap:6px;">
+                                <span>🏢 Cty: <b style="color:var(--primary);">[${km.maCtu}]${compName}</b></span>
+                                <span>📦 Hàng: <b style="color:var(--emerald);">${km.hangHoa || 'Tất cả'}</b></span>
+                            </div>
+                        </div>
+                        `;
+                    }).join('') : `
+                        <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">
+                            Không có chương trình khuyến nào từ các công ty đang mở.
+                        </div>
+                    `}
+                </div>
+            </div>
         </div>
-        <div style="font-size:14px; color:var(--text-main); line-height:1.5;">
-          <div style="background:var(--panel-bg); border:1px dashed #E11D48; padding:12px; border-radius:8px; margin-bottom:10px;">
-            <b style="color:#E11D48;"><i class="fa-solid fa-layer-group"></i> Chương trình Trưng bày:</b><br>
-            Phủ 3 lốc Era/Basto vị trí mặt tiền thưởng 300.000đ/tháng (Yêu cầu có ảnh kệ).
-          </div>
-          <div style="background:var(--panel-bg); border:1px dashed #E11D48; padding:12px; border-radius:8px; margin-bottom:10px;">
-            <b style="color:#E11D48;"><i class="fa-solid fa-sack-dollar"></i> Tích lũy tháng/quý:</b><br>
-            Doanh số đạt 50 triệu/tháng chiết khấu thêm 2%, tặng 1 phần quà cuối năm.
-          </div>
-          <div style="background:rgba(225, 29, 72, 0.05); padding:10px; border-radius:8px; color:var(--text-muted); font-size: 13px; text-align: center;">
-            <i>Bấm vào nút [🎁 KM] ở từng sản phẩm để xem CTKM riêng lẻ của mã đó.</i>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
+    `;
+    modalContainer.classList.remove('hidden');
+};
+
+// Hàm lọc nhanh danh sách CTKM bên trong modal
+window.filterModalPromos = function(keyword) {
+    const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+    const cards = document.querySelectorAll('.promo-item-card');
+    cards.forEach(card => {
+        const text = card.getAttribute('data-search') || '';
+        if (text.includes(q)) {
+            card.style.display = 'flex';
+        } else {
+            card.style.display = 'none';
+        }
+    });
 };
 
 // 2. Mở Modal Khuyến Mãi Chi Tiết Từng Mã Hàng
