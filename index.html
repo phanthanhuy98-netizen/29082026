@@ -12354,7 +12354,27 @@ window.openAiSmartOrderModal = function() {
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-    // 1. Lọc toàn bộ lịch sử đơn hàng của tiệm này
+    // 0. KIỂM TRA CHỐNG TRÙNG ĐƠN (Cảnh báo nếu hôm nay tiệm đã có đơn)
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    
+    let todayOrdersCount = orders.filter(o => {
+        const matchId = String(o.storeId || '') === storeIdStr;
+        let inferredCode = o.maDTPNNo || '';
+        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+            inferredCode = o.maKH.split(' - ')[0].trim();
+        }
+        const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+        const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+        return (matchId || matchCode) && o.ngayCtu === todayStr && isOwner && o.status !== 'Đã hủy';
+    }).length;
+
+    if (todayOrdersCount > 0) {
+        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm nay đã có ${todayOrdersCount} đơn hàng được lập rồi.\n\nBạn có chắc chắn muốn tiếp tục tạo thêm toa gợi ý thứ ${todayOrdersCount + 1} không?`);
+        if (!confirmExtraOrder) return;
+    }
+
+    // 1. Lọc lịch sử đơn hàng cũ của tiệm
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12365,26 +12385,19 @@ window.openAiSmartOrderModal = function() {
         return (matchId || matchCode) && o.status !== 'Đã hủy';
     });
 
-    if (storeOrders.length === 0) {
-        return alert("Tiệm này chưa có lịch sử mua hàng để hệ thống gợi ý!");
-    }
-
-    // 2. Tính trung bình số lượng mỗi lần mua cho từng mã hàng
+    // 2. Thu thập các mã hàng tiệm đã từng mua
     let productHistoryMap = {};
+    let purchasedSkuCodes = new Set();
+    
     storeOrders.forEach((o) => {
         if (Array.isArray(o.items)) {
             o.items.forEach(item => {
                 const q = Number(item.qty || 0);
                 if (q > 0) {
                     const code = String(item.code || item.id || '').trim();
+                    purchasedSkuCodes.add(code.toUpperCase());
                     if (!productHistoryMap[code]) {
-                        productHistoryMap[code] = { 
-                            code: code, 
-                            name: item.name || '', 
-                            dvt: item.dvt || 'hộp', 
-                            totalQty: 0, 
-                            purchaseCount: 0 
-                        };
+                        productHistoryMap[code] = { code: code, name: item.name || '', dvt: item.dvt || 'hộp', totalQty: 0, purchaseCount: 0 };
                     }
                     productHistoryMap[code].totalQty += q;
                     productHistoryMap[code].purchaseCount += 1;
@@ -12394,16 +12407,20 @@ window.openAiSmartOrderModal = function() {
     });
 
     let suggestedOrderList = [];
+
+    // --- NHÓM 1: MÃ HÀNG CŨ (Đã tăng trưởng +10% sản lượng) ---
     Object.values(productHistoryMap).forEach(prod => {
-        // Lấy tổng lượng mua chia cho số lần đã mua -> ra trung bình mỗi đơn chuẩn xác
-        let avgPerOrder = Math.round(prod.totalQty / prod.purchaseCount);
-        if (avgPerOrder < 1) avgPerOrder = 1;
+        let avgPerOrder = prod.totalQty / prod.purchaseCount;
+        
+        // 🔥 Đẩy thêm 10% khối lượng để tăng trưởng và giúp tiệm không bị đứt hàng giữa chu kỳ
+        let growthAvg = Math.round(avgPerOrder * 1.10); 
+        if (growthAvg < 1) growthAvg = 1;
 
         const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
         let ratio = Number(pObj?.tyLeQuyDoi || 50);
         
-        let kien = ratio > 1 ? Math.floor(avgPerOrder / ratio) : avgPerOrder;
-        let le = ratio > 1 ? avgPerOrder % ratio : 0;
+        let kien = ratio > 1 ? Math.floor(growthAvg / ratio) : growthAvg;
+        let le = ratio > 1 ? growthAvg % ratio : 0;
 
         suggestedOrderList.push({
             code: prod.code,
@@ -12412,13 +12429,55 @@ window.openAiSmartOrderModal = function() {
             ratio: ratio,
             kien: kien,
             le: le,
-            ghiChu: `Trung bình mua ${prod.purchaseCount} lần`
+            tag: 'CORE', // Hàng ruột
+            ghiChu: `📈 Đã tăng +10% so với trung bình (${prod.purchaseCount} lần mua)`
         });
     });
 
-    suggestedOrderList = suggestedOrderList.slice(0, 15); // Lấy top 15 mã hay mua nhất
+    // --- NHÓM 2: MÃ HÀNG MỒI / KHUYẾN MÃI (Upsell & Cross-selling) ---
+    // Tự động quét các sản phẩm đang có chương trình khuyến mãi (hoặc sản phẩm mới) mà tiệm này chưa từng nhập
+    let hookItemsAdded = 0;
+    if (typeof products !== 'undefined' && Array.isArray(products)) {
+        products.forEach(p => {
+            const pCode = String(p.code || p.id || '').trim();
+            if (hookItemsAdded < 3 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
+                // Kiểm tra xem sản phẩm này có đang nằm trong danh sách CTKM không
+                let hasPromo = false;
+                if (window.promotionsList && window.promotionsList.length > 0) {
+                    hasPromo = window.promotionsList.some(km => km.status !== 'Stop' && km.hangHoa && km.hangHoa.toUpperCase().includes(pCode.toUpperCase()));
+                }
 
-    // 3. Render Modal hiển thị
+                // Nếu có CTKM hoặc ngẫu nhiên chọn làm hàng mồi chiến lược
+                if (hasPromo || hookItemsAdded === 0) {
+                    let ratio = Number(p.tyLeQuyDoi || 50);
+                    // Gợi ý mồi nhẹ: 1 thùng hoặc 1 lốc/lẻ tùy quy cách
+                    let defaultKien = ratio > 1 ? 1 : 5; 
+                    let defaultLe = 0;
+
+                    suggestedOrderList.push({
+                        code: pCode,
+                        name: p.name,
+                        dvt: p.dvt || 'hộp',
+                        ratio: ratio,
+                        kien: defaultKien,
+                        le: defaultLe,
+                        tag: 'HOOK', // Hàng mồi
+                        ghiChu: `🔥 [HÀNG MỒI] Đang có chương trình KM/Mặt hàng mới chạy mạnh!`
+                    });
+                    hookItemsAdded++;
+                }
+            }
+        });
+    }
+
+    // Sắp xếp: Đưa hàng mồi lên trên cùng để Sales nhìn thấy và chào đầu tiên khi mở miệng nói chuyện với chủ tiệm
+    suggestedOrderList.sort((a, b) => {
+        if (a.tag === 'HOOK' && b.tag !== 'HOOK') return -1;
+        if (a.tag !== 'HOOK' && b.tag === 'HOOK') return 1;
+        return 0;
+    });
+
+    // 3. Render Modal Giao diện chuyên nghiệp
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
@@ -12429,7 +12488,7 @@ window.openAiSmartOrderModal = function() {
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
                     <div>
                         <h3 style="font-size:18px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
-                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Gợi Ý Toa Theo Trung Bình Đơn
+                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Toa Gợi Ý Tăng Trưởng (+10% & Hàng Mồi)
                         </h3>
                         <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Tiệm: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
                     </div>
@@ -12439,16 +12498,17 @@ window.openAiSmartOrderModal = function() {
                 <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
                     ${suggestedOrderList.map((item, idx) => {
                         const showLooseInput = item.ratio > 1;
+                        const isHook = item.tag === 'HOOK';
                         return `
-                        <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                        <div style="background:var(--panel-bg); border:1px solid ${isHook ? 'rgba(225,29,72,0.4)' : 'var(--card-border)'}; border-left:4px solid ${isHook ? 'var(--rose)' : 'var(--emerald)'}; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
                             
                             <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
                                 <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
                                     <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.35;" title="[${item.code}]${item.name}">
                                         <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${item.code}</span>${item.name}
                                     </div>
-                                    <div style="font-size:11.5px; color:var(--text-muted); font-weight:800; margin-top:4px;">
-                                        <i class="fa-solid fa-chart-line"></i> ${item.ghiChu}
+                                    <div style="font-size:11.5px; color:${isHook ? 'var(--rose)' : 'var(--emerald)'}; font-weight:800; margin-top:4px;">
+                                        ${item.ghiChu}
                                     </div>
                                 </div>
                             </div>
