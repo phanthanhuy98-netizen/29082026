@@ -12354,7 +12354,7 @@ window.openAiSmartOrderModal = function() {
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-    // 0. KIỂM TRA CHỐNG TRÙNG ĐƠN (Cảnh báo nếu hôm nay tiệm đã có đơn)
+    // 0. CHỐNG TRÙNG ĐƠN TRONG NGÀY
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
@@ -12370,11 +12370,11 @@ window.openAiSmartOrderModal = function() {
     }).length;
 
     if (todayOrdersCount > 0) {
-        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm nay đã có ${todayOrdersCount} đơn hàng được lập rồi.\n\nBạn có chắc chắn muốn tiếp tục tạo thêm toa gợi ý thứ ${todayOrdersCount + 1} không?`);
+        const confirmExtraOrder = confirm(`⚠️ CẢNH BÁO: Tiệm "${activeVisitedStore.name}" hôm nay đã có ${todayOrdersCount} đơn hàng.\n\nBạn có muốn tiếp tục tạo thêm toa gợi ý không?`);
         if (!confirmExtraOrder) return;
     }
 
-    // 1. Lọc lịch sử đơn hàng cũ của tiệm
+    // 1. Lọc lịch sử đơn hàng cũ
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12385,7 +12385,8 @@ window.openAiSmartOrderModal = function() {
         return (matchId || matchCode) && o.status !== 'Đã hủy';
     });
 
-    // 2. Thu thập các mã hàng tiệm đã từng mua
+    storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
+
     let productHistoryMap = {};
     let purchasedSkuCodes = new Set();
     
@@ -12408,19 +12409,19 @@ window.openAiSmartOrderModal = function() {
 
     let suggestedOrderList = [];
 
-    // --- NHÓM 1: MÃ HÀNG CŨ (Đã tăng trưởng +10% sản lượng) ---
+    // --- NHÓM 1: TỰ ĐỘNG ĐÔN SỐ LƯỢNG LÊN +10% ĐẾN +15% (Scale-up) ---
     Object.values(productHistoryMap).forEach(prod => {
         let avgPerOrder = prod.totalQty / prod.purchaseCount;
         
-        // 🔥 Đẩy thêm 10% khối lượng để tăng trưởng và giúp tiệm không bị đứt hàng giữa chu kỳ
-        let growthAvg = Math.round(avgPerOrder * 1.10); 
-        if (growthAvg < 1) growthAvg = 1;
+        // 🔥 THUẬT TOÁN ĐÔN SỐ: Tự động nhân hệ số 1.12 (+12%) để từ 10 triệu tự động nhích lên ~11.2 triệu
+        let scaledQty = Math.round(avgPerOrder * 1.12); 
+        if (scaledQty < 1) scaledQty = 1;
 
         const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
         let ratio = Number(pObj?.tyLeQuyDoi || 50);
         
-        let kien = ratio > 1 ? Math.floor(growthAvg / ratio) : growthAvg;
-        let le = ratio > 1 ? growthAvg % ratio : 0;
+        let kien = ratio > 1 ? Math.floor(scaledQty / ratio) : scaledQty;
+        let le = ratio > 1 ? scaledQty % ratio : 0;
 
         suggestedOrderList.push({
             code: prod.code,
@@ -12429,30 +12430,25 @@ window.openAiSmartOrderModal = function() {
             ratio: ratio,
             kien: kien,
             le: le,
-            tag: 'CORE', // Hàng ruột
-            ghiChu: `📈 Đã tăng +10% so với trung bình (${prod.purchaseCount} lần mua)`
+            tag: 'CORE',
+            ghiChu: `📈 Đã đôn số +12% so với trung bình cũ`
         });
     });
 
-    // --- NHÓM 2: MÃ HÀNG MỒI / KHUYẾN MÃI (Upsell & Cross-selling) ---
-    // Tự động quét các sản phẩm đang có chương trình khuyến mãi (hoặc sản phẩm mới) mà tiệm này chưa từng nhập
+    // --- NHÓM 2: CHÈN THÊM "HÀNG MỒI" ĐỂ ĐẨY GIÁ TRỊ ĐƠN HÀNG LÊN CAO HƠN NỮA ---
     let hookItemsAdded = 0;
     if (typeof products !== 'undefined' && Array.isArray(products)) {
         products.forEach(p => {
             const pCode = String(p.code || p.id || '').trim();
-            if (hookItemsAdded < 3 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
-                // Kiểm tra xem sản phẩm này có đang nằm trong danh sách CTKM không
+            if (hookItemsAdded < 2 && !purchasedSkuCodes.has(pCode.toUpperCase())) {
                 let hasPromo = false;
                 if (window.promotionsList && window.promotionsList.length > 0) {
                     hasPromo = window.promotionsList.some(km => km.status !== 'Stop' && km.hangHoa && km.hangHoa.toUpperCase().includes(pCode.toUpperCase()));
                 }
 
-                // Nếu có CTKM hoặc ngẫu nhiên chọn làm hàng mồi chiến lược
-                if (hasPromo || hookItemsAdded === 0) {
+                if (hasPromo) {
                     let ratio = Number(p.tyLeQuyDoi || 50);
-                    // Gợi ý mồi nhẹ: 1 thùng hoặc 1 lốc/lẻ tùy quy cách
-                    let defaultKien = ratio > 1 ? 1 : 5; 
-                    let defaultLe = 0;
+                    let defaultKien = ratio > 1 ? 1 : 5;
 
                     suggestedOrderList.push({
                         code: pCode,
@@ -12460,9 +12456,9 @@ window.openAiSmartOrderModal = function() {
                         dvt: p.dvt || 'hộp',
                         ratio: ratio,
                         kien: defaultKien,
-                        le: defaultLe,
-                        tag: 'HOOK', // Hàng mồi
-                        ghiChu: `🔥 [HÀNG MỒI] Đang có chương trình KM/Mặt hàng mới chạy mạnh!`
+                        le: 0,
+                        tag: 'HOOK',
+                        ghiChu: `🔥 [HÀNG MỒI TĂNG TRƯỞNG] Đang chạy KM lớn để ép doanh số!`
                     });
                     hookItemsAdded++;
                 }
@@ -12470,14 +12466,16 @@ window.openAiSmartOrderModal = function() {
         });
     }
 
-    // Sắp xếp: Đưa hàng mồi lên trên cùng để Sales nhìn thấy và chào đầu tiên khi mở miệng nói chuyện với chủ tiệm
+    // Đưa hàng mồi lên trên cùng
     suggestedOrderList.sort((a, b) => {
         if (a.tag === 'HOOK' && b.tag !== 'HOOK') return -1;
         if (a.tag !== 'HOOK' && b.tag === 'HOOK') return 1;
         return 0;
     });
 
-    // 3. Render Modal Giao diện chuyên nghiệp
+    suggestedOrderList = suggestedOrderList.slice(0, 15);
+
+    // 3. Render Modal Giao diện Tăng Trưởng
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
@@ -12488,7 +12486,7 @@ window.openAiSmartOrderModal = function() {
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid var(--card-border); padding-bottom:14px; flex-shrink:0;">
                     <div>
                         <h3 style="font-size:18px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
-                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Toa Gợi Ý Tăng Trưởng (+10% & Hàng Mồi)
+                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Toa Gợi Ý Đôn Số Tự Động (+12% Giá Trị)
                         </h3>
                         <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Tiệm: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
                     </div>
