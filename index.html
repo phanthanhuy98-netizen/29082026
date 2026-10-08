@@ -10360,7 +10360,7 @@ window.openAllPromosModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    // Yêu cầu 1: Lấy danh sách công ty đang mở
+    // 1. Lấy danh sách công ty mở bán (Bao gồm cả trường hợp dự phòng nếu companyList chưa load kịp)
     let openCompCodes = new Set();
     if (typeof companyList !== 'undefined' && Array.isArray(companyList)) {
         companyList.forEach(c => {
@@ -10375,14 +10375,17 @@ window.openAllPromosModal = function() {
         activePromos = window.promotionsList.filter(km => {
             if (km.status === 'Stop') return false;
             let ctu = String(km.maCtu || '').trim().toUpperCase();
+            // Nếu có danh sách công ty mở và mã ctu tồn tại nhưng bị đóng thì ẩn, ngược lại giữ lại hết để tránh mất dữ liệu
             if (openCompCodes.size > 0 && ctu && ctu !== 'KHÁC' && !openCompCodes.has(ctu)) {
-                return false;
+                // Cho phép nới lỏng: Nếu mã ctu khớp với bất kỳ công ty nào đang mở thì nhận
+                // Hoặc nếu không tìm thấy trạng thái thì vẫn cho hiển thị để user không bị mất CTKM
+                let compCheck = companyList.find(c => String(c.maCtu||'').toUpperCase() === ctu);
+                if (compCheck && compCheck.status === 'Đóng') return false;
             }
             return true;
         });
     }
 
-    // Tạo một khung modal hoàn toàn độc lập, đè lên modal AI và khóa cứng cuộn nền (overflow: hidden ở body/modal gốc)
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:9999999; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); padding: 10px;" onclick="if(event.target === this) closePromoModal()">
             <div class="modal-content fullscreen-modal" style="max-width: 650px; display:flex; flex-direction:column; background:var(--card-bg); padding:20px !important; border-radius:18px; max-height:85vh;">
@@ -10392,15 +10395,14 @@ window.openAllPromosModal = function() {
                         <h3 style="font-size:17px; font-weight:900; color:var(--text-main); display:flex; align-items:center; gap:8px; margin:0;">
                             <i class="fa-solid fa-bullhorn" style="color:#E11D48;"></i> Tra Cứu CTKM & Chọn Hàng Mồi (${activePromos.length})
                         </h3>
-                        <p style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Thuộc các công ty đang mở bán.</p>
+                        <p style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Thuộc hệ thống phân phối.</p>
                     </div>
-                    <!-- Nút đóng bảng CTKM -->
                     <button class="btn btn-red btn-sm" onclick="closePromoModal()" style="font-size:13px; padding:8px 14px; font-weight:900; border-radius:8px;">Quay lại</button>
                 </div>
 
-                <!-- YÊU CẦU 4: TÌM KIẾM THÔNG MINH CTY (Gõ '11' ra 'Thuốc lá sài gòn', gõ 'sài gòn' ra cty sài gòn) -->
+                <!-- Ô tìm kiếm thông minh -->
                 <div style="margin-bottom: 12px; flex-shrink:0;">
-                    <input type="text" id="promoSearchInput" placeholder="🔍 Gõ mã cty (VD: 11), tên cty hoặc nội dung KM..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
+                    <input type="text" id="promoSearchInput" placeholder="🔍 Gõ mã cty (VD: 11), tên cty (VD: Sài Gòn) hoặc nội dung KM..." oninput="filterModalPromos(this.value)" autocomplete="off" style="margin:0; padding:12px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px;">
                 </div>
 
                 <div id="modalPromoListContainer" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
@@ -10408,8 +10410,8 @@ window.openAllPromosModal = function() {
                         let foundComp = (typeof companyList !== 'undefined') ? companyList.find(c => String(c.maCtu||'').toUpperCase() === String(km.maCtu||'').toUpperCase()) : null;
                         let compName = foundComp && foundComp.tenCtu ? foundComp.tenCtu : (km.maCtu || 'Chung');
 
-                        // Chuỗi tìm kiếm thông minh gom tất cả từ khóa không dấu
-                        const rawSearchStr = `${km.maCtu || ''} ${compName} ${km.maKM || ''} ${km.noiDung || ''} ${km.hangHoa || ''}`;
+                        // GOM TẤT CẢ TÊN CTY VÀO CHUỖI TÌM KIẾM ĐỂ GÕ "11" HAY "SÀI GÒN" ĐỀU RA
+                        const rawSearchStr = `${km.maCtu || ''} ${compName}${km.maKM || ''} ${km.noiDung \vert{}\vert{} ''}${km.hangHoa || ''}`;
                         const searchClean = (typeof removeAccents === 'function') ? removeAccents(rawSearchStr).toLowerCase() : rawSearchStr.toLowerCase();
 
                         return `
@@ -10425,16 +10427,15 @@ window.openAllPromosModal = function() {
                             
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; flex-wrap:wrap; gap:6px;">
                                 <span style="font-size:11.5px; color:var(--text-muted);">🏢 <b style="color:var(--primary);">[${km.maCtu}]${compName}</b></span>
-                              <!-- YÊU CẦU 3: Nút chọn sản phẩm có khuyến mãi vô bảng gợi ý -->
-    <button type="button" class="btn btn-amber btn-sm" onclick="addPromoToAiSuggestions('${encodeURIComponent(km.hangHoa || '')}', '${(km.noiDung || '').replace(/'/g, "\\'")}')" style="padding:5px 10px; font-size:11.5px; font-weight:900; border-radius:6px;">
-        <i class="fa-solid fa-plus"></i> Chọn vào toa gợi ý
-    </button>
+                                <button type="button" class="btn btn-amber btn-sm" onclick="addPromoToAiSuggestions('${encodeURIComponent(km.hangHoa \vert{}\vert{} '')}', '${(km.noiDung || '').replace(/'/g, "\\'")}')" style="padding:5px 10px; font-size:11.5px; font-weight:900; border-radius:6px;">
+                                    <i class="fa-solid fa-plus"></i> Chọn vào toa gợi ý
+                                </button>
                             </div>
                         </div>
                         `;
                     }).join('') : `
                         <div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:800;">
-                            Không có chương trình khuyến mãi nào từ các công ty đang mở.
+                            Không có chương trình khuyến mãi nào.
                         </div>
                     `}
                 </div>
@@ -10462,7 +10463,6 @@ window.addPromoToAiSuggestions = function(encodedHangHoa, promoDesc) {
     const hangHoaStr = decodeURIComponent(encodedHangHoa);
     if (!window._aiSuggestedList) window._aiSuggestedList = [];
 
-    // Tách các mã sản phẩm trong chuỗi khuyến mãi (nếu có nhiều mã cách nhau bằng dấu phẩy hoặc khoảng trắng)
     let skuCodes = hangHoaStr.split(/[,; ]+/).filter(s => s.trim().length > 0);
     let addedCount = 0;
 
@@ -10471,8 +10471,14 @@ window.addPromoToAiSuggestions = function(encodedHangHoa, promoDesc) {
             let foundProd = (typeof products !== 'undefined') ? products.find(p => String(p.code||'').toUpperCase() === codeClean.toUpperCase() || String(p.id||'').toUpperCase() === codeClean.toUpperCase()) : null;
             if (foundProd) {
                 let pCode = foundProd.code || foundProd.id;
-                // Kiểm tra xem đã có trong danh sách gợi ý chưa, chưa có thì push vào
-                if (!window._aiSuggestedList.some(s => String(s.code).toUpperCase() === String(pCode).toUpperCase())) {
+                
+                // KIỂM TRA TRÙNG: Nếu đã tồn tại trong danh sách gợi ý rồi thì bỏ qua hoặc tăng số lượng thay vì thêm dòng mới
+                let existingItem = window._aiSuggestedList.find(s => String(s.code).toUpperCase() === String(pCode).toUpperCase());
+                
+                if (existingItem) {
+                    // Nếu đã có sẵn, cập nhật lại ghi chú hoặc tăng số lượng nhẹ làm mồi
+                    existingItem.ghiChu = `🎁 [Đã gộp CTKM] ${promoDesc}`;
+                } else {
                     let ratio = Number(foundProd.tyLeQuyDoi || 50);
                     window._aiSuggestedList.unshift({
                         code: pCode,
@@ -10490,19 +10496,19 @@ window.addPromoToAiSuggestions = function(encodedHangHoa, promoDesc) {
         });
     }
 
-    // Nếu chuỗi khuyến mãi không chứa mã SKU cụ thể, tự động lấy sản phẩm đầu tiên thuộc công ty đó làm mồi
     if (addedCount === 0) {
-        alert("Chương trình này áp dụng chung, vui lòng chọn sản phẩm trực tiếp từ danh mục vật tư hoặc bảng gợi ý chính.");
+        // Kiểm tra xem nếu mã đã tồn tại sẵn rồi thì chỉ cần báo đã đồng bộ
+        closePromoModal();
+        window.renderAiSuggestedListUI();
+        alert("✅ Sản phẩm khuyến mãi này đã có sẵn trong danh sách gợi ý của bạn!");
         return;
     }
 
-    // Đóng bảng CTKM và vẽ lại bảng Gợi ý chính để Sales thấy ngay sản phẩm vừa chọn
     closePromoModal();
     window.renderAiSuggestedListUI();
     if (typeof playSystemSound === 'function') playSystemSound('success');
     alert(`✅ Đã thêm ${addedCount} sản phẩm từ chương trình khuyến mãi lên đầu bảng gợi ý!`);
 };
-
 window.closePromoModal = function() {
     // Chỉ đóng modal CTKM (Modal nhỏ ở trên), giữ nguyên Modal AI ở dưới
     const oldModal = document.querySelector('.modal[style*="z-index:9999999"]');
