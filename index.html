@@ -1821,16 +1821,41 @@ try {
     if (ctkmListenerUnsub) ctkmListenerUnsub();
     if (compListenerUnsub) compListenerUnsub();
 
-    // 1. Lắng nghe thay đổi CTKM
+   // 1. Lắng nghe thay đổi CTKM (Phân luồng chống tốn Read Firebase)
     ctkmListenerUnsub = onSnapshot(doc(db, "systemMeta", "ctkmVersion"), async (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().version;
+            const syncType = docSnap.data().type || 'full'; // Đọc loại tín hiệu Admin gửi
             const localVersion = localStorage.getItem("localCtkmVersion") || 0;
+            
             if (serverVersion > localVersion && currentUser && currentUser.role !== 'admin') {
+                const lastSync = localStorage.getItem("dms_last_sync_ctkm") || "2000-01-01T00:00:00.000Z";
+                
+                if (syncType === 'partial') {
+                    // CẬP NHẬT GIA TĂNG: Sếp chỉ bấm Ngưng/Mở 1 chương trình -> Chỉ tốn vài Read
+                    const qCtkm = query(collection(db, "promotions"), where("updatedAt", ">", lastSync));
+                    const snap = await getDocs(qCtkm);
+                    
+                    if (!snap.empty) {
+                        const promoMap = new Map();
+                        (window.promotionsList || []).forEach(p => promoMap.set(p.id, p));
+                        snap.docs.forEach(d => promoMap.set(d.id, {id: d.id, ...d.data()})); // Đè trạng thái mới nhất vào
+                        window.promotionsList = Array.from(promoMap.values());
+                    }
+                } else {
+                    // CẬP NHẬT TOÀN BỘ: Sếp tải Excel mới lên -> Buộc phải tốn Read để đồng bộ
+                    const snap = await getDocs(collection(db, "promotions"));
+                    window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                }
+                
+                // Lưu vào bộ nhớ cứng điện thoại và ghi nhận mốc thời gian vừa tải xong
+                if (typeof savePromotionsToLocalCache === 'function') {
+                    await savePromotionsToLocalCache(window.promotionsList);
+                }
                 localStorage.setItem("localCtkmVersion", serverVersion);
-                const snap = await getDocs(collection(db, "promotions"));
-                window.promotionsList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                localStorage.setItem("dms_last_sync_ctkm", new Date().toISOString());
                 window.promotionsLoaded = true;
+                
                 if (typeof drawCtkmUI === 'function' && currentTab === 'ctkm') drawCtkmUI();
             }
         }
@@ -10321,11 +10346,13 @@ window.toggleCtkmStatus = async function(id, currentStatus) {
         updatedAt: new Date().toISOString()
     });
 
-    // 2. Cập nhật mảng trên máy và vẽ lại giao diện
+    // TỐI ƯU: Phát lệnh đánh thức máy Sales (Chỉ tải đúng 1 dòng bị sửa - Tiết kiệm Read)
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: newVersion, type: 'partial' }, { merge: true });
+
+    // 2. Cập nhật mảng trên máy Admin và vẽ lại giao diện
     const idx = window.promotionsList.findIndex(p => p.id === id);
-    if (idx > -1) {
-      window.promotionsList[idx].status = newStatus;
-    }
+    if (idx > -1) window.promotionsList[idx].status = newStatus;
     
     window.debounceFilterCtkm(window._ctkmSearchKey);
     if (typeof triggerHaptic === 'function') triggerHaptic(20);
@@ -10504,10 +10531,14 @@ window.executeImportCtkm = async function(mode) {
         upCount = 0;
       }
     });
-    if (upCount > 0) uploadBatches.push(uploadBatch.commit());
+   if (upCount > 0) uploadBatches.push(uploadBatch.commit());
     await Promise.all(uploadBatches);
 
-// Cập nhật Local UI
+    // THÊM 2 DÒNG NÀY VÀO ĐÂY: Phát lệnh đánh thức (Báo Sales tải lại toàn bộ vì có thay đổi lớn)
+    const newVersion = Date.now();
+    await setDoc(doc(db, "systemMeta", "ctkmVersion"), { version: newVersion, type: 'full' }, { merge: true });
+
+    // Cập nhật Local UI
     if (mode === 'replace_all') {
        window.promotionsList = newPromos;
     } else {
