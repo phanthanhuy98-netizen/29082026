@@ -12353,9 +12353,6 @@ window.toggleSalesPanel = function() {
         toggleBtn.style.borderColor = 'var(--card-border)';
     }
 };
-// ==========================================
-// HỆ THỐNG GỢI Ý ĐƠN HÀNG THÔNG MINH (TỰ ĐỘNG ẨN Ô LẺ KHI LÀ MÃ THÙNG)
-// ==========================================
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
     
@@ -12414,58 +12411,67 @@ window.openAiSmartOrderModal = function() {
 
         const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
         let ratio = Number(pObj?.tyLeQuyDoi || 50);
+        let price = Number(pObj?.price || 0);
         
-        // Nếu mã hàng không có quy cách hoặc quy cách = 1 thì coi như bán nguyên thùng, ẩn lẻ
         let kien = ratio > 1 ? Math.floor(avgPerOrder / ratio) : avgPerOrder;
         let le = ratio > 1 ? avgPerOrder % ratio : 0;
         
-        // Nếu số lượng ít hơn 1 thùng nhưng có lịch sử mua lẻ thì đưa vào lẻ, ngược lại đưa vào thùng
         if (kien === 0 && le > 0 && ratio <= 1) {
             kien = 0;
         }
 
         suggestedOrderList.push({
             code: prod.code,
-            name: prod.name,
+            name: prod.name || pObj?.name || prod.code,
             dvt: prod.dvt,
             ratio: ratio,
+            price: price,
             kien: kien,
             le: le,
-            ghiChu: `Đã nhập ${prod.purchaseCount} lần (Chu kỳ ~${averageCycleDays} ngày)`
+            purchaseCount: prod.purchaseCount,
+            avgPerOrder: avgPerOrder,
+            ghiChu: `Đã mua ${prod.purchaseCount} lần (Chu kỳ ~${averageCycleDays} ngày)`
         });
     });
 
-    suggestedOrderList = suggestedOrderList.slice(0, 10);
+    suggestedOrderList = suggestedOrderList.slice(0, 15);
 
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
-            <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:24px !important;">
+            <div class="modal-content fullscreen-modal" style="max-width: 800px; display:flex; flex-direction:column; background:#ffffff; padding:24px !important;">
                 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid #e2e8f0; padding-bottom:14px; flex-shrink:0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:2px solid #e2e8f0; padding-bottom:12px; flex-shrink:0;">
                     <div>
-                        <h3 style="font-size:20px; font-weight:900; color:#1e293b; display:flex; align-items:center; gap:10px; margin:0;">
-                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Gợi Ý Toa Hàng Tối Ưu
+                        <h3 style="font-size:18px; font-weight:900; color:#1e293b; display:flex; align-items:center; gap:8px; margin:0;">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Gợi Ý Toa Hàng Thông Minh (AI)
                         </h3>
-                        <p style="font-size:13px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Cửa hàng: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
+                        <p style="font-size:12.5px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Cửa hàng: <b style="color:var(--primary);">${activeVisitedStore.name}</b> (Cách đơn cuối: ${daysSinceLastOrder} ngày)</p>
                     </div>
-                    <button class="btn btn-red" onclick="closeAiModal()" style="font-size:14px; padding:10px 20px; font-weight:900; border-radius:10px;">Đóng</button>
+                    <button class="btn btn-red" onclick="closeAiModal()" style="font-size:13px; padding:8px 16px; font-weight:900; border-radius:8px;">Đóng</button>
                 </div>
 
-                <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:12px; padding-right:6px;">
+                <div style="background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.2); padding: 12px 16px; border-radius: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-shrink:0;">
+                    <span style="font-size: 13.5px; font-weight: 800; color: var(--text-main);">💰 Tổng giá trị toa gợi ý dự kiến:</span>
+                    <span id="aiTotalPreviewVal" style="font-size: 16px; font-weight: 900; color: var(--rose);">0K</span>
+                </div>
+
+                <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding-right:4px;" id="aiSuggestionCardsArea">
                     ${suggestedOrderList.map((item, idx) => {
-                        const showLooseInput = item.ratio > 1; // Chỉ hiện ô lẻ khi tỷ lệ quy cách > 1
+                        const showLooseInput = item.ratio > 1;
+                        const estItemTotal = ((item.kien * item.ratio + item.le) * item.price);
                         return `
-                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:14px; padding:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
+                        <div class="ai-item-row" data-price="${item.price}" data-ratio="${item.ratio}" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
                             
-                            <div style="display:flex; align-items:center; gap:14px; flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+                                <input type="checkbox" class="ai-item-checkbox" checked onchange="updateAiTotalPreview()" style="width:18px; height:18px; cursor:pointer; accent-color:var(--primary); flex-shrink:0;">
                                 <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-                                    <div style="font-size:15px; font-weight:900; color:#0f172a; line-height:1.4;" title="[${item.code}]${item.name}">
-                                        <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 8px; border-radius:6px; font-size:13px; margin-right:6px;">${item.code}</span>${item.name}
+                                    <div style="font-size:14px; font-weight:900; color:#0f172a; line-height:1.35;" title="[${item.code}]${item.name}">
+                                        <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${item.code}</span>${item.name}
                                     </div>
-                                    <div style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin-top:3px;">
+                                    <div style="font-size:11px; color:var(--text-muted); font-weight:700; margin-top:3px;">
                                         <i class="fa-solid fa-clock-rotate-left"></i> ${item.ghiChu}
                                     </div>
                                 </div>
@@ -12473,31 +12479,106 @@ window.openAiSmartOrderModal = function() {
 
                             <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
                                 <div style="display:flex; flex-direction:column; align-items:center;">
-                                    <span style="font-size:11px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">THÙNG</span>
-                                    <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" style="width:65px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
+                                    <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">THÙNG</span>
+                                    <input type="text" value="${item.kien}" data-code="${item.code}" class="ai-rec-kien-input" oninput="updateAiTotalPreview()" style="width:55px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
                                 </div>
                                 ${showLooseInput ? `
                                 <div style="display:flex; flex-direction:column; align-items:center;">
-                                    <span style="font-size:11px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">LẺ (${item.dvt})</span>
-                                    <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" style="width:65px; margin:0; padding:10px 4px; text-align:center; font-weight:900; font-size:16px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
+                                    <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">LẺ (${item.dvt})</span>
+                                    <input type="text" value="${item.le}" data-code="${item.code}" class="ai-rec-le-input" oninput="updateAiTotalPreview()" style="width:55px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:15px; border-radius:8px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
                                 </div>
                                 ` : ''}
                             </div>
 
                         </div>
-                    `;
+                        `;
                     }).join('')}
                 </div>
 
-                <div style="margin-top:16px; padding-top:14px; border-top:2px solid #e2e8f0; flex-shrink:0;">
-                    <button class="btn btn-green" style="width:100%; justify-content:center; padding:18px; font-weight:900; font-size:16px; border-radius:14px; box-shadow: 0 8px 25px rgba(16, 185, 129, 0.35);" onclick="applyAllAiRecommendations()">
-                        <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TOA GỢI Ý VÀO GIỎ HÀNG
+                <div style="margin-top:14px; padding-top:12px; border-top:2px solid #e2e8f0; flex-shrink:0;">
+                    <button class="btn btn-green" style="width:100%; justify-content:center; padding:16px; font-weight:900; font-size:15px; border-radius:12px; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3);" onclick="applyAllAiRecommendations()">
+                        <i class="fa-solid fa-circle-check"></i> NẠP CÁC MÃ ĐÃ CHỌN VÀO GIỎ HÀNG
                     </button>
                 </div>
             </div>
         </div>
     `;
     modalContainer.classList.remove('hidden');
+    updateAiTotalPreview();
+};
+
+// Hàm tính toán tổng tiền dự kiến real-time khi Sales thay đổi số lượng hoặc check/uncheck
+window.updateAiTotalPreview = function() {
+    const rows = document.querySelectorAll('.ai-item-row');
+    let totalVal = 0;
+
+    rows.forEach(row => {
+        const cb = row.querySelector('.ai-item-checkbox');
+        if (cb && cb.checked) {
+            const price = Number(row.getAttribute('data-price') || 0);
+            const ratio = Number(row.getAttribute('data-ratio') || 50);
+            
+            const kienInp = row.querySelector('.ai-rec-kien-input');
+            const leInp = row.querySelector('.ai-rec-le-input');
+
+            const kien = kienInp ? (Number(kienInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+            const le = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+
+            const totalQty = (kien * ratio) + le;
+            totalVal += (totalQty * price);
+        }
+    });
+
+    const totalValEl = document.getElementById('aiTotalPreviewVal');
+    if (totalValEl) {
+        totalValEl.innerText = `${(totalVal / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}K`;
+    }
+};
+
+window.applyAllAiRecommendations = function() {
+    const rows = document.querySelectorAll('.ai-item-row');
+    let addedCount = 0;
+
+    rows.forEach(row => {
+        const cb = row.querySelector('.ai-item-checkbox');
+        if (cb && cb.checked) {
+            const kienInp = row.querySelector('.ai-rec-kien-input');
+            const leInp = row.querySelector('.ai-rec-le-input');
+            const code = kienInp ? kienInp.getAttribute('data-code') : null;
+
+            const p = products.find(x => x.id === code || x.code === code);
+            if (p) {
+                const ratio = Number(p.tyLeQuyDoi || 50);
+                const kienVal = kienInp ? (Number(kienInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+                const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+                
+                const totalQ = (kienVal * ratio) + leVal;
+
+                if (totalQ > 0) {
+                    const keyId = p.id || p.code;
+                    if (!currentCart[keyId]) currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
+                    
+                    currentCart[keyId].qty += totalQ;
+                    currentCart[keyId].kien = ratio > 0 ? Math.floor(currentCart[keyId].qty / ratio) : 0;
+                    currentCart[keyId].le = ratio > 0 ? currentCart[keyId].qty % ratio : currentCart[keyId].qty;
+                    addedCount++;
+                }
+            }
+        }
+    });
+
+    if (addedCount === 0) {
+        return alert("Vui lòng chọn ít nhất một sản phẩm cần nạp!");
+    }
+
+    saveCartDraftToLocal();
+    updateCartTotalsUI();
+    filterSalesProducts();
+    closeAiModal();
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    if (typeof triggerHaptic === 'function') triggerHaptic(30);
+    alert(`✅ Đã nạp thành công ${addedCount} sản phẩm vào giỏ hàng!`);
 };
 
 window.closeAiModal = function() {
