@@ -6170,25 +6170,58 @@ else if (tab === 'ctkm') {
             let foundComp = companyList.find(c => c && c.maCtu && String(c.maCtu).trim().toUpperCase() === ctu);
             let compDisplayName = foundComp && foundComp.tenCtu ? `${ctu} - ${foundComp.tenCtu}` : `MaCtu: ${ctu}`;
 
-            let listHtml = prods.map(km => {
+           let listHtml = prods.map(km => {
                 const isAppliedForAllCust = !km.khachHang || km.khachHang.trim() === '';
+                const isStopped = km.status === 'Stop';
+                
+                // KIỂM TRA ĐỘC LẬP: DÙ NGƯNG HAY MỞ THÌ ĐÃ HẾT HẠN CHƯA?
+                let isExpiredOrNotStarted = false;
+                try {
+                    const nowTime = new Date().getTime();
+                    const parseTime = (dateStr, isEnd) => {
+                        if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') return isEnd ? 9999999999999 : 0;
+                        let cleanStr = dateStr.trim().split(' ')[0];
+                        let p = cleanStr.includes('/') ? cleanStr.split('/') : cleanStr.split('-');
+                        if (p.length === 3) {
+                            let y, m, d;
+                            if (p[0].length === 4) { y = p[0]; m = p[1]; d = p[2]; } else { y = p[2]; m = p[1]; d = p[0]; }
+                            return isEnd ? new Date(y, m - 1, d, 23, 59, 59).getTime() : new Date(y, m - 1, d, 0, 0, 0).getTime();
+                        }
+                        return isEnd ? 9999999999999 : 0;
+                    };
+                    const fD = parseTime(km.tuNgay, false);
+                    const tD = parseTime(km.denNgay, true);
+                    isExpiredOrNotStarted = (nowTime < fD || nowTime > tD);
+                } catch(e) {}
+
+                const stopBadge = isStopped ? `<span style="background:var(--rose); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle; box-shadow:0 2px 4px rgba(225,29,72,0.2);"><i class="fa-solid fa-pause"></i> ĐÃ NGƯNG</span>` : '';
+                const expiredBadge = isExpiredOrNotStarted ? `<span style="background:var(--amber); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle;">Hết hạn/Chưa tới</span>` : '';
+
+                // Nếu đã hết hạn thì KHÓA LUÔN NÚT NGƯNG/MỞ LẠI
+                const actionButtonHtml = isExpiredOrNotStarted 
+                    ? `<span style="font-size:11.5px; color:var(--rose); font-weight:700; font-style:italic;"><i class="fa-solid fa-calendar-xmark"></i> CTKM không nằm trong thời hạn áp dụng</span>` 
+                    : `<button class="btn ${isStopped ? 'btn-green' : 'btn-amber'} btn-sm" onclick="toggleCtkmStatus('${km.id}', '${km.status}')" style="padding:6px 12px; font-weight:800; border-radius: 8px;">
+                          <i class="fa-solid ${isStopped ? 'fa-play' : 'fa-pause'}"></i> ${isStopped ? 'Mở Lại CTKM' : 'Tạm Ngưng'}
+                       </button>`;
+
                 return `
-                  <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:12px; margin-bottom:8px;">
+                  <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:12px; margin-bottom:8px; ${(isStopped || isExpiredOrNotStarted) ? 'opacity: 0.7; background: #f8fafc;' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-                      <span style="background:var(--prod-code-bg); color:var(--primary); padding:3px 8px; border-radius:6px; font-size:13px; font-weight:900;">
-    ${km.maKM}
-    ${!window.isPromoActiveToday(km) ? '<span style="background:var(--rose); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle;">Hết hạn / Chưa tới</span>' : ''}
-</span>
+                      <div>
+                          <span style="background:var(--prod-code-bg); color:var(--primary); padding:3px 8px; border-radius:6px; font-size:13px; font-weight:900;">${km.maKM}</span>
+                          ${stopBadge} ${expiredBadge}
+                      </div>
                       <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay} - <b style="color:var(--rose);">${km.denNgay}</b></span>
                     </div>
-                    <div style="font-weight:900; color:var(--text-main); font-size:14.5px; margin-bottom:8px; line-height:1.4;">${km.noiDung}</div>
+                    <div style="font-weight:900; color:var(--text-main); font-size:14.5px; margin-bottom:8px; line-height:1.4; ${(isStopped || isExpiredOrNotStarted) ? 'text-decoration: line-through; color: var(--text-muted);' : ''}">${km.noiDung}</div>
                     <div style="font-size:12.5px; color:var(--text-muted);">
                       <div style="margin-bottom:4px;"><i class="fa-solid fa-box-open" style="color:var(--amber);"></i> Hàng Hóa: <b style="color:var(--primary); word-break: break-all;">${km.hangHoa || 'Tất cả'}</b></div>
                       <div><i class="fa-solid fa-users" style="color:var(--purple);"></i> Khách Hàng: <b style="color:var(--text-main); word-break: break-all;">${isAppliedForAllCust ? 'Tất cả' : km.khachHang}</b></div>
                     </div>
+                    
                     ${isAdminOrManager ? `
-                      <div style="text-align:right; margin-top:8px;">
-                        <button class="btn btn-red btn-sm" onclick="deleteCtkm('${km.id}')" style="padding:4px 10px; font-weight:800;"><i class="fa-solid fa-trash"></i> Xóa</button>
+                      <div style="text-align:right; margin-top:8px; border-top: 1px dashed var(--card-border); padding-top: 8px; min-height:34px; display:flex; justify-content:flex-end; align-items:center;">
+                        ${actionButtonHtml}
                       </div>
                     ` : ''}
                   </div>
@@ -10269,7 +10302,38 @@ window.deleteCtkm = async function(id) {
     alert("Lỗi xóa CTKM: " + err.message);
   }
 };
+window.toggleCtkmStatus = async function(id, currentStatus) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  
+  const newStatus = (currentStatus === 'Stop') ? 'Mở' : 'Stop';
+  const actionName = (newStatus === 'Stop') ? 'Tạm Ngưng' : 'Mở Lại';
+  const confirmMsg = (newStatus === 'Stop') 
+    ? "Bạn có chắc muốn TẠM NGƯNG chương trình này? Toàn bộ Sales sẽ không còn nhìn thấy nó nữa."
+    : "Bạn muốn MỞ LẠI chương trình này cho Sales sử dụng?";
 
+  const confirm = await window.showCustomConfirm(`Xác nhận ${actionName}`, confirmMsg, "fa-power-off", "Đồng ý", "Hủy");
+  if (!confirm) return;
+
+  try {
+    // 1. Cập nhật lên Firebase
+    await updateDoc(doc(db, "promotions", id), { 
+        status: newStatus,
+        updatedAt: new Date().toISOString()
+    });
+
+    // 2. Cập nhật mảng trên máy và vẽ lại giao diện
+    const idx = window.promotionsList.findIndex(p => p.id === id);
+    if (idx > -1) {
+      window.promotionsList[idx].status = newStatus;
+    }
+    
+    window.debounceFilterCtkm(window._ctkmSearchKey);
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+    
+  } catch (err) {
+    alert("Lỗi cập nhật trạng thái: " + err.message);
+  }
+};
 window.exportCtkmExcel = function() {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
   if (!window.promotionsList || window.promotionsList.length === 0) return alert("Không có dữ liệu CTKM!");
