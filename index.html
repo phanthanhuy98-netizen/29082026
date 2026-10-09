@@ -3740,79 +3740,81 @@ window.openOrderDetailsModal = function(orderId) {
         totalOrderValue += itemPrice * Number(item.qty || 0);
     });
 
+    let itemsHtml = '';
+    if (validItems.length > 0) {
+        itemsHtml = validItems.map(item => {
+            const productObj = products.find(p => p.id === item.id || p.code === item.code);
+            const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
+            
+            const totalQty = Number(item.qty || 0);
+            const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
+            const le = ratio > 0 ? totalQty % ratio : totalQty;
+            const unitName = item.dvt || 'gói';
+
+            const itemPrice = Number(item.price || productObj?.price || 0);
+            const itemTotalValue = totalQty * itemPrice;
+
+            let qtyText = '';
+            if (kien > 0 && le > 0) {
+                qtyText = '<b>' + kien + '</b> Thùng <b>' + le + '</b> ' + unitName;
+            } else if (kien > 0) {
+                qtyText = '<b>' + kien + '</b> Thùng';
+            } else {
+                qtyText = '<b>' + totalQty + '</b> ' + unitName;
+            }
+
+            let noteHtml = '';
+            if (item.note) {
+                noteHtml = '<div style="display:flex; align-items:center; gap:6px; background:rgba(16,185,129,0.08); padding:6px 10px; border-radius:8px; border:1px dashed var(--emerald); font-size:13px; color:var(--emerald); font-weight:800;"><i class="fa-solid fa-tags"></i> Ghi chú: ' + item.note + '</div>';
+            }
+
+            return '<div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; font-size:14px; display:flex; flex-direction:column; gap:6px;">' +
+                '<div style="display:flex; justify-content:space-between; font-weight:800; color:var(--text-main);">' +
+                '<span style="font-size:15px; line-height:1.4;">[' + (item.code || '') + '] ' + (item.name || '') + '</span>' +
+                '</div>' +
+                '<div style="display:flex; justify-content:space-between; color:var(--text-muted); align-items:center;">' +
+                '<span style="font-size:14px;">SL: <span style="color:#2563EB;">' + qtyText + '</span></span>' +
+                '<span style="font-size:14px; font-weight:900; color:var(--rose);">Thành tiền: ' + (itemTotalValue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2}) + 'K</span>' +
+                '</div>' +
+                noteHtml +
+                '</div>';
+        }).join('');
+    } else {
+        itemsHtml = '<div style="text-align:center; padding:24px; color:var(--text-muted);">Không có sản phẩm hợp lệ.</div>';
+    }
+
+    const isV = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}')[order.id];
+    const viewedBtnHtml = '<button class="btn ' + (isV ? 'btn-red' : 'btn-green') + '" onclick="markOrderAsViewedLocal(\'' + order.id + '\')" style="font-size:14px; padding:8px 16px;">' +
+        '<i class="fa-solid ' + (isV ? 'fa-rotate-left' : 'fa-check') + '"></i> ' + (isV ? 'Bỏ đánh dấu xem' : 'Đã xem') +
+        '</button>';
+
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
-    modalContainer.innerHTML = `
-      <div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">
-        <div class="modal-content fullscreen-modal">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-            <h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #${order.soCtu || 1}</h3>
-            <div style="display:flex; align-items:center; gap:8px;">
-              ${(() => { 
-                const isV = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}')[order.id]; 
-                return `<button class="btn ${isV ? 'btn-red' : 'btn-green'}" onclick="markOrderAsViewedLocal('${order.id}')" style="font-size:14px; padding:8px 16px;">
-                  <i class="fa-solid ${isV ? 'fa-rotate-left' : 'fa-check'}"></i> ${isV ? 'Bỏ đánh dấu xem' : 'Đã xem'}
-                </button>`;
-              })()}
-              <button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>
-            </div>
-          </div>
-          
-          <div style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25); padding: 12px 16px; border-radius: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 15px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-sack-dollar" style="color: var(--rose);"></i> Tổng giá trị đơn hàng:</span>
-            <span style="font-size: 17px; font-weight: 900; color: var(--rose);">${(totalOrderValue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}K</span>
-          </div>
-
-          <div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">
-            <div>Ngày chứng từ: <b style="color:var(--text-main);">${formatDateDDMMYYYY(order.ngayCtu)} ${formatOrderTime(order.createdAt)}</b></div>
-            <div>Nhân viên: <b style="color:var(--text-main);">[${order.salesCode || ''}] ${order.salesName || ''}</b></div>
-            <div>Mã KH: <b style="color:var(--text-main);">${inferredMaDTPN}</b></div>
-            <div>Khách hàng: <b style="color:var(--text-main);">${order.maKH || '—'}</b></div>
-          </div>
-
-          <div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">
-        ${validItems.length > 0 ? validItems.map(item => {
-      const productObj = products.find(p => p.id === item.id || p.code === item.code);
-      const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-      
-      const totalQty = Number(item.qty || 0);
-      const kien = ratio > 0 ? Math.floor(totalQty / ratio) : 0;
-      const le = ratio > 0 ? totalQty % ratio : totalQty;
-      const unitName = item.dvt || 'gói';
-
-      const itemPrice = Number(item.price || productObj?.price || 0);
-      const itemTotalValue = totalQty * itemPrice;
-
-      let qtyText = '';
-      if (kien > 0 && le > 0) {
-        qtyText = `<b>${kien}</b> Thùng <b>${le}</b>${unitName}`;
-      } else if (kien > 0) {
-        qtyText = `<b>${kien}</b> Thùng`;
-      } else {
-        qtyText = `<b>${totalQty}</b>${unitName}`;
-      }
-
-      return `
-        <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; font-size:14px; display:flex; flex-direction:column; gap:6px;">
-          <div style="display:flex; justify-content:space-between; font-weight:800; color:var(--text-main);">
-            <span style="font-size:15px; line-height:1.4;">[${item.code \vert{}\vert{} ''}]${item.name || ''}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; color:var(--text-muted); align-items:center;">
-            <span style="font-size:14px;">SL: <span style="color:#2563EB;">${qtyText}</span></span>
-            <span style="font-size:14px; font-weight:900; color:var(--rose);">Thành tiền: ${(itemTotalValue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}K</span>
-          </div>
-          ${item.note ? `
-            <div style="display:flex; align-items:center; gap:6px; background:rgba(16,185,129,0.08); padding:6px 10px; border-radius:8px; border:1px dashed var(--emerald); font-size:13px; color:var(--emerald); font-weight:800;">
-              <i class="fa-solid fa-tags"></i> Ghi chú: ${item.note}
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted);">Không có sản phẩm hợp lệ.</div>`}
-           </div>
-        </div>
-      </div>
-    `;
+    
+    modalContainer.innerHTML = '<div class="modal" style="display:flex;" onclick="if(event.target === this) closeOrderDetailsModal()">' +
+        '<div class="modal-content fullscreen-modal">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">' +
+        '<h3 style="font-size:18px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-receipt"></i> Chi Tiết Chứng Từ #' + (order.soCtu || 1) + '</h3>' +
+        '<div style="display:flex; align-items:center; gap:8px;">' +
+        viewedBtnHtml +
+        '<button class="btn btn-red" onclick="closeOrderDetailsModal()" style="font-size:14px; padding:8px 16px;">Đóng</button>' +
+        '</div>' +
+        '</div>' +
+        '<div style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25); padding: 12px 16px; border-radius: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">' +
+        '<span style="font-size: 15px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-sack-dollar" style="color: var(--rose);"></i> Tổng giá trị đơn hàng:</span>' +
+        '<span style="font-size: 17px; font-weight: 900; color: var(--rose);">' + (totalOrderValue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2}) + 'K</span>' +
+        '</div>' +
+        '<div style="font-size:14px; color:var(--text-muted); margin-bottom:14px; display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:var(--panel-bg); padding:10px; border-radius:10px;">' +
+        '<div>Ngày chứng từ: <b style="color:var(--text-main);">' + formatDateDDMMYYYY(order.ngayCtu) + ' ' + formatOrderTime(order.createdAt) + '</b></div>' +
+        '<div>Nhân viên: <b style="color:var(--text-main);">[' + (order.salesCode || '') + '] ' + (order.salesName || '') + '</b></div>' +
+        '<div>Mã KH: <b style="color:var(--text-main);">' + inferredMaDTPN + '</b></div>' +
+        '<div>Khách hàng: <b style="color:var(--text-main);">' + (order.maKH || '—') + '</b></div>' +
+        '</div>' +
+        '<div style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; margin-bottom:12px; padding-right:4px;">' +
+        itemsHtml +
+        '</div>' +
+        '</div>' +
+        '</div>';
     modalContainer.classList.remove('hidden');
 };
   window.closeOrderDetailsModal = function() {
