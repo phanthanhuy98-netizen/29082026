@@ -1446,7 +1446,44 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       } catch(e) { resolve(null); }
     });
   }
+// HÀM KIỂM TRA CTKM CÒN HẠN TRONG NGÀY HÔM NAY HAY KHÔNG
+window.isPromoActiveToday = function(km) {
+    if (!km || km.status === 'Stop') return false;
+    
+    try {
+        const nowTime = new Date().getTime();
+        let fromDate = 0;
+        let toDate = 9999999999999; 
+        
+        // Khắc phục triệt để lỗi ngày tháng trên các dòng điện thoại iPhone/Safari
+        if (km.tuNgay) {
+            if (km.tuNgay.includes('/')) {
+                let p = km.tuNgay.split('/');
+                fromDate = new Date(p[2], p[1] - 1, p[0], 0, 0, 0).getTime();
+            } else if (km.tuNgay.includes('-')) {
+                let p = km.tuNgay.split('-');
+                fromDate = new Date(p[0], p[1] - 1, p[2], 0, 0, 0).getTime();
+            }
+        }
+        
+        if (km.denNgay) {
+            if (km.denNgay.includes('/')) {
+                let p = km.denNgay.split('/');
+                toDate = new Date(p[2], p[1] - 1, p[0], 23, 59, 59).getTime(); // Kết thúc vào 23:59:59 của ngày cuối
+            } else if (km.denNgay.includes('-')) {
+                let p = km.denNgay.split('-');
+                toDate = new Date(p[0], p[1] - 1, p[2], 23, 59, 59).getTime();
+            }
+        }
 
+        if (nowTime >= fromDate && nowTime <= toDate) {
+            return true;
+        }
+    } catch (err) {
+        console.error("Lỗi check ngày KM:", err);
+    }
+    return false;
+};
 window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     // Đã xóa ngoại lệ của Admin/Manager ở đây. Tất cả đều bị chặn công bằng.
 
@@ -2596,38 +2633,12 @@ window._renderModalContent = function() {
         }
       }
       let activeDvtStr = activeDvtList.join(', ');
-    let promoBadge = '';
+   let promoBadge = '';
     if (window.promotionsList && window.promotionsList.length > 0) {
-        // Lấy ngày hiện tại chuẩn theo định dạng YYYY-MM-DD (hoặc so sánh chuỗi DD/MM/YYYY)
-        const nowTime = new Date().getTime();
-
         const activePromo = window.promotionsList.find(km => {
-            if (km.status === 'Stop') return false;
-            
-            // Kiểm tra xem mã hàng có khớp không
-            const matchHangHoa = km.hangHoa && km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
-            if (!matchHangHoa) return false;
-
-            // Kiểm tra khung thời gian (tuNgay và denNgay có định dạng DD/MM/YYYY hoặc YYYY-MM-DD)
-            try {
-                let partsFrom = (km.tuNgay || '').split('/');
-                let partsTo = (km.denNgay || '').split('/');
-                
-                if (partsFrom.length === 3 && partsTo.length === 3) {
-                    let fromDate = new Date(`${partsFrom[2]}-${partsFrom[1]}-${partsFrom[0]}`).getTime();
-                    let toDate = new Date(`${partsTo[2]}-${partsTo[1]}-${partsTo[0]}`).getTime();
-                    
-                    // Thêm 1 ngày vào toDate để tính trọn vẹn đến hết ngày kết thúc
-                    toDate += 24 * 60 * 60 * 1000; 
-
-                    // Kiểm tra xem hiện tại có nằm trong khoảng từNgay -> denNgay không
-                    if (nowTime >= fromDate && nowTime <= toDate) {
-                        return true;
-                    }
-                }
-            } catch (err) {}
-
-            return false;
+            return window.isPromoActiveToday(km) && 
+                   km.hangHoa && 
+                   km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
         });
 
         if (activePromo) {
@@ -2755,7 +2766,11 @@ window.filterModalProductList = function(keyword) {
     // LOGIC TÌM CTKM CHO SẢN PHẨM NÀY
     let promoBadge = '';
     if (window.promotionsList && window.promotionsList.length > 0) {
-      const activePromo = window.promotionsList.find(km => km.status !== 'Stop' && km.hangHoa && km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase()));
+      const activePromo = window.promotionsList.find(km => 
+          window.isPromoActiveToday(km) && 
+          km.hangHoa && 
+          km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase())
+      );
       if (activePromo) {
         promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
       }
@@ -2881,10 +2896,13 @@ window.filterSalesProducts = function(val) {
        }
      }
      let activeDvtStr = activeDvtList.join(', ');
-
-     let promoBadge = '';
+let promoBadge = '';
      if (window.promotionsList && window.promotionsList.length > 0) {
-       const activePromo = window.promotionsList.find(km => km.status !== 'Stop' && km.hangHoa && km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase()));
+       const activePromo = window.promotionsList.find(km => 
+           window.isPromoActiveToday(km) && 
+           km.hangHoa && 
+           km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase())
+       );
        if (activePromo) {
          promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
        }
@@ -6114,7 +6132,10 @@ else if (tab === 'ctkm') {
                 return `
                   <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-radius:8px; padding:12px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-                      <span style="background:var(--prod-code-bg); color:var(--primary); padding:3px 8px; border-radius:6px; font-size:13px; font-weight:900;">${km.maKM}</span>
+                      <span style="background:var(--prod-code-bg); color:var(--primary); padding:3px 8px; border-radius:6px; font-size:13px; font-weight:900;">
+    ${km.maKM}
+    ${!window.isPromoActiveToday(km) ? '<span style="background:var(--rose); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle;">Hết hạn / Chưa tới</span>' : ''}
+</span>
                       <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay} - <b style="color:var(--rose);">${km.denNgay}</b></span>
                     </div>
                     <div style="font-weight:900; color:var(--text-main); font-size:14.5px; margin-bottom:8px; line-height:1.4;">${km.noiDung}</div>
@@ -12440,8 +12461,11 @@ window.openAiSmartOrderModal = function() {
     // 2. CACHE DỮ LIỆU NỀN TỐC ĐỘ CAO
     const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
     
-    // Cache Promo
-    let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
+    // Cache Promo - Đã áp dụng lưới lọc ngày tháng
+    let activePromos = (window.promotionsList || []).filter(p => 
+        window.isPromoActiveToday(p) && 
+        openCompCodes.has(String(p.maCtu || '').trim().toUpperCase())
+    );
     let promoMap = new Map();
     activePromos.forEach(km => {
         if (km.hangHoa) {
