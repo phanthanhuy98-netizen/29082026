@@ -12336,13 +12336,15 @@ window.toggleSalesPanel = function() {
         toggleBtn.style.borderColor = 'var(--card-border)';
     }
 };
-window._aiModalView = 'suggest'; // 'suggest' hoặc 'ctkm'
+window._aiModalView = 'suggest'; // 'suggest', 'promo_suggest', 'cross_sell', 'npi_suggest', 'threshold_upsell', 'oos_warning', 'ctkm'
 window._aiCtkmSearch = '';
+window._aiPromoSearch = '';
 
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
     window._aiModalView = 'suggest';
     window._aiCtkmSearch = '';
+    window._aiPromoSearch = '';
     renderAiModalMain();
 };
 
@@ -12351,10 +12353,9 @@ window.switchAiModalView = function(viewName) {
     renderAiModalMain();
 };
 
-// Hàm tìm kiếm mượt mà kết hợp nút xóa nhanh
+// 1. Tìm kiếm CTKM
 window.filterAiModalCtkm = function(val) {
     window._aiCtkmSearch = typeof removeAccents === 'function' ? removeAccents(val.trim().toLowerCase()) : val.trim().toLowerCase();
-    
     const container = document.getElementById('aiModalCtkmListContainer');
     const countBadge = document.getElementById('aiCtkmCountBadge');
     if (!container) return;
@@ -12372,7 +12373,6 @@ window.filterAiModalCtkm = function(val) {
     });
 
     const rawVal = val.trim().toLowerCase();
-
     if (window._aiCtkmSearch) {
         const q = window._aiCtkmSearch;
         activePromos = activePromos.filter(p => {
@@ -12381,75 +12381,122 @@ window.filterAiModalCtkm = function(val) {
             let searchStr = typeof removeAccents === 'function' ? removeAccents(`${p.maCtu} ${compName} ${p.maKM} ${p.noiDung}`) : `${p.maCtu} ${compName} ${p.maKM} ${p.noiDung}`.toLowerCase();
             return searchStr.includes(q);
         });
-
-        // --- THUẬT TOÁN SẮP XẾP THÔNG MINH ---
-        // Ưu tiên 1: Mã công ty (maCtu) bắt đầu chính xác bằng từ khóa tìm kiếm lên đầu tiên (VD gõ "11" thì công ty 11 lên đầu)
-        // Ưu tiên 2: Mã khuyến mãi hoặc tên chứa từ khóa
         activePromos.sort((a, b) => {
             const aCtu = String(a.maCtu || '').trim().toLowerCase();
             const bCtu = String(b.maCtu || '').trim().toLowerCase();
-            
-            const aStarts = aCtu.startsWith(rawVal) ? 0 : 1;
-            const bStarts = bCtu.startsWith(rawVal) ? 0 : 1;
-            
-            if (aStarts !== bStarts) {
-                return aStarts - bStarts; // Mã bắt đầu bằng từ khóa xếp trước
-            }
-            return aCtu.localeCompare(bCtu);
+            return (aCtu.startsWith(rawVal) ? 0 : 1) - (bCtu.startsWith(rawVal) ? 0 : 1);
         });
-    } else {
-        // Mặc định sắp xếp theo mã công ty A-Z nếu không tìm kiếm
-        activePromos.sort((a, b) => String(a.maCtu || '').localeCompare(String(b.maCtu || '')));
     }
 
     if (countBadge) countBadge.innerText = activePromos.length;
-
     container.innerHTML = activePromos.length > 0 ? activePromos.map(km => {
         let foundComp = (typeof companyList !== 'undefined' ? companyList : []).find(c => String(c.maCtu || '').trim().toUpperCase() === String(km.maCtu || '').trim().toUpperCase());
         let compFullName = foundComp && foundComp.tenCtu ? `${km.maCtu} - ${foundComp.tenCtu}` : `Công Ty ${km.maCtu || 'KHÁC'}`;
-
         return `
         <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #E11D48; border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:13px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-building"></i> ${compFullName}</span>
                 <span style="font-size:11px; font-weight:700; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay || ''} - <b style="color:var(--rose);">${km.denNgay || ''}</b></span>
             </div>
-            <div style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--rose); padding:2px 8px; border-radius:6px; width:fit-content;">
-                ${km.maKM || ''}
-            </div>
-            <div style="font-size:14px; font-weight:900; color:#0f172a; line-height:1.4;">
-                ${km.noiDung || ''}
-            </div>
+            <div style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--rose); padding:2px 8px; border-radius:6px; width:fit-content;">${km.maKM || ''}</div>
+            <div style="font-size:14px; font-weight:900; color:#0f172a; line-height:1.4;">${km.noiDung || ''}</div>
             <div style="font-size:12px; color:var(--text-muted); font-weight:700;">
                 <div>📦 Hàng hóa: <b style="color:var(--primary);">${km.hangHoa || 'Tất cả'}</b></div>
                 <div>👥 Khách hàng: <b style="color:var(--text-main);">${km.khachHang || 'Tất cả'}</b></div>
             </div>
-        </div>
-        `;
-    }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy chương trình khuyến mãi nào từ các công ty đang mở.</div>';
+        </div>`;
+    }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy chương trình khuyến mãi nào.</div>';
 };
 
+// 2. Tìm kiếm SP Khuyến Mãi Tốt
+window.filterAiModalPromoSuggest = function(val) {
+    window._aiPromoSearch = typeof removeAccents === 'function' ? removeAccents(val.trim().toLowerCase()) : val.trim().toLowerCase();
+    const container = document.getElementById('aiModalPromoListContainer');
+    if (!container) return;
+
+    const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
+    let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
+
+    let promoProductsMap = new Map();
+    activePromos.forEach(km => {
+        if (km.hangHoa) {
+            let codes = km.hangHoa.split(/[,+\s]+/).map(s => s.trim()).filter(Boolean);
+            codes.forEach(cCode => {
+                let foundP = (typeof products !== 'undefined' ? products : []).find(p => String(p.code || '').trim().toUpperCase() === cCode.toUpperCase() || String(p.id || '').trim().toUpperCase() === cCode.toUpperCase());
+                if (foundP && isProductAllowedByCompanyDvt(foundP)) {
+                    if (!promoProductsMap.has(foundP.code)) promoProductsMap.set(foundP.code, { product: foundP, promos: [] });
+                    promoProductsMap.get(foundP.code).promos.push(km.noiDung);
+                }
+            });
+        }
+    });
+
+    let promoList = Array.from(promoProductsMap.values());
+    if (window._aiPromoSearch) {
+        const q = window._aiPromoSearch;
+        promoList = promoList.filter(item => removeAccents(`${item.product.code} ${item.product.name} ${item.promos.join(' ')}`).toLowerCase().includes(q));
+    }
+
+    container.innerHTML = promoList.length > 0 ? promoList.map(item => {
+        const p = item.product;
+        return `
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #10B981; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-shrink:0;">
+            <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:0;">
+                <div style="font-size:14px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${p.code}</span>${p.name}</div>
+                <div style="font-size:12px; font-weight:800; color:var(--emerald);"><i class="fa-solid fa-gift"></i> KM: ${item.promos.join(' | ')}</div>
+            </div>
+            <button class="btn btn-green btn-sm" style="font-weight:900; padding:10px 14px; border-radius:8px; flex-shrink:0;" onclick="addQuickItemToCart('${p.id || p.code}')"><i class="fa-solid fa-cart-plus"></i> + Thêm</button>
+        </div>`;
+    }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy sản phẩm.</div>';
+};
+
+window.addQuickItemToCart = function(prdId) {
+    const p = products.find(x => x.id === prdId || x.code === prdId);
+    if (!p) return;
+    const ratio = Number(p.tyLeQuyDoi || 50);
+    if (!currentCart[prdId]) currentCart[prdId] = { qty: 0, kien: 0, le: 0 };
+    let addQ = ratio > 1 ? ratio : 1;
+    currentCart[prdId].qty += addQ;
+    currentCart[prdId].kien = ratio > 0 ? Math.floor(currentCart[prdId].qty / ratio) : 0;
+    currentCart[prdId].le = ratio > 0 ? currentCart[prdId].qty % ratio : currentCart[prdId].qty;
+    saveCartDraftToLocal();
+    updateCartTotalsUI();
+    filterSalesProducts();
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    alert(`✅ Đã thêm 1 [${p.code}] ${p.name} vào giỏ!`);
+};
+
+// ================= RENDER CHÍNH (TÍCH HỢP 6 TAB GỢI Ý THÔNG MINH) =================
 window.renderAiModalMain = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    const isCtkmView = window._aiModalView === 'ctkm';
+    const view = window._aiModalView; // 'suggest', 'promo_suggest', 'cross_sell', 'npi_suggest', 'threshold_upsell', 'oos_warning', 'ctkm'
 
-    if (!isCtkmView) {
-        // --- VIEW 1: BẢNG GỢI Ý TOA HÀNG ---
-        const storeIdStr = String(activeVisitedStore.id);
-        const storeCodeStr = String(activeVisitedStore.code || '').trim();
+    const storeIdStr = String(activeVisitedStore.id);
+    const storeCodeStr = String(activeVisitedStore.code || '').trim();
+    let storeOrders = orders.filter(o => {
+        const matchId = String(o.storeId || '') === storeIdStr;
+        let inferredCode = o.maDTPNNo || '';
+        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) inferredCode = o.maKH.split(' - ')[0].trim();
+        return (matchId || (storeCodeStr !== '' && inferredCode === storeCodeStr)) && o.status !== 'Đã hủy';
+    });
 
-        let storeOrders = orders.filter(o => {
-            const matchId = String(o.storeId || '') === storeIdStr;
-            let inferredCode = o.maDTPNNo || '';
-            if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
-                inferredCode = o.maKH.split(' - ')[0].trim();
-            }
-            const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
-            return (matchId || matchCode) && o.status !== 'Đã hủy';
-        });
+    // Thanh Navigation Tabs bên trong Modal
+    const navBarHtml = `
+        <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; flex-shrink:0; border-bottom:1px solid #e2e8f0; margin-bottom:12px; -webkit-overflow-scrolling:touch;">
+            <button class="btn ${view==='suggest'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('suggest')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-clock-rotate-left"></i> Chu Kỳ</button>
+            <button class="btn ${view==='promo_suggest'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('promo_suggest')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-gift"></i> SP KM</button>
+            <button class="btn ${view==='cross_sell'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('cross_sell')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-basket-shopping"></i> Mua Kèm</button>
+            <button class="btn ${view==='npi_suggest'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('npi_suggest')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-star"></i> SP Mới</button>
+            <button class="btn ${view==='threshold_upsell'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('threshold_upsell')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-arrow-trend-up"></i> Rướn Mốc</button>
+            <button class="btn ${view==='oos_warning'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('oos_warning')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-triangle-exclamation"></i> Chống Đứt Hàng</button>
+            <button class="btn ${view==='ctkm'?'btn-amber':'btn-sm'}" onclick="switchAiModalView('ctkm')" style="font-weight:800; white-space:nowrap; font-size:12px;"><i class="fa-solid fa-building"></i> Show CTKM</button>
+        </div>
+    `;
 
+    if (view === 'suggest') {
+        // --- 1. GỢI Ý THEO CHU KỲ LỊCH SỬ ---
         let suggestedOrderList = [];
         if (storeOrders.length > 0) {
             storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
@@ -12457,7 +12504,6 @@ window.renderAiModalMain = function() {
             let firstOrderDate = new Date(storeOrders[storeOrders.length - 1].ngayCtu || Date.now());
             let lastOrderDate = new Date(storeOrders[0].ngayCtu || Date.now());
             let todayTime = new Date().getTime();
-            
             let daysSinceLastOrder = Math.max(0, Math.round((todayTime - lastOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
             let totalSpanDays = Math.max(1, Math.round((todayTime - firstOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
             let averageCycleDays = Math.max(1, Math.round(totalSpanDays / totalOrdersCount));
@@ -12469,9 +12515,7 @@ window.renderAiModalMain = function() {
                         const q = Number(item.qty || 0);
                         if (q > 0) {
                             const code = String(item.code || item.id || '').trim();
-                            if (!productHistoryMap[code]) {
-                                productHistoryMap[code] = { code: code, name: item.name || '', dvt: item.dvt || 'hộp', totalQty: 0, purchaseCount: 0 };
-                            }
+                            if (!productHistoryMap[code]) productHistoryMap[code] = { code: code, name: item.name || '', dvt: item.dvt || 'hộp', totalQty: 0, purchaseCount: 0 };
                             productHistoryMap[code].totalQty += q;
                             productHistoryMap[code].purchaseCount += 1;
                         }
@@ -12481,28 +12525,15 @@ window.renderAiModalMain = function() {
 
             Object.values(productHistoryMap).forEach(prod => {
                 let avgPerOrder = Math.round(prod.totalQty / prod.purchaseCount);
-                if (daysSinceLastOrder > averageCycleDays * 1.3) {
-                    avgPerOrder = Math.round(avgPerOrder * 1.2);
-                }
-
+                if (daysSinceLastOrder > averageCycleDays * 1.3) avgPerOrder = Math.round(avgPerOrder * 1.2);
                 const pObj = products.find(x => x.id === prod.code || x.code === prod.code);
                 let ratio = Number(pObj?.tyLeQuyDoi || 50);
                 let itemPrice = Number(pObj?.price || 0);
-                
                 let kien = ratio > 1 ? Math.floor(avgPerOrder / ratio) : avgPerOrder;
                 let le = ratio > 1 ? avgPerOrder % ratio : 0;
                 if (kien === 0 && le > 0 && ratio <= 1) kien = 0;
 
-                suggestedOrderList.push({
-                    code: prod.code,
-                    name: prod.name,
-                    dvt: prod.dvt,
-                    ratio: ratio,
-                    price: itemPrice,
-                    kien: kien,
-                    le: le,
-                    ghiChu: `Đã nhập ${prod.purchaseCount} lần (Chu kỳ ~${averageCycleDays} ngày)`
-                });
+                suggestedOrderList.push({ code: prod.code, name: prod.name, dvt: prod.dvt, ratio: ratio, price: itemPrice, kien: kien, le: le, ghiChu: `Đã nhập ${prod.purchaseCount} lần (~${averageCycleDays} ngày/lần)` });
             });
             suggestedOrderList = suggestedOrderList.slice(0, 15);
         }
@@ -12510,175 +12541,304 @@ window.renderAiModalMain = function() {
         modalContainer.innerHTML = `
             <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
                 <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
-                    
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:2px solid #e2e8f0; padding-bottom:12px; flex-shrink:0;">
-                        <div>
-                            <h3 style="font-size:18px; font-weight:900; color:#1e293b; display:flex; align-items:center; gap:8px; margin:0;">
-                                <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> Gợi Ý Toa Hàng Tối Ưu
-                            </h3>
-                            <p style="font-size:12px; color:var(--text-muted); font-weight:700; margin:4px 0 0 0;">Cửa hàng: <b style="color:var(--primary);">${activeVisitedStore.name}</b></p>
-                        </div>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <button class="btn btn-purple btn-sm" onclick="switchAiModalView('ctkm')" style="font-weight:900; padding:8px 12px; border-radius:8px; font-size:13px;">
-                                <i class="fa-solid fa-gift"></i> Show CTKM
-                            </button>
-                            <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-size:13px; padding:8px 14px; font-weight:900; border-radius:8px;">Đóng</button>
-                        </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:#1e293b; margin:0;"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary);"></i> AI Copilot: ${activeVisitedStore.name}</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
                     </div>
-
-                    <div style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25); padding: 10px 14px; border-radius: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
-                        <span style="font-size: 14px; font-weight: 800; color: var(--text-main);"><i class="fa-solid fa-sack-dollar" style="color: var(--rose);"></i> Tổng giá trị đơn gợi ý:</span>
+                    ${navBarHtml}
+                    <div style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25); padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+                        <span style="font-size: 13px; font-weight: 800; color: var(--text-main);">💰 Tổng giá trị đơn gợi ý:</span>
                         <span id="ai_modal_total_rev" style="font-size: 16px; font-weight: 900; color: var(--rose);">0K</span>
                     </div>
-
-                    <div style="overflow-y:auto; -webkit-overflow-scrolling:touch; flex:1; min-height:0; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
-                        ${suggestedOrderList.length > 0 ? suggestedOrderList.map((item, idx) => {
-                            const showLooseInput = item.ratio > 1;
-                            return `
-                            <div id="ai_suggestion_row_${idx}" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:12px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); flex-shrink:0;">
-                                <button type="button" class="btn btn-red btn-sm" style="padding:6px 8px; border-radius:6px; flex-shrink:0;" onclick="document.getElementById('ai_suggestion_row_${idx}').remove(); updateAiTotalSum();" title="Xóa mã này">
-                                    <i class="fa-solid fa-trash"></i>
-                                </button>
-                                <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
-                                    <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-                                        <div style="font-size:14px; font-weight:900; color:#0f172a; line-height:1.3;" title="[${item.code}]${item.name}">
-                                            <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:12px; margin-right:6px;">${item.code}</span>${item.name}
-                                        </div>
-                                        <div style="font-size:11px; color:var(--text-muted); font-weight:700; margin-top:2px;">
-                                            <i class="fa-solid fa-clock-rotate-left"></i> ${item.ghiChu}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                                    <div style="display:flex; flex-direction:column; align-items:center;">
-                                        <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">THÙNG</span>
-                                        <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-kien-input" oninput="updateAiTotalSum()" style="width:55px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:14px; border-radius:6px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
-                                    </div>
-                                    ${showLooseInput ? `
-                                    <div style="display:flex; flex-direction:column; align-items:center;">
-                                        <span style="font-size:10px; font-weight:900; color:var(--text-muted); margin-bottom:2px;">LẺ (${item.dvt})</span>
-                                        <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-le-input" oninput="updateAiTotalSum()" style="width:55px; margin:0; padding:8px 4px; text-align:center; font-weight:900; font-size:14px; border-radius:6px; border:2px solid #cbd5e1; background:#fff; color:#0f172a;">
-                                    </div>
-                                    ` : ''}
-                                </div>
+                    <div style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                        ${suggestedOrderList.length > 0 ? suggestedOrderList.map((item, idx) => `
+                        <div id="ai_suggestion_row_${idx}" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-shrink:0;">
+                            <button type="button" class="btn btn-red btn-sm" style="padding:4px 8px; border-radius:6px;" onclick="document.getElementById('ai_suggestion_row_${idx}').remove(); updateAiTotalSum();"><i class="fa-solid fa-trash"></i></button>
+                            <div style="flex:1; min-width:0;">
+                                <div style="font-size:13.5px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11px; margin-right:6px;">${item.code}</span>${item.name}</div>
+                                <div style="font-size:11px; color:var(--text-muted); font-weight:700;"><i class="fa-solid fa-clock-rotate-left"></i> ${item.ghiChu}</div>
                             </div>
-                            `;
-                        }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Tiệm này chưa đủ dữ liệu lịch sử mua hàng để gợi ý.</div>'}
+                            <div style="display:flex; gap:6px; flex-shrink:0;">
+                                <div><span style="font-size:9px; font-weight:900; color:var(--text-muted); display:block;">THÙNG</span><input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-kien-input" oninput="updateAiTotalSum()" style="width:50px; padding:6px 2px; text-align:center; font-weight:900; font-size:14px; border-radius:6px; border:1px solid #cbd5e1;"></div>
+                                ${item.ratio > 1 ? `<div><span style="font-size:9px; font-weight:900; color:var(--text-muted); display:block;">LẺ (${item.dvt})</span><input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-le-input" oninput="updateAiTotalSum()" style="width:50px; padding:6px 2px; text-align:center; font-weight:900; font-size:14px; border-radius:6px; border:1px solid #cbd5e1;"></div>` : ''}
+                            </div>
+                        </div>`).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Chưa đủ dữ liệu lịch sử.</div>'}
                     </div>
-
-                    <div style="margin-top:12px; padding-top:12px; border-top:2px solid #e2e8f0; flex-shrink:0;">
-                        <button class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-weight:900; font-size:15px; border-radius:12px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);" onclick="applyAllAiRecommendations()">
-                            <i class="fa-solid fa-circle-check"></i> ĐỒNG Ý NẠP TOA GỢI Ý VÀO GIỎ HÀNG
-                        </button>
+                    <div style="margin-top:10px; padding-top:10px; border-top:2px solid #e2e8f0; flex-shrink:0;">
+                        <button class="btn btn-green" style="width:100%; justify-content:center; padding:14px; font-weight:900; font-size:15px; border-radius:12px;" onclick="applyAllAiRecommendations()"><i class="fa-solid fa-circle-check"></i> NẠP TOA VÀO GIỎ HÀNG</button>
                     </div>
                 </div>
-            </div>
-        `;
+            </div>`;
         modalContainer.classList.remove('hidden');
         updateAiTotalSum();
 
-    } else {
-        // --- VIEW 2: HIỂN THỊ CTKM CÁC CÔNG TY ĐANG MỞ (CÓ NÚT XÓA NHANH TRONG Ô TÌM KIẾM) ---
+    } else if (view === 'promo_suggest') {
+        // --- 2. GỢI Ý SP KHUYẾN MÃI TỐT ---
         modalContainer.innerHTML = `
             <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
                 <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
-                    
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:2px solid #e2e8f0; padding-bottom:12px; flex-shrink:0;">
-                        <div>
-                            <h3 style="font-size:18px; font-weight:900; color:#E11D48; display:flex; align-items:center; gap:8px; margin:0;">
-                                <i class="fa-solid fa-gift"></i> CTKM Các Công Ty Đang Mở (<span id="aiCtkmCountBadge">0</span>)
-                            </h3>
-                        </div>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <button class="btn btn-amber btn-sm" onclick="switchAiModalView('suggest')" style="font-weight:900; padding:8px 12px; border-radius:8px; font-size:13px;">
-                                <i class="fa-solid fa-arrow-left"></i> Quay lại gợi ý
-                            </button>
-                            <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-size:13px; padding:8px 14px; font-weight:900; border-radius:8px;">Đóng</button>
-                        </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:var(--emerald); margin:0;"><i class="fa-solid fa-lightbulb"></i> Gợi Ý SP Khuyến Mãi Tốt</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
                     </div>
-
-                    <!-- Ô TÌM KIẾM CÓ TÍCH HỢP NÚT XÓA NHANH (DẤU X) -->
-                    <div style="margin-bottom:10px; flex-shrink:0; position:relative; display:flex; align-items:center;">
-                        <input type="text" id="aiCtkmSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty để lọc CTKM..." value="${window._aiCtkmSearch ? window._aiCtkmSearch : ''}" oninput="filterAiModalCtkm(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 14px; font-size:14px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border);">
-                        <button type="button" onclick="const inp=document.getElementById('aiCtkmSearchInput'); inp.value=''; filterAiModalCtkm(''); inp.focus();" style="position: absolute; right: 10px; background: none; border: none; font-size: 16px; cursor: pointer; color: var(--text-muted); padding: 5px; z-index: 2;" title="Xóa nhanh">✖</button>
+                    ${navBarHtml}
+                    <div style="margin-bottom:8px; flex-shrink:0; position:relative; display:flex; align-items:center;">
+                        <input type="text" id="aiPromoSearchInput" placeholder="🔍 Gõ mã hoặc tên SP..." value="${window._aiPromoSearch || ''}" oninput="filterAiModalPromoSuggest(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 14px; font-size:13.5px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border);">
+                        <button type="button" onclick="const inp=document.getElementById('aiPromoSearchInput'); inp.value=''; filterAiModalPromoSuggest(''); inp.focus();" style="position: absolute; right: 10px; background: none; border: none; font-size: 16px; cursor: pointer; color: var(--text-muted); padding: 5px;">✖</button>
                     </div>
-
-                    <div id="aiModalCtkmListContainer" style="overflow-y:auto; -webkit-overflow-scrolling:touch; flex:1; min-height:0; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
-                        <!-- Danh sách CTKM sẽ được render mượt mà ở đây -->
-                    </div>
-
+                    <div id="aiModalPromoListContainer" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;"></div>
                 </div>
-            </div>
-        `;
+            </div>`;
         modalContainer.classList.remove('hidden');
-        
-        filterAiModalCtkm(window._aiCtkmSearch || '');
-        setTimeout(() => {
-            const inp = document.getElementById('aiCtkmSearchInput');
-            if (inp) {
-                inp.focus();
-                inp.setSelectionRange(inp.value.length, inp.value.length);
+        filterAiModalPromoSuggest(window._aiPromoSearch || '');
+
+    } else if (view === 'cross_sell') {
+        // --- 3. MUA KÈM THÔNG MINH (CROSS-SELLING) ---
+        // Quét các sản phẩm thường xuất hiện cùng nhau trong lịch sử các đơn hàng
+        let purchasedSkus = new Set();
+        storeOrders.forEach(o => (o.items || []).forEach(i => { if(Number(i.qty)>0) purchasedSkus.add(String(i.code||i.id).trim().toUpperCase()); }));
+
+        let crossSellMap = new Map();
+        orders.forEach(o => {
+            if(o.status === 'Đã hủy') return;
+            let oSkus = (o.items || []).filter(i => Number(i.qty) > 0).map(i => String(i.code || i.id).trim().toUpperCase());
+            // Nếu đơn hàng này chứa ít nhất 1 sản phẩm mà khách hay mua
+            let hasMatch = oSkus.some(sku => purchasedSkus.has(sku));
+            if(hasMatch) {
+                oSkus.forEach(sku => {
+                    if(!purchasedSkus.has(sku)) {
+                        crossSellMap.set(sku, (crossSellMap.get(sku) || 0) + 1);
+                    }
+                });
             }
-        }, 50);
+        });
+
+        let crossSellList = Array.from(crossSellMap.entries()).sort((a,b)=>b[1]-a[1]).map(e => {
+            let p = products.find(x => String(x.code||x.id).trim().toUpperCase() === e[0]);
+            return { product: p, score: e[1] };
+        }).filter(item => item.product && isProductAllowedByCompanyDvt(item.product)).slice(0, 15);
+
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+                <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:var(--primary); margin:0;"><i class="fa-solid fa-basket-shopping"></i> Gợi Ý Mua Kèm (Cross-selling)</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
+                    </div>
+                    ${navBarHtml}
+                    <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Các sản phẩm khách hàng tương tự thường mua kèm:</div>
+                    <div style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                        ${crossSellList.length > 0 ? crossSellList.map(item => `
+                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid var(--primary); border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-shrink:0;">
+                            <div>
+                                <div style="font-size:14px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11.5px; margin-right:6px;">${item.product.code}</span>${item.product.name}</div>
+                                <div style="font-size:11.5px; color:var(--text-muted); font-weight:700; margin-top:2px;">🔥 Có mặt trong ${item.score} đơn hàng liên quan</div>
+                            </div>
+                            <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 12px; border-radius:8px;" onclick="addQuickItemToCart('${item.product.id || item.product.code}')"><i class="fa-solid fa-cart-plus"></i> + Thêm</button>
+                        </div>`).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Chưa đủ dữ liệu mua kèm.</div>'}
+                    </div>
+                </div>
+            </div>`;
+        modalContainer.classList.remove('hidden');
+
+    } else if (view === 'npi_suggest') {
+        // --- 4. SẢN PHẨM MỚI TIỀM NĂNG (NPI) ---
+        // Sản phẩm có trong hệ thống nhưng cửa hàng này chưa bao giờ nhập
+        let purchasedSkus = new Set();
+        storeOrders.forEach(o => (o.items || []).forEach(i => { if(Number(i.qty)>0) purchasedSkus.add(String(i.code||i.id).trim().toUpperCase()); }));
+
+        let npiList = (typeof products !== 'undefined' ? products : []).filter(p => {
+            return !purchasedSkus.has(String(p.code||p.id).trim().toUpperCase()) && isProductAllowedByCompanyDvt(p);
+        }).slice(0, 15);
+
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+                <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:#8B5CF6; margin:0;"><i class="fa-solid fa-star"></i> Sản Phẩm Mới Tiềm Năng (NPI)</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
+                    </div>
+                    ${navBarHtml}
+                    <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Các sản phẩm mới hoặc chưa từng xuất hiện trong lịch sử mua hàng của tiệm:</div>
+                    <div style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                        ${npiList.length > 0 ? npiList.map(p => `
+                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #8B5CF6; border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-shrink:0;">
+                            <div>
+                                <div style="font-size:14px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11.5px; margin-right:6px;">${p.code}</span>${p.name}</div>
+                                <div style="font-size:11.5px; color:var(--rose); font-weight:800; margin-top:2px;">Đơn giá: ${(Number(p.price\vert{}\vert{}0)/1000).toLocaleString('en-US')}K / ${p.dvt||'hộp'}</div>
+                            </div>
+                            <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 12px; border-radius:8px;" onclick="addQuickItemToCart('${p.id || p.code}')"><i class="fa-solid fa-cart-plus"></i> + Thêm</button>
+                        </div>`).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không còn sản phẩm mới nào.</div>'}
+                    </div>
+                </div>
+            </div>`;
+        modalContainer.classList.remove('hidden');
+
+    } else if (view === 'threshold_upsell') {
+        // --- 5. RƯỚN MỐC KHUYẾN MÃI (THRESHOLD UPSELL) ---
+        // Quét các CTKM đang mở, kiểm tra xem sản phẩm nào tiệm đã lấy gần đạt mốc
+        let thresholdList = [];
+        const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
+        let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
+
+        // Lấy danh sách SKU khách đã mua gần đây
+        let recentSkuQtyMap = {};
+        if(storeOrders.length > 0) {
+            (storeOrders[0].items || []).forEach(i => { recentSkuQtyMap[String(i.code||i.id).trim().toUpperCase()] = Number(i.qty || 0); });
+        }
+
+        activePromos.forEach(km => {
+            if (km.hangHoa && km.noiDung) {
+                let codes = km.hangHoa.split(/[,+\s]+/).map(s => s.trim()).filter(Boolean);
+                codes.forEach(cCode => {
+                    let foundP = (typeof products !== 'undefined' ? products : []).find(p => String(p.code||'').trim().toUpperCase() === cCode.toUpperCase());
+                    if (foundP && isProductAllowedByCompanyDvt(foundP)) {
+                        let curQ = recentSkuQtyMap[String(foundP.code).trim().toUpperCase()] || 0;
+                        thresholdList.push({ product: foundP, promo: km.noiDung, currentQty: curQ });
+                    }
+                });
+            }
+        });
+        thresholdList = thresholdList.slice(0, 15);
+
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+                <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:#D97706; margin:0;"><i class="fa-solid fa-arrow-trend-up"></i> Gợi Ý Rướn Mốc Khuyến Mãi</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
+                    </div>
+                    ${navBarHtml}
+                    <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Tư vấn chủ tiệm nhập thêm chút để chạm mốc nhận quà/chiết khấu:</div>
+                    <div style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                        ${thresholdList.length > 0 ? thresholdList.map(item => `
+                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #D97706; border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-shrink:0;">
+                            <div>
+                                <div style="font-size:14px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11.5px; margin-right:6px;">${item.product.code}</span>${item.product.name}</div>
+                                <div style="font-size:12px; font-weight:800; color:#D97706; margin-top:2px;"><i class="fa-solid fa-bullseye"></i> ${item.promo}</div>
+                            </div>
+                            <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 12px; border-radius:8px;" onclick="addQuickItemToCart('${item.product.id || item.product.code}')"><i class="fa-solid fa-cart-plus"></i> + Thêm</button>
+                        </div>`).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không có dữ liệu rướn mốc.</div>'}
+                    </div>
+                </div>
+            </div>`;
+        modalContainer.classList.remove('hidden');
+
+    } else if (view === 'oos_warning') {
+        // --- 6. CHỐNG ĐỨT HÀNG CHỦ LỰC (OOS WARNING) ---
+        // Các sản phẩm tiệm nhập thường xuyên ($\ge 2$ lần) nhưng đã quá chu kỳ chưa mua lại
+        let overdueSkus = [];
+        let nowTime = Date.now();
+        
+        let productFrequencyMap = {};
+        storeOrders.forEach(o => {
+            (o.items || []).forEach(i => {
+                let q = Number(i.qty || 0);
+                if(q > 0) {
+                    let code = String(i.code||i.id).trim().toUpperCase();
+                    if(!productFrequencyMap[code]) productFrequencyMap[code] = { count: 0, lastDate: new Date(o.ngayCtu||0).getTime(), name: i.name };
+                    productFrequencyMap[code].count += 1;
+                }
+            });
+        });
+
+        Object.keys(productFrequencyMap).forEach(code => {
+            let data = productFrequencyMap[code];
+            if (data.count >= 2) { // Mua từ 2 lần trở lên là hàng chủ lực
+                let daysAgo = Math.round((nowTime - data.lastDate) / (1000 * 60 * 60 * 24));
+                if (daysAgo >= 12) { // Quá 12 ngày chưa nhập lại
+                    let p = products.find(x => String(x.code||x.id).trim().toUpperCase() === code);
+                    if (p && isProductAllowedByCompanyDvt(p)) {
+                        overdueSkus.push({ product: p, days: daysAgo });
+                    }
+                }
+            }
+        });
+
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+                <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:var(--rose); margin:0;"><i class="fa-solid fa-triangle-exclamation"></i> Chống Đứt Hàng (OOS Warning)</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
+                    </div>
+                    ${navBarHtml}
+                    <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Các mặt hàng chủ lực tiệm thường nhập nhưng đã lâu chưa tái đặt hàng (Có nguy cơ đứt hàng):</div>
+                    <div style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+                        ${overdueSkus.length > 0 ? overdueSkus.map(item => `
+                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid var(--rose); border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-shrink:0;">
+                            <div>
+                                <div style="font-size:14px; font-weight:900; color:#0f172a;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11.5px; margin-right:6px;">${item.product.code}</span>${item.product.name}</div>
+                                <div style="font-size:11.5px; color:var(--rose); font-weight:800; margin-top:2px;"><i class="fa-solid fa-clock"></i> Đã quá ${item.days} ngày chưa nhập lại mã này</div>
+                            </div>
+                            <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 12px; border-radius:8px;" onclick="addQuickItemToCart('${item.product.id || item.product.code}')"><i class="fa-solid fa-cart-plus"></i> + Thêm</button>
+                        </div>`).join('') : '<div style="text-align:center; padding:30px; color:var(--emerald); font-weight:800;">Tuyệt vời! Tiệm không có mặt hàng chủ lực nào bị quá hạn.</div>'}
+                    </div>
+                </div>
+            </div>`;
+        modalContainer.classList.remove('hidden');
+
+    } else if (view === 'ctkm') {
+        // --- 7. SHOW CTKM ---
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
+                <div class="modal-content fullscreen-modal" style="max-width: 750px; display:flex; flex-direction:column; background:#ffffff; padding:20px !important; height: 90vh; max-height: 90vh;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:2px solid #e2e8f0; padding-bottom:10px; flex-shrink:0;">
+                        <h3 style="font-size:17px; font-weight:900; color:#E11D48; margin:0;"><i class="fa-solid fa-gift"></i> CTKM Các Công Ty Đang Mở (<span id="aiCtkmCountBadge">0</span>)</h3>
+                        <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-weight:900;">Đóng</button>
+                    </div>
+                    ${navBarHtml}
+                    <div style="margin-bottom:8px; flex-shrink:0; position:relative; display:flex; align-items:center;">
+                        <input type="text" id="aiCtkmSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty..." value="${window._aiCtkmSearch || ''}" oninput="filterAiModalCtkm(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 14px; font-size:13.5px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border);">
+                        <button type="button" onclick="const inp=document.getElementById('aiCtkmSearchInput'); inp.value=''; filterAiModalCtkm(''); inp.focus();" style="position: absolute; right: 10px; background: none; border: none; font-size: 16px; cursor: pointer; color: var(--text-muted); padding: 5px;">✖</button>
+                    </div>
+                    <div id="aiModalCtkmListContainer" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;"></div>
+                </div>
+            </div>`;
+        modalContainer.classList.remove('hidden');
+        filterAiModalCtkm(window._aiCtkmSearch || '');
     }
 };
 
 window.closeAiModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-        modalContainer.innerHTML = '';
-        modalContainer.classList.add('hidden');
-    }
+    if (modalContainer) { modalContainer.innerHTML = ''; modalContainer.classList.add('hidden'); }
 };
 
 window.updateAiTotalSum = function() {
     const kiens = document.querySelectorAll('.ai-rec-kien-input');
     let totalRevenue = 0;
-
     kiens.forEach(kienInp => {
         const cardRow = kienInp.closest('div[style*="display:flex; justify-content:space-between"]');
         if (!cardRow) return;
-
         const leInp = cardRow.querySelector('.ai-rec-le-input');
         const ratio = Number(kienInp.getAttribute('data-ratio')) || 50;
         const price = Number(kienInp.getAttribute('data-price')) || 0;
-
         const kienVal = Number(kienInp.value.replace(/[^0-9]/g, '')) || 0;
         const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
-
-        const totalQty = (kienVal * ratio) + leVal;
-        totalRevenue += totalQty * price;
+        totalRevenue += ((kienVal * ratio) + leVal) * price;
     });
-
     const totalRevEl = document.getElementById('ai_modal_total_rev');
-    if (totalRevEl) {
-        totalRevEl.innerText = `${(totalRevenue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}K`;
-    }
+    if (totalRevEl) totalRevEl.innerText = `${(totalRevenue / 1000).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}K`;
 };
 
 window.applyAllAiRecommendations = function() {
     const kiens = document.querySelectorAll('.ai-rec-kien-input');
     let addedCount = 0;
-
     kiens.forEach(kienInp => {
         const cardRow = kienInp.closest('div[style*="display:flex; justify-content:space-between"]');
         if (!cardRow) return;
-
         const leInp = cardRow.querySelector('.ai-rec-le-input');
         const code = kienInp.getAttribute('data-code');
-
         const p = products.find(x => x.id === code || x.code === code);
         if (p) {
             const ratio = Number(p.tyLeQuyDoi || 50);
             const kienVal = Number(kienInp.value.replace(/[^0-9]/g, '')) || 0;
             const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
-            
             const totalQ = (kienVal * ratio) + leVal;
-
             if (totalQ > 0) {
                 const keyId = p.id || p.code;
                 if (!currentCart[keyId]) currentCart[keyId] = { qty: 0, kien: 0, le: 0 };
-                
                 currentCart[keyId].qty += totalQ;
                 currentCart[keyId].kien = ratio > 0 ? Math.floor(currentCart[keyId].qty / ratio) : 0;
                 currentCart[keyId].le = ratio > 0 ? currentCart[keyId].qty % ratio : currentCart[keyId].qty;
@@ -12686,16 +12846,11 @@ window.applyAllAiRecommendations = function() {
             }
         }
     });
-
-    if (addedCount === 0) {
-        return alert("Vui lòng nhập số lượng sản phẩm cần nạp!");
-    }
-
+    if (addedCount === 0) return alert("Vui lòng nhập số lượng sản phẩm cần nạp!");
     saveCartDraftToLocal();
     updateCartTotalsUI();
     filterSalesProducts();
     closeAiModal();
-
     if (typeof playSystemSound === 'function') playSystemSound('success');
     if (typeof triggerHaptic === 'function') triggerHaptic(30);
     alert(`✅ Đã nạp thành công ${addedCount} sản phẩm vào giỏ hàng!`);
