@@ -1446,43 +1446,42 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       } catch(e) { resolve(null); }
     });
   }
-// HÀM KIỂM TRA CTKM CÒN HẠN TRONG NGÀY HÔM NAY HAY KHÔNG
+// HÀM KIỂM TRA CTKM CÒN HẠN TRONG NGÀY HÔM NAY HAY KHÔNG (Bản vá chống lỗi định dạng)
 window.isPromoActiveToday = function(km) {
     if (!km || km.status === 'Stop') return false;
     
     try {
         const nowTime = new Date().getTime();
-        let fromDate = 0;
-        let toDate = 9999999999999; 
         
-        // Khắc phục triệt để lỗi ngày tháng trên các dòng điện thoại iPhone/Safari
-        if (km.tuNgay) {
-            if (km.tuNgay.includes('/')) {
-                let p = km.tuNgay.split('/');
-                fromDate = new Date(p[2], p[1] - 1, p[0], 0, 0, 0).getTime();
-            } else if (km.tuNgay.includes('-')) {
-                let p = km.tuNgay.split('-');
-                fromDate = new Date(p[0], p[1] - 1, p[2], 0, 0, 0).getTime();
+        // Hàm phụ trợ "bọc thép": Bóc tách ngày chuẩn xác 100% bất chấp DD/MM/YYYY hay YYYY-MM-DD
+        const parseTime = (dateStr, isEnd) => {
+            if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') {
+                return isEnd ? 9999999999999 : 0; // Trống 'Từ ngày' => 0. Trống 'Đến ngày' => Vô cực.
             }
-        }
-        
-        if (km.denNgay) {
-            if (km.denNgay.includes('/')) {
-                let p = km.denNgay.split('/');
-                toDate = new Date(p[2], p[1] - 1, p[0], 23, 59, 59).getTime(); // Kết thúc vào 23:59:59 của ngày cuối
-            } else if (km.denNgay.includes('-')) {
-                let p = km.denNgay.split('-');
-                toDate = new Date(p[0], p[1] - 1, p[2], 23, 59, 59).getTime();
-            }
-        }
+            let cleanStr = dateStr.trim().split(' ')[0]; // Gọt bỏ phần giờ phút nếu Excel tự gắn thêm
+            let p = cleanStr.includes('/') ? cleanStr.split('/') : cleanStr.split('-');
+            
+            if (p.length === 3) {
+                let y, m, d;
+                // Kiểm tra xem năm nằm ở p[0] hay p[2] dựa vào độ dài (Năm có 4 chữ số)
+                if (p[0].length === 4) { y = p[0]; m = p[1]; d = p[2]; } // Form: YYYY-MM-DD
+                else { y = p[2]; m = p[1]; d = p[0]; } // Form: DD/MM/YYYY hoặc DD-MM-YYYY
 
-        if (nowTime >= fromDate && nowTime <= toDate) {
-            return true;
-        }
+                return isEnd 
+                    ? new Date(y, m - 1, d, 23, 59, 59).getTime() 
+                    : new Date(y, m - 1, d, 0, 0, 0).getTime();
+            }
+            return isEnd ? 9999999999999 : 0;
+        };
+
+        const fromDate = parseTime(km.tuNgay, false);
+        const toDate = parseTime(km.denNgay, true);
+
+        return (nowTime >= fromDate && nowTime <= toDate);
     } catch (err) {
-        console.error("Lỗi check ngày KM:", err);
+        console.error("Lỗi parse ngày KM:", err);
+        return false;
     }
-    return false;
 };
 window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     // Đã xóa ngoại lệ của Admin/Manager ở đây. Tất cả đều bị chặn công bằng.
@@ -2633,12 +2632,26 @@ window._renderModalContent = function() {
         }
       }
       let activeDvtStr = activeDvtList.join(', ');
-   let promoBadge = '';
+  // LOGIC TÌM CTKM CHUẨN XÁC KÉP (THỜI GIAN + MÃ CÔNG TY)
+    let promoBadge = '';
     if (window.promotionsList && window.promotionsList.length > 0) {
         const activePromo = window.promotionsList.find(km => {
-            return window.isPromoActiveToday(km) && 
-                   km.hangHoa && 
-                   km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
+            // 1. Lưới lọc 1: Kiểm tra mốc thời gian (Đã tính trong ngày hôm nay chưa)
+            if (!window.isPromoActiveToday(km)) return false;
+
+            // 2. Lưới lọc 2: Trích xuất mã Công ty của sản phẩm (p) để chống hiện nhầm chéo hãng
+            let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+            let pCtu = compPrefix; // Mặc định lấy 2 ký tự đầu
+            if (typeof companyList !== 'undefined') {
+                let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+                if (matchedComp) pCtu = matchedComp.maCtu.toLowerCase();
+            }
+            const matchCtu = !km.maCtu || km.maCtu.toLowerCase() === 'khác' || km.maCtu.toLowerCase() === pCtu;
+
+            // 3. Lưới lọc 3: Phải đúng mã Hàng hoặc chương trình áp dụng "Tất cả mặt hàng"
+            const matchHangHoa = !km.hangHoa || km.hangHoa.trim() === '' || km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
+
+            return matchCtu && matchHangHoa;
         });
 
         if (activePromo) {
@@ -2764,16 +2777,31 @@ window.filterModalProductList = function(keyword) {
     let activeDvtStr = activeDvtList.join(', ');
 
     // LOGIC TÌM CTKM CHO SẢN PHẨM NÀY
+    // LOGIC TÌM CTKM CHUẨN XÁC KÉP (THỜI GIAN + MÃ CÔNG TY)
     let promoBadge = '';
     if (window.promotionsList && window.promotionsList.length > 0) {
-      const activePromo = window.promotionsList.find(km => 
-          window.isPromoActiveToday(km) && 
-          km.hangHoa && 
-          km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase())
-      );
-      if (activePromo) {
-        promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
-      }
+        const activePromo = window.promotionsList.find(km => {
+            // 1. Lưới lọc 1: Kiểm tra mốc thời gian (Đã tính trong ngày hôm nay chưa)
+            if (!window.isPromoActiveToday(km)) return false;
+
+            // 2. Lưới lọc 2: Trích xuất mã Công ty của sản phẩm (p) để chống hiện nhầm chéo hãng
+            let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+            let pCtu = compPrefix; // Mặc định lấy 2 ký tự đầu
+            if (typeof companyList !== 'undefined') {
+                let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+                if (matchedComp) pCtu = matchedComp.maCtu.toLowerCase();
+            }
+            const matchCtu = !km.maCtu || km.maCtu.toLowerCase() === 'khác' || km.maCtu.toLowerCase() === pCtu;
+
+            // 3. Lưới lọc 3: Phải đúng mã Hàng hoặc chương trình áp dụng "Tất cả mặt hàng"
+            const matchHangHoa = !km.hangHoa || km.hangHoa.trim() === '' || km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
+
+            return matchCtu && matchHangHoa;
+        });
+
+        if (activePromo) {
+            promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
+        }
     }
 
     return `
@@ -2896,17 +2924,32 @@ window.filterSalesProducts = function(val) {
        }
      }
      let activeDvtStr = activeDvtList.join(', ');
-let promoBadge = '';
-     if (window.promotionsList && window.promotionsList.length > 0) {
-       const activePromo = window.promotionsList.find(km => 
-           window.isPromoActiveToday(km) && 
-           km.hangHoa && 
-           km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase())
-       );
-       if (activePromo) {
-         promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
-       }
-     }
+// LOGIC TÌM CTKM CHUẨN XÁC KÉP (THỜI GIAN + MÃ CÔNG TY)
+    let promoBadge = '';
+    if (window.promotionsList && window.promotionsList.length > 0) {
+        const activePromo = window.promotionsList.find(km => {
+            // 1. Lưới lọc 1: Kiểm tra mốc thời gian (Đã tính trong ngày hôm nay chưa)
+            if (!window.isPromoActiveToday(km)) return false;
+
+            // 2. Lưới lọc 2: Trích xuất mã Công ty của sản phẩm (p) để chống hiện nhầm chéo hãng
+            let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
+            let pCtu = compPrefix; // Mặc định lấy 2 ký tự đầu
+            if (typeof companyList !== 'undefined') {
+                let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
+                if (matchedComp) pCtu = matchedComp.maCtu.toLowerCase();
+            }
+            const matchCtu = !km.maCtu || km.maCtu.toLowerCase() === 'khác' || km.maCtu.toLowerCase() === pCtu;
+
+            // 3. Lưới lọc 3: Phải đúng mã Hàng hoặc chương trình áp dụng "Tất cả mặt hàng"
+            const matchHangHoa = !km.hangHoa || km.hangHoa.trim() === '' || km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
+
+            return matchCtu && matchHangHoa;
+        });
+
+        if (activePromo) {
+            promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
+        }
+    }
 
     return `
           <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 6px;">
