@@ -12341,6 +12341,9 @@ window._aiCtkmSearch = '';
 window._aiPromoSearch = '';
 window._aiExpandSearch = '';
 window._aiWorkingOrderList = [];
+window._aiCachedPromoItems = [];
+window._aiCachedExpandItems = [];
+window._aiCachedCtkmItems = [];
 
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
@@ -12428,10 +12431,49 @@ window.openAiSmartOrderModal = function() {
 
     window._aiWorkingOrderList = suggestedOrderList.slice(0, 20);
 
+    // 2. CACHE DỮ LIỆU NỀN CHO CÁC TAB PHỤ (CHỐNG LAG TỆ TOÀN DIỆN)
+    const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
+    
+    // Cache Promo Items
+    let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
+    let promoMap = new Map();
+    activePromos.forEach(km => {
+        if (km.hangHoa) {
+            km.hangHoa.split(/[,+\s]+/).map(s => s.trim()).filter(Boolean).forEach(cCode => {
+                let p = (typeof products !== 'undefined' ? products : []).find(x => String(x.code||'').trim().toUpperCase() === cCode.toUpperCase() || String(x.id||'').trim().toUpperCase() === cCode.toUpperCase());
+                if (p && isProductAllowedByCompanyDvt(p)) {
+                    if(!promoMap.has(p.code)) promoMap.set(p.code, { product: p, note: km.noiDung });
+                }
+            });
+        }
+    });
+    window._aiCachedPromoItems = Array.from(promoMap.values()).map(i => ({ product: i.product, subText: `🎁 KM & Rướn Mốc: ${i.note}` }));
+
+    // Cache Expand Items (Cross-sell + NPI)
+    let purchasedSkus = new Set();
+    storeOrders.forEach(o => (o.items || []).forEach(i => { if(Number(i.qty)>0) purchasedSkus.add(String(i.code||i.id).trim().toUpperCase()); }));
+    let crossMap = new Map();
+    orders.forEach(o => {
+        if(o.status === 'Đã hủy') return;
+        let oSkus = (o.items || []).filter(i => Number(i.qty) > 0).map(i => String(i.code || i.id).trim().toUpperCase());
+        if(oSkus.some(sku => purchasedSkus.has(sku))) {
+            oSkus.forEach(sku => { if(!purchasedSkus.has(sku)) crossMap.set(sku, (crossMap.get(sku)||0)+1); });
+        }
+    });
+    let crossItems = Array.from(crossMap.entries()).sort((a,b)=>b[1]-a[1]).map(e => {
+        let p = products.find(x => String(x.code||x.id).trim().toUpperCase() === e[0]);
+        return { product: p, subText: `🔥 Mua kèm phổ biến (${e[1]} đơn liên quan)` };
+    }).filter(i => i.product && isProductAllowedByCompanyDvt(i.product));
+    let npiItems = (typeof products !== 'undefined' ? products : []).filter(p => !purchasedSkus.has(String(p.code||p.id).trim().toUpperCase()) && isProductAllowedByCompanyDvt(p)).map(p => ({ product: p, subText: '⭐ Sản phẩm mới tiềm năng (NPI)' }));
+    window._aiCachedExpandItems = [...crossItems, ...npiItems];
+
+    // Cache CTKM Items
+    window._aiCachedCtkmItems = activePromos;
+
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    // 2. Dựng khung Modal tĩnh chứa toàn bộ 4 Panel (Pre-rendered để chuyển tab 0-lag tức thì)
+    // 3. Dựng khung Modal tĩnh (Pre-rendered)
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeAiModal()">
             <div class="modal-content fullscreen-modal" style="max-width: 800px; display:flex; flex-direction:column; background:var(--panel-bg); backdrop-filter:blur(25px); padding:20px !important; height: 90vh; max-height: 90vh;">
@@ -12508,7 +12550,7 @@ window.openAiSmartOrderModal = function() {
     updateAiTotalSum();
 };
 
-// Chuyển tab cực kỳ mượt mà 0-lag bằng hiển thị CSS
+// Chuyển tab cực kỳ mượt mà 0-lag tuyệt đối
 window.switchAiModalView = function(viewName) {
     window._aiModalView = viewName;
     ['core', 'promo', 'expand', 'ctkm'].forEach(t => {
@@ -12561,29 +12603,14 @@ window.adjustAiQuickStep = function(inputId, step) {
     updateAiTotalSum();
 };
 
-// --- TAB KM: TÌM KIẾM THÔNG MINH DNA & THÊM VÀO CHỦ LỰC ---
+// --- TAB KM: TÌM KIẾM TỨC THÌ TRÊN CACHE (0-LAG) ---
 window.filterPromoTabList = function(keyword) {
-    window._aiPromoSearch = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+    window._aiPromoSearch = keyword;
     const container = document.getElementById('aiPromoListContainer');
     if (!container) return;
-    const q = window._aiPromoSearch;
+    const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
 
-    const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
-    let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
-
-    let promoMap = new Map();
-    activePromos.forEach(km => {
-        if (km.hangHoa) {
-            km.hangHoa.split(/[,+\s]+/).map(s => s.trim()).filter(Boolean).forEach(cCode => {
-                let p = (typeof products !== 'undefined' ? products : []).find(x => String(x.code||'').trim().toUpperCase() === cCode.toUpperCase() || String(x.id||'').trim().toUpperCase() === cCode.toUpperCase());
-                if (p && isProductAllowedByCompanyDvt(p)) {
-                    if(!promoMap.has(p.code)) promoMap.set(p.code, { product: p, note: km.noiDung });
-                }
-            });
-        }
-    });
-
-    let rawItems = Array.from(promoMap.values()).map(i => ({ product: i.product, subText: `🎁 KM & Rướn Mốc: ${i.note}` }));
+    let rawItems = window._aiCachedPromoItems;
 
     if (q) {
         rawItems = rawItems.filter(item => {
@@ -12641,42 +12668,14 @@ window.filterPromoTabList = function(keyword) {
     }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy sản phẩm khuyến mãi phù hợp.</div>';
 };
 
-// --- TAB MỞ RỘNG: TÌM KIẾM THÔNG MINH DNA & THÊM VÀO CHỦ LỰC ---
+// --- TAB MỞ RỘNG: TÌM KIẾM TỨC THÌ TRÊN CACHE (0-LAG) ---
 window.filterExpandTabList = function(keyword) {
-    window._aiExpandSearch = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
+    window._aiExpandSearch = keyword;
     const container = document.getElementById('aiExpandListContainer');
     if (!container) return;
-    const q = window._aiExpandSearch;
+    const q = typeof removeAccents === 'function' ? removeAccents(keyword.trim().toLowerCase()) : keyword.trim().toLowerCase();
 
-    const storeIdStr = String(activeVisitedStore.id);
-    const storeCodeStr = String(activeVisitedStore.code || '').trim();
-    let storeOrders = orders.filter(o => {
-        const matchId = String(o.storeId || '') === storeIdStr;
-        let inferredCode = o.maDTPNNo || '';
-        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) inferredCode = o.maKH.split(' - ')[0].trim();
-        return (matchId || (storeCodeStr !== '' && inferredCode === storeCodeStr)) && o.status !== 'Đã hủy';
-    });
-
-    let purchasedSkus = new Set();
-    storeOrders.forEach(o => (o.items || []).forEach(i => { if(Number(i.qty)>0) purchasedSkus.add(String(i.code||i.id).trim().toUpperCase()); }));
-
-    let crossMap = new Map();
-    orders.forEach(o => {
-        if(o.status === 'Đã hủy') return;
-        let oSkus = (o.items || []).filter(i => Number(i.qty) > 0).map(i => String(i.code || i.id).trim().toUpperCase());
-        if(oSkus.some(sku => purchasedSkus.has(sku))) {
-            oSkus.forEach(sku => { if(!purchasedSkus.has(sku)) crossMap.set(sku, (crossMap.get(sku)||0)+1); });
-        }
-    });
-
-    let crossItems = Array.from(crossMap.entries()).sort((a,b)=>b[1]-a[1]).map(e => {
-        let p = products.find(x => String(x.code||x.id).trim().toUpperCase() === e[0]);
-        return { product: p, subText: `🔥 Mua kèm phổ biến (${e[1]} đơn liên quan)` };
-    }).filter(i => i.product && isProductAllowedByCompanyDvt(i.product));
-
-    let npiItems = (typeof products !== 'undefined' ? products : []).filter(p => !purchasedSkus.has(String(p.code||p.id).trim().toUpperCase()) && isProductAllowedByCompanyDvt(p)).map(p => ({ product: p, subText: '⭐ Sản phẩm mới tiềm năng (NPI)' }));
-
-    let rawItems = [...crossItems, ...npiItems];
+    let rawItems = window._aiCachedExpandItems;
 
     if (q) {
         rawItems = rawItems.filter(item => {
@@ -12734,7 +12733,7 @@ window.filterExpandTabList = function(keyword) {
     }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy sản phẩm phù hợp.</div>';
 };
 
-// --- HÀM THÊM VÀO CHỦ LỰC VÀ RENDER LẠI DOM CHỦ LỰC ---
+// --- THÊM VÀO TAB CHỦ LỰC ---
 window.addTabItemToAiCore = function(prefix, idx, prdId, subText) {
     const p = products.find(x => x.id === prdId || x.code === prdId);
     if (!p) return;
@@ -12780,14 +12779,14 @@ window.addTabItemToAiCore = function(prefix, idx, prdId, subText) {
     alert(`✅ Đã thêm [${p.code}] ${p.name} vào tab Gợi Ý Chủ Lực!`);
 };
 
-// --- SHOW CTKM ---
+// --- SHOW CTKM (TÌM KIẾM TRÊN CACHE 0-LAG) ---
 window.filterAiModalCtkm = function(val) {
     window._aiCtkmSearch = typeof removeAccents === 'function' ? removeAccents(val.trim().toLowerCase()) : val.trim().toLowerCase();
     const container = document.getElementById('aiModalCtkmListContainer');
+    const countBadge = document.getElementById('aiCtkmCountBadge');
     if (!container) return;
 
-    const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
-    let activePromos = (window.promotionsList || []).filter(p => p.status !== 'Stop' && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
+    let activePromos = window._aiCachedCtkmItems;
 
     const rawVal = val.trim().toLowerCase();
     if (window._aiCtkmSearch) {
@@ -12806,6 +12805,7 @@ window.filterAiModalCtkm = function(val) {
         activePromos.sort((a, b) => String(a.maCtu || '').localeCompare(String(b.maCtu || '')));
     }
 
+    if (countBadge) countBadge.innerText = activePromos.length;
     container.innerHTML = activePromos.length > 0 ? activePromos.map(km => {
         let foundComp = (typeof companyList !== 'undefined' ? companyList : []).find(c => String(c.maCtu || '').trim().toUpperCase() === String(km.maCtu || '').trim().toUpperCase());
         let compFullName = foundComp && foundComp.tenCtu ? `${km.maCtu} - ${foundComp.tenCtu}` : `Công Ty ${km.maCtu || 'KHÁC'}`;
