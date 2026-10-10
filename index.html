@@ -2867,7 +2867,7 @@ window.filterModalProductList = function(keyword) {
 
 
 // ==========================================
-// 3. HÀM TÌM KIẾM SẢN PHẨM TRONG TAB BÁN HÀNG
+// 3. HÀM TÌM KIẾM SẢN PHẨM TRONG TAB BÁN HÀNG (CÓ TÍCH HỢP GỢI Ý LỊCH SỬ TB)
 // ==========================================
 window.filterSalesProducts = function(val) {
    if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
@@ -2875,6 +2875,42 @@ window.filterSalesProducts = function(val) {
    const hintEl = document.getElementById('productSearchHint');
    if (!container) return;
 
+   // BƯỚC 1: TÍNH TOÁN LỊCH SỬ MUA HÀNG TRUNG BÌNH CỦA KHÁCH NÀY (SIÊU TỐC ĐỘ)
+   let historyMap = new Map();
+   if (activeVisitedStore) {
+       const storeIdStr = String(activeVisitedStore.id);
+       const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+       // Lọc ra các đơn hàng của riêng khách này
+       let custOrders = orders.filter(o => {
+           if (o.status === 'Đã hủy') return false;
+           const matchId = String(o.storeId || '') === storeIdStr;
+           let inferredCode = o.maDTPNNo || '';
+           if (!inferredCode && o.maKH && o.maKH.includes(' - ')) inferredCode = o.maKH.split(' - ')[0].trim();
+           const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+           return matchId || matchCode;
+       });
+
+       // Cộng dồn số lượng và đếm số lần mua cho từng mã SP
+       custOrders.forEach(o => {
+           if (Array.isArray(o.items)) {
+               o.items.forEach(item => {
+                   let qty = Number(item.qty || 0);
+                   if (qty > 0) {
+                       let code = String(item.code || item.id).trim().toUpperCase();
+                       if (!historyMap.has(code)) {
+                           historyMap.set(code, { totalQty: 0, count: 0 });
+                       }
+                       let data = historyMap.get(code);
+                       data.totalQty += qty;
+                       data.count += 1;
+                   }
+               });
+           }
+       });
+   }
+
+   // BƯỚC 2: TÌM KIẾM SẢN PHẨM
    let matched = [];
 
    for (const [id, entry] of productIndexMap.entries()) {
@@ -2910,6 +2946,7 @@ window.filterSalesProducts = function(val) {
      }
    }
 
+   // Sắp xếp đưa các SP đang có trong giỏ lên đầu
    matched.sort((a, b) => {
      const aKey = a.id || a.code;
      const bKey = b.id || b.code;
@@ -2925,6 +2962,7 @@ window.filterSalesProducts = function(val) {
 
    matched = matched.slice(0, 30);
 
+   // BƯỚC 3: VẼ GIAO DIỆN SẢN PHẨM
    container.innerHTML = matched.length > 0 ? matched.map(p => {
      const keyId = p.id || p.code;
      const safeK = getSafeKey(keyId);
@@ -2949,32 +2987,47 @@ window.filterSalesProducts = function(val) {
        }
      }
      let activeDvtStr = activeDvtList.join(', ');
-// LOGIC TÌM CTKM CHUẨN XÁC KÉP (THỜI GIAN + MÃ CÔNG TY)
-    let promoBadge = '';
-    if (window.promotionsList && window.promotionsList.length > 0) {
-        const activePromo = window.promotionsList.find(km => {
-            // 1. Lưới lọc 1: Kiểm tra mốc thời gian (Đã tính trong ngày hôm nay chưa)
-            if (!window.isPromoActiveToday(km)) return false;
 
-            // 2. Lưới lọc 2: Trích xuất mã Công ty của sản phẩm (p) để chống hiện nhầm chéo hãng
-            let compPrefix = (p.code || '').trim().slice(0, 2).toLowerCase();
-            let pCtu = compPrefix; // Mặc định lấy 2 ký tự đầu
-            if (typeof companyList !== 'undefined') {
-                let matchedComp = companyList.find(co => (co.maCtu || '').trim().toLowerCase() === compPrefix);
-                if (matchedComp) pCtu = matchedComp.maCtu.toLowerCase();
-            }
-            const matchCtu = !km.maCtu || km.maCtu.toLowerCase() === 'khác' || km.maCtu.toLowerCase() === pCtu;
+     // LOGIC HUY HIỆU KHUYẾN MÃI
+     let promoBadge = '';
+     if (window.promotionsList && window.promotionsList.length > 0) {
+       const activePromo = window.promotionsList.find(km => 
+           window.isPromoActiveToday(km) && 
+           km.hangHoa && 
+           km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase())
+       );
+       if (activePromo) {
+         promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
+       }
+     }
 
-            // 3. Lưới lọc 3: Phải đúng mã Hàng hoặc chương trình áp dụng "Tất cả mặt hàng"
-            const matchHangHoa = !km.hangHoa || km.hangHoa.trim() === '' || km.hangHoa.toUpperCase().includes((p.code || '').toUpperCase());
+     // ==========================================
+     // LOGIC HUY HIỆU GỢI Ý LỊCH SỬ TRUNG BÌNH (TB)
+     // ==========================================
+     let avgBadgeHtml = '';
+     const pCodeUpper = String(p.code || '').trim().toUpperCase();
+     if (historyMap.has(pCodeUpper)) {
+         let histData = historyMap.get(pCodeUpper);
+         let avgQty = Math.round(histData.totalQty / histData.count); // Tính trung bình
 
-            return matchCtu && matchHangHoa;
-        });
+         let ratio = Number(p.tyLeQuyDoi || 50);
+         let unitName = activeDvtList[0] || p.dvt || 'cây';
 
-        if (activePromo) {
-            promoBadge = `<div style="display:inline-block; background:rgba(225,29,72,0.1); color:#E11D48; padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:800; border:1px solid rgba(225,29,72,0.3); margin-top:4px;"><i class="fa-solid fa-gift"></i> KM: ${activePromo.noiDung}</div>`;
-        }
-    }
+         let avgText = '';
+         if (ratio > 1) {
+             let kien = Math.floor(avgQty / ratio);
+             let le = avgQty % ratio;
+             if (kien > 0 && le > 0) avgText = `${kien} Thùng ${le} ${unitName}`;
+             else if (kien > 0) avgText = `${kien} Thùng`;
+             else avgText = `${le} ${unitName}`;
+         } else {
+             avgText = `${avgQty} ${unitName}`;
+         }
+
+         // Vẽ huy hiệu màu Xanh Lá cực gọn gàng
+         avgBadgeHtml = `<span style="background:rgba(16, 185, 129, 0.1); color:var(--emerald); padding:2px 6px; border-radius:6px; font-size:10.5px; font-weight:900; margin-left:6px; display:inline-flex; align-items:center; gap:4px; vertical-align:middle; border:1px solid rgba(16, 185, 129, 0.2);"><i class="fa-solid fa-clock-rotate-left"></i> TB: ${avgText}</span>`;
+     }
+     // ==========================================
 
     return `
           <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 6px;">
@@ -2986,8 +3039,8 @@ window.filterSalesProducts = function(val) {
               </div>
             </div>
 
-            <div class="item-title" style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word;">
-              ${p.name}
+            <div class="item-title" style="font-size: var(--font-size-product-name); font-weight: 800; color: var(--text-main); line-height: 1.35; width: 100%; word-break: break-word; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+              ${p.name} ${avgBadgeHtml}
             </div>
 
             <!-- ĐƠN GIÁ ĐÃ CHIA 1000 ĐỂ HIỂN THỊ GỌN GÀNG -->
