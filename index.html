@@ -12515,18 +12515,17 @@ window.toggleSalesPanel = function() {
         toggleBtn.style.borderColor = 'var(--card-border)';
     }
 };
-window._aiModalView = 'core'; 
+window._aiModalView = 'promo'; // Chuyển mặc định sang tab KM
 window._aiCtkmSearch = '';
 window._aiPromoSearch = '';
 window._aiExpandSearch = '';
-window._aiWorkingOrderList = [];
 window._aiCachedPromoItems = [];
 window._aiCachedExpandItems = [];
 window._aiCachedCtkmItems = [];
 
 window.openAiSmartOrderModal = function() {
     if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
-    window._aiModalView = 'core';
+    window._aiModalView = 'promo';
     window._aiCtkmSearch = '';
     window._aiPromoSearch = '';
     window._aiExpandSearch = '';
@@ -12540,90 +12539,11 @@ window.openAiSmartOrderModal = function() {
         return (matchId || (storeCodeStr !== '' && inferredCode === storeCodeStr)) && o.status !== 'Đã hủy';
     });
 
-    let suggestedOrderList = [];
-    let productFreq = {}; // Lưu trữ chi tiết để tính OOS động
-    let nowTime = Date.now();
-
-    if (storeOrders.length > 0) {
-        storeOrders.sort((a, b) => new Date(b.ngayCtu || 0) - new Date(a.ngayCtu || 0));
-        let totalOrdersCount = storeOrders.length;
-        let firstOrderDate = new Date(storeOrders[storeOrders.length - 1].ngayCtu || Date.now());
-        let lastOrderDate = new Date(storeOrders[0].ngayCtu || Date.now());
-        
-        let daysSinceLastOrder = Math.max(0, Math.round((nowTime - lastOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
-        let totalSpanDays = Math.max(1, Math.round((nowTime - firstOrderDate.getTime()) / (1000 * 60 * 60 * 24)));
-        let globalAvgCycle = Math.max(1, Math.round(totalSpanDays / totalOrdersCount));
-
-        storeOrders.forEach((o) => {
-            let oTime = new Date(o.ngayCtu || 0).getTime();
-            if (Array.isArray(o.items)) {
-                o.items.forEach(item => {
-                    const q = Number(item.qty || 0);
-                    if (q > 0) {
-                        const code = String(item.code || item.id || '').trim().toUpperCase();
-                        if (!productFreq[code]) {
-                            productFreq[code] = { code: code, name: item.name || '', dvt: item.dvt || 'hộp', totalQty: 0, count: 0, firstDate: oTime, lastDate: oTime };
-                        }
-                        productFreq[code].totalQty += q;
-                        productFreq[code].count += 1;
-                        if (oTime < productFreq[code].firstDate) productFreq[code].firstDate = oTime;
-                        if (oTime > productFreq[code].lastDate) productFreq[code].lastDate = oTime;
-                    }
-                });
-            }
-        });
-
-        // 1. TÍNH TOÁN GỢI Ý CHU KỲ VÀ OOS ĐỘNG (THÔNG MINH HÓA)
-        Object.values(productFreq).forEach(prod => {
-            let avgPerOrder = Math.round(prod.totalQty / prod.count);
-            
-            // Tính chu kỳ riêng biệt của TỪNG sản phẩm
-            let prodSpanDays = Math.max(1, Math.round((prod.lastDate - prod.firstDate) / (1000 * 60 * 60 * 24)));
-            let prodAvgCycle = prod.count > 1 ? Math.max(1, Math.round(prodSpanDays / (prod.count - 1))) : globalAvgCycle;
-            let daysAgo = Math.round((nowTime - prod.lastDate) / (1000 * 60 * 60 * 24));
-
-            const pObj = products.find(x => String(x.id).toUpperCase() === prod.code || String(x.code).toUpperCase() === prod.code);
-            if (!pObj || !isProductAllowedByCompanyDvt(pObj)) return;
-            
-            let ratio = Number(pObj?.tyLeQuyDoi || 50);
-            let itemPrice = Number(pObj?.price || 0);
-            
-            // Cảnh báo đứt hàng (OOS) KHOA HỌC: Mua >= 2 lần, và số ngày quá 1.5 lần chu kỳ của chính sản phẩm đó
-            if (prod.count >= 2 && daysAgo > Math.max(7, prodAvgCycle * 1.5)) {
-                suggestedOrderList.push({ 
-                    code: pObj.code, name: pObj.name, dvt: pObj.dvt, ratio: ratio, price: itemPrice, 
-                    kien: ratio > 1 ? 1 : 1, le: 0, 
-                    badge: `🚨 Quá ${daysAgo} ngày chưa nhập (Chu kỳ ~${prodAvgCycle} ngày)`, badgeColor: 'var(--rose)' 
-                });
-            } 
-            // Gợi ý thông thường
-            else if (daysAgo >= prodAvgCycle * 0.7) { 
-                if (daysAgo > prodAvgCycle * 1.2) avgPerOrder = Math.round(avgPerOrder * 1.2); // Tăng lượng nếu hơi trễ
-                let kien = ratio > 1 ? Math.floor(avgPerOrder / ratio) : avgPerOrder;
-                let le = ratio > 1 ? avgPerOrder % ratio : 0;
-                if (kien === 0 && le > 0 && ratio <= 1) kien = 0;
-
-                suggestedOrderList.push({ 
-                    code: pObj.code, name: pObj.name, dvt: pObj.dvt, ratio: ratio, price: itemPrice, 
-                    kien: kien, le: le, 
-                    badge: `📦 Theo Chu Kỳ (~${prodAvgCycle} ngày)`, badgeColor: 'var(--primary)' 
-                });
-            }
-        });
-    }
-
-    // Ưu tiên hiển thị mã OOS lên đầu
-    suggestedOrderList.sort((a, b) => (a.badgeColor === 'var(--rose)' ? -1 : 1));
-    window._aiWorkingOrderList = suggestedOrderList.slice(0, 20);
-
-    // 2. CACHE DỮ LIỆU NỀN TỐC ĐỘ CAO
+    // CACHE DỮ LIỆU NỀN TỐC ĐỘ CAO
     const openCompCodes = new Set((typeof companyList !== 'undefined' ? companyList : []).filter(c => c.status !== 'Đóng').map(c => String(c.maCtu || '').trim().toUpperCase()));
     
-    // Cache Promo - Đã áp dụng lưới lọc ngày tháng
-    let activePromos = (window.promotionsList || []).filter(p => 
-        window.isPromoActiveToday(p) && 
-        openCompCodes.has(String(p.maCtu || '').trim().toUpperCase())
-    );
+    // Cache Promo
+    let activePromos = (window.promotionsList || []).filter(p => window.isPromoActiveToday(p) && openCompCodes.has(String(p.maCtu || '').trim().toUpperCase()));
     let promoMap = new Map();
     activePromos.forEach(km => {
         if (km.hangHoa) {
@@ -12672,33 +12592,18 @@ window.openAiSmartOrderModal = function() {
                     <button class="btn btn-red btn-sm" onclick="closeAiModal()" style="font-size:12px; padding:6px 12px; font-weight:900; border-radius:8px; flex-shrink:0;">Đóng</button>
                 </div>
 
-                <!-- NAVIGATION TABS -->
+                <!-- NAVIGATION TABS (Bỏ tab Chủ Lực) -->
                 <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; flex-shrink:0; border-bottom:1px solid var(--card-border); margin-bottom:10px; -webkit-overflow-scrolling:touch;">
-                    <button id="ai_nav_btn_core" class="btn btn-amber" onclick="switchAiModalView('core')" style="font-weight:800; white-space:nowrap; font-size:12px; padding:6px 10px; border-radius:8px;"><i class="fa-solid fa-bullseye"></i> Chủ Lực</button>
-                    <button id="ai_nav_btn_promo" class="btn btn-sm" onclick="switchAiModalView('promo')" style="font-weight:800; white-space:nowrap; font-size:12px; padding:6px 10px; border-radius:8px;"><i class="fa-solid fa-gift"></i> KM & Mốc</button>
+                    <button id="ai_nav_btn_promo" class="btn btn-amber" onclick="switchAiModalView('promo')" style="font-weight:800; white-space:nowrap; font-size:12px; padding:6px 10px; border-radius:8px;"><i class="fa-solid fa-gift"></i> KM & Mốc</button>
                     <button id="ai_nav_btn_expand" class="btn btn-sm" onclick="switchAiModalView('expand')" style="font-weight:800; white-space:nowrap; font-size:12px; padding:6px 10px; border-radius:8px;"><i class="fa-solid fa-basket-shopping"></i> Mở Rộng</button>
                     <button id="ai_nav_btn_ctkm" class="btn btn-sm" onclick="switchAiModalView('ctkm')" style="font-weight:800; white-space:nowrap; font-size:12px; padding:6px 10px; border-radius:8px;"><i class="fa-solid fa-building"></i> CTKM</button>
                 </div>
 
-                <!-- 4 PANEL NỘI DUNG (ZERO-LAG) -->
+                <!-- 3 PANEL NỘI DUNG -->
                 <div style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; position:relative;">
                     
-                    <!-- PANEL 1: GỢI Ý CHỦ LỰC -->
-                    <div id="ai_panel_core" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
-                        <div style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25); padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
-                            <span style="font-size: 13px; font-weight: 800; color: var(--text-main);">💰 Tổng giá trị đơn gợi ý:</span>
-                            <span id="ai_modal_total_rev" style="font-size: 15px; font-weight: 900; color: var(--rose);">0K</span>
-                        </div>
-                        <div id="aiCoreListContainer" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
-                            ${renderCoreListHtml()}
-                        </div>
-                        <div style="margin-top:10px; padding-top:10px; border-top:2px solid var(--card-border); flex-shrink:0;">
-                            <button class="btn btn-green" style="width:100%; justify-content:center; padding:12px; font-weight:900; font-size:14px; border-radius:12px;" onclick="applyAllAiRecommendations()"><i class="fa-solid fa-circle-check"></i> NẠP TOA VÀO GIỎ HÀNG</button>
-                        </div>
-                    </div>
-
-                    <!-- PANEL 2: KM & MỐC -->
-                    <div id="ai_panel_promo" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
+                    <!-- PANEL 1: KM & MỐC -->
+                    <div id="ai_panel_promo" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
                         <div style="margin-bottom:8px; flex-shrink:0; position:relative; display:flex; align-items:center;">
                             <input type="text" id="aiPromoSearchInput" placeholder="🔍 Gõ mã hoặc tên SP khuyến mãi..." value="" oninput="filterPromoTabList(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 12px; font-size:13.5px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border); background:var(--box-bg-custom); color:var(--box-text-custom); outline:none;">
                             <button type="button" onclick="const inp=document.getElementById('aiPromoSearchInput'); inp.value=''; filterPromoTabList(''); inp.focus();" style="position: absolute; right: 10px; background: none; border: none; font-size: 16px; cursor: pointer; color: var(--text-muted); padding: 5px; z-index:2;" title="Xóa nhanh">✖</button>
@@ -12706,7 +12611,7 @@ window.openAiSmartOrderModal = function() {
                         <div id="aiPromoListContainer" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;"></div>
                     </div>
 
-                    <!-- PANEL 3: MỞ RỘNG -->
+                    <!-- PANEL 2: MỞ RỘNG -->
                     <div id="ai_panel_expand" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
                         <div style="margin-bottom:8px; flex-shrink:0; position:relative; display:flex; align-items:center;">
                             <input type="text" id="aiExpandSearchInput" placeholder="🔍 Gõ mã hoặc tên SP mở rộng..." value="" oninput="filterExpandTabList(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 12px; font-size:13.5px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border); background:var(--box-bg-custom); color:var(--box-text-custom); outline:none;">
@@ -12715,7 +12620,7 @@ window.openAiSmartOrderModal = function() {
                         <div id="aiExpandListContainer" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px;"></div>
                     </div>
 
-                    <!-- PANEL 4: CTKM -->
+                    <!-- PANEL 3: CTKM -->
                     <div id="ai_panel_ctkm" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
                         <div style="margin-bottom:8px; flex-shrink:0; position:relative; display:flex; align-items:center;">
                             <input type="text" id="aiCtkmSearchInput" placeholder="🔍 Gõ mã hoặc tên công ty..." value="" oninput="filterAiModalCtkm(this.value)" autocomplete="off" style="margin:0; padding:10px 35px 10px 12px; font-size:13.5px; font-weight:800; width:100%; border-radius:10px; border:1px solid var(--card-border); background:var(--box-bg-custom); color:var(--box-text-custom); outline:none;">
@@ -12733,15 +12638,11 @@ window.openAiSmartOrderModal = function() {
     filterPromoTabList('');
     filterExpandTabList('');
     filterAiModalCtkm('');
-    updateAiTotalSum();
 };
 
 window.switchAiModalView = function(viewName) {
-    // 3. KHÓA CHẶT DATA BINDING KHI CHUYỂN TAB (CHỐNG MẤT DỮ LIỆU)
-    syncDomToWorkingList();
-    
     window._aiModalView = viewName;
-    ['core', 'promo', 'expand', 'ctkm'].forEach(t => {
+    ['promo', 'expand', 'ctkm'].forEach(t => {
         const panel = document.getElementById(`ai_panel_${t}`);
         const btn = document.getElementById(`ai_nav_btn_${t}`);
         if (panel) panel.style.display = (t === viewName) ? 'flex' : 'none';
@@ -12749,48 +12650,44 @@ window.switchAiModalView = function(viewName) {
     });
 };
 
-// Hàm đồng bộ DOM -> Mảng để không bị mất dữ liệu khi vẽ lại Chủ Lực
-window.syncDomToWorkingList = function() {
-    window._aiWorkingOrderList.forEach((item, idx) => {
-        const kInp = document.getElementById(`ai_kien_${idx}`);
-        const lInp = document.getElementById(`ai_le_${idx}`);
-        if(kInp) item.kien = Number(kInp.value.replace(/[^0-9]/g, '')) || 0;
-        if(lInp) item.le = Number(lInp.value.replace(/[^0-9]/g, '')) || 0;
-    });
-};
+window.addAiItemToMainCart = function(event, prefix, idx, prdId) {
+    const p = products.find(x => x.id === prdId || x.code === prdId);
+    if (!p) return;
 
-function renderCoreListHtml() {
-    if (!window._aiWorkingOrderList || window._aiWorkingOrderList.length === 0) {
-        return '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Chưa có sản phẩm nào trong gợi ý chủ lực.</div>';
-    }
-    return window._aiWorkingOrderList.map((item, idx) => `
-    <div id="ai_suggestion_row_${idx}" style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-shrink:0;">
-        <button type="button" class="btn btn-red btn-sm" style="padding:4px 8px; border-radius:6px; flex-shrink:0;" onclick="document.getElementById('ai_suggestion_row_${idx}').remove(); window._aiWorkingOrderList.splice(${idx}, 1); updateAiTotalSum();" title="Xóa mã này"><i class="fa-solid fa-trash"></i></button>
-        <div style="flex:1; min-width:0;">
-            <div style="font-size:13px; font-weight:900; color:var(--text-main);"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:2px 6px; border-radius:4px; font-size:11px; margin-right:6px;">${item.code}</span>${item.name}</div>
-            <div style="font-size:10.5px; color:${item.badgeColor || 'var(--primary)'}; font-weight:800; margin-top:2px;">${item.badge || '📦 Thêm từ gợi ý'}</div>
-        </div>
-        <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
-            <div>
-                <span style="font-size:8.5px; font-weight:900; color:var(--text-muted); display:block; text-align:center;">THÙNG</span>
-                <div style="display:flex; align-items:center; gap:2px;">
-                    <button type="button" class="btn btn-sm" style="padding:2px 4px; font-size:10px;" onclick="adjustAiQuickStep('ai_kien_${idx}', -1)">-</button>
-                    <input type="text" id="ai_kien_${idx}" value="${item.kien}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-kien-input" oninput="updateAiTotalSum()" style="width:36px; padding:5px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border); background:var(--box-bg-custom); color:var(--box-text-custom);">
-                    <button type="button" class="btn btn-sm" style="padding:2px 4px; font-size:10px;" onclick="adjustAiQuickStep('ai_kien_${idx}', 1)">+</button>
-                </div>
-            </div>
-            ${item.ratio > 1 ? `
-            <div>
-                <span style="font-size:8.5px; font-weight:900; color:var(--text-muted); display:block; text-align:center;">LẺ (${item.dvt})</span>
-                <div style="display:flex; align-items:center; gap:2px;">
-                    <button type="button" class="btn btn-sm" style="padding:2px 4px; font-size:10px;" onclick="adjustAiQuickStep('ai_le_${idx}', -1)">-</button>
-                    <input type="text" id="ai_le_${idx}" value="${item.le}" data-code="${item.code}" data-ratio="${item.ratio}" data-price="${item.price}" class="ai-rec-le-input" oninput="updateAiTotalSum()" style="width:36px; padding:5px 2px; text-align:center; font-weight:900; font-size:13px; border-radius:6px; border:1px solid var(--card-border); background:var(--box-bg-custom); color:var(--box-text-custom);">
-                    <button type="button" class="btn btn-sm" style="padding:2px 4px; font-size:10px;" onclick="adjustAiQuickStep('ai_le_${idx}', 1)">+</button>
-                </div>
-            </div>` : ''}
-        </div>
-    </div>`).join('');
-}
+    const kienInp = document.getElementById(`${prefix}_kien_${idx}`);
+    const leInp = document.getElementById(`${prefix}_le_${idx}`);
+
+    const kienVal = kienInp ? (Number(kienInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+    const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
+    const ratio = Number(p.tyLeQuyDoi || 50);
+
+    const totalQ = (kienVal * ratio) + leVal;
+    if (totalQ <= 0) return alert("Vui lòng nhập số lượng lớn hơn 0 trước khi thêm!");
+
+    // THÊM TRỰC TIẾP VÀO GIỎ HÀNG CHÍNH BÊN NGOÀI
+    const safeK = p.id || p.code;
+    if (!currentCart[safeK]) currentCart[safeK] = { qty: 0, kien: 0, le: 0 };
+    
+    currentCart[safeK].qty += totalQ;
+    currentCart[safeK].kien = ratio > 0 ? Math.floor(currentCart[safeK].qty / ratio) : 0;
+    currentCart[safeK].le = ratio > 0 ? currentCart[safeK].qty % ratio : currentCart[safeK].qty;
+
+    // Lưu lại và cập nhật giao diện chính (như bình thường)
+    saveCartDraftToLocal();
+    updateCartTotalsUI();
+    filterSalesProducts(productSearchKeyword);
+
+    // Thay đổi giao diện nút để báo hiệu thành công
+    const btn = event.currentTarget;
+    btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã thêm vào giỏ`;
+    btn.style.background = 'var(--emerald)';
+    btn.style.color = '#fff';
+    btn.style.border = 'none';
+    btn.style.pointerEvents = 'none'; // Khóa nút chống bấm đúp
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+};
 
 window.adjustAiQuickStep = function(inputId, step) {
     const inp = document.getElementById(inputId);
@@ -12798,9 +12695,7 @@ window.adjustAiQuickStep = function(inputId, step) {
     let cur = Number(inp.value.replace(/[^0-9]/g, '')) || 0;
     let next = Math.max(0, cur + step);
     inp.value = next;
-    updateAiTotalSum();
 };
-
 window.filterPromoTabList = function(keyword) {
     window._aiPromoSearch = keyword;
     const container = document.getElementById('aiPromoListContainer');
@@ -12846,8 +12741,8 @@ window.filterPromoTabList = function(keyword) {
                         </div>
                     </div>` : ''}
                 </div>
-                <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 10px; border-radius:8px; flex-shrink:0;" onclick="addTabItemToAiCore(event, 'promo', ${idx}, '${p.id || p.code}', '${item.subText.replace(/'/g, "\\'")}')">
-                    <i class="fa-solid fa-plus"></i> Chủ Lực
+               <button class="btn btn-blue btn-sm" style="font-weight:900; padding:8px 10px; border-radius:8px; flex-shrink:0;" onclick="addAiItemToMainCart(event, 'promo', ${idx}, '${p.id || p.code}')">
+                    <i class="fa-solid fa-cart-plus"></i> Thêm Vào Giỏ
                 </button>
             </div>
         </div>`;
@@ -12899,64 +12794,12 @@ window.filterExpandTabList = function(keyword) {
                         </div>
                     </div>` : ''}
                 </div>
-                <button class="btn btn-green btn-sm" style="font-weight:900; padding:8px 10px; border-radius:8px; flex-shrink:0;" onclick="addTabItemToAiCore(event, 'expand', ${idx}, '${p.id || p.code}', '${item.subText.replace(/'/g, "\\'")}')">
-                    <i class="fa-solid fa-plus"></i> Chủ Lực
+                <button class="btn btn-blue btn-sm" style="font-weight:900; padding:8px 10px; border-radius:8px; flex-shrink:0;" onclick="addAiItemToMainCart(event, 'expand', ${idx}, '${p.id || p.code}')">
+                    <i class="fa-solid fa-cart-plus"></i> Thêm Vào Giỏ
                 </button>
             </div>
         </div>`;
     }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy sản phẩm phù hợp.</div>';
-};
-
-// --- THÊM VÀO TAB CHỦ LỰC (CÓ VISUAL FEEDBACK) ---
-window.addTabItemToAiCore = function(event, prefix, idx, prdId, subText) {
-    // 4. LƯU LẠI DỮ LIỆU ĐANG GÕ BÊN TAB CHỦ LỰC TRƯỚC KHI THÊM
-    syncDomToWorkingList();
-
-    const p = products.find(x => x.id === prdId || x.code === prdId);
-    if (!p) return;
-
-    const kienInp = document.getElementById(`${prefix}_kien_${idx}`);
-    const leInp = document.getElementById(`${prefix}_le_${idx}`);
-
-    const kienVal = kienInp ? (Number(kienInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
-    const leVal = leInp ? (Number(leInp.value.replace(/[^0-9]/g, '')) || 0) : 0;
-    const ratio = Number(p.tyLeQuyDoi || 50);
-
-    const totalQ = (kienVal * ratio) + leVal;
-    if (totalQ <= 0) return alert("Vui lòng nhập số lượng lớn hơn 0!");
-
-    let existing = window._aiWorkingOrderList.find(x => String(x.code).trim().toUpperCase() === String(p.code).trim().toUpperCase());
-    if (existing) {
-        existing.kien += kienVal;
-        existing.le += leVal;
-    } else {
-        window._aiWorkingOrderList.push({
-            code: p.code,
-            name: p.name,
-            dvt: p.dvt || 'hộp',
-            ratio: ratio,
-            price: Number(p.price || 0),
-            kien: kienVal,
-            le: leVal,
-            badge: `✨ ${subText}`,
-            badgeColor: 'var(--emerald)'
-        });
-    }
-
-    // Nút đổi trạng thái sang Đã thêm
-    const btn = event.currentTarget;
-    btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã thêm`;
-    btn.style.background = 'var(--text-muted)';
-    btn.style.boxShadow = 'none';
-
-    const coreContainer = document.getElementById('aiCoreListContainer');
-    if (coreContainer) {
-        coreContainer.innerHTML = renderCoreListHtml(); // Vẽ lại với số lượng đã được đồng bộ
-    }
-    updateAiTotalSum();
-
-    if (typeof playSystemSound === 'function') playSystemSound('success');
-    if (typeof triggerHaptic === 'function') triggerHaptic(20);
 };
 
 window.filterAiModalCtkm = function(val) {
