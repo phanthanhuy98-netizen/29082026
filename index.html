@@ -363,7 +363,6 @@
 
   <!-- APP MAIN VIEW -->
   <div id="appView" class="hidden">
-    <div id="userProfileStatusBar"></div>
     <div id="mobileTabBarContainer" class="mobile-tab-bar"></div>
 
     <div class="panel">
@@ -1721,21 +1720,9 @@ window.allStores = (cachedStores || []).filter(s => !s.isDeleted);
       window.promotionsList = cachedPromos || [];
       window.promotionsLoaded = true;
       // -----------------------------------------------
-     if (typeof renderUI === 'function') renderUI();
-
-// Delay việc đánh index nặng nề ra khỏi quá trình khởi động
-setTimeout(() => {
-    if (typeof buildProductIndex === 'function') buildProductIndex();
-    if (typeof buildStoreIndex === 'function') buildStoreIndex();
-    
-    // Nạp lại danh sách SP và KH sau khi đánh index xong nếu đang ở Tab Bán hàng
-    if (currentTab === 'sales') {
-        if (selectedRouteCode || customerSearchKeyword) filterSalesCustomers(customerSearchKeyword);
-        filterSalesProducts('');
-    } else if (currentTab === 'customers') {
-        filterTabCustomers(tabCustomerSearchKey);
-    }
-}, 1500);
+      if (typeof buildProductIndex === 'function') buildProductIndex();
+      if (typeof buildStoreIndex === 'function') buildStoreIndex();
+      if (typeof renderUI === 'function') renderUI();
 
     } catch (error) {}
   }
@@ -2154,47 +2141,122 @@ window.handleLogout = async function() {
     } catch (err) { alert("Lỗi: " + err.message); }
   };
 
-window.selectStoreDirectly = async function(storeId, event) {
-    // ... (Giữ nguyên phần đầu của hàm) ...
+  window.selectStoreDirectly = async function(storeId, event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    let targetStore = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
+    if (!targetStore) {
+      targetStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
+    }
+    if (!targetStore) {
+      alert("Không tìm thấy thông tin khách hàng này!");
+      return;
+    }
+
+    const hasGPSAlready = Boolean(targetStore.lat && Number(targetStore.lat) !== 0 && targetStore.lng && Number(targetStore.lng) !== 0);
+
+    if (!hasGPSAlready) {
+      const confirmPin = await window.showCustomConfirm(
+        "Bắt Buộc Ghim GPS",
+        `Khách hàng "${targetStore.name}" chưa có vị trí GPS.\nBạn có chắc chắn đây là vị trí đúng của khách hàng chứ?`,
+        "fa-location-crosshairs",
+        "Đúng chính xác",
+        "Hủy"
+      );
+
+      if (!confirmPin) return;
+
+      try {
+        const pos = await getHighAccuracyPosition();
+        const lat = Number(pos.lat);
+        const lng = Number(pos.lng);
+        currentSalesGPS = { lat, lng };
+
+        const existingHistory = targetStore.pinnedHistory || [];
+        const newHistoryItem = {
+          lat, lng,
+          code: currentUser.code || 'NV',
+          name: currentUser.name || 'Nhân viên',
+          time: new Date().toISOString()
+        };
+
+        const checkinPayload = {
+          salesUid: currentUser.uid,
+          salesName: currentUser.name,
+          salesCode: currentUser.code,
+          storeId: String(targetStore.id),
+          storeName: targetStore.name,
+          lat, lng,
+          accuracy: pos.accuracy,
+          status: "Ghim GPS bắt buộc"
+        };
+
+        const updatePayload = {
+          lat, lng,
+          pinnedByCode: currentUser.code || 'NV',
+          pinnedByName: currentUser.name || 'Nhân viên',
+          pinnedAt: new Date().toISOString(),
+          pinnedHistory: [...existingHistory, newHistoryItem]
+        };
+
+       const storeRef = doc(db, "stores", String(targetStore.id));
+        setDoc(storeRef, updatePayload, { merge: true }).catch(e => console.log("Lưu tạm GPS", e));
+        
+        addDoc(collection(db, "checkins"), {
+          ...checkinPayload,
+          createdAt: serverTimestamp()
+        }).catch(e => console.log("Lưu check-in offline", e));
+
+        const storeIndex = stores.findIndex(s => String(s.id) === String(targetStore.id));
+        if (storeIndex > -1) {
+          stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+          targetStore = stores[storeIndex];
+        }
+        await saveStoresToLocalCache(stores);
+        buildStoreIndex();
+        triggerHaptic(30);
+      } catch (err) {
+        alert("Không thể lấy tọa độ GPS: " + err.message);
+        return;
+      }
+    } else {
+      try {
+        const pos = await getHighAccuracyPosition();
+        const salesLat = Number(pos.lat);
+        const salesLng = Number(pos.lng);
+        currentSalesGPS = { lat: salesLat, lng: salesLng };
+
+        const distanceMeters = calculateDistanceMeters(salesLat, salesLng, Number(targetStore.lat), Number(targetStore.lng));
+
+        if (distanceMeters > 20) {
+          const confirmDistance = await window.showCustomConfirm(
+            "Cảnh Báo Lệch Khoảng Cách GPS",
+            `Bạn đang đứng cách vị trí ghim của khách hàng ${Math.round(distanceMeters)} mét (lệch trên 20 mét).\nKhách hàng này đã đúng cần xem lại?`,
+            "fa-triangle-exclamation",
+            "Đúng chính xác",
+            "Hủy"
+          );
+
+          if (!confirmDistance) return;
+        }
+      } catch (err) {}
+    }
 
     activeVisitedStore = targetStore;
-    
-    // THÊM ĐOẠN NÀY: Tính lịch sử mua hàng đúng 1 lần khi chọn khách
-    window._currentStoreHistoryMap = new Map();
-    const storeIdStr = String(targetStore.id);
-    const storeCodeStr = String(targetStore.code || '').trim();
-    
-    let custOrders = orders.filter(o => {
-        if (o.status === 'Đã hủy') return false;
-        const matchId = String(o.storeId || '') === storeIdStr;
-        let inferredCode = o.maDTPNNo || '';
-        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) inferredCode = o.maKH.split(' - ')[0].trim();
-        const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
-        return matchId || matchCode;
-    });
+    productSearchKeyword = '';
+    customerSearchKeyword = '';
+    selectedCompanyCode = '';
+    pinnedCompanyPrefix = '';
+    currentCart = {};
+    editingOrderId = null;
+    existingOrderSoCtu = null;
 
-    custOrders.forEach(o => {
-        if (Array.isArray(o.items)) {
-            o.items.forEach(item => {
-                let qty = Number(item.qty || 0);
-                if (qty > 0) {
-                    let code = String(item.code || item.id).trim().toUpperCase();
-                    if (!window._currentStoreHistoryMap.has(code)) {
-                        window._currentStoreHistoryMap.set(code, { totalQty: 0, count: 0 });
-                    }
-                    let data = window._currentStoreHistoryMap.get(code);
-                    data.totalQty += qty;
-                    data.count += 1;
-                }
-            });
-        }
-    });
-
-    // ... (Phần còn lại giữ nguyên) ...
     await loadCartDraftFromLocal();
     triggerHaptic(25);
     renderUI();
-};
+  };
 
   window.resetSelectedStore = async function() {
     let hasUnsavedItems = false;
@@ -2379,94 +2441,90 @@ window.selectStoreDirectly = async function(storeId, event) {
     }, 300);
   };
 
-window.filterSalesCustomers = function(val) {
+  window.filterSalesCustomers = function(val) {
     if (val !== undefined) customerSearchKeyword = removeAccents(val.trim());
     const container = document.getElementById('salesCustomerResultContainer');
     if (!container) return;
 
     if (customerSearchKeyword === "" && !selectedRouteCode) {
-        container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>`;
-        const hintEl = document.getElementById('customerSearchHint');
-        if (hintEl) hintEl.innerText = "Vui lòng nhập mã khách hàng hoặc chọn tuyến...";
-        return;
+      container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>`;
+      const hintEl = document.getElementById('customerSearchHint');
+      if (hintEl) hintEl.innerText = "Vui lòng nhập mã khách hàng hoặc chọn tuyến...";
+      return;
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
     const soldStoreIdsToday = new Set(
-        orders.filter(o => o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid) && o.status !== 'Đã hủy')
-              .map(o => String(o.storeId))
+      orders.filter(o => o.ngayCtu === todayStr && (o.salesCode === currentUser.code || o.salesUid === currentUser.uid) && o.status !== 'Đã hủy')
+            .map(o => String(o.storeId))
     );
 
-    let matchedStores = [];
-    
-    // Bước 1: Chỉ lọc lấy các tiệm khớp (Chưa tính GPS vội để đỡ lag)
+    let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
-        const s = entry.store;
-        const sCode = (s.code || '').trim();
-        
-        let matchRoute = true;
-        if (selectedRouteCode) {
-            matchRoute = sCode.toUpperCase().startsWith(selectedRouteCode.toUpperCase());
-        }
+      const s = entry.store;
+      const sCode = (s.code || '').trim();
+      
+      let matchRoute = true;
+      if (selectedRouteCode) {
+        const sCodeUpper = sCode.toUpperCase();
+        const routeCodeUpper = selectedRouteCode.toUpperCase();
+        matchRoute = sCodeUpper.startsWith(routeCodeUpper);
+      }
 
-        let matchKey = true;
-        if (customerSearchKeyword !== "") {
-            matchKey = removeAccents(sCode).includes(customerSearchKeyword) || entry.searchableText.includes(customerSearchKeyword);
-        }
+      let matchKey = true;
+      if (customerSearchKeyword !== "") {
+        matchKey = removeAccents(sCode).includes(customerSearchKeyword) || entry.searchableText.includes(customerSearchKeyword);
+      }
 
-        if (matchRoute && matchKey) {
-            matchedStores.push(s);
+      if (matchRoute && matchKey) {
+        let dist = Infinity;
+        if (currentSalesGPS && s.lat && Number(s.lat) !== 0 && s.lng && Number(s.lng) !== 0) {
+          dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
         }
+        matched.push({ store: s, distance: dist });
+      }
     }
 
-    // Bước 2: Tách tác vụ render ra khỏi luồng tính toán bằng requestAnimationFrame
-    requestAnimationFrame(() => {
-        // Chỉ lấy tối đa 50-100 tiệm đầu tiên để tính GPS (Máy yếu tính nhiều sẽ treo)
-        const storesToProcess = matchedStores.slice(0, 100);
-        let finalMatches = [];
+    matched.sort((a, b) => a.distance - b.distance);
+    const slicedMatched = matched.slice(0, 20);
 
-        storesToProcess.forEach(s => {
-            let dist = Infinity;
-            if (currentSalesGPS && s.lat && Number(s.lat) !== 0 && s.lng && Number(s.lng) !== 0) {
-                dist = calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, s.lat, s.lng);
-            }
-            finalMatches.push({ store: s, distance: dist });
-        });
+    container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(item => {
+      const s = item.store;
+      const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
+      const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
+      const isClosest = item.distance !== Infinity && item.distance <= 100;
+      const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
+      const hasLat = Boolean(s.lat && Number(s.lat) !== 0);
 
-        finalMatches.sort((a, b) => a.distance - b.distance);
-        const slicedMatched = finalMatches.slice(0, 20); // Chỉ render 20 tiệm lên màn hình
+      return `
+        <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosest ? 'rgba(5, 150, 105, 0.4)' : 'var(--card-border)'};">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="item-code" style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'} ${isSoldToday ? '✅' : ''}</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              ${hasLat ? `
+                <button class="btn btn-green btn-sm" style="padding:5px 10px; font-size:var(--font-size-sub-meta);" onclick="openNativeNavigator(${Number(s.lat)}, ${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
+              ` : ''}
+              <span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>
+            </div>
+          </div>
+          <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
+          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
+          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
+          <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:2px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
+            <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
+          </button>
+        </div>
+      `;
+    }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
 
-        container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(item => {
-            const s = item.store;
-            const isSoldToday = soldStoreIdsToday.has(String(s.id)) || soldStoreIdsToday.has(String(s.code));
-            const distStr = item.distance !== Infinity ? (item.distance > 1000 ? (item.distance / 1000).toFixed(1) + ' km' : Math.round(item.distance) + ' m') : 'Chưa có GPS';
-            const isClosest = item.distance !== Infinity && item.distance <= 100;
-            const pName = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
-            const hasLat = Boolean(s.lat && Number(s.lat) !== 0);
-
-            return `
-                <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px; border:1px solid ${isClosest ? 'rgba(5, 150, 105, 0.4)' : 'var(--card-border)'};">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span class="item-code" style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'} ${isSoldToday ? '✅' : ''}</span>
-                        <div style="display:flex; gap:6px; align-items:center;">
-                            ${hasLat ? `<button class="btn btn-green btn-sm" style="padding:5px 10px; font-size:var(--font-size-sub-meta);" onclick="openNativeNavigator(${Number(s.lat)},${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>` : ''}
-                            <span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClosest ? 'var(--emerald)' : 'var(--text-muted)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>
-                        </div>
-                    </div>
-                    <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
-                    <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
-                    <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
-                    <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:2px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
-                        <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
-                    </button>
-                </div>
-            `;
-        }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
-
-        const hintEl = document.getElementById('customerSearchHint');
-        if (hintEl) hintEl.innerText = slicedMatched.length > 0 ? `Hiển thị ${slicedMatched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
-    });
-};
+    const hintEl = document.getElementById('customerSearchHint');
+    if (hintEl) hintEl.innerText = slicedMatched.length > 0 ? `Hiển thị ${slicedMatched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
+  };
 
   window.debounceFilterSalesProducts = function(val) {
     clearTimeout(productSearchDebounceTimer);
@@ -2817,13 +2875,49 @@ window.filterModalProductList = function(keyword) {
 };
 
 
+// ==========================================
+// 3. HÀM TÌM KIẾM SẢN PHẨM TRONG TAB BÁN HÀNG (CÓ TÍCH HỢP GỢI Ý LỊCH SỬ TB)
+// ==========================================
 window.filterSalesProducts = function(val) {
    if (val !== undefined) productSearchKeyword = removeAccents(val.trim());
    const container = document.getElementById('mobileProductListContainer');
    const hintEl = document.getElementById('productSearchHint');
    if (!container) return;
-   // ==========================================
-   let historyMap = window._currentStoreHistoryMap || new Map();
+
+   // BƯỚC 1: TÍNH TOÁN LỊCH SỬ MUA HÀNG TRUNG BÌNH CỦA KHÁCH NÀY (SIÊU TỐC ĐỘ)
+   let historyMap = new Map();
+   if (activeVisitedStore) {
+       const storeIdStr = String(activeVisitedStore.id);
+       const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+       // Lọc ra các đơn hàng của riêng khách này
+       let custOrders = orders.filter(o => {
+           if (o.status === 'Đã hủy') return false;
+           const matchId = String(o.storeId || '') === storeIdStr;
+           let inferredCode = o.maDTPNNo || '';
+           if (!inferredCode && o.maKH && o.maKH.includes(' - ')) inferredCode = o.maKH.split(' - ')[0].trim();
+           const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+           return matchId || matchCode;
+       });
+
+       // Cộng dồn số lượng và đếm số lần mua cho từng mã SP
+       custOrders.forEach(o => {
+           if (Array.isArray(o.items)) {
+               o.items.forEach(item => {
+                   let qty = Number(item.qty || 0);
+                   if (qty > 0) {
+                       let code = String(item.code || item.id).trim().toUpperCase();
+                       if (!historyMap.has(code)) {
+                           historyMap.set(code, { totalQty: 0, count: 0 });
+                       }
+                       let data = historyMap.get(code);
+                       data.totalQty += qty;
+                       data.count += 1;
+                   }
+               });
+           }
+       });
+   }
 
    // BƯỚC 2: TÌM KIẾM SẢN PHẨM
    let matched = [];
@@ -2920,7 +3014,9 @@ window.filterSalesProducts = function(val) {
         }
      }
 
+     // ==========================================
      // LOGIC HUY HIỆU GỢI Ý LỊCH SỬ TRUNG BÌNH (TB)
+     // ==========================================
      let avgBadgeHtml = '';
      const pCodeUpper = String(p.code || '').trim().toUpperCase();
      if (historyMap.has(pCodeUpper)) {
@@ -2941,8 +3037,10 @@ window.filterSalesProducts = function(val) {
              avgText = `${avgQty} ${unitName}`;
          }
 
+         // Vẽ huy hiệu màu Xanh Lá cực gọn gàng
          avgBadgeHtml = `<span style="background:rgba(16, 185, 129, 0.1); color:var(--emerald); padding:2px 6px; border-radius:6px; font-size:10.5px; font-weight:900; margin-left:6px; display:inline-flex; align-items:center; gap:4px; vertical-align:middle; border:1px solid rgba(16, 185, 129, 0.2);"><i class="fa-solid fa-clock-rotate-left"></i> TB: ${avgText}</span>`;
      }
+     // ==========================================
 
     return `
           <div id="card_item_${safeK}" class="mobile-item-card product-card-item ${hasQty ? 'has-selected' : ''}" style="display: flex; flex-direction: column; gap: 6px;">
@@ -2958,6 +3056,7 @@ window.filterSalesProducts = function(val) {
               ${p.name} ${avgBadgeHtml}
             </div>
 
+            <!-- ĐƠN GIÁ ĐÃ CHIA 1000 ĐỂ HIỂN THỊ GỌN GÀNG -->
             <div style="display:flex; justify-content:space-between; align-items:center; font-size: var(--font-size-sub-meta); margin-top: 2px;">
               <span style="color:var(--text-muted); font-weight:700;">Đơn giá:</span>
               <span style="color:var(--rose); font-weight:900; font-size:13px;">${(Number(p.price || 0) / 1000).toLocaleString('en-US')}</span>
@@ -2989,7 +3088,7 @@ window.filterSalesProducts = function(val) {
   }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); font-size:12px;">Gõ tìm kiếm vật tư tiếp theo...</div>`;
   
   if (hintEl) hintEl.innerText = "";
-};
+ };
   window.togglePinnedGPSFilter = function() {
     showOnlyPinnedGPS = !showOnlyPinnedGPS;
     const btn = document.getElementById('togglePinnedGPSBtn');
@@ -5412,19 +5511,18 @@ function attachListeners() {
     localStorage.setItem('dms_last_active_tab', tabName);
     renderUI();
   };
-function renderUserProfileBar() {
+  function renderUserProfileBar() {
+    let statusBar = document.getElementById('userProfileStatusBar');
+    if (!statusBar) {
+        statusBar = document.createElement('div');
+        statusBar.id = 'userProfileStatusBar';
+        // Chèn vào ngay trước thanh Tab Bar
+        const appView = document.getElementById('appView');
+        const tabBar = document.getElementById('mobileTabBarContainer');
+        appView.insertBefore(statusBar, tabBar);
+    }
+
     if (!currentUser) return;
-    // 4. Xóa rỗng các biến tạm trên RAM
-      if (ctkmListenerUnsub) { ctkmListenerUnsub(); ctkmListenerUnsub = null; }
-      if (compListenerUnsub) { compListenerUnsub(); compListenerUnsub = null; }
-      
-      // THÊM 2 DÒNG NÀY VÀO ĐỂ RESET THANH TRẠNG THÁI KHI ĐĂNG XUẤT
-      const statusBar = document.getElementById('userProfileStatusBar');
-      if (statusBar) { statusBar.innerHTML = ''; delete statusBar.dataset.uid; }
-      
-      currentCart = {};
-  
-    if (statusBar.dataset.uid === currentUser.uid) return;
 
     // Tự động dịch mã Đơn vị sang Tên hiển thị chuyên nghiệp
     let companyName = "Chưa gán đơn vị";
@@ -5433,7 +5531,7 @@ function renderUserProfileBar() {
 
     if (currentUser.maNB === "BH_") {
         companyName = "NPP ĐẠI ĐÔNG";
-        companyColor = "var(--amber)"; // Trùng màu thương hiệu
+        companyColor = "var(--amber)"; // Trùng màu thương hiệu anh hay dùng
         companyIcon = "fa-bolt";
     } else if (currentUser.maNB === "PB_") {
         companyName = "NPP PHƯỚC BÌNH";
@@ -5473,9 +5571,6 @@ function renderUserProfileBar() {
             </div>
         </div>
     `;
-
-    // Gắn nhãn đã vẽ cho User này để các lần gọi renderUI() sau không bị tính toán lại
-    statusBar.dataset.uid = currentUser.uid;
   }
 
   function renderUI() {
