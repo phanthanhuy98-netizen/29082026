@@ -10769,13 +10769,11 @@ window.handleImportCtkmExcel = function(event) {
     const reader = new FileReader();
     reader.onload = async function(e) {
       try {
-        const data = new Uint8Array(e.target.result);
-        // CẤU HÌNH cellDates: true ĐỂ NHẬN DIỆN NGÀY THÁNG TỪ EXCEL
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true }); 
+       const data = new Uint8Array(e.target.result);
+        // ĐÃ SỬA LỖI ĐỊNH DẠNG NGÀY: Để Excel trả về số Serial nguyên thủy, tự code JS sẽ xử lý
+        const workbook = XLSX.read(data, { type: 'array' }); 
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        
-        // CẤU HÌNH raw: false ĐỂ ÉP EXCEL XUẤT RA CHUỖI ĐÃ FORMAT THAY VÌ SỐ SERIAL (45962)
-        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, dateNF: "dd/mm/yyyy" }); 
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         // ================= CHỐT CHẶN BẢO MẬT ĐƠN VỊ =================
         let headerRow = jsonRows[0] || [];
         let donViColIndex = -1;
@@ -10820,10 +10818,51 @@ window.handleImportCtkmExcel = function(event) {
         let newPromos = [];
         let importedCtus = new Set();
 
-        // Hàm tiện ích cắt bỏ đuôi 00:00:00 nếu Excel tự thêm vào
+     // ĐÃ SỬA: Hàm tiện ích xử lý định dạng ngày tháng triệt để 100% chuẩn Việt Nam
         const formatCleanDate = (val) => {
             if (!val) return '';
-            return String(val).split(' ')[0].trim();
+            
+            // Trị tận gốc trường hợp Excel trả về số Serial (ví dụ: 45928 = 29/09/2026)
+            if (typeof val === 'number') {
+                // Tính ngày từ Serial Number của Excel (Lấy mốc 30/12/1899)
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const dateObj = new Date(excelEpoch.getTime() + val * 86400000);
+                const dd = String(dateObj.getUTCDate()).padStart(2, '0');
+                const mm = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+                const yyyy = dateObj.getUTCFullYear();
+                return `${dd}/${mm}/${yyyy}`;
+            }
+
+            // Nếu nó đã là chữ (ví dụ copy paste dạng Text)
+            let strVal = String(val).split(' ')[0].trim();
+            
+            // Sửa lỗi nếu nó vô tình bị định dạng US M/D/YY (VD: 11/1/25 -> 01/11/2025)
+            if (strVal.includes('/')) {
+                let p = strVal.split('/');
+                if (p.length === 3) {
+                    let y = p[2];
+                    if (y.length === 2) y = '20' + y; // Bù năm 25 -> 2025
+                    
+                    let p0 = parseInt(p[0]);
+                    let p1 = parseInt(p[1]);
+                    
+                    // Nếu p1 > 12 thì chắc chắn p1 là Ngày, p0 là Tháng (Dạng US MM/DD/YYYY)
+                    if (p1 > 12) return `${String(p1).padStart(2, '0')}/${String(p0).padStart(2, '0')}/${y}`;
+                    
+                    // Mặc định trả về định dạng Việt Nam DD/MM/YYYY
+                    return `${String(p0).padStart(2, '0')}/${String(p1).padStart(2, '0')}/${y}`;
+                }
+            }
+            
+            // Xử lý nếu đầu vào là YYYY-MM-DD
+            if (strVal.includes('-')) {
+                let p = strVal.split('-');
+                if (p.length === 3 && p[0].length === 4) {
+                    return `${p[2]}/${p[1]}/${p[0]}`;
+                }
+            }
+
+            return strVal;
         };
 
         // Bắt đầu đọc từ dòng dưới dòng tiêu đề
