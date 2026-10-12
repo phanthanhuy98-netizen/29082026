@@ -5811,6 +5811,9 @@ ${activeVisitedStore ? `
            <button class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #E11D48; color: #fff;" onclick="switchTab('ctkm')">
            <i class="fa-solid fa-gift"></i> Khuyến Mãi
            </button>
+           <button id="btnSyncCustHistory" class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #0EA5E9; color: #fff;" onclick="syncActiveCustomerHistory()">
+  <i class="fa-solid fa-cloud-arrow-down"></i> Tải Lịch Sử Cũ
+</button>
               
             </div>
 
@@ -7335,6 +7338,58 @@ window.clearHistoryFilter = function() {
   if (dFrom) dFrom.value = '';
   if (dTo) dTo.value = '';
   window._renderHistoryResultsOnly();
+};
+  window.syncActiveCustomerHistory = async function() {
+  if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
+  
+  const btn = document.getElementById('btnSyncCustHistory');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+  }
+
+  try {
+    const storeIdStr = String(activeVisitedStore.id);
+    const storeCodeStr = String(activeVisitedStore.code || '').trim();
+
+    // Lọc theo ID của khách hàng trên máy chủ
+    const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
+    const snap1 = await getDocs(q1);
+
+    // Lọc dự phòng theo mã Cửa hàng (maDTPNNo) cho các đơn cũ
+    const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
+    const snap2 = await getDocs(q2);
+
+    let newCount = 0;
+    
+    // Gộp dữ liệu tải về vào biến `orders` cục bộ của máy
+    const mergeData = (docSnap) => {
+      const data = { id: docSnap.id, ...docSnap.data() };
+      if (!orders.find(o => o.id === data.id)) {
+        orders.push(data);
+        newCount++;
+      }
+    };
+
+    snap1.forEach(mergeData);
+    snap2.forEach(mergeData);
+
+    if (typeof triggerHaptic === 'function') triggerHaptic(30);
+    
+    if (newCount > 0) {
+        alert(`✅ Đã tải thêm thành công ${newCount} đơn hàng cũ của khách hàng này từ máy chủ đám mây!\n\nBây giờ AI Gợi ý và Lịch sử đã có đầy đủ dữ liệu để phân tích.`);
+    } else {
+        alert("Khách hàng này chưa có thêm đơn hàng cũ nào khác trên hệ thống.");
+    }
+
+  } catch (e) {
+    alert("Lỗi khi tải lịch sử: " + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Tải Lịch Sử Cũ';
+    }
+  }
 };
 
 window.openStoreHistoryModal = function() {
