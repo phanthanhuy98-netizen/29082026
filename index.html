@@ -10865,26 +10865,42 @@ window.handleImportCtkmExcel = function(event) {
             return strVal;
         };
 
+    // --- THÊM BỘ LỌC CHỐNG TRÙNG LẶP ---
+        let uniquePromoMap = new Map(); // Dùng Map để tự động loại bỏ trùng lặp
+
         // Bắt đầu đọc từ dòng dưới dòng tiêu đề
         for (let i = headerIdx + 1; i < jsonRows.length; i++) {
             const row = jsonRows[i];
             if (!row || row.length === 0 || !row[colMap['Ma CTKM']]) continue;
             
-            const ctu = row[colMap['Ma Ctu']] ? String(row[colMap['Ma Ctu']]).trim() : 'KHÁC';
-            importedCtus.add(ctu);
+            const maKMRaw = String(row[colMap['Ma CTKM']]).trim();
+            if (!maKMRaw) continue; // Bỏ qua nếu mã trống
 
-            newPromos.push({
-               id: 'km_' + Date.now() + '_' + i,
-               tuNgay: formatCleanDate(row[colMap['Tu Ngay']]),
-               denNgay: formatCleanDate(row[colMap['Den Ngay']]),
-               maKM: String(row[colMap['Ma CTKM']]).trim(),
-               noiDung: row[colMap['Noi Dung']] ? String(row[colMap['Noi Dung']]).trim() : '',
-               hangHoa: row[colMap['Nhom Hang Hoa']] ? String(row[colMap['Nhom Hang Hoa']]).trim() : '',
-               khachHang: row[colMap['Khach Hang']] ? String(row[colMap['Khach Hang']]).trim() : '',
-               maCtu: ctu,
-               createdAt: new Date().toISOString()
-            });
+            const ctu = row[colMap['Ma Ctu']] ? String(row[colMap['Ma Ctu']]).trim() : 'KHÁC';
+            
+            // Tạo khóa nhận diện duy nhất (Ghép Mã Cty + Mã KM để chính xác tuyệt đối)
+            const uniqueKey = `${ctu}_${maKMRaw}`.toUpperCase();
+
+            // NẾU KHÓA NÀY CHƯA TỒN TẠI THÌ MỚI THÊM VÀO (Nếu đã có rồi thì bỏ qua dòng dư)
+            if (!uniquePromoMap.has(uniqueKey)) {
+                importedCtus.add(ctu);
+                uniquePromoMap.set(uniqueKey, {
+                   id: 'km_' + Date.now() + '_' + i,
+                   tuNgay: formatCleanDate(row[colMap['Tu Ngay']]),
+                   denNgay: formatCleanDate(row[colMap['Den Ngay']]),
+                   maKM: maKMRaw,
+                   noiDung: row[colMap['Noi Dung']] ? String(row[colMap['Noi Dung']]).trim() : '',
+                   hangHoa: row[colMap['Nhom Hang Hoa']] ? String(row[colMap['Nhom Hang Hoa']]).trim() : '',
+                   khachHang: row[colMap['Khach Hang']] ? String(row[colMap['Khach Hang']]).trim() : '',
+                   maCtu: ctu,
+                   createdAt: new Date().toISOString()
+                });
+            }
         }
+        
+        // Chuyển kết quả từ Map đã lọc sạch trở lại mảng newPromos
+        newPromos = Array.from(uniquePromoMap.values());
+        // -----------------------------------
 
         if (newPromos.length === 0) return alert("Không đọc được dòng dữ liệu hợp lệ nào!");
 
