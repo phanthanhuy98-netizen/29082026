@@ -12962,6 +12962,7 @@ window.openSmartSuggestionModal = function() {
     const storeIdStr = String(activeVisitedStore.id);
     const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
+    // 1. Lọc ra các đơn hàng hợp lệ của khách hàng này
     let storeOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -12976,6 +12977,7 @@ window.openSmartSuggestionModal = function() {
     const totalOrders = storeOrders.length;
     let skuDataMap = new Map();
 
+    // 2. Tính tổng sản lượng đã mua cho từng mã hàng
     storeOrders.forEach(o => {
         (o.items || []).forEach(i => {
             let qty = Number(i.qty || 0);
@@ -12989,6 +12991,7 @@ window.openSmartSuggestionModal = function() {
         });
     });
 
+    // 3. Phân tích số liệu trung bình/đơn
     let suggestions = [];
     let totalSuggestedValue = 0;
 
@@ -12997,6 +13000,7 @@ window.openSmartSuggestionModal = function() {
         if (p && isProductAllowedByCompanyDvt(p)) {
             let avgQty = data.totalQty / totalOrders;
             
+            // Chỉ gợi ý những món khách mua tương đối ổn định (trung bình >= 0.1 / đơn)
             if (avgQty >= 0.1) {
                 let ratio = Number(p.tyLeQuyDoi || 50);
                 let price = Number(p.price || 0);
@@ -13004,10 +13008,11 @@ window.openSmartSuggestionModal = function() {
 
                 totalSuggestedValue += avgValue;
 
+                // Tính toán Thùng / Lẻ trực quan
                 let kien = Math.floor(avgQty / ratio);
                 let le = Math.round(avgQty % ratio);
                 
-                if (le === ratio) { kien++; le = 0; }
+                if (le === ratio) { kien++; le = 0; } // Làm tròn lên nếu số lẻ sát nút
 
                 suggestions.push({
                     product: p,
@@ -13020,8 +13025,10 @@ window.openSmartSuggestionModal = function() {
         }
     });
 
+    // Sắp xếp các món mang lại giá trị cao nhất lên đầu
     suggestions.sort((a, b) => b.avgValue - a.avgValue);
 
+    // 4. Vẽ giao diện Báo cáo chuyên nghiệp (Tối ưu siêu gọn & mượt mà)
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
@@ -13042,7 +13049,7 @@ window.openSmartSuggestionModal = function() {
                     <button class="btn btn-sm" onclick="closeSmartSuggestionModal()" style="background: rgba(255,255,255,0.2); color: #fff; border: none; font-size: 14px; padding: 4px 10px;"><i class="fa-solid fa-xmark"></i></button>
                 </div>
 
-                <!-- TỔNG KẾT TÀI CHÍNH -->
+                <!-- TỔNG KẾT TÀI CHÍNH (Gọn hơn) -->
                 <div style="padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--card-border); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; z-index: 9;">
                     <div style="display: flex; flex-direction: column; gap: 2px;">
                         <span style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Giá trị toa đề xuất</span>
@@ -13054,9 +13061,9 @@ window.openSmartSuggestionModal = function() {
                     </div>
                 </div>
 
-                <!-- DANH SÁCH CHI TIẾT GỢI Ý (ĐÃ GỘP THÀNH 1 DÒNG DUY NHẤT) -->
+                <!-- DANH SÁCH CHI TIẾT GỢI Ý (Thiết kế dạng List phẳng, chống lag) -->
                 <div style="flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; background: #fff; display: flex; flex-direction: column; transform: translateZ(0);">
-                    ${suggestions.length > 0 ? suggestions.map((item) => {
+                    ${suggestions.length > 0 ? suggestions.map((item, idx) => {
                         const p = item.product;
                         let qtyText = '';
                         if (item.kien > 0 && item.le > 0) qtyText = `${item.kien}T ${item.le}${p.dvt || 'lẻ'}`;
@@ -13064,16 +13071,22 @@ window.openSmartSuggestionModal = function() {
                         else qtyText = `${item.le}${p.dvt || 'lẻ'}`;
 
                         return `
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #f1f5f9; gap: 12px; contain: content;">
-                            <!-- Trái: Mã, Tên sản phẩm và Số tiền trên cùng 1 hàng -->
-                            <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
-                                <span style="background: var(--prod-code-bg); color: var(--primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 900; flex-shrink: 0;">${p.code}</span>
-                                <span style="font-size: 13.5px; font-weight: 800; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${p.name}">${p.name}</span>
-                                <span style="font-size: 13px; font-weight: 900; color: var(--rose); flex-shrink: 0; margin-left: auto;">${(item.avgValue / 1000).toLocaleString('en-US', {maximumFractionDigits: 1})}K</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #f1f5f9; contain: content;">
+                            <!-- Bên trái: Tên SP & Số tiền -->
+                            <div style="flex: 1; min-width: 0; padding-right: 12px;">
+                                <div style="font-size: 13.5px; font-weight: 800; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${p.name}">
+                                    <span style="color: var(--primary);">[${p.code}]</span>${p.name}
+                                </div>
+                                <div style="font-size: 13px; font-weight: 900; color: var(--rose); margin-top: 3px;">
+                                    ${(item.avgValue / 1000).toLocaleString('en-US', {maximumFractionDigits: 1})}K
+                                </div>
                             </div>
-                            <!-- Phải: Định mức TB nằm gọn góc phải -->
-                            <div style="text-align: right; flex-shrink: 0; background: rgba(16, 185, 129, 0.08); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.2);">
-                                <span style="font-size: 12px; font-weight: 900; color: var(--emerald);">${qtyText}</span>
+                            <!-- Bên phải: Khối Số lượng -->
+                            <div style="text-align: right; flex-shrink: 0; background: rgba(16, 185, 129, 0.08); padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.2);">
+                                <div style="font-size: 10px; font-weight: 800; color: var(--text-muted); margin-bottom: 2px;">ĐỊNH MỨC TB</div>
+                                <div style="font-size: 13px; font-weight: 900; color: var(--emerald);">
+                                    ${qtyText}
+                                </div>
                             </div>
                         </div>
                         `;
@@ -13081,11 +13094,12 @@ window.openSmartSuggestionModal = function() {
                         <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
                             <i class="fa-solid fa-folder-open fa-3x" style="margin-bottom: 12px; opacity: 0.5;"></i>
                             <div style="font-size: 14px; font-weight: 800;">Không đủ dữ liệu tạo toa.</div>
+                            <div style="font-size: 12px; margin-top: 4px;">Khách hàng có vẻ ít khi lặp lại đơn hoặc mua quá ít.</div>
                         </div>
                     `}
                 </div>
 
-                <!-- FOOTER -->
+                <!-- FOOTER CẢNH BÁO -->
                 <div style="padding: 10px 16px; background: #f8fafc; border-top: 1px solid var(--card-border); text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); flex-shrink: 0;">
                     <i class="fa-solid fa-circle-info"></i> Bảng số liệu cố vấn tham khảo. Hãy tự chốt đơn tại giỏ hàng.
                 </div>
@@ -13095,6 +13109,7 @@ window.openSmartSuggestionModal = function() {
     `;
     modalContainer.classList.remove('hidden');
 };
+
 window.closeSmartSuggestionModal = function() {
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (modalContainer) {
