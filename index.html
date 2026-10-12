@@ -13248,8 +13248,10 @@ window.filterAiModalCtkm = function(val) {
     const container = document.getElementById('aiModalCtkmListContainer');
     if (!container) return;
 
-    let activePromos = window._aiCachedCtkmItems;
+    let activePromos = window._aiCachedCtkmItems; // ADN lọc ngày & lọc quyền đã nằm sẵn ở đây
     const rawVal = val.trim().toLowerCase();
+    
+    // 1. LỌC THEO TỪ KHÓA TÌM KIẾM
     if (window._aiCtkmSearch) {
         const q = window._aiCtkmSearch;
         activePromos = activePromos.filter(p => {
@@ -13264,19 +13266,64 @@ window.filterAiModalCtkm = function(val) {
         });
     }
 
-    container.innerHTML = activePromos.length > 0 ? activePromos.map(km => {
-        let foundComp = (typeof companyList !== 'undefined' ? companyList : []).find(c => String(c.maCtu || '').trim().toUpperCase() === String(km.maCtu || '').trim().toUpperCase());
-        let compFullName = foundComp && foundComp.tenCtu ? `${km.maCtu} - ${foundComp.tenCtu}` : `Công Ty ${km.maCtu || 'KHÁC'}`;
-        return `
-        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left:4px solid #E11D48; border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:13px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-building"></i> ${compFullName}</span>
-                <span style="font-size:11px; font-weight:700; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay || ''} - <b style="color:var(--rose);">${km.denNgay || ''}</b></span>
+    if (activePromos.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy chương trình khuyến mãi nào.</div>';
+        return;
+    }
+
+    // 2. GOM NHÓM CTKM THEO CÔNG TY
+    let groupedPromos = {};
+    activePromos.forEach(km => {
+        let ctuKey = (km.maCtu || 'KHÁC').toUpperCase();
+        if (!groupedPromos[ctuKey]) groupedPromos[ctuKey] = [];
+        groupedPromos[ctuKey].push(km);
+    });
+
+    const sortedCtus = Object.keys(groupedPromos).sort();
+    
+    // Nếu đang gõ tìm kiếm -> Tự động mở bung Accordion ra cho dễ nhìn
+    // Nếu để trống -> Thu gọn lại cho gọn gàng
+    const isExpanded = rawVal !== '' ? true : false;
+
+    // 3. VẼ GIAO DIỆN DẠNG ĐÓNG/MỞ (ACCORDION)
+    let htmlOutput = sortedCtus.map(ctu => {
+        const prods = groupedPromos[ctu];
+        const accId = `acc_ai_ctkm_ctu_${ctu.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        
+        let foundComp = (typeof companyList !== 'undefined' ? companyList : []).find(c => String(c.maCtu || '').trim().toUpperCase() === ctu);
+        let compDisplayName = foundComp && foundComp.tenCtu ? `${ctu} - ${foundComp.tenCtu}` : `Công Ty ${ctu}`;
+
+        // Vẽ các thẻ CTKM con bên trong
+        let listHtml = prods.map(km => {
+            return `
+            <div style="background:var(--panel-bg); border:1px dashed var(--card-border); border-left:4px solid #E11D48; border-radius:8px; padding:12px; margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:13px; font-weight:900; background:var(--prod-code-bg); color:var(--rose); padding:2px 8px; border-radius:6px;">${km.maKM || ''}</span>
+                    <span style="font-size:11px; font-weight:700; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> ${km.tuNgay || ''} - <b style="color:var(--rose);">${km.denNgay || ''}</b></span>
+                </div>
+                <div style="font-size:13.5px; font-weight:800; color:var(--text-main); line-height:1.4;">${km.noiDung || ''}</div>
             </div>
-            <div style="font-size:13px; font-weight:800; background:var(--prod-code-bg); color:var(--rose); padding:2px 8px; border-radius:6px; width:fit-content;">${km.maKM || ''}</div>
-            <div style="font-size:14px; font-weight:900; color:var(--text-main); line-height:1.4;">${km.noiDung || ''}</div>
-        </div>`;
-    }).join('') : '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;">Không tìm thấy chương trình khuyến mãi nào.</div>';
+            `;
+        }).join('');
+
+        // Bọc lại bằng khung Accordion của Công ty
+        return `
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden; margin-bottom:10px; flex-shrink:0;">
+            <div onclick="toggleOrderAccordion('${accId}')" style="padding:12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:rgba(37, 99, 235, 0.05);">
+                <div style="display:flex; gap:10px; align-items:center; flex:1;">
+                    <span style="font-size:14px; font-weight:900; color:var(--primary);"><i class="fa-solid fa-building"></i> ${compDisplayName}</span>
+                    <span style="font-size:11px; font-weight:700; background:var(--primary); color:#fff; padding:2px 8px; border-radius:8px;">${prods.length} CTKM</span>
+                </div>
+                <i class="fa-solid fa-chevron-down" id="icon_${accId}" style="font-size:14px; color:var(--primary); transition:transform 0.2s; ${isExpanded ? 'transform: rotate(180deg);' : ''}"></i>
+            </div>
+            <div id="${accId}" class="${isExpanded ? '' : 'hidden'}" style="padding:10px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; background:var(--card-bg);">
+                ${listHtml}
+            </div>
+        </div>
+        `;
+    }).join('');
+
+    container.innerHTML = htmlOutput;
 };
 
 window.closeAiModal = function() {
