@@ -7408,7 +7408,7 @@ window.clearHistoryFilter = function() {
   }
 };
 
-window.openStoreHistoryModal = async function() { // Thêm chữ async vào đây
+window.openStoreHistoryModal = async function() {
   if (!activeVisitedStore) {
     return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
@@ -7416,42 +7416,71 @@ window.openStoreHistoryModal = async function() { // Thêm chữ async vào đâ
   window._historyModalTab = 'top';
   window._historyDateFrom = ''; 
   window._historyDateTo = '';
+  window._currentHistoryDisplayLimit = 10; // Mặc định chỉ hiển thị 10 đơn
   
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
-  // Hiển thị loading mờ trong lúc tải dữ liệu ngầm từ Firebase
-  modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu lịch sử...</div></div>`;
-  modalContainer.classList.remove('hidden');
-
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
-  // --- BẮT ĐẦU TỰ ĐỘNG TẢI LỊCH SỬ ---
-  try {
-    const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
-    const snap1 = await getDocs(q1);
+  // 1. HIỂN THỊ GIAO DIỆN CHỜ
+  modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu lịch sử...</div></div>`;
+  modalContainer.classList.remove('hidden');
 
-    const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
-    const snap2 = await getDocs(q2);
+  // 2. LẤY DỮ LIỆU TỪ ADN (NẾU CÓ TRƯỚC ĐÓ)
+  let localHistory = await loadCustomerHistoryFromLocal(storeIdStr);
+  let hasLocalData = false;
 
-    const mergeData = (docSnap) => {
-      const data = { id: docSnap.id, ...docSnap.data() };
-      if (!orders.find(o => o.id === data.id)) {
-        orders.push(data); // Đẩy dữ liệu cũ vào RAM
-      }
-    };
-
-    snap1.forEach(mergeData);
-    snap2.forEach(mergeData);
-  } catch(e) {
-    console.warn("Lỗi tự động tải lịch sử:", e);
+  if (localHistory && Array.isArray(localHistory) && localHistory.length > 0) {
+      hasLocalData = true;
+      localHistory.forEach(localOrder => {
+          if (!orders.find(o => o.id === localOrder.id)) {
+              orders.push(localOrder); // Nhúng ADN vào RAM
+          }
+      });
   }
-  // --- KẾT THÚC TẢI LỊCH SỬ ---
+
+  // 3. CHỈ TẢI TỪ FIREBASE KHI ADN CHƯA CÓ GÌ (TIẾT KIỆM 100% READ)
+  if (!hasLocalData) {
+      try {
+        const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
+        const snap1 = await getDocs(q1);
+
+        const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
+        const snap2 = await getDocs(q2);
+
+        let customerFreshOrders = [];
+
+        const mergeData = (docSnap) => {
+          const data = { id: docSnap.id, ...docSnap.data() };
+          customerFreshOrders.push(data); // Đưa vào mảng để lưu ADN
+          
+          // Đẩy vào RAM hiện tại
+          const idx = orders.findIndex(o => o.id === data.id);
+          if (idx > -1) {
+              orders[idx] = data; // Ghi đè nếu có cập nhật
+          } else {
+              orders.push(data); // Thêm mới
+          }
+        };
+
+        snap1.forEach(mergeData);
+        snap2.forEach(mergeData);
+
+        // LƯU VÀO ADN ĐỂ LẦN SAU BẤM VÀO SẼ KHÔNG TỐN READ NỮA
+        if (customerFreshOrders.length > 0) {
+            await saveCustomerHistoryToLocal(storeIdStr, customerFreshOrders);
+        }
+      } catch(e) {
+        console.warn("Lỗi đồng bộ lịch sử mới:", e);
+      }
+  }
 
   const isTopTab = window._historyModalTab === 'top';
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7); // Lấy tháng hiện tại (VD: 2026-10)
 
-  // Lọc dữ liệu từ biến orders (đã được cập nhật đầy đủ ở bước trên)
+  // 4. LỌC: CHỈ LẤY TRONG THÁNG HIỆN TẠI (MẶC ĐỊNH)
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
     let inferredCode = o.maDTPNNo || '';
@@ -7459,7 +7488,11 @@ window.openStoreHistoryModal = async function() { // Thêm chữ async vào đâ
       inferredCode = o.maKH.split(' - ')[0].trim();
     }
     const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
-    return (matchId || matchCode) && o.status !== 'Đã hủy';
+    
+    // Nếu chưa dùng bộ lọc ngày tùy chỉnh, thì ép chỉ hiện trong tháng này
+    let matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
+    
+    return (matchId || matchCode) && matchMonth && o.status !== 'Đã hủy';
   });
   customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
@@ -7476,7 +7509,7 @@ window.openStoreHistoryModal = async function() { // Thêm chữ async vào đâ
             🔥 Top sản phẩm hay mua
           </button>
           <button id="histTabDiaryBtn" class="btn ${!isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('diary')">
-            📖 Nhật ký đơn (${customerOrders.length})
+            📖 Nhật ký tháng này (${customerOrders.length})
           </button>
         </div>
 
@@ -7485,15 +7518,15 @@ window.openStoreHistoryModal = async function() { // Thêm chữ async vào đâ
               <div style="display:flex; gap:8px; align-items:center;">
                   <div style="flex:1;">
                       <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
-                      <input type="date" id="histDateFrom" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                      <input type="date" id="histDateFrom" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value); window._currentHistoryDisplayLimit=10;" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
                   </div>
                   <div style="flex:1;">
                       <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
-                      <input type="date" id="histDateTo" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value)" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                      <input type="date" id="histDateTo" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value); window._currentHistoryDisplayLimit=10;" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
                   </div>
               </div>
               <button id="histClearFilterBtn" class="btn btn-red btn-sm hidden" onclick="clearHistoryFilter()" style="width:100%; justify-content:center; padding:8px; font-weight:800; margin-top:4px;">
-                  <i class="fa-solid fa-xmark"></i> Hủy bộ lọc ngày để xem chi tiết
+                  <i class="fa-solid fa-xmark"></i> Hủy bộ lọc để xem mặc định tháng này
               </button>
           </div>
         </div>
@@ -7532,8 +7565,10 @@ window._renderHistoryResultsOnly = function() {
   if (!contentEl) return;
 
   const clearBtn = document.getElementById('histClearFilterBtn');
+  const isCustomDate = window._historyDateFrom !== '' || window._historyDateTo !== '';
+  
   if (clearBtn) {
-    if (window._historyDateFrom !== '' || window._historyDateTo !== '') {
+    if (isCustomDate) {
       clearBtn.classList.remove('hidden');
     } else {
       clearBtn.classList.add('hidden');
@@ -7547,6 +7582,7 @@ window._renderHistoryResultsOnly = function() {
 
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7); // Mặc định tháng hiện tại
 
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
@@ -7555,7 +7591,14 @@ window._renderHistoryResultsOnly = function() {
       inferredCode = o.maKH.split(' - ')[0].trim();
     }
     const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
-    return (matchId || matchCode) && o.status !== 'Đã hủy';
+    
+    // Logic: Nếu không bấm chọn ngày cụ thể, chỉ hiển thị lịch sử của tháng này.
+    let matchMonth = true;
+    if (!isCustomDate) {
+        matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
+    }
+    
+    return (matchId || matchCode) && matchMonth && o.status !== 'Đã hủy';
   });
   
   customerOrders.sort((a, b) => {
@@ -7566,6 +7609,7 @@ window._renderHistoryResultsOnly = function() {
   const isTopTab = window._historyModalTab === 'top';
 
   if (isTopTab) {
+      // (Phần code gom nhóm Top sản phẩm giữ nguyên)
       let productStatsMap = new Map();
       customerOrders.forEach(o => {
         if (o.items && Array.isArray(o.items)) {
@@ -7601,7 +7645,7 @@ window._renderHistoryResultsOnly = function() {
       topProductsList.sort((a, b) => b.totalQty - a.totalQty);
 
       if (topProductsList.length === 0) {
-        contentEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700; flex-shrink:0;">Khách hàng chưa có lịch sử mua hàng.</div>';
+        contentEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:700; flex-shrink:0;">Khách hàng chưa có lịch sử mua hàng trong khoảng thời gian này.</div>';
         return;
       }
 
@@ -7609,7 +7653,6 @@ window._renderHistoryResultsOnly = function() {
       topProductsList.forEach(tp => {
         let cleanCode = String(tp.code || '').trim();
         let ctyKey = cleanCode.length >= 2 ? cleanCode.substring(0, 2).toUpperCase() : 'KHAC';
-        
         if (!groupedByCompany[ctyKey]) groupedByCompany[ctyKey] = [];
         groupedByCompany[ctyKey].push(tp);
       });
@@ -7617,8 +7660,6 @@ window._renderHistoryResultsOnly = function() {
       let groupHtmlArr = [];
       Object.keys(groupedByCompany).sort().forEach(ctyCode => {
         const prods = groupedByCompany[ctyCode];
-        
-        // --- THÊM TỔNG DOANH SỐ CHO TỪNG CÔNG TY ---
         let compTotalRev = 0;
         prods.forEach(p => {
            const pObj = products.find(x => x.code === p.code || x.id === p.code);
@@ -7694,6 +7735,7 @@ window._renderHistoryResultsOnly = function() {
       const hasBothDates = window._historyDateFrom !== '' && window._historyDateTo !== '';
 
       if (hasBothDates) {
+        // (Phần gom nhóm theo ngày giữ nguyên như code cũ)
         let aggregatedItems = new Map();
         diaryOrders.forEach(o => {
           if (o.items && Array.isArray(o.items)) {
@@ -7704,13 +7746,7 @@ window._renderHistoryResultsOnly = function() {
                 if (!aggregatedItems.has(pKey)) {
                   const productObj = products.find(p => p.id === pKey || p.code === pKey);
                   const ratio = productObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50;
-                  aggregatedItems.set(pKey, {
-                    code: item.code,
-                    name: item.name,
-                    qty: 0,
-                    dvt: item.dvt || 'gói',
-                    ratio: ratio
-                  });
+                  aggregatedItems.set(pKey, { code: item.code, name: item.name, qty: 0, dvt: item.dvt || 'gói', ratio: ratio });
                 }
                 aggregatedItems.get(pKey).qty += qty;
               }
@@ -7778,12 +7814,14 @@ window._renderHistoryResultsOnly = function() {
           </div>
         `;
       } else {
-        htmlOutput = diaryOrders.map(o => {
+        // ÁP DỤNG CHIA TRANG LỊCH SỬ Ở ĐÂY
+        const visibleOrders = diaryOrders.slice(0, window._currentHistoryDisplayLimit);
+
+        htmlOutput = visibleOrders.map(o => {
             const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
             const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
             const accordionId = `acc_order_${o.id}`;
 
-            // --- THÊM TỔNG TIỀN CHO TỪNG ĐƠN HÀNG ---
             let orderTotalRev = 0;
             validItems.forEach(i => {
                 const pObj = products.find(p => p.id === i.id || p.code === i.code);
@@ -7834,6 +7872,18 @@ window._renderHistoryResultsOnly = function() {
               </div>
             `;
         }).join('');
+
+        // THÊM NÚT "XEM THÊM"
+        if (diaryOrders.length > visibleOrders.length) {
+            const remainingCount = diaryOrders.length - visibleOrders.length;
+            htmlOutput += `
+            <div style="text-align: center; margin-top: 10px; margin-bottom: 20px;">
+                <button class="btn btn-amber" style="padding: 12px 24px; font-weight: 800; font-size: 13px; border-radius: 12px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.2);" onclick="loadMoreHistoryOrders()">
+                    <i class="fa-solid fa-angle-down"></i> XEM THÊM (${remainingCount} ĐƠN CŨ HƠN)
+                </button>
+            </div>
+            `;
+        }
       }
       
       contentEl.innerHTML = htmlOutput;
@@ -7846,6 +7896,10 @@ window.closeStoreHistoryModal = function() {
     modalContainer.innerHTML = '';
     modalContainer.classList.add('hidden');
   }
+};
+  window.loadMoreHistoryOrders = function() {
+    window._currentHistoryDisplayLimit += 10;
+    window._renderHistoryResultsOnly();
 };
 
 window.toggleOrderAccordion = function(accId) {
