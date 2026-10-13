@@ -5802,19 +5802,14 @@ ${activeVisitedStore ? `
               <button class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #DB2777; color: #fff;" onclick="openCompanyListModal()">
                 <i class="fa-solid fa-building"></i> DS Cty
               </button>
-             <button class="btn btn-purple btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%); color: #fff;" onclick="openSmartSuggestionModal()">
-    <i class="fa-solid fa-brain"></i> Phân Tích Gợi Ý Đơn
-</button>
+      
               <button class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #7C3AED; color: #fff;" onclick="openStoreHistoryModal()">
                 <i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử
               </button>
            <button class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #E11D48; color: #fff;" onclick="switchTab('ctkm')">
            <i class="fa-solid fa-gift"></i> Khuyến Mãi
            </button>
-           <button id="btnSyncCustHistory" class="btn btn-sm" style="font-weight: 800; padding: 8px 10px; font-size: 12px; background: #0EA5E9; color: #fff;" onclick="syncActiveCustomerHistory()">
-  <i class="fa-solid fa-cloud-arrow-down"></i> Tải Lịch Sử Cũ
-</button>
-              
+               
             </div>
 
             <div style="background: rgba(59, 130, 246, 0.15); border: 2px solid rgba(59, 130, 246, 0.5); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px; position: relative;">
@@ -7413,10 +7408,11 @@ window.clearHistoryFilter = function() {
   }
 };
 
-window.openStoreHistoryModal = function() {
+window.openStoreHistoryModal = async function() { // Thêm chữ async vào đây
   if (!activeVisitedStore) {
     return alert("Vui lòng chọn khách hàng trước khi xem lịch sử!");
   }
+  
   window._historyModalTab = 'top';
   window._historyDateFrom = ''; 
   window._historyDateTo = '';
@@ -7424,10 +7420,38 @@ window.openStoreHistoryModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
-  const isTopTab = window._historyModalTab === 'top';
+  // Hiển thị loading mờ trong lúc tải dữ liệu ngầm từ Firebase
+  modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu lịch sử...</div></div>`;
+  modalContainer.classList.remove('hidden');
+
   const storeIdStr = String(activeVisitedStore.id);
   const storeCodeStr = String(activeVisitedStore.code || '').trim();
 
+  // --- BẮT ĐẦU TỰ ĐỘNG TẢI LỊCH SỬ ---
+  try {
+    const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
+    const snap1 = await getDocs(q1);
+
+    const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
+    const snap2 = await getDocs(q2);
+
+    const mergeData = (docSnap) => {
+      const data = { id: docSnap.id, ...docSnap.data() };
+      if (!orders.find(o => o.id === data.id)) {
+        orders.push(data); // Đẩy dữ liệu cũ vào RAM
+      }
+    };
+
+    snap1.forEach(mergeData);
+    snap2.forEach(mergeData);
+  } catch(e) {
+    console.warn("Lỗi tự động tải lịch sử:", e);
+  }
+  // --- KẾT THÚC TẢI LỊCH SỬ ---
+
+  const isTopTab = window._historyModalTab === 'top';
+
+  // Lọc dữ liệu từ biến orders (đã được cập nhật đầy đủ ở bước trên)
   let customerOrders = orders.filter(o => {
     const matchId = String(o.storeId || '') === storeIdStr;
     let inferredCode = o.maDTPNNo || '';
@@ -7479,7 +7503,6 @@ window.openStoreHistoryModal = function() {
       </div>
     </div>
   `;
-  modalContainer.classList.remove('hidden');
   window.switchHistoryTab('top'); 
 };
 
