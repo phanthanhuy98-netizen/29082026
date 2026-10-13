@@ -7488,10 +7488,152 @@ window.openStoreHistoryModal = async function() {
           }
       }
 
- const isTopTab = window._historyModalTab === 'top';
+      const isTopTab = window._historyModalTab === 'top';
+      const currentMonthPrefix = new Date().toISOString().slice(0, 7); 
+
+      // 4. LỌC: MẶC ĐỊNH CHỈ LẤY TRONG THÁNG HIỆN TẠI
+      let customerOrders = orders.filter(o => {
+        const matchId = String(o.storeId || '') === storeIdStr;
+        let inferredCode = o.maDTPNNo || '';
+        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+          inferredCode = o.maKH.split(' - ')[0].trim();
+        }
+        const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+        
+        let matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
+        
+        return (matchId || matchCode) && matchMonth && o.status !== 'Đã hủy';
+      });
+      customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
+
+      // 5. VẼ KHUNG GIAO DIỆN LỊCH SỬ
+      modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeStoreHistoryModal()">
+          <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; max-width:600px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:10px; flex-shrink:0;">
+              <h3 style="font-size:16px; font-weight:800; color:var(--primary);"><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử: ${activeVisitedStore.name}</h3>
+              <button class="btn btn-red btn-sm" onclick="closeStoreHistoryModal()">Đóng</button>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:12px; flex-shrink:0;">
+              <button id="histTabTopBtn" class="btn ${isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('top')">
+                🔥 Top sản phẩm hay mua
+              </button>
+              <button id="histTabDiaryBtn" class="btn ${!isTopTab ? 'btn-amber' : 'btn-sm'}" style="flex:1; font-weight:800; padding:10px;" onclick="switchHistoryTab('diary')">
+                📖 Nhật ký tháng này (${customerOrders.length})
+              </button>
+            </div>
+
+            <div id="historyFilterContainer" style="flex-shrink:0; display:none;">
+              <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 12px; background: var(--card-bg); padding: 12px; border-radius: 12px; border: 1px solid var(--card-border);">
+                  <div style="display:flex; gap:8px; align-items:center;">
+                      <div style="flex:1;">
+                          <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Từ ngày:</label>
+                          <input type="date" id="histDateFrom" value="${window._historyDateFrom}" onchange="setHistoryDateFrom(this.value); window._currentHistoryDisplayLimit=10;" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                      </div>
+                      <div style="flex:1;">
+                          <label style="font-size:11px; font-weight:800; color:var(--primary); margin-bottom:4px; display:block;">Đến ngày:</label>
+                          <input type="date" id="histDateTo" value="${window._historyDateTo}" onchange="setHistoryDateTo(this.value); window._currentHistoryDisplayLimit=10;" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--card-border); font-size:13px; font-weight:700;">
+                      </div>
+                  </div>
+                  <button id="histClearFilterBtn" class="btn btn-red btn-sm hidden" onclick="clearHistoryFilter()" style="width:100%; justify-content:center; padding:8px; font-weight:800; margin-top:4px;">
+                      <i class="fa-solid fa-xmark"></i> Hủy bộ lọc để xem mặc định
+                  </button>
+              </div>
+            </div>
+
+            <div id="historyScrollContent" style="overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding-right:4px; padding-bottom:20px;">
+            </div>
+          </div>
+        </div>
+      `;
+
+      // 6. GỌI HÀM VẼ CHI TIẾT
+      if (typeof window.switchHistoryTab === 'function') {
+          window.switchHistoryTab('top'); 
+      } else {
+          throw new Error("Không tìm thấy hàm switchHistoryTab (Có thể bạn đã xóa nhầm ở các bước trước).");
+      }
+
+  } catch (error) {
+      // NẾU CÓ BẤT KỲ LỖI GÌ XẢY RA, LẬP TỨC TẮT BẢNG LOADING VÀ BÁO LỖI
+      console.error(error);
+      modalContainer.innerHTML = '';
+      modalContainer.classList.add('hidden');
+      alert("Lỗi không thể mở lịch sử: " + error.message);
+  }
+};
+window.switchHistoryTab = function(tabName) {
+  window._historyModalTab = tabName;
+  const isTop = tabName === 'top';
+  
+  const btnTop = document.getElementById('histTabTopBtn');
+  const btnDiary = document.getElementById('histTabDiaryBtn');
+  if(btnTop && btnDiary) {
+    btnTop.className = `btn ${isTop ? 'btn-amber' : 'btn-sm'}`;
+    btnTop.style.cssText = "flex:1; font-weight:800; padding:10px;";
+    btnDiary.className = `btn ${!isTop ? 'btn-amber' : 'btn-sm'}`;
+    btnDiary.style.cssText = "flex:1; font-weight:800; padding:10px;";
+  }
+
+  const filterContainer = document.getElementById('historyFilterContainer');
+  if (filterContainer) {
+    filterContainer.style.display = isTop ? 'none' : 'block';
+  }
+
+  window._renderHistoryResultsOnly();
+};
+
+window._renderHistoryResultsOnly = function() {
+  const contentEl = document.getElementById('historyScrollContent');
+  if (!contentEl) return;
+
+  const clearBtn = document.getElementById('histClearFilterBtn');
+  const isCustomDate = window._historyDateFrom !== '' || window._historyDateTo !== '';
+  
+  if (clearBtn) {
+    if (isCustomDate) {
+      clearBtn.classList.remove('hidden');
+    } else {
+      clearBtn.classList.add('hidden');
+    }
+  }
+
+  if (!activeVisitedStore) {
+      contentEl.innerHTML = '';
+      return;
+  }
+
+  const storeIdStr = String(activeVisitedStore.id);
+  const storeCodeStr = String(activeVisitedStore.code || '').trim();
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7); // Mặc định tháng hiện tại
+
+  let customerOrders = orders.filter(o => {
+    const matchId = String(o.storeId || '') === storeIdStr;
+    let inferredCode = o.maDTPNNo || '';
+    if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+      inferredCode = o.maKH.split(' - ')[0].trim();
+    }
+    const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
+    
+    // Logic: Nếu không bấm chọn ngày cụ thể, chỉ hiển thị lịch sử của tháng này.
+    let matchMonth = true;
+    if (!isCustomDate) {
+        matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
+    }
+    
+    return (matchId || matchCode) && matchMonth && o.status !== 'Đã hủy';
+  });
+  
+  customerOrders.sort((a, b) => {
+      const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
+      return getNum(b.soCtu) - getNum(a.soCtu);
+  });
+
+  const isTopTab = window._historyModalTab === 'top';
 
   if (isTopTab) {
-      // (Phần code gom nhóm Top sản phẩm giữ nguyên không thay đổi)
+      // (Phần code gom nhóm Top sản phẩm giữ nguyên)
       let productStatsMap = new Map();
       customerOrders.forEach(o => {
         if (o.items && Array.isArray(o.items)) {
@@ -7699,7 +7841,6 @@ window.openStoreHistoryModal = async function() {
         // ÁP DỤNG CHIA TRANG LỊCH SỬ Ở ĐÂY
         const visibleOrders = diaryOrders.slice(0, window._currentHistoryDisplayLimit);
 
-        // THAY ĐỔI: Dùng visibleOrders thay vì customerOrders
         htmlOutput = visibleOrders.map(o => {
             const validItems = (o.items || []).filter(i => Number(i.qty || 0) > 0);
             const totalSL = validItems.reduce((sum, i) => sum + Number(i.qty || 0), 0);
@@ -7771,7 +7912,8 @@ window.openStoreHistoryModal = async function() {
       
       contentEl.innerHTML = htmlOutput;
   }
-    };
+};
+
 window.closeStoreHistoryModal = function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (modalContainer) {
