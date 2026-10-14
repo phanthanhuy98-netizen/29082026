@@ -6841,14 +6841,53 @@ else if (tab === 'kpi') {
         }
       }
 
+      // BẮT ĐẦU ĐOẠN SỬA LỖI: TẠO GIAO DIỆN CHỜ (LOADING) ĐỂ TRÁNH GIẬT TRANG
+      container.innerHTML = `
+        <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
+          <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
+        </div>
+        <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
+            <b style="font-size:15px;">Đang tổng hợp số liệu từ máy chủ...</b>
+        </div>`;
+
+      // TRUY VẤN DỮ LIỆU ĐỘC LẬP TỪ FIREBASE THEO ĐÚNG KHOẢNG NGÀY ĐÃ CHỌN
+      let analyticsOrders = [];
+      try {
+          // Gộp cả ngày quá khứ (prevStart) và ngày hiện tại (filterStart) vào 1 lần tải
+          let queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
+          let queryEnd = filterEnd;
+
+          if (queryStart && queryEnd) {
+              const q = query(collection(db, "orders"),
+                  where("ngayCtu", ">=", queryStart),
+                  where("ngayCtu", "<=", queryEnd)
+              );
+              const snap = await getDocs(q);
+              analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+          } else {
+              // Trường hợp chọn "Tất Cả"
+              const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
+              const snapAll = await getDocs(qAll);
+              analyticsOrders = snapAll.docs.map(d => ({id: d.id, ...d.data()}));
+          }
+      } catch (err) {
+          console.error("Lỗi lấy dữ liệu KPI:", err);
+          analyticsOrders = typeof orders !== 'undefined' ? orders : []; // Fallback nếu rớt mạng
+      }
+
+      // Khóa an toàn: Nếu người dùng chuyển tab khác trong lúc đang tải thì không vẽ tiếp
+      if (currentTab !== 'kpi') return;
+
       let kpiMap = new Map();
       let globalSkuMap = new Map();
-      let globalStoreStatsMap = new Map(); 
-      let globalCompanyStatsMap = new Map(); 
+      let globalStoreStatsMap = new Map();
+      let globalCompanyStatsMap = new Map();
       let currentStats = { kien: 0, don: 0, doanhSo: 0, tiems: new Set() };
-      let prevStats = { kien: 0, don: 0, doanhSo: 0 }; 
+      let prevStats = { kien: 0, don: 0, doanhSo: 0 };
 
-      orders.forEach(o => {
+      // ĐỔI orders.forEach THÀNH analyticsOrders.forEach ĐỂ LẤY DỮ LIỆU VỪA TẢI
+      analyticsOrders.forEach(o => {
         if (o.status === 'Đã hủy') return;
 
         if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
