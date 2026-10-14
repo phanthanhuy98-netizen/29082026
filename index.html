@@ -9431,9 +9431,45 @@ window.forceRefreshKpi = async function() {
 
     try {
         const currentMonth = window._chiTieuTargetMonth;
-        
+
+        // ==========================================
+        // 1. ĐỒNG BỘ GPS KHÁCH HÀNG (CHẠY NGẦM SILENT SYNC)
+        // Giải quyết triệt để lỗi "0 tại quầy" mà không cần qua tab Khách Hàng
+        // ==========================================
+        try {
+            const lastGpsSync = localStorage.getItem('dms_last_gps_refresh') || "2000-01-01T00:00:00.000Z";
+            const qStore = query(collection(db, "stores"), where("pinnedAt", ">", lastGpsSync));
+            const storeSnap = await getDocs(qStore);
+            let storeUpdated = false;
+
+            storeSnap.forEach(docSnap => {
+                const serverData = docSnap.data();
+                const sId = String(serverData.id || docSnap.id);
+                const localStore = stores.find(s => String(s.id) === sId);
+
+                if (localStore) {
+                    localStore.lat = serverData.lat || 0;
+                    localStore.lng = serverData.lng || 0;
+                    storeUpdated = true;
+                } else {
+                    stores.push(serverData);
+                    storeUpdated = true;
+                }
+            });
+
+            if (storeUpdated) {
+                localStorage.setItem('dms_last_gps_refresh', new Date().toISOString());
+                if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
+            }
+        } catch (gpsErr) {
+            console.warn("Lỗi đồng bộ GPS ngầm:", gpsErr);
+        }
+
+        // ==========================================
+        // 2. ĐỒNG BỘ ĐƠN HÀNG (GIỮ NGUYÊN LOGIC CŨ)
+        // ==========================================
         if (!window._cachedKpiOrders[currentMonth]) {
-            // LẦN TẢI ĐẦU TIÊN CỦA THÁNG: Tải toàn bộ để làm móng dữ liệu
+            // Lần tải đầu tiên
             const startOfMonth = currentMonth + "-01";
             const endOfMonth = currentMonth + "-31";
             const q = query(collection(db, "orders"), 
@@ -9442,14 +9478,11 @@ window.forceRefreshKpi = async function() {
             );
             const mSnap = await getDocs(q);
             window._cachedKpiOrders[currentMonth] = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-            
-            // Lưu lại mốc thời gian vừa tải xong
             localStorage.setItem(`dms_kpi_last_sync_${currentMonth}`, new Date().toISOString());
         } else {
-            // CÁC LẦN TẢI SAU: Đồng bộ gia tăng tuyệt đối chính xác (Timestamp Sync)
+            // Tải gia tăng (Chỉ lấy đơn mới)
             const lastSyncTime = localStorage.getItem(`dms_kpi_last_sync_${currentMonth}`) || "2000-01-01T00:00:00.000Z";
             
-            // Lấy các đơn hàng MỚI ĐƯỢC TẠO SAU mốc lastSyncTime
             const qNew = query(collection(db, "orders"), 
                 where("ngayCtu", ">=", currentMonth + "-01"),
                 where("ngayCtu", "<=", currentMonth + "-31"),
@@ -9457,7 +9490,6 @@ window.forceRefreshKpi = async function() {
             );
             const snapNew = await getDocs(qNew);
             
-            // Lấy các đơn hàng CŨ BỊ SỬA LẠI SAU mốc lastSyncTime
             const qEdited = query(collection(db, "orders"), 
                 where("ngayCtu", ">=", currentMonth + "-01"),
                 where("ngayCtu", "<=", currentMonth + "-31"),
@@ -9465,47 +9497,41 @@ window.forceRefreshKpi = async function() {
             );
             const snapEdited = await getDocs(qEdited);
             
-            // Gom chung đơn mới và đơn bị sửa lại
             let changedOrders = [];
             snapNew.forEach(d => changedOrders.push({ id: d.id, ...d.data() }));
             snapEdited.forEach(d => {
-                // Kiểm tra trùng lặp giữa 2 truy vấn
                 if (!changedOrders.find(o => o.id === d.id)) {
                     changedOrders.push({ id: d.id, ...d.data() });
                 }
             });
             
-            // Gộp (Merge) vào cache hiện tại của tháng
             let cachedList = window._cachedKpiOrders[currentMonth];
             changedOrders.forEach(newOrd => {
                 const idx = cachedList.findIndex(o => o.id === newOrd.id || o.soCtu === newOrd.soCtu);
                 if (idx > -1) {
-                    cachedList[idx] = newOrd; // Ghi đè đơn cũ vừa bị Edit
+                    cachedList[idx] = newOrd; 
                 } else {
-                    cachedList.push(newOrd); // Bổ sung đơn mới tinh
+                    cachedList.push(newOrd); 
                 }
             });
             
-            // Cập nhật lại mốc thời gian mới nhất
             localStorage.setItem(`dms_kpi_last_sync_${currentMonth}`, new Date().toISOString());
-            
-            // Bộ lọc cuối: Loại bỏ các đơn đã bị Hủy để KPI chính xác
             window._cachedKpiOrders[currentMonth] = cachedList.filter(o => o.status !== 'Đã hủy');
             await saveKpiOrdersToLocal(currentMonth, window._cachedKpiOrders[currentMonth]);
         }
 
-        // Gọi lại hàm vẽ biểu đồ KPI
+        // ==========================================
+        // 3. TÍNH TOÁN VÀ VẼ LẠI BIỂU ĐỒ VỚI TỌA ĐỘ GPS MỚI NHẤT
+        // ==========================================
         await calculateAndRenderTargets();
 
         if (typeof playSystemSound === 'function') playSystemSound('success');
         if (typeof triggerHaptic === 'function') triggerHaptic(30);
+
     } catch (error) {
         console.error("Lỗi làm mới KPI:", error);
-        
-        // CẢNH BÁO BẢO MẬT FIREBASE INDEX:
-        // Lần đầu chạy có thể Firebase yêu cầu tạo Composite Index (Bảng mục lục ghép)
         if (error.message.includes("requires an index")) {
-            alert("⚠️️ Cảnh báo từ máy chủ: Vui lòng mở F12 (Console), copy đường link xanh dương của Firebase dán vào trình duyệt để tạo Index đồng bộ dữ liệu. Chờ 5 phút sau đó F5 tải lại là hệ thống sẽ chạy mượt vĩnh viễn!");
+            alert("⚠ Cảnh báo từ máy chủ: Vui lòng mở F12 (Console), copy đường link xanh dương của Firebase dán vào trình duyệt để tạo Index đồng bộ dữ liệu.");
         } else {
             alert("Lỗi khi tải dữ liệu mới: " + error.message);
         }
