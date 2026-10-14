@@ -7326,28 +7326,43 @@ if (skuObj.kien > 0) {
           <div id="acc_top_stores" class="hidden" style="padding:20px; border-top:1px solid var(--card-border); background:var(--card-bg);">
             <div style="display:flex; flex-direction:column; gap:10px;">
  ${topStoresList.map((st, i) => {
-                // 1. Dò tìm thông tin Khách Hàng và Tuyến siêu tốc
-                let storeIdentifier = st.name; 
-                let matchedStore = stores.find(s => s.id === storeIdentifier || s.code === storeIdentifier || s.name === storeIdentifier);
+                // 1. Tách dữ liệu thô
+                let rawIdentifier = st.name; 
+                let matchedStore = stores.find(s => s.id === rawIdentifier || s.code === rawIdentifier || s.name === rawIdentifier);
                 
                 let storeCode = "KH";
-                let storeName = st.name;
+                let storeName = rawIdentifier;
                 let routeName = "Chưa phân tuyến";
 
+                // 2. Trích xuất Mã KH và Tên KH chuẩn xác
                 if (matchedStore) {
                     storeCode = matchedStore.code || "KH";
-                    storeName = matchedStore.name || st.name;
-                    let cleanCode = String(storeCode).trim().toUpperCase();
-                    let matchedRoute = (routeGroupsList || []).find(r => cleanCode.startsWith(String(r.nhomDoiTuong || '').trim().toUpperCase()));
-                    if (matchedRoute) {
-                        routeName = `Tuyến ${matchedRoute.nhomDoiTuong} ${matchedRoute.noiDung ? '- ' + matchedRoute.noiDung : ''}`;
-                    }
-                } else if (storeName.includes(' - ')) {
-                    let parts = storeName.split(' - ');
+                    storeName = matchedStore.name || rawIdentifier;
+                } else if (rawIdentifier.includes(' - ')) {
+                    let parts = rawIdentifier.split(' - ');
                     storeCode = parts[0].trim();
                     storeName = parts.slice(1).join(' - ').trim();
                 }
 
+                // 3. LOGIC TÌM TUYẾN THÔNG MINH (ĐỘC LẬP)
+                let cleanCode = String(storeCode).trim().toUpperCase();
+                
+                // Dùng Regex bóc tách chữ số ở đầu Mã KH (VD: "70GIANG" -> lấy "70", "37H.THAO" -> lấy "37")
+                let routePrefixMatch = cleanCode.match(/^(\d+)/); 
+                
+                if (routePrefixMatch) {
+                    let prefixNum = routePrefixMatch[1]; // Lấy con số tuyến
+                    let matchedRoute = (routeGroupsList || []).find(r => String(r.nhomDoiTuong).trim() === prefixNum);
+                    
+                    if (matchedRoute) {
+                        routeName = `Tuyến ${matchedRoute.nhomDoiTuong} ${matchedRoute.noiDung ? '- ' + matchedRoute.noiDung : ''}`;
+                    } else {
+                        // Nếu bắt được số Tuyến nhưng Admin chưa đặt tên trong Cài đặt
+                        routeName = `Tuyến ${prefixNum} (Chưa đặt tên)`;
+                    }
+                }
+
+                // 4. Tính toán giao diện
                 const qtyStr = st.qty.toFixed(1) + ' Thùng';
                 const barWidth = Math.max((st.qty / maxStoreQty) * 100, 5);
 
