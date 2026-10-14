@@ -6841,42 +6841,59 @@ else if (tab === 'kpi') {
         }
       }
 
-      // BẮT ĐẦU ĐOẠN SỬA LỖI: TẠO GIAO DIỆN CHỜ (LOADING) ĐỂ TRÁNH GIẬT TRANG
+      // BẮT ĐẦU ĐOẠN SỬA LỖI THEO ĐÚNG "ADN" CACHE CỦA HỆ THỐNG
       container.innerHTML = `
         <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
           <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
         </div>
         <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
             <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
-            <b style="font-size:15px;">Đang tổng hợp số liệu từ máy chủ...</b>
+            <b style="font-size:15px;">Đang trích xuất dữ liệu từ bộ nhớ...</b>
         </div>`;
 
-      // TRUY VẤN DỮ LIỆU ĐỘC LẬP TỪ FIREBASE THEO ĐÚNG KHOẢNG NGÀY ĐÃ CHỌN
-      let analyticsOrders = [];
-      try {
-          // Gộp cả ngày quá khứ (prevStart) và ngày hiện tại (filterStart) vào 1 lần tải
-          let queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
-          let queryEnd = filterEnd;
+      // 1. TÌM THÁNG CẦN LỌC (Lấy "YYYY-MM" từ biến filterEnd hoặc todayStr)
+      const targetMonthForKpi = (filterEnd || todayStr).slice(0, 7);
 
-          if (queryStart && queryEnd) {
-              const q = query(collection(db, "orders"),
-                  where("ngayCtu", ">=", queryStart),
-                  where("ngayCtu", "<=", queryEnd)
-              );
-              const snap = await getDocs(q);
-              analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      // 2. TẠO MẢNG DỮ LIỆU LỚN CHỨA TOÀN BỘ ĐƠN CỦA THÁNG ĐÓ
+      let analyticsOrders = [];
+
+      try {
+          window._cachedKpiOrders = window._cachedKpiOrders || {};
+
+          // LƯỚI LỌC 1: Tìm trong RAM (Chuyển ngày qua lại tốn 0 Read, tốc độ tức thời)
+          if (window._cachedKpiOrders[targetMonthForKpi] && window._cachedKpiOrders[targetMonthForKpi].length > 0) {
+              analyticsOrders = window._cachedKpiOrders[targetMonthForKpi];
           } else {
-              // Trường hợp chọn "Tất Cả"
-              const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
-              const snapAll = await getDocs(qAll);
-              analyticsOrders = snapAll.docs.map(d => ({id: d.id, ...d.data()}));
+              // LƯỚI LỌC 2: Tìm trong IndexedDB (Tắt trình duyệt mở lại tốn 0 Read)
+              const localData = typeof loadKpiOrdersFromLocal === 'function' ? await loadKpiOrdersFromLocal(targetMonthForKpi) : null;
+
+              if (localData && localData.length > 0) {
+                  analyticsOrders = localData;
+                  window._cachedKpiOrders[targetMonthForKpi] = localData; // Nạp ngược lên RAM
+              } else {
+                  // LƯỚI LỌC 3: Tải từ Firebase (Chỉ tốn Read 1 lần duy nhất cho cả tháng đó)
+                  const startOfMonth = targetMonthForKpi + "-01";
+                  const endOfMonth = targetMonthForKpi + "-31";
+                  const q = query(collection(db, "orders"),
+                      where("ngayCtu", ">=", startOfMonth),
+                      where("ngayCtu", "<=", endOfMonth)
+                  );
+                  const snap = await getDocs(q);
+                  analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+
+                  // Kéo về xong thì nhét liền vào IndexedDB và RAM để khóa Read
+                  window._cachedKpiOrders[targetMonthForKpi] = analyticsOrders;
+                  if (typeof saveKpiOrdersToLocal === 'function') {
+                      await saveKpiOrdersToLocal(targetMonthForKpi, analyticsOrders);
+                  }
+              }
           }
       } catch (err) {
           console.error("Lỗi lấy dữ liệu KPI:", err);
-          analyticsOrders = typeof orders !== 'undefined' ? orders : []; // Fallback nếu rớt mạng
+          analyticsOrders = typeof orders !== 'undefined' ? orders : [];
       }
 
-      // Khóa an toàn: Nếu người dùng chuyển tab khác trong lúc đang tải thì không vẽ tiếp
+      // Khóa an toàn: Chống render đè nếu người dùng đã bấm sang tab khác lúc đang tính toán
       if (currentTab !== 'kpi') return;
 
       let kpiMap = new Map();
@@ -6886,7 +6903,7 @@ else if (tab === 'kpi') {
       let currentStats = { kien: 0, don: 0, doanhSo: 0, tiems: new Set() };
       let prevStats = { kien: 0, don: 0, doanhSo: 0 };
 
-      // ĐỔI orders.forEach THÀNH analyticsOrders.forEach ĐỂ LẤY DỮ LIỆU VỪA TẢI
+      // 3. THAY VÌ LẶP MẢNG 'orders' (Bị kẹt 100 dòng), TA LẶP MẢNG 'analyticsOrders' (Chứa cả ngàn đơn của tháng)
       analyticsOrders.forEach(o => {
         if (o.status === 'Đã hủy') return;
 
