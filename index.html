@@ -2909,7 +2909,7 @@ window.filterSalesProducts = function(val) {
        });
 
        // Cộng dồn số lượng và đếm số lần mua cho từng mã SP
-       custunifiedKpiOrders.forEach(o => {
+       custOrders.forEach(o => {
            if (Array.isArray(o.items)) {
                o.items.forEach(item => {
                    let qty = Number(item.qty || 0);
@@ -3528,7 +3528,7 @@ window.loadMoreSoGoc = async function() {
             const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
 
             let appendHtml = '';
-            newunifiedKpiOrders.forEach(o => {
+            newOrders.forEach(o => {
                 if (o.status === 'Đã hủy' || !o.items || o.items.length === 0) return;
                 
                 const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
@@ -3805,7 +3805,7 @@ window.deleteSingleOrder = async function(orderId) {
       let currentBatch = writeBatch(db);
       let count = 0;
 
-      targetunifiedKpiOrders.forEach(o => {
+      targetOrders.forEach(o => {
         // DÙNG XÓA MỀM BẰNG BATCH UPDATE
         currentBatch.update(doc(db, "orders", o.id), { 
             status: "Đã hủy", 
@@ -4209,7 +4209,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     if (!isOnline) {
         let maxExisting = 0;
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-            unifiedKpiOrders.forEach(o => {
+            orders.forEach(o => {
                 // Chỉ quét các số ctu offline cũ của chính nhân viên này để tính tiếp
                 let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                 if (!isNaN(num) && num > maxExisting) {
@@ -4233,7 +4233,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 
                 let maxExisting = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    unifiedKpiOrders.forEach(o => {
+                    orders.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > maxExisting) {
                             maxExisting = num;
@@ -4261,7 +4261,7 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 // Fallback an toàn nếu lỗi transaction mạng
                 let localMax = 0;
                 if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    unifiedKpiOrders.forEach(o => {
+                    orders.forEach(o => {
                         let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                         if (!isNaN(num) && num > localMax) localMax = num;
                     });
@@ -5924,7 +5924,7 @@ const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || curre
     return getNum(b.soCtu) - getNum(a.soCtu);
 });
 
-      sortedunifiedKpiOrders.forEach(o => {
+      sortedOrders.forEach(o => {
         if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
           if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
             return;
@@ -6841,59 +6841,42 @@ else if (tab === 'kpi') {
         }
       }
 
-      // BẮT ĐẦU ĐOẠN SỬA LỖI THEO ĐÚNG "ADN" CACHE CỦA HỆ THỐNG
+      // BẮT ĐẦU ĐOẠN SỬA LỖI: TẠO GIAO DIỆN CHỜ (LOADING) ĐỂ TRÁNH GIẬT TRANG
       container.innerHTML = `
         <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
           <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
         </div>
         <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
             <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
-            <b style="font-size:15px;">Đang trích xuất dữ liệu từ bộ nhớ...</b>
+            <b style="font-size:15px;">Đang tổng hợp số liệu từ máy chủ...</b>
         </div>`;
 
-      // 1. TÌM THÁNG CẦN LỌC (Lấy "YYYY-MM" từ biến filterEnd hoặc todayStr)
-      const targetMonthForKpi = (filterEnd || todayStr).slice(0, 7);
-
-      // 2. TẠO MẢNG DỮ LIỆU LỚN CHỨA TOÀN BỘ ĐƠN CỦA THÁNG ĐÓ
+      // TRUY VẤN DỮ LIỆU ĐỘC LẬP TỪ FIREBASE THEO ĐÚNG KHOẢNG NGÀY ĐÃ CHỌN
       let analyticsOrders = [];
-
       try {
-          window._cachedKpiOrders = window._cachedKpiOrders || {};
+          // Gộp cả ngày quá khứ (prevStart) và ngày hiện tại (filterStart) vào 1 lần tải
+          let queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
+          let queryEnd = filterEnd;
 
-          // LƯỚI LỌC 1: Tìm trong RAM (Chuyển ngày qua lại tốn 0 Read, tốc độ tức thời)
-          if (window._cachedKpiOrders[targetMonthForKpi] && window._cachedKpiOrders[targetMonthForKpi].length > 0) {
-              analyticsOrders = window._cachedKpiOrders[targetMonthForKpi];
+          if (queryStart && queryEnd) {
+              const q = query(collection(db, "orders"),
+                  where("ngayCtu", ">=", queryStart),
+                  where("ngayCtu", "<=", queryEnd)
+              );
+              const snap = await getDocs(q);
+              analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
           } else {
-              // LƯỚI LỌC 2: Tìm trong IndexedDB (Tắt trình duyệt mở lại tốn 0 Read)
-              const localData = typeof loadKpiOrdersFromLocal === 'function' ? await loadKpiOrdersFromLocal(targetMonthForKpi) : null;
-
-              if (localData && localData.length > 0) {
-                  analyticsOrders = localData;
-                  window._cachedKpiOrders[targetMonthForKpi] = localData; // Nạp ngược lên RAM
-              } else {
-                  // LƯỚI LỌC 3: Tải từ Firebase (Chỉ tốn Read 1 lần duy nhất cho cả tháng đó)
-                  const startOfMonth = targetMonthForKpi + "-01";
-                  const endOfMonth = targetMonthForKpi + "-31";
-                  const q = query(collection(db, "orders"),
-                      where("ngayCtu", ">=", startOfMonth),
-                      where("ngayCtu", "<=", endOfMonth)
-                  );
-                  const snap = await getDocs(q);
-                  analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
-
-                  // Kéo về xong thì nhét liền vào IndexedDB và RAM để khóa Read
-                  window._cachedKpiOrders[targetMonthForKpi] = analyticsOrders;
-                  if (typeof saveKpiOrdersToLocal === 'function') {
-                      await saveKpiOrdersToLocal(targetMonthForKpi, analyticsOrders);
-                  }
-              }
+              // Trường hợp chọn "Tất Cả"
+              const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
+              const snapAll = await getDocs(qAll);
+              analyticsOrders = snapAll.docs.map(d => ({id: d.id, ...d.data()}));
           }
       } catch (err) {
           console.error("Lỗi lấy dữ liệu KPI:", err);
-          analyticsOrders = typeof orders !== 'undefined' ? orders : [];
+          analyticsOrders = typeof orders !== 'undefined' ? orders : []; // Fallback nếu rớt mạng
       }
 
-      // Khóa an toàn: Chống render đè nếu người dùng đã bấm sang tab khác lúc đang tính toán
+      // Khóa an toàn: Nếu người dùng chuyển tab khác trong lúc đang tải thì không vẽ tiếp
       if (currentTab !== 'kpi') return;
 
       let kpiMap = new Map();
@@ -6903,8 +6886,8 @@ else if (tab === 'kpi') {
       let currentStats = { kien: 0, don: 0, doanhSo: 0, tiems: new Set() };
       let prevStats = { kien: 0, don: 0, doanhSo: 0 };
 
-      // 3. THAY VÌ LẶP MẢNG 'orders' (Bị kẹt 100 dòng), TA LẶP MẢNG 'analyticsOrders' (Chứa cả ngàn đơn của tháng)
-      analyticsunifiedKpiOrders.forEach(o => {
+      // ĐỔI orders.forEach THÀNH analyticsOrders.forEach ĐỂ LẤY DỮ LIỆU VỪA TẢI
+      analyticsOrders.forEach(o => {
         if (o.status === 'Đã hủy') return;
 
         if (typeof prevStart !== 'undefined' && prevStart && prevEnd) {
@@ -7104,7 +7087,7 @@ else if (tab === 'kpi') {
 
               ${(() => {
                   let taiQuayAll = 0, tuXaAll = 0;
-                  unifiedKpiOrders.forEach(o => {
+                  orders.forEach(o => {
                       if (o.status === 'Đã hủy') return;
                       if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
                       
@@ -7166,7 +7149,7 @@ else if (tab === 'kpi') {
             const accId = `kpi_acc_${rep.code}`;
 
             let repTaiQuay = 0, repTuXa = 0;
-            unifiedKpiOrders.forEach(o => {
+            orders.forEach(o => {
               if (o.status === 'Đã hủy') return;
               if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
               if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -7234,7 +7217,7 @@ else if (tab === 'kpi') {
                     <div style="display:flex; flex-direction:column; gap:5px; max-height:160px; overflow-y:auto; padding-right:6px;">
                       ${(() => {
                       const repSkusMap = {};
-unifiedKpiOrders.forEach(o => {
+orders.forEach(o => {
     if (o.status === 'Đã hủy') return;
     if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
     if ((o.salesCode || '').trim() === (rep.code || '').trim()) {
@@ -7692,7 +7675,7 @@ window._renderHistoryResultsOnly = function() {
   if (isTopTab) {
       // (Phần code gom nhóm Top sản phẩm giữ nguyên)
       let productStatsMap = new Map();
-      customerunifiedKpiOrders.forEach(o => {
+      customerOrders.forEach(o => {
         if (o.items && Array.isArray(o.items)) {
           o.items.forEach(item => {
             const itemQty = Number(item.qty || 0);
@@ -7818,7 +7801,7 @@ window._renderHistoryResultsOnly = function() {
       if (hasBothDates) {
         // (Phần gom nhóm theo ngày giữ nguyên như code cũ)
         let aggregatedItems = new Map();
-        diaryunifiedKpiOrders.forEach(o => {
+        diaryOrders.forEach(o => {
           if (o.items && Array.isArray(o.items)) {
             o.items.forEach(item => {
               let qty = Number(item.qty || 0);
@@ -9879,37 +9862,6 @@ window.calculateAndRenderTargets = async function() {
     const qTargets = query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth));
     const targetsSnap = await getDocs(qTargets);
     let targetDocFound = false;
-    // --- BẮT ĐẦU FIX LỖI MẤT SỐ ---
-// 1. Tải toàn bộ đơn hàng của tháng từ Cache
-const currentMonth = window._chiTieuTargetMonth;
-window._cachedKpiOrders = window._cachedKpiOrders || {};
-
-if (window._cachedKpiMonth !== currentMonth || !window._cachedKpiOrders[currentMonth]) {
-    let cachedData = typeof loadKpiOrdersFromLocal === 'function' ? await loadKpiOrdersFromLocal(currentMonth) : null;
-    if (cachedData && cachedData.length > 0) {
-        window._cachedKpiOrders[currentMonth] = cachedData;
-    } else {
-        const startOfMonth = currentMonth + "-01";
-        const endOfMonth = currentMonth + "-31";
-        const q = query(collection(db, "orders"), where("ngayCtu", ">=", startOfMonth), where("ngayCtu", "<=", endOfMonth));
-        const mSnap = await getDocs(q);
-        const data = mSnap.docs.map(d => ({id: d.id, ...d.data()}));
-        window._cachedKpiOrders[currentMonth] = data;
-        if (typeof saveKpiOrdersToLocal === 'function') await saveKpiOrdersToLocal(currentMonth, data);
-    }
-    window._cachedKpiMonth = currentMonth;
-}
-
-// 2. Gộp đơn trong Cache (Cũ) và đơn trong mảng Live (Vừa chốt xong hôm nay)
-let fullMonthMap = new Map();
-(window._cachedKpiOrders[currentMonth] || []).forEach(o => fullMonthMap.set(o.id || o.orderId, o));
-(typeof orders !== 'undefined' ? orders : []).forEach(o => {
-    if (o.ngayCtu && o.ngayCtu.startsWith(currentMonth)) fullMonthMap.set(o.id || o.orderId, o);
-});
-
-// 3. Mảng dữ liệu tuyệt đối 100% không bị sót đơn
-const unifiedKpiOrders = Array.from(fullMonthMap.values());
-// --- KẾT THÚC FIX LỖI ---
     
     targetsSnap.forEach(doc => {
       const data = doc.data();
@@ -9976,12 +9928,49 @@ const unifiedKpiOrders = Array.from(fullMonthMap.values());
     let compActualRevenues = {}; 
     let salesOrderCountMap = {}; // Biến lưu đếm số đơn (Tính Drop Size)
 
- let monthlyOrdersForKpi = [];
-      if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
-          monthlyOrdersForKpi = unifiedKpiOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
-      } else {
-          monthlyOrdersForKpi = unifiedKpiOrders;
-      }
+  let monthlyOrdersForKpi = [];
+    try {
+        if (targetDocFound) { 
+            const startOfMonth = window._chiTieuTargetMonth + "-01";
+            const endOfMonth = window._chiTieuTargetMonth + "-31";
+            
+           if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+                // 1. ĐỌC TỪ Ổ CỨNG MÁY (INDEXEDDB) -> TỐN 0 READ SERVER DÙ CÓ ẤN F5
+                let cachedData = await loadKpiOrdersFromLocal(window._chiTieuTargetMonth);
+                
+                if (cachedData && cachedData.length > 0) {
+                    window._cachedKpiOrders[window._chiTieuTargetMonth] = cachedData;
+                    window._cachedKpiMonth = window._chiTieuTargetMonth;
+                } else {
+                    // 2. CHỈ TẢI TỪ SERVER 1 LẦN DUY NHẤT KHI CÀI APP
+                    const q = query(collection(db, "orders"), 
+                        where("ngayCtu", ">=", startOfMonth), 
+                        where("ngayCtu", "<=", endOfMonth)
+                    );
+                    const mSnap = await getDocs(q);
+                    const data = mSnap.docs.map(d => d.data());
+                    
+                    window._cachedKpiOrders[window._chiTieuTargetMonth] = data;
+                    window._cachedKpiMonth = window._chiTieuTargetMonth;
+                    
+                    // Lưu ngay vào ổ cứng để vĩnh viễn không bị kéo lại
+                    await saveKpiOrdersToLocal(window._chiTieuTargetMonth, data);
+                    localStorage.setItem(`dms_kpi_last_sync_${window._chiTieuTargetMonth}`, new Date().toISOString());
+                }
+            }
+            
+            let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
+            
+            if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
+                monthlyOrdersForKpi = allMonthOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
+            } else {
+                monthlyOrdersForKpi = allMonthOrders;
+            }
+        }
+    } catch(e) {
+        console.warn("Lỗi tải dữ liệu KPI: ", e);
+        monthlyOrdersForKpi = typeof orders !== 'undefined' ? orders : [];
+    }
     if (Array.isArray(monthlyOrdersForKpi)) {
       monthlyOrdersForKpi.forEach(o => {
         if (o && o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) {
@@ -10225,7 +10214,7 @@ const unifiedKpiOrders = Array.from(fullMonthMap.values());
             }
             
             if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                unifiedKpiOrders.forEach(o => {
+                orders.forEach(o => {
                     if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth) && o.salesCode === sCode) {
                         if (Array.isArray(o.items)) {
                             o.items.forEach(item => {
@@ -11354,7 +11343,7 @@ const targetDocId = `tgt_${safeCode}_${rawMonth}`;
             let userActuals = {}; 
             let compActualRevenues = {};
 
-            unifiedKpiOrders.forEach(o => {
+            orders.forEach(o => {
                 if (o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(rawMonth) && o.salesCode === sCode) {
                     if (Array.isArray(o.items)) {
                         o.items.forEach(item => {
@@ -13130,7 +13119,7 @@ window.openSmartSuggestionModal = function() {
     let skuDataMap = new Map();
 
     // 2. Tính tổng sản lượng đã mua cho từng mã hàng
-    storeunifiedKpiOrders.forEach(o => {
+    storeOrders.forEach(o => {
         (o.items || []).forEach(i => {
             let qty = Number(i.qty || 0);
             if (qty > 0) {
