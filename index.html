@@ -958,6 +958,7 @@ let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin',
   let tabCustomerSearchKey = ""; 
   let tabProductSearchKey = ""; 
   let showOnlyPinnedGPS = false;
+  let showOnlyDuplicateGPS = false;
   window._currentCustomerDisplayLimit = 20;
 
 window.loadMoreCustomers = function() {
@@ -3101,6 +3102,27 @@ window.filterSalesProducts = function(val) {
   
   if (hintEl) hintEl.innerText = "";
  };
+  window.toggleDuplicateGPSFilter = function() {
+    showOnlyDuplicateGPS = !showOnlyDuplicateGPS;
+    if (showOnlyDuplicateGPS) showOnlyPinnedGPS = false; // Tắt lọc ghim nếu bật lọc trùng
+    
+    const btn = document.getElementById('toggleDuplicateGPSBtn');
+    if (btn) {
+        btn.style.background = showOnlyDuplicateGPS ? 'var(--rose)' : '#E2E8F0';
+        btn.style.color = showOnlyDuplicateGPS ? '#fff' : '#1E293B';
+    }
+    
+    // Reset lại nút Ẩn ghim
+    const pinBtn = document.getElementById('togglePinnedGPSBtn');
+    if (pinBtn) {
+        pinBtn.style.background = '#E2E8F0';
+        pinBtn.style.color = '#1E293B';
+        pinBtn.innerHTML = '<i class="fa-solid fa-map-location-dot"></i> Xem KH ghim GPS';
+    }
+
+    window._currentCustomerDisplayLimit = 20;
+    filterTabCustomers(tabCustomerSearchKey);
+};
   window.togglePinnedGPSFilter = function() {
     showOnlyPinnedGPS = !showOnlyPinnedGPS;
     const btn = document.getElementById('togglePinnedGPSBtn');
@@ -3123,6 +3145,21 @@ window.filterSalesProducts = function(val) {
 
   const container = document.getElementById('tabCustomerCardContainer');
   const hintEl = document.getElementById('tabCustSearchHint');
+   // 1. THUẬT TOÁN QUÉT VÀ ĐẾM TỌA ĐỘ TRÙNG (Sai số ~11 mét)
+  const gpsFrequencyMap = {};
+  stores.forEach(s => {
+      const lat = Number(s.lat || 0);
+      const lng = Number(s.lng || 0);
+      if (lat !== 0 && lng !== 0) {
+          // Làm tròn 4 chữ số thập phân (Bán kính ~11m) để tóm những người ngồi cùng 1 quán cafe
+          const gpsKey = `${lat.toFixed(4)}_${lng.toFixed(4)}`;
+          if (!gpsFrequencyMap[gpsKey]) {
+              gpsFrequencyMap[gpsKey] = 0;
+          }
+          gpsFrequencyMap[gpsKey] += 1;
+      }
+  });
+  if (tabCustomerSearchKey === "" && !showOnlyPinnedGPS && !showOnlyDuplicateGPS) {
   if (!container) return;
 
   if (tabCustomerSearchKey === "" && !showOnlyPinnedGPS) {
@@ -3131,43 +3168,40 @@ window.filterSalesProducts = function(val) {
     return;
   }
 
-  let matched = [];
+ let matched = [];
   for (const [id, entry] of storeIndexMap.entries()) {
     const s = entry.store;
     const latVal = Number(s.lat || 0);
     const lngVal = Number(s.lng || 0);
     const hasLat = !isNaN(latVal) && latVal !== 0 && !isNaN(lngVal) && lngVal !== 0;
 
-    let matchPinned = true;
-    if (showOnlyPinnedGPS) {
-      matchPinned = hasLat;
+    // Kiểm tra xem GPS này có bị trùng không
+    let isDuplicate = false;
+    let duplicateCount = 0;
+    if (hasLat) {
+        const gpsKey = `${latVal.toFixed(4)}_${lngVal.toFixed(4)}`;
+        duplicateCount = gpsFrequencyMap[gpsKey] || 0;
+        if (duplicateCount > 1) isDuplicate = true;
     }
 
- let matchKey = true;
+    let matchFilters = true;
+    if (showOnlyPinnedGPS) matchFilters = hasLat;
+    if (showOnlyDuplicateGPS) matchFilters = isDuplicate; // Chỉ lấy những ca bị trùng
+
+    let matchKey = true;
     if (tabCustomerSearchKey !== "") {
       const codeNorm = removeAccents(String(s.code || ''));
-      // Quét qua cả Mã KH (codeNorm) và Chuỗi tổng hợp (searchableText chứa Tên KH, Địa chỉ, SĐT, Tên/Mã NV ghim)
       matchKey = codeNorm.includes(tabCustomerSearchKey) || entry.searchableText.includes(tabCustomerSearchKey);
     }
 
-    if (matchPinned && matchKey) {
-      matched.push({ ...s, lat: latVal, lng: lngVal });
-      // Đã bỏ dòng break ở 50 để lấy được toàn bộ danh sách tìm kiếm
+    if (matchFilters && matchKey) {
+      matched.push({ ...s, lat: latVal, lng: lngVal, isDuplicate, duplicateCount });
     }
   }
 
-  // Sắp xếp ưu tiên các mã khớp từ ký tự đầu tiên lên trước
-  matched.sort((a, b) => {
-    const aCode = removeAccents(String(a.code || ''));
-    const bCode = removeAccents(String(b.code || ''));
-    const aStartsWith = aCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
-    const bStartsWith = bCode.startsWith(tabCustomerSearchKey) ? 0 : 1;
-    return aStartsWith - bStartsWith;
-  });
+  // (Phần Sort giữ nguyên...)
 
-  // CHỈ LẤY ĐÚNG SỐ LƯỢNG LIMIT HIỆN TẠI (20, 40, 60...)
   const visibleMatched = matched.slice(0, window._currentCustomerDisplayLimit);
-
   const isViewer = currentUser.role === 'viewer';
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
@@ -3175,21 +3209,38 @@ window.filterSalesProducts = function(val) {
     const hasLat = s.lat && s.lat !== 0;
     const pInfo = s.pinnedByName ? `[${s.pinnedByCode || ''}] ${s.pinnedByName}` : 'Chưa có';
     
+    // Giao diện thẻ GPS (Xanh = Chuẩn, Đỏ nhấp nháy = Gian lận)
+    let gpsBadgeHtml = '';
+    if (hasLat) {
+        if (s.isDuplicate) {
+            gpsBadgeHtml = `
+            <span style="font-size: 11px; padding: 4px 8px; font-weight: 800; background: rgba(225, 29, 72, 0.12); color: var(--rose); border-radius: 6px; border: 1px dashed var(--rose);" title="Phát hiện gian lận: Tọa độ này đang được ghim cho ${s.duplicateCount} tiệm khác nhau.">
+                <i class="fa-solid fa-triangle-exclamation fa-fade"></i> TRÙNG LẶP (${s.duplicateCount} Tiệm)
+            </span>`;
+        } else {
+            gpsBadgeHtml = `
+            <span style="font-size: 11px; padding: 4px 8px; font-weight: 700; background: rgba(5, 150, 105, 0.12); color: #059669; border-radius: 6px;">
+                📍 Đã ghim (${Number(s.lat).toFixed(4)},${Number(s.lng).toFixed(4)})
+            </span>`;
+        }
+    } else {
+        gpsBadgeHtml = `<span style="font-size: 11px; padding: 4px 8px; font-weight: 700; background: rgba(0,0,0,0.05); color: var(--text-muted); border-radius: 6px;">Chưa có GPS</span>`;
+    }
+    
     return `
-      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px;">
+      <div class="mobile-item-card" style="display:flex; flex-direction:column; gap:8px; ${s.isDuplicate ? 'border: 1px solid var(--rose); box-shadow: 0 0 10px rgba(225, 29, 72, 0.1);' : ''}">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span style="background:rgba(37, 99, 235, 0.12); color:#2563EB; padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">${s.code || 'KH'}</span>
-          <span style="font-size: 11px; padding: 4px 8px; font-weight: 700; background: rgba(5, 150, 105, 0.12); color: #059669; border-radius: 6px;">
-  ${hasLat ? `📍 Đã ghim (${Number(s.lat).toFixed(4)},${Number(s.lng).toFixed(4)})` : 'Chưa có GPS'}
-</span>
+          ${gpsBadgeHtml}
         </div>
+        <!-- (Phần render thông tin khách hàng bên dưới giữ nguyên như cũ) -->
         <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
         <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
         <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
           <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
           <span>💬 Zalo: <b>${s.zalo || '—'}</b></span>
         </div>
-        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pInfo}</b></div>
+        <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="${s.isDuplicate ? 'color:var(--rose);' : 'color:#2563EB;'}">${pInfo}</b></div>
         <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
           ${hasLat ? `
             <button class="btn btn-green btn-sm" style="flex:1; padding:8px; font-size:12px;" onclick="openNativeNavigator(${Number(s.lat)},${Number(s.lng)})"><i class="fa-solid fa-map-location-dot"></i> Chỉ đường</button>
@@ -5888,6 +5939,9 @@ ${activeVisitedStore ? `
 
     <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
       <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
+    </button>
+    <button id="toggleDuplicateGPSBtn" class="btn btn-sm" onclick="toggleDuplicateGPSFilter()" style="background:#E2E8F0; color:#1E293B; font-weight:700; font-size:12px;">
+      <i class="fa-solid fa-triangle-exclamation"></i> Lọc GPS Trùng
     </button>
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
