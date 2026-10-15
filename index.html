@@ -2153,119 +2153,6 @@ window.handleLogout = async function() {
       alert("✅ Đã xóa GPS thành công! Khách hàng đã ở trạng thái trống, có thể ghim lại.");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
-  // ==========================================
-// TÍNH NĂNG QUÉT RÀ SOÁT GIAN LẬN GPS (ADMIN/MANAGER)
-// ==========================================
-window.openFraudScanModal = function() {
-  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-
-  const modalContainer = document.getElementById('dynamicModalContainer');
-  if (!modalContainer) return;
-
-  // 1. CHẠY THUẬT TOÁN GOM NHÓM TỌA ĐỘ
-  // Thuật toán: Nhóm các tiệm có khoảng cách dưới 10m lại với nhau.
-  let duplicateGroups = [];
-  let processedStoreIds = new Set();
-  const SUSPICIOUS_DISTANCE = 10; // Cùng 1 cụm nếu cách nhau dưới 10m
-
-  stores.forEach(s1 => {
-      // Bỏ qua tiệm chưa ghim hoặc đã được đưa vào một nhóm rồi
-      if (!s1.lat || !s1.lng || Number(s1.lat) === 0 || processedStoreIds.has(s1.id)) return;
-
-      let currentGroup = [s1];
-      
-      stores.forEach(s2 => {
-          if (s1.id !== s2.id && !processedStoreIds.has(s2.id) && s2.lat && s2.lng && Number(s2.lat) !== 0) {
-              const dist = calculateDistanceMeters(Number(s1.lat), Number(s1.lng), Number(s2.lat), Number(s2.lng));
-              if (dist <= SUSPICIOUS_DISTANCE) {
-                  currentGroup.push(s2);
-                  processedStoreIds.add(s2.id); // Đánh dấu tiệm này đã có nhóm
-              }
-          }
-      });
-
-      // Nếu nhóm có từ 2 tiệm trở lên -> Đưa vào danh sách đen
-      if (currentGroup.length > 1) {
-          processedStoreIds.add(s1.id); // Đánh dấu luôn tiệm gốc
-          duplicateGroups.push(currentGroup);
-      }
-  });
-
-  // 2. VẼ GIAO DIỆN BÁO CÁO (MODAL)
-  let reportHtml = '';
-  if (duplicateGroups.length === 0) {
-      reportHtml = `
-        <div style="text-align:center; padding:40px 20px; color:var(--emerald);">
-            <i class="fa-solid fa-shield-check fa-4x" style="margin-bottom:16px;"></i>
-            <h4 style="font-size:16px; font-weight:900;">HỆ THỐNG SẠCH SẼ</h4>
-            <p style="font-size:13px; font-weight:700; color:var(--text-muted); margin-top:8px;">Tuyệt vời! Không phát hiện trường hợp khách hàng nào bị ghim trùng hoặc quá gần nhau (dưới 10m).</p>
-        </div>`;
-  } else {
-      reportHtml = duplicateGroups.map((group, index) => {
-          // Lấy thông tin chung của cụm (Dựa theo tiệm đầu tiên)
-          const baseLat = Number(group[0].lat).toFixed(6);
-          const baseLng = Number(group[0].lng).toFixed(6);
-          
-          const tiemsHtml = group.map(t => `
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px dashed var(--card-border);">
-                <div style="flex:1;">
-                    <div style="font-size:13.5px; font-weight:800; color:var(--text-main); margin-bottom:4px;">
-                        <span style="color:var(--primary);">[${t.code}]</span> ${t.name}
-                    </div>
-                    <div style="font-size:12px; color:var(--text-muted);">NV Ghim: <b style="color:var(--rose);">${t.pinnedByCode || 'N/A'} - ${t.pinnedByName || 'N/A'}</b></div>
-                </div>
-                <button class="btn btn-sm btn-amber" onclick="adminResetCustomerLocation('${t.id}')" style="padding:4px 8px; font-size:11px;" title="Xóa ghim tiệm này"><i class="fa-solid fa-eraser"></i> Gỡ</button>
-            </div>
-          `).join('');
-
-          return `
-            <div style="background:var(--card-bg); border:1px solid var(--rose); border-left:4px solid var(--rose); border-radius:10px; padding:12px; margin-bottom:12px; box-shadow:0 2px 8px rgba(225,29,72,0.1);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <div style="font-size:12px; font-weight:900; color:var(--rose);"><i class="fa-solid fa-map-pin"></i> CỤM #${index + 1} (${group.length} Tiệm trùng lặp)</div>
-                    <div style="font-size:11px; color:var(--text-muted); background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:4px;">${baseLat}, ${baseLng}</div>
-                </div>
-                <div style="background:rgba(225,29,72,0.02); padding:8px; border-radius:8px;">
-                    ${tiemsHtml}
-                </div>
-            </div>
-          `;
-      }).join('');
-  }
-
-  modalContainer.innerHTML = `
-    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeFraudScanModal()">
-      <div class="modal-content" style="max-width: 500px; width:95%; max-height:85vh; display:flex; flex-direction:column; padding:0; border-radius:16px; overflow:hidden;">
-        
-        <!-- Header -->
-        <div style="background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%); padding:16px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-            <h3 style="font-size:15px; font-weight:900; color:#fff; margin:0;"><i class="fa-solid fa-radar fa-spin-pulse"></i> BÁO CÁO RÀ SOÁT GIAN LẬN GPS</h3>
-            <button class="btn btn-sm" onclick="closeFraudScanModal()" style="background:rgba(255,255,255,0.2); color:#fff; border:none; padding:4px 10px; border-radius:8px;"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-
-        <!-- Cảnh báo/Tổng quan -->
-        <div style="padding:12px 16px; background:rgba(245, 158, 11, 0.1); border-bottom:1px solid rgba(245, 158, 11, 0.2); flex-shrink:0;">
-            <div style="font-size:13px; font-weight:700; color:#B45309; line-height:1.4;">
-                <i class="fa-solid fa-circle-info"></i> Hệ thống tự động quét và gom nhóm các cửa hàng bị ghim cách nhau <b>dưới 10 mét</b>. Cần rà soát và gỡ ghim nếu phát hiện nhân viên làm sai.
-            </div>
-        </div>
-
-        <!-- Body Cuộn -->
-        <div style="padding:16px; flex:1; overflow-y:auto; background:var(--bg-dark);">
-            ${reportHtml}
-        </div>
-      </div>
-    </div>
-  `;
-  modalContainer.classList.remove('hidden');
-};
-
-window.closeFraudScanModal = function() {
-    const modalContainer = document.getElementById('dynamicModalContainer');
-    if (modalContainer) {
-        modalContainer.innerHTML = '';
-        modalContainer.classList.add('hidden');
-    }
-};
 
   window.selectStoreDirectly = async function(storeId, event) {
     if (event) {
@@ -6019,15 +5906,12 @@ ${activeVisitedStore ? `
               <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}  
-        ${currentUser && currentUser.role === 'admin' ? `
+           ${currentUser && currentUser.role === 'admin' ? `
   <button class="btn btn-red btn-sm" onclick="deleteAllAndImportCustomersExcel(event)"><i class="fa-solid fa-triangle-exclamation"></i> Xóa & Tải Mới KH</button>
 ` : ''}
-            <!-- NÚT MỚI: QUÉT GIAN LẬN GPS -->
-            ${isAdminOrManager ? `
-              <button class="btn btn-purple btn-sm" onclick="openFraudScanModal()"><i class="fa-solid fa-radar"></i> Quét Trùng GPS</button>
-            ` : ''}
           </div>
         </div>
+
         <div class="card" style="margin-bottom:10px; padding:10px;">
           <input type="text" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, địa chỉ, SĐT hoặc tên NV ghim..." oninput="filterTabCustomers(this.value)" value="" autocomplete="off" autocapitalize="none" style="margin:0; padding:13px 15px; font-size: var(--font-size-search-input);">
         </div>
