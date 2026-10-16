@@ -10136,21 +10136,24 @@ window.calculateAndRenderTargets = async function() {
     let salesOrderCountMap = {}; // Biến lưu đếm số đơn (Tính Drop Size)
     let salesOrderLinesMap = {}; // TẬP ĐOÀN: Đếm tổng số SKU để tính LPPC (Độ dày toa)
 
-  let monthlyOrdersForKpi = [];
+ let monthlyOrdersForKpi = [];
     try {
         if (targetDocFound) { 
             const startOfMonth = window._chiTieuTargetMonth + "-01";
             const endOfMonth = window._chiTieuTargetMonth + "-31";
             
-           if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
-                // 1. ĐỌC TỪ Ổ CỨNG MÁY (INDEXEDDB) -> TỐN 0 READ SERVER DÙ CÓ ẤN F5
-                let cachedData = await loadKpiOrdersFromLocal(window._chiTieuTargetMonth);
+            if (window._cachedKpiMonth !== window._chiTieuTargetMonth) {
+                // Đọc từ ổ cứng máy an toàn bằng hàm async độc lập
+                let cachedData = await (async () => {
+                    try {
+                        return await loadKpiOrdersFromLocal(window._chiTieuTargetMonth);
+                    } catch(err) { return null; }
+                })();
                 
                 if (cachedData && cachedData.length > 0) {
                     window._cachedKpiOrders[window._chiTieuTargetMonth] = cachedData;
                     window._cachedKpiMonth = window._chiTieuTargetMonth;
                 } else {
-                    // 2. CHỈ TẢI TỪ SERVER 1 LẦN DUY NHẤT KHI CÀI APP
                     const q = query(collection(db, "orders"), 
                         where("ngayCtu", ">=", startOfMonth), 
                         where("ngayCtu", "<=", endOfMonth)
@@ -10161,14 +10164,12 @@ window.calculateAndRenderTargets = async function() {
                     window._cachedKpiOrders[window._chiTieuTargetMonth] = data;
                     window._cachedKpiMonth = window._chiTieuTargetMonth;
                     
-                    // Lưu ngay vào ổ cứng để vĩnh viễn không bị kéo lại
                     await saveKpiOrdersToLocal(window._chiTieuTargetMonth, data);
                     localStorage.setItem(`dms_kpi_last_sync_${window._chiTieuTargetMonth}`, new Date().toISOString());
                 }
             }
             
             let allMonthOrders = window._cachedKpiOrders[window._chiTieuTargetMonth] || [];
-            
             if (window._chiTieuTargetSalesCode && window._chiTieuTargetSalesCode !== 'ALL') {
                 monthlyOrdersForKpi = allMonthOrders.filter(o => o.salesCode === window._chiTieuTargetSalesCode);
             } else {
