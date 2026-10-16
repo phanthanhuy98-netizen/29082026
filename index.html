@@ -5915,12 +5915,20 @@ ${activeVisitedStore ? `
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
         <div class="tab-header-actions">
-  <h2 style="font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})</h2>
-  <div class="excel-group-btns">
-    <!-- Nút Làm Mới GPS Riêng Biệt -->
-    <button class="btn btn-amber btn-sm" onclick="refreshStoresGPSData()" style="font-weight:700; font-size:12px;" title="Cập nhật vị trí ghim GPS mới nhất từ máy chủ">
-      <i class="fa-solid fa-rotate"></i> Làm mới GPS
-    </button>
+          <h2 style="font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})</h2>
+          <div class="excel-group-btns">
+            
+            <!-- THÊM NÚT QUÉT GIAN LẬN Ở ĐÂY -->
+            ${currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') ? `
+            <button class="btn btn-red btn-sm" onclick="openGpsAuditModal()" style="font-weight:900; font-size:12px; box-shadow: 0 2px 8px rgba(225,29,72,0.3);" title="Quét phát hiện nhân viên ghim trùng tọa độ">
+              <i class="fa-solid fa-radar fa-spin-pulse"></i> Quét Gian Lận GPS
+            </button>
+            ` : ''}
+
+            <!-- Nút Làm Mới GPS Riêng Biệt -->
+            <button class="btn btn-amber btn-sm" onclick="refreshStoresGPSData()" style="font-weight:700; font-size:12px;" title="Cập nhật vị trí ghim GPS mới nhất từ máy chủ">
+              <i class="fa-solid fa-rotate"></i> Làm mới GPS
+            </button>
 
     <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
       <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
@@ -13578,6 +13586,171 @@ window.executeSaveDonVi = async function(uid) {
     } catch (err) {
         alert("⛔ Lỗi cập nhật Đơn vị: " + err.message);
     }
+};
+  // ==========================================
+// THUẬT TOÁN KIỂM TOÁN GIAN LẬN GPS (GRID HASHING - O(N))
+// ==========================================
+window.openGpsAuditModal = function() {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    // 1. Hiển thị Loading mượt mà
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex; z-index:999999;">
+        <div style="color:#fff; font-size:18px; font-weight:bold; text-align:center;">
+          <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:10px;"></i><br>
+          Đang rà soát lưới tọa độ của ${stores.length} khách hàng...
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+
+    setTimeout(() => {
+        // 2. Thuật toán Hashing (Làm tròn 4 số thập phân ~ Sai số 11 mét)
+        let fraudClusters = {}; 
+
+        stores.forEach(s => {
+            const latVal = Number(s.lat);
+            const lngVal = Number(s.lng);
+            
+            // Chỉ quét các tiệm đã có GPS hợp lệ
+            if (latVal && latVal !== 0 && lngVal && lngVal !== 0) {
+                let latKey = latVal.toFixed(4);
+                let lngKey = lngVal.toFixed(4);
+                let coordKey = `${latKey}_${lngKey}`;
+                let nvCode = s.pinnedByCode ? s.pinnedByCode.trim() : 'UNKNOWN';
+
+                // Nếu ghim ẩn danh thì bỏ qua
+                if (nvCode === '' || nvCode === 'UNKNOWN') return;
+
+                if (!fraudClusters[nvCode]) fraudClusters[nvCode] = {};
+                if (!fraudClusters[nvCode][coordKey]) fraudClusters[nvCode][coordKey] = [];
+
+                fraudClusters[nvCode][coordKey].push(s);
+            }
+        });
+
+        // 3. Trích xuất những điểm có >= 2 tiệm trùng nhau
+        let finalReport = []; 
+        let totalSuspects = 0;
+        let totalDupedStores = 0;
+
+        Object.keys(fraudClusters).forEach(nvCode => {
+            let employeeClusters = [];
+            Object.keys(fraudClusters[nvCode]).forEach(coordKey => {
+                if (fraudClusters[nvCode][coordKey].length > 1) { 
+                    employeeClusters.push({
+                        coordKey: coordKey,
+                        originalLat: fraudClusters[nvCode][coordKey][0].lat, 
+                        originalLng: fraudClusters[nvCode][coordKey][0].lng,
+                        timeGhim: fraudClusters[nvCode][coordKey][0].pinnedAt,
+                        stores: fraudClusters[nvCode][coordKey]
+                    });
+                    totalDupedStores += fraudClusters[nvCode][coordKey].length;
+                }
+            });
+
+            if (employeeClusters.length > 0) {
+                let nvName = employeeClusters[0].stores[0].pinnedByName || 'Nhân viên';
+                finalReport.push({ nvCode, nvName, clusters: employeeClusters });
+                totalSuspects++;
+            }
+        });
+
+        // 4. Render Báo cáo khoa học
+        let reportHtml = '';
+        if (finalReport.length === 0) {
+            reportHtml = `
+                <div style="text-align:center; padding:40px 20px; color:var(--emerald);">
+                    <i class="fa-solid fa-shield-check fa-4x" style="margin-bottom:16px; opacity:0.5;"></i>
+                    <div style="font-size:18px; font-weight:900;">TUYỆT VỜI! THỊ TRƯỜNG SẠCH</div>
+                    <div style="font-size:14px; margin-top:8px; color:var(--text-muted);">Không phát hiện bất kỳ nhân viên nào có dấu hiệu ghim trùng tọa độ.</div>
+                </div>
+            `;
+        } else {
+            reportHtml = finalReport.sort((a, b) => b.clusters.length - a.clusters.length).map(rep => {
+                let totalStoresInCluster = rep.clusters.reduce((sum, c) => sum + c.stores.length, 0);
+                return `
+                <div style="background:var(--card-bg); border:1px solid var(--rose); border-radius:14px; margin-bottom:16px; overflow:hidden; box-shadow: 0 4px 15px rgba(225,29,72,0.05);">
+                    <div style="background:rgba(225, 29, 72, 0.05); padding:14px 16px; border-bottom:1px dashed var(--rose); display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-weight:900; color:var(--rose); font-size:15px; display:flex; align-items:center; gap:8px;">
+                            <div style="width:32px; height:32px; background:var(--rose); color:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center;"><i class="fa-solid fa-user-secret"></i></div>
+                            [${rep.nvCode}] ${rep.nvName}
+                        </div>
+                        <span style="background:var(--rose); color:#fff; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:900; box-shadow: 0 2px 4px rgba(225,29,72,0.2);">
+                            Cảnh báo: ${rep.clusters.length} Điểm trùng (${totalStoresInCluster} Tiệm)
+                        </span>
+                    </div>
+                    <div style="padding:16px; display:flex; flex-direction:column; gap:12px;">
+                        ${rep.clusters.map((cluster, cIdx) => {
+                            let timeStr = '';
+                            if (cluster.timeGhim) {
+                                const d = new Date(cluster.timeGhim);
+                                if (!isNaN(d.getTime())) {
+                                    timeStr = ` - 🕒 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+                                }
+                            }
+                            return `
+                            <div style="background:var(--bg-dark); border:1px solid var(--card-border); border-left:3px solid var(--amber); border-radius:8px; padding:12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                                    <div style="font-size:13px; font-weight:800; color:var(--primary);">
+                                        <i class="fa-solid fa-map-pin" style="color:var(--amber);"></i> Vị trí #${cIdx + 1}:${cluster.coordKey.replace('_', ', ')} <span style="color:var(--text-muted); font-weight:600;">${timeStr}</span>
+                                    </div>
+                                    <button class="btn btn-sm btn-blue" onclick="openNativeNavigator(${cluster.originalLat},${cluster.originalLng})" style="padding:4px 10px; font-size:11px; font-weight:800;">
+                                        <i class="fa-solid fa-map"></i> Soi Bản Đồ
+                                    </button>
+                                </div>
+                                <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                    ${cluster.stores.map(s => `
+                                        <span style="background:#fff; border:1px solid #cbd5e1; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:4px;" title="${s.name}">
+                                            <span style="color:var(--rose);">[${s.code}]</span> ${s.name}
+                                        </span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `}).join('')}
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        modalContainer.innerHTML = `
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
+                <div class="modal-content fullscreen-modal" style="max-width: 700px; padding: 0; background: var(--bg-dark);">
+                    
+                    <!-- Header -->
+                    <div style="background: var(--rose-gradient); padding: 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(225,29,72,0.2);">
+                        <h3 style="font-size: 16px; font-weight: 900; color: #fff; margin: 0;">
+                            <i class="fa-solid fa-radar fa-beat"></i> KẾT QUẢ KIỂM TOÁN GPS
+                        </h3>
+                        <button class="btn btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="background: rgba(255,255,255,0.2); color: #fff; border: none;"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+
+                    <!-- Summary Bar -->
+                    ${finalReport.length > 0 ? `
+                    <div style="padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--card-border); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 13px; font-weight: 800; color: var(--rose);">⚠️ CẢNH BÁO: PHÁT HIỆN GIAN LẬN</span>
+                        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">
+                            <b style="color:var(--text-main); font-size:14px;">${totalSuspects}</b> NV | <b style="color:var(--rose); font-size:14px;">${totalDupedStores}</b> Tiệm trùng
+                        </div>
+                    </div>
+                    ` : ''}
+
+                    <!-- Scroll Body -->
+                    <div style="flex: 1; overflow-y: auto; padding: 16px; background: var(--bg-dark);">
+                        ${reportHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        if (typeof playSystemSound === 'function') {
+            finalReport.length > 0 ? playSystemSound('error') : playSystemSound('success');
+        }
+    }, 100); // Tạo timeout nhẹ để UI Loading kịp hiện ra trước khi chạy vòng lặp tính toán nặng
 };
 </script>
 </body>
