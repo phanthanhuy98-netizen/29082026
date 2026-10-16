@@ -9715,10 +9715,15 @@ const targetDocId = `tgt_${safeCode}_${window._chiTieuTargetMonth}`;
   } catch(e) { alert("Lỗi xóa chỉ tiêu: " + e.message); }
 };
 // Component thẻ tiến độ (BẢN PRO - CÓ CHỈ BÁO RUN-RATE & THỜI GIAN)
-function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, targetRev, actualRev, targetSkus = 0, actualSkus = 0) {
-    let pct = targetRev > 0 ? (actualRev / targetRev) * 100 : (actualRev > 0 ? 100 : 0);
+// Component thẻ tiến độ (BẢN PRO V6 - BỔ SUNG CHỈ TIÊU ĐỘ PHỦ TỪNG TIỆM)
+function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, targetRev, actualRev, targetStores = 0, actualStores = 0) {
+    // Tính phần trăm ưu tiên theo Doanh Số, nếu không có DS thì tính theo Tiệm
+    let pct = 0;
+    if (targetRev > 0) pct = (actualRev / targetRev) * 100;
+    else if (targetStores > 0) pct = (actualStores / targetStores) * 100;
+    else if (actualRev > 0 || actualStores > 0) pct = 100;
     
-    // Tính toán tỷ lệ thời gian (Chỉ áp dụng nếu là tháng hiện tại)
+    // Tính toán tỷ lệ thời gian
     const now = new Date();
     const yyyy_mm_now = now.toISOString().slice(0, 7);
     const targetMonth = window._chiTieuTargetMonth || yyyy_mm_now;
@@ -9734,14 +9739,18 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
         timePct = (currentDay / totalDaysInMonth) * 100;
         daysLeft = totalDaysInMonth - currentDay;
 
-        if (daysLeft > 0 && pct < 100 && targetRev > 0) {
-            const revNeededPerDay = (targetRev - actualRev) / daysLeft;
-            const qtyNeededPerDay = (targetQty - actualQty) / daysLeft;
-            runRateText = `Cần bán: <b>${(revNeededPerDay/1000).toLocaleString('en-US')}k</b> hoặc <b>${qtyNeededPerDay.toFixed(1)} Thùng</b> / ngày để về đích.`;
+        if (daysLeft > 0 && pct < 100 && (targetRev > 0 || targetStores > 0)) {
+            const revNeededPerDay = targetRev > 0 ? (targetRev - actualRev) / daysLeft : 0;
+            const storesNeededPerDay = targetStores > 0 ? (targetStores - actualStores) / daysLeft : 0;
             
-            // Cảnh báo nếu tiến độ số < tiến độ thời gian
+            let runRateParts = [];
+            if (revNeededPerDay > 0) runRateParts.push(`<b>${(revNeededPerDay/1000).toLocaleString('en-US')}k</b>`);
+            if (storesNeededPerDay > 0) runRateParts.push(`<b>${Math.ceil(storesNeededPerDay)} Tiệm</b>`);
+            
+            runRateText = `Tốc độ cần thiết: ${runRateParts.join(' và ')} / ngày để về đích.`;
+            
             if (pct < timePct - 5) {
-                timeWarningHtml = `<div style="margin-top:8px; font-size:12px; color:var(--rose); background:rgba(225,29,72,0.1); padding:6px 10px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: Tiến độ số (${pct.toFixed(1)}%) đang chạy chậm hơn tiến độ thời gian (${timePct.toFixed(1)}%). Cần tăng tốc!</div>`;
+                timeWarningHtml = `<div style="margin-top:8px; font-size:12px; color:var(--rose); background:rgba(225,29,72,0.1); padding:6px 10px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> CẢNH BÁO: Tiến độ số (${pct.toFixed(1)}%) đang chạy chậm hơn tiến độ thời gian (${timePct.toFixed(1)}%).</div>`;
             } else {
                 timeWarningHtml = `<div style="margin-top:8px; font-size:12px; color:var(--emerald); background:rgba(16,185,129,0.1); padding:6px 10px; border-radius:6px; font-weight:700;"><i class="fa-solid fa-fire"></i> TUYỆT VỜI: Tiến độ đang bám sát hoặc vượt thời gian! Duy trì nhé.</div>`;
             }
@@ -9760,20 +9769,20 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
     let bgTint = 'rgba(225, 29, 72, 0.05)';
     let iconBg = 'rgba(225, 29, 72, 0.1)';
     if(pct >= 100) { 
-        statusColor = 'var(--emerald)'; 
-        barGradient = 'var(--emerald-gradient)'; 
-        bgTint = 'rgba(16, 185, 129, 0.05)';
-        iconBg = 'rgba(16, 185, 129, 0.1)';
+        statusColor = 'var(--emerald)'; barGradient = 'var(--emerald-gradient)'; 
+        bgTint = 'rgba(16, 185, 129, 0.05)'; iconBg = 'rgba(16, 185, 129, 0.1)';
     }
     else if (pct >= 70) { 
-        statusColor = 'var(--amber)'; 
-        barGradient = 'var(--amber-gradient)'; 
-        bgTint = 'rgba(245, 158, 11, 0.05)';
-        iconBg = 'rgba(245, 158, 11, 0.1)';
+        statusColor = 'var(--amber)'; barGradient = 'var(--amber-gradient)'; 
+        bgTint = 'rgba(245, 158, 11, 0.05)'; iconBg = 'rgba(245, 158, 11, 0.1)';
     }
 
     const formatRev = (val) => ((Number(val) || 0) / 1000).toLocaleString('en-US');
     const formatQty = (val) => Number.isInteger(Number(val)) ? Number(val).toString() : Number(val).toFixed(1);
+
+    // Tính phần trăm riêng cho chỉ tiêu Điểm bán
+    let storePct = targetStores > 0 ? (actualStores / targetStores) * 100 : (actualStores > 0 ? 100 : 0);
+    let storeColor = storePct >= 100 ? 'var(--emerald)' : (storePct >= 70 ? 'var(--amber)' : 'var(--rose)');
 
     return `
     <div style="background:var(--card-bg); border:1px solid var(--card-border); border-top: 5px solid var(--${colorTheme}); border-radius:18px; padding:20px; box-shadow:0 8px 25px rgba(0,0,0,0.05); margin-bottom: 20px; position: relative; overflow: hidden;">
@@ -9787,15 +9796,35 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
         </div>
         
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; position:relative; z-index:1;">
-            <div style="text-align:center; background:rgba(0,0,0,0.02); padding:16px 8px; border-radius:14px; border:1px dashed var(--card-border);">
-                <div style="font-size:11px; font-weight:900; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.5px;">🎯 TỔNG CHỈ TIÊU</div>
-                <div style="font-size:22px; font-weight:900; color:var(--text-main); line-height:1.2;">${formatRev(targetRev)}k</div>
-                <div style="font-size:13px; font-weight:800; color:var(--text-muted); margin-top:4px;">${formatQty(targetQty)} Thùng</div>
+            <div style="background:rgba(0,0,0,0.02); padding:16px 12px; border-radius:14px; border:1px dashed var(--card-border); display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:11px; font-weight:900; color:var(--text-muted); letter-spacing:0.5px; text-align:center; border-bottom:1px solid var(--card-border); padding-bottom:6px;">🎯 TỔNG CHỈ TIÊU</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;"><i class="fa-solid fa-coins"></i> Tiền:</span>
+                    <span style="font-size:16px; font-weight:900; color:var(--text-main);">${formatRev(targetRev)}k</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;"><i class="fa-solid fa-box"></i> Hàng:</span>
+                    <span style="font-size:14px; font-weight:800; color:var(--text-main);">${formatQty(targetQty)} Th</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;"><i class="fa-solid fa-store"></i> Phủ tiệm:</span>
+                    <span style="font-size:14px; font-weight:900; color:var(--text-main); background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:6px;">${targetStores}</span>
+                </div>
             </div>
-            <div style="text-align:center; background:${bgTint}; padding:16px 8px; border-radius:14px; border:1px solid ${iconBg};">
-                <div style="font-size:11px; font-weight:900; color:${statusColor}; margin-bottom:6px; letter-spacing:0.5px;">📈 THỰC ĐẠT</div>
-                <div style="font-size:22px; font-weight:900; color:${statusColor}; line-height:1.2;">${formatRev(actualRev)}k</div>
-                <div style="font-size:13px; font-weight:800; color:var(--text-main); margin-top:4px;">${formatQty(actualQty)} Thùng</div>
+            <div style="background:${bgTint}; padding:16px 12px; border-radius:14px; border:1px solid ${iconBg}; display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:11px; font-weight:900; color:${statusColor}; letter-spacing:0.5px; text-align:center; border-bottom:1px solid ${iconBg}; padding-bottom:6px;">📈 THỰC ĐẠT</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;">Tiền:</span>
+                    <span style="font-size:16px; font-weight:900; color:${statusColor};">${formatRev(actualRev)}k</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;">Hàng:</span>
+                    <span style="font-size:14px; font-weight:800; color:var(--text-main);">${formatQty(actualQty)} Th</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:800;">Phủ tiệm:</span>
+                    <span style="font-size:14px; font-weight:900; color:${storeColor}; background:${storeColor}20; padding:2px 6px; border-radius:6px;">${actualStores}</span>
+                </div>
             </div>
         </div>
 
@@ -9809,7 +9838,7 @@ function buildProgressCard(title, icon, colorTheme, targetQty, actualQty, target
             </div>
             
             <div style="display:flex; justify-content:space-between; align-items:flex-end; font-weight:900; margin-bottom:6px;">
-                <span style="font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tiến độ KPI:</span>
+                <span style="font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tiến độ Doanh Số:</span>
                 <span style="font-size:24px; color:${statusColor}; line-height:1;">${pct.toFixed(1)}%</span>
             </div>
             <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);">
@@ -10025,6 +10054,8 @@ window.calculateAndRenderTargets = async function() {
 
     let globalRevTarget = 0; let globalRevActual = 0;
     let salesRevTarget = 0; let salesRevActual = 0;
+    let globalTargetStores = 0; 
+    let salesTargetStores = 0;
 
     let targetItems = [];
     let companyRevenuesMap = {}; 
@@ -10049,6 +10080,9 @@ window.calculateAndRenderTargets = async function() {
         const hasRevenues = revenues && Object.keys(revenues).length > 0;
         if (sCode && (hasItems || hasRevenues)) {
             assignedSalesCodes.add(sCode);
+          globalTargetStores += Number(data.targetStores || 0);
+        if (sCode === window._chiTieuTargetSalesCode) {
+            salesTargetStores = Number(data.targetStores || 0);
         }
         
         items.forEach(it => {
@@ -10330,7 +10364,7 @@ window.calculateAndRenderTargets = async function() {
                 'TỔNG TIẾN ĐỘ CHỈ TIÊU TOÀN CÔNG TY', 'fa-chart-pie', 'primary', 
                 globalTarget, globalActual, 
                 globalRevTarget, globalRevActual, 
-                globalTargetSkusCount, globalActualSkusCount
+                globalTargetStores, currentStats.tiems.size
             );
         } else {
             const targetSalesObj = users.find(u => u.code === window._chiTieuTargetSalesCode);
@@ -10339,7 +10373,7 @@ window.calculateAndRenderTargets = async function() {
                 `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
                 salesTarget, salesActual, 
                 salesRevTarget, salesRevActual, 
-                personalTargetSkusCount, personalActualSkusCount
+                salesTargetStores, currentStats.tiems.size
             );
         }
     } else {
@@ -10349,7 +10383,7 @@ window.calculateAndRenderTargets = async function() {
             `TIẾN ĐỘ CHỈ TIÊU: [${window._chiTieuTargetSalesCode}] ${targetSalesName}`, 'fa-user-check', 'primary', 
             salesTarget, salesActual, 
             salesRevTarget, salesRevActual, 
-            personalTargetSkusCount, personalActualSkusCount
+            salesTargetStores, currentStats.tiems.size
         );
     }
 
@@ -11838,13 +11872,13 @@ window.loadAndEditCurrentMonthKpi = async function() {
 
         const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
         salesUsers.forEach(s => {
-            alloc[s.code] = { name: s.name, companies: {}, skus: {} };
+            alloc[s.code] = { name: s.name, companies: {}, skus: {}, targetStores: 0 };
         });
 
         // Bóc tách dữ liệu từ Firebase
         foundDocs.forEach(data => {
             const sCode = data.salesCode;
-            if (!alloc[sCode]) alloc[sCode] = { name: sCode, companies: {}, skus: {} };
+            if (!alloc[sCode]) alloc[sCode] = { name: sCode, companies: {}, skus: {}, targetStores: Number(data.targetStores || 0) };
 
             // Bóc tách tiền Công ty
             const revs = data.companyRevenues || {};
@@ -12610,14 +12644,12 @@ window.renderMasterKpiStep2 = function(salesUsers) {
     });
 
     // 1. Dựng Header Bảng (Đã xóa dòng A, B, C của Excel)
-    let titleRowHtml = `
-        <tr class="title-row">
+   <tr class="title-row">
             <th style="position: sticky; left: 0; top: 0; z-index: 50; width: 40px; background: #e2e8f0; border-right: 1px solid #cbd5e1; text-align: center; color: #475569; font-size: 12px; border-bottom: 2px solid #94a3b8;">STT</th>
             <th style="position: sticky; left: 40px; top: 0; z-index: 50; width: 150px; min-width: 150px; max-width: 150px; background: #f8fafc; border-right: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; box-shadow: 2px 0 5px rgba(0,0,0,0.05); color: #475569; font-size: 12px; padding: 10px;">Tên Nhân Viên</th>
             <th style="position: sticky; left: 190px; top: 0; z-index: 50; width: 80px; min-width: 80px; max-width: 80px; background: #f8fafc; border-right: 2px solid #cbd5e1; border-bottom: 2px solid #94a3b8; box-shadow: 2px 0 5px rgba(0,0,0,0.05); color: #475569; font-size: 12px; padding: 10px;">Mã NV</th>
+            <th style="position: sticky; left: 270px; top: 0; z-index: 50; width: 80px; min-width: 80px; max-width: 80px; background: #e0f2fe; border-right: 2px solid #cbd5e1; border-bottom: 2px solid #94a3b8; box-shadow: 2px 0 5px rgba(0,0,0,0.05); color: #0284c7; font-size: 12px; padding: 10px; text-align:center;">Độ Phủ<br>(Tiệm)</th>
     `;
-    
- // Rải cột cho Công ty và SKU
 // Rải cột cho Công ty và SKU
     window._masterKpiState.companies.forEach(c => {
         titleRowHtml += `
@@ -12657,6 +12689,13 @@ titleRowHtml += `<th style="background: #f8fafc; border-bottom: 2px solid #94a3b
                 <td style="position: sticky; left: 0; z-index: 30; background: #e2e8f0; text-align: center; font-weight: 700; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #e2e8f0; color: #475569; font-size: 13px;">${index + 1}</td>
                 <td style="position: sticky; left: 40px; z-index: 20; background: ${rowBg}; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; box-shadow: 2px 0 5px rgba(0,0,0,0.02); padding: 0 10px;" title="${s.name}">${s.name}</td>
                 <td style="position: sticky; left: 190px; z-index: 20; background: ${rowBg}; border-right: 2px solid #cbd5e1; border-bottom: 1px solid #e2e8f0; font-weight: 800; color: var(--primary); text-align: left; box-shadow: 2px 0 5px rgba(0,0,0,0.02); padding: 0 10px;">${s.code}</td>
+                <td style="position: sticky; left: 270px; z-index: 20; background: ${rowBg}; border-right: 2px solid #cbd5e1; border-bottom: 1px solid #e2e8f0; box-shadow: 2px 0 5px rgba(0,0,0,0.02); padding: 0;">
+                    <input type="text" inputmode="numeric"
+                           value="${window._masterKpiState.salesAllocations[s.code].targetStores > 0 ? window._masterKpiState.salesAllocations[s.code].targetStores : ''}"
+                           oninput="window._masterKpiState.salesAllocations['${s.code}'].targetStores = Number(this.value.replace(/[^0-9]/g, '')) || 0; this.value = this.value.replace(/[^0-9]/g, '');"
+                           placeholder="-"
+                           class="pro-grid-input" style="color:var(--emerald); text-align:center !important;">
+                </td>
         `;
 
         window._masterKpiState.companies.forEach(c => {
@@ -12955,6 +12994,7 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
         batch.set(docRef, {
            salesCode: sCode,
            month: window._chiTieuTargetMonth,
+           targetStores: window._masterKpiState.salesAllocations[sCode].targetStores || 0,
            items: items,
            companyRevenues: companyRevenues,
            lastUpdatedByCode: currentUser.code,
