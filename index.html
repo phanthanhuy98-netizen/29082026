@@ -13967,12 +13967,21 @@ window.renderGpsAuditContent = function() {
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // Lấy danh sách NV đầy đủ Mã + Họ Tên để đưa vào dropdown lọc
+   // Lấy danh sách NV để đưa vào dropdown lọc (CHỈ GIỮ LẠI NHÂN VIÊN SALES)
+    const validSalesCodes = new Set();
+    if (typeof users !== 'undefined' && Array.isArray(users)) {
+        users.forEach(u => {
+            if (u && u.code && u.role === 'sales') {
+                validSalesCodes.add(String(u.code).trim().toUpperCase());
+            }
+        });
+    }
+
     const uniqueSales = Array.from(new Set([
         ...Object.keys(salesNameMap),
         ...stores.map(s => (s.pinnedByCode || '').trim().toUpperCase()),
         ...orders.map(o => (o.salesCode || '').trim().toUpperCase())
-    ])).filter(Boolean).sort();
+    ])).filter(code => code && validSalesCodes.has(code)).sort();
 
     let reportHtml = `
         <!-- THANH BỘ LỌC & CÔNG CỤ -->
@@ -13986,7 +13995,7 @@ window.renderGpsAuditContent = function() {
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                 <select onchange="changeGpsAuditFilter('sales', this.value)" style="margin:0; padding:7px 12px; font-size:13px; font-weight:800; border-radius:8px; width:auto; min-width:230px; color:var(--primary); border:1px solid var(--primary);">
-                    <option value="ALL">-- Tất cả Nhân viên (${uniqueSales.length}) --</option>
+                    <option value="ALL">-- Tất cả Nhân viên Sales (${uniqueSales.length}) --</option>
                     ${uniqueSales.map(code => `<option value="${code}" ${filterSales === code ? 'selected' : ''}>[${code}]${getFullSalesName(code)}</option>`).join('')}
                 </select>
                 <button class="btn btn-green btn-sm" onclick="exportGpsAuditExcel()" style="padding:8px 12px; font-weight:800;">
@@ -14253,7 +14262,6 @@ window.renderGpsAuditContent = function() {
                 let orderCount = dayEvents.filter(e => e.type === 'Chốt đơn').length;
                 let pinCount = dayEvents.filter(e => e.type === 'Ghim GPS').length;
 
-                // Tính tổng km thực tế & phát hiện Cụm đứng yên bấm liên thanh + Khoảng dừng đỗ lâu
                 let totalRealKm = 0;
                 let longStops = [];
                 let fakeJumps = [];
@@ -14272,7 +14280,6 @@ window.renderGpsAuditContent = function() {
                         fakeJumps.push(`Lúc ${formatHM(curr.time)}: Bay tọa độ ${distKm.toFixed(1)}km chỉ trong ${gapMin} phút (${Math.round(speed)} km/h) đến ${curr.targetName}`);
                     }
 
-                    // Phát hiện khoảng ngưng thao tác / dừng đỗ >= 40 phút
                     if (gapMin >= 40) {
                         let prevHour = new Date(prev.time).getHours();
                         let isLunch = (prevHour >= 11 && prevHour <= 13);
@@ -14290,7 +14297,6 @@ window.renderGpsAuditContent = function() {
                     }
                 }
 
-                // Phát hiện "Ngồi 1 chỗ bấm liên thanh" (Bán kính <= 20m từ 3 thao tác liên tiếp trở lên)
                 let stationaryBursts = [];
                 let idx = 0;
                 while (idx < dayEvents.length) {
@@ -14306,7 +14312,6 @@ window.renderGpsAuditContent = function() {
                             break;
                         }
                     }
-                    // Lọc lấy tên các tiệm khác nhau trong cụm đứng yên
                     let uniqueStoresInBurst = Array.from(new Set(burst.map(b => b.targetName)));
                     if (uniqueStoresInBurst.length >= 3) {
                         let burstMin = Math.max(1, Math.round((burst[burst.length - 1].time - burst[0].time) / 60000));
@@ -14325,7 +14330,6 @@ window.renderGpsAuditContent = function() {
                     }
                 }
 
-                // Chấm điểm Kỷ luật AI (Thang 100)
                 let score = 100;
                 let verdictReasons = [];
 
@@ -14372,12 +14376,14 @@ window.renderGpsAuditContent = function() {
                 }
 
                 let rawLogId = `raw_log_${dIdx}`;
+                let accDailyId = `acc_daily_${dIdx}`;
 
                 return `
-                <div style="background:#fff; border:1px solid #cbd5e1; border-left:5px solid ${badgeCol}; border-radius:10px; padding:16px; margin-bottom:14px; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
-                    <!-- Tiêu đề Ngày & Điểm AI -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
+                <div style="background:#fff; border:1px solid #cbd5e1; border-left:5px solid ${badgeCol}; border-radius:10px; margin-bottom:14px; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+                    <!-- Tiêu đề Ngày & Điểm AI (DẠNG ACCORDION) -->
+                    <div onclick="toggleOrderAccordion('${accDailyId}')" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding:12px 16px; cursor:pointer;">
                         <div style="font-size:14.5px; font-weight:900; color:#0f172a;">
+                            <i id="icon_${accDailyId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; transition: 0.3s; margin-right: 8px;"></i>
                             📅 NGÀY ${vnDateStr} — <span style="color:var(--primary);">[${filterSales}] ${selectedFullName}</span>
                         </div>
                         <div style="display:flex; gap:8px; align-items:center;">
@@ -14387,74 +14393,77 @@ window.renderGpsAuditContent = function() {
                         </div>
                     </div>
 
-                    <!-- Đoạn văn 1: Tóm tắt tổng quan hoạt động trong ngày -->
-                    <div style="font-size:13px; line-height:1.65; color:#1e293b; display:flex; flex-direction:column; gap:8px;">
-                        <div>
-                            • <b>🕒 Thời gian & Hiệu suất:</b> Bắt đầu thao tác đầu tiên lúc <b>${formatHM(firstEv.time)}</b> (tại <i>${firstEv.targetName}</i>) và kết thúc lúc <b>${formatHM(lastEv.time)}</b> (tại <i>${lastEv.targetName}</i>). Tổng thời gian hoạt động: <b>${spanHoursStr}</b> — Thực hiện <b>${dayEvents.length} thao tác</b> (Gồm <b>${orderCount} đơn hàng</b> và <b>${pinCount} lượt ghim GPS</b>) trên tổng quãng đường di chuyển thực tế khoảng <b>${totalRealKm.toFixed(1)} km</b>.
-                        </div>
+                    <!-- NỘI DUNG PHÂN TÍCH (BỊ ẨN MẶC ĐỊNH) -->
+                    <div id="${accDailyId}" class="hidden" style="padding: 16px; border-top:1px solid #e2e8f0; background:#f8fafc;">
+                        <!-- Đoạn văn 1: Tóm tắt tổng quan hoạt động trong ngày -->
+                        <div style="font-size:13px; line-height:1.65; color:#1e293b; display:flex; flex-direction:column; gap:8px;">
+                            <div>
+                                • <b>🕒 Thời gian & Hiệu suất:</b> Bắt đầu thao tác đầu tiên lúc <b>${formatHM(firstEv.time)}</b> (tại <i>${firstEv.targetName}</i>) và kết thúc lúc <b>${formatHM(lastEv.time)}</b> (tại <i>${lastEv.targetName}</i>). Tổng thời gian hoạt động: <b>${spanHoursStr}</b> — Thực hiện <b>${dayEvents.length} thao tác</b> (Gồm <b>${orderCount} đơn hàng</b> và <b>${pinCount} lượt ghim GPS</b>) trên tổng quãng đường di chuyển thực tế khoảng <b>${totalRealKm.toFixed(1)} km</b>.
+                            </div>
 
-                        <!-- Đoạn văn 2: Các cụm ngồi 1 chỗ bấm liên thanh (nếu có) -->
-                        ${stationaryBursts.length > 0 ? `
-                        <div style="background:#fff1f2; border:1px dashed #f43f5e; padding:10px 12px; border-radius:8px; color:#9f1239;">
-                            <b>🚨 Phát hiện hành vi đứng yên 1 chỗ bấm hàng loạt (${stationaryBursts.length} cụm):</b>
-                            <ul style="margin:4px 0 0 18px; padding:0;">
-                                ${stationaryBursts.map(b => `
-                                    <li style="margin-bottom:4px;">
-                                        Từ <b>${b.from} đến ${b.to}</b> (${b.durationMin} phút): Đứng yên tại tọa độ <span style="font-family:monospace;">(${b.lat.toFixed(5)}, ${b.lng.toFixed(5)})</span> bấm liên tiếp cho <b>${b.storeCount} tiệm</b>: <i>${b.sampleStores}</i>.
-                                        <button class="btn btn-sm" onclick="openNativeNavigator(${b.lat}, ${b.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f43f5e; color:#e11d48;">📍 Xem vị trí ngồi bấm</button>
-                                    </li>
-                                `).join('')}
-                            </ul>
-                        </div>
-                        ` : `
-                        <div style="color:#047857;">
-                            • <b>✅ Tác phong di chuyển:</b> Không phát hiện hiện tượng ngồi một chỗ bấm ghim liên thanh nhiều tiệm cùng lúc.
-                        </div>
-                        `}
+                            <!-- Đoạn văn 2: Các cụm ngồi 1 chỗ bấm liên thanh (nếu có) -->
+                            ${stationaryBursts.length > 0 ? `
+                            <div style="background:#fff1f2; border:1px dashed #f43f5e; padding:10px 12px; border-radius:8px; color:#9f1239;">
+                                <b>🚨 Phát hiện hành vi đứng yên 1 chỗ bấm hàng loạt (${stationaryBursts.length} cụm):</b>
+                                <ul style="margin:4px 0 0 18px; padding:0;">
+                                    ${stationaryBursts.map(b => `
+                                        <li style="margin-bottom:4px;">
+                                            Từ <b>${b.from} đến ${b.to}</b> (${b.durationMin} phút): Đứng yên tại tọa độ <span style="font-family:monospace;">(${b.lat.toFixed(5)}, ${b.lng.toFixed(5)})</span> bấm liên tiếp cho <b>${b.storeCount} tiệm</b>: <i>${b.sampleStores}</i>.
+                                            <button class="btn btn-sm" onclick="openNativeNavigator(${b.lat}, ${b.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f43f5e; color:#e11d48;">📍 Xem vị trí ngồi bấm</button>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                            ` : `
+                            <div style="color:#047857;">
+                                • <b>✅ Tác phong di chuyển:</b> Không phát hiện hiện tượng ngồi một chỗ bấm ghim liên thanh nhiều tiệm cùng lúc.
+                            </div>
+                            `}
 
-                        <!-- Đoạn văn 3: Các khoảng dừng đỗ / ngưng thao tác lâu (nếu có) -->
-                        ${longStops.length > 0 ? `
-                        <div style="background:#fffbeb; border:1px dashed #f59e0b; padding:10px 12px; border-radius:8px; color:#92400e;">
-                            <b>⏳ Các khoảng dừng đỗ / ngưng thao tác trên 40 phút (${longStops.length} lần):</b>
-                            <ul style="margin:4px 0 0 18px; padding:0;">
-                                ${longStops.map(st => `
-                                    <li style="margin-bottom:4px;">
-                                        Từ <b>${st.from} đến ${st.to}</b> (Ngưng <b>${st.minutes} phút</b> ${st.isLunch ? '- Khung giờ trưa' : '- Giờ làm việc'}): 
-                                        ${st.distKm < 0.3
-                                            ? `Đứng yên/dừng đỗ tại khu vực gần <b>${st.nearStore}</b> (chỉ dịch chuyển ${Math.round(st.distKm * 1000)}m).`
-                                            : `Không phát sinh thao tác trên phần mềm, sau đó di chuyển <b>${st.distKm.toFixed(1)} km</b> từ <i>${st.nearStore}</i> sang <i>${st.nextStore}</i>.`
-                                        }
-                                        <button class="btn btn-sm" onclick="openNativeNavigator(${st.lat}, ${st.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f59e0b; color:#d97706;">📍 Soi điểm dừng</button>
-                                    </li>
-                                `).join('')}
-                            </ul>
-                        </div>
-                        ` : ''}
+                            <!-- Đoạn văn 3: Các khoảng dừng đỗ / ngưng thao tác lâu (nếu có) -->
+                            ${longStops.length > 0 ? `
+                            <div style="background:#fffbeb; border:1px dashed #f59e0b; padding:10px 12px; border-radius:8px; color:#92400e;">
+                                <b>⏳ Các khoảng dừng đỗ / ngưng thao tác trên 40 phút (${longStops.length} lần):</b>
+                                <ul style="margin:4px 0 0 18px; padding:0;">
+                                    ${longStops.map(st => `
+                                        <li style="margin-bottom:4px;">
+                                            Từ <b>${st.from} đến ${st.to}</b> (Ngưng <b>${st.minutes} phút</b> ${st.isLunch ? '- Khung giờ trưa' : '- Giờ làm việc'}): 
+                                            ${st.distKm < 0.3
+                                                ? `Đứng yên/dừng đỗ tại khu vực gần <b>${st.nearStore}</b> (chỉ dịch chuyển ${Math.round(st.distKm * 1000)}m).`
+                                                : `Không phát sinh thao tác trên phần mềm, sau đó di chuyển <b>${st.distKm.toFixed(1)} km</b> từ <i>${st.nearStore}</i> sang <i>${st.nextStore}</i>.`
+                                            }
+                                            <button class="btn btn-sm" onclick="openNativeNavigator(${st.lat}, ${st.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f59e0b; color:#d97706;">📍 Soi điểm dừng</button>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                            ` : ''}
 
-                        <!-- Đoạn văn 4: Phán xét tổng kết của AI -->
-                        <div style="background:linear-gradient(to right, rgba(37,99,235,0.06), rgba(124,58,237,0.06)); border:1px solid rgba(37,99,235,0.2); padding:10px 12px; border-radius:8px; color:#0f172a;">
-                            <i class="fa-solid fa-gavel" style="color:var(--primary); margin-right:6px;"></i> <b>AI Phán Xét:</b> ${aiConclusionText}
-                        </div>
+                            <!-- Đoạn văn 4: Phán xét tổng kết của AI -->
+                            <div style="background:linear-gradient(to right, rgba(37,99,235,0.06), rgba(124,58,237,0.06)); border:1px solid rgba(37,99,235,0.2); padding:10px 12px; border-radius:8px; color:#0f172a;">
+                                <i class="fa-solid fa-gavel" style="color:var(--primary); margin-right:6px;"></i> <b>AI Phán Xét:</b> ${aiConclusionText}
+                            </div>
 
-                        <!-- Nút bật/tắt dòng nhật ký rút gọn 1 dòng -->
-                        <div style="margin-top:4px;">
-                            <button class="btn btn-sm" onclick="toggleOrderAccordion('${rawLogId}')" style="background:#f1f5f9; color:#334155; font-size:11.5px; padding:4px 10px;">
-                                <i class="fa-solid fa-list-ul"></i> Xem / Ẩn danh sách ${dayEvents.length} mốc giờ chi tiết trong ngày
-                            </button>
-                            <div id="${rawLogId}" class="hidden" style="margin-top:8px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; max-height:220px; overflow-y:auto; font-size:12px;">
-                                ${dayEvents.map((ev, k) => {
-                                    let prevEv = k > 0 ? dayEvents[k - 1] : null;
-                                    let dMeters = prevEv ? Math.round(calculateDistanceMeters(prevEv.lat, prevEv.lng, ev.lat, ev.lng)) : 0;
-                                    let dMin = prevEv ? Math.round((ev.time - prevEv.time) / 60000) : 0;
-                                    let moveTag = prevEv ? `<span style="color:#64748b;">(+${dMin}p \vert{} cách ${dMeters > 1000 ? (dMeters/1000).toFixed(1)+'km' : dMeters+'m'})</span>` : '<span style="color:#10b981; font-weight:800;">[Bắt đầu ngày]</span>';
-                                    return `
-                                    <div style="padding:4px 0; border-bottom:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                                        <div>
-                                            <b>${k + 1}. [${formatHM(ev.time)}]</b> <span style="color:${ev.type === 'Chốt đơn' ? '#2563eb' : '#d97706'}; font-weight:800;">${ev.type}:</span> ${ev.targetName}${moveTag}
-                                        </div>
-                                        <span style="font-family:monospace; font-size:11px; color:#64748b; cursor:pointer;" onclick="openNativeNavigator(${ev.lat},${ev.lng})" title="Bấm mở bản đồ">📍 ${ev.lat.toFixed(5)},${ev.lng.toFixed(5)}</span>
-                                    </div>`;
-                                }).join('')}
+                            <!-- Nút bật/tắt dòng nhật ký rút gọn 1 dòng -->
+                            <div style="margin-top:4px;">
+                                <button class="btn btn-sm" onclick="toggleOrderAccordion('${rawLogId}')" style="background:#f1f5f9; color:#334155; font-size:11.5px; padding:4px 10px;">
+                                    <i class="fa-solid fa-list-ul"></i> Xem / Ẩn danh sách ${dayEvents.length} mốc giờ chi tiết trong ngày
+                                </button>
+                                <div id="${rawLogId}" class="hidden" style="margin-top:8px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; max-height:220px; overflow-y:auto; font-size:12px;">
+                                    ${dayEvents.map((ev, k) => {
+                                        let prevEv = k > 0 ? dayEvents[k - 1] : null;
+                                        let dMeters = prevEv ? Math.round(calculateDistanceMeters(prevEv.lat, prevEv.lng, ev.lat, ev.lng)) : 0;
+                                        let dMin = prevEv ? Math.round((ev.time - prevEv.time) / 60000) : 0;
+                                        let moveTag = prevEv ? `<span style="color:#64748b;">(+${dMin}p \vert{} cách ${dMeters > 1000 ? (dMeters/1000).toFixed(1)+'km' : dMeters+'m'})</span>` : '<span style="color:#10b981; font-weight:800;">[Bắt đầu ngày]</span>';
+                                        return `
+                                        <div style="padding:4px 0; border-bottom:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                                            <div>
+                                                <b>${k + 1}. [${formatHM(ev.time)}]</b> <span style="color:${ev.type === 'Chốt đơn' ? '#2563eb' : '#d97706'}; font-weight:800;">${ev.type}:</span> ${ev.targetName}${moveTag}
+                                            </div>
+                                            <span style="font-family:monospace; font-size:11px; color:#64748b; cursor:pointer;" onclick="openNativeNavigator(${ev.lat},${ev.lng})" title="Bấm mở bản đồ">📍 ${ev.lat.toFixed(5)},${ev.lng.toFixed(5)}</span>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -14463,11 +14472,17 @@ window.renderGpsAuditContent = function() {
 
             reportHtml += `
             <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
-                <div style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); padding: 12px 16px; font-size: 13.5px; font-weight: 800; color: #fff; display: flex; justify-content: space-between; align-items: center;">
+                <!-- Đổi thành thanh Toggle Accordion (Mặc định thu gọn) -->
+                <div onclick="toggleOrderAccordion('audit_table_ai_personal')" style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); padding: 12px 16px; font-size: 13.5px; font-weight: 800; color: #fff; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                     <div><i class="fa-solid fa-robot" style="color: #fbbf24; margin-right:6px;"></i> 4. AI PHÂN TÍCH & PHÁN XÉT LỘ TRÌNH: [${filterSales}] ${selectedFullName}</div>
-                    <span style="background: rgba(255,255,255,0.15); color: #fff; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${sortedDates.length} Ngày hoạt động</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="background: rgba(255,255,255,0.15); color: #fff; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${sortedDates.length} Ngày hoạt động</span>
+                        <!-- Mũi tên mặc định trỏ xuống -->
+                        <i id="icon_audit_table_ai_personal" class="fa-solid fa-chevron-down" style="color: #fff; transition: 0.3s;"></i>
+                    </div>
                 </div>
-                <div style="padding: 16px; background: #f8fafc;">
+                <!-- Vùng chứa danh sách các ngày (Mặc định thêm class hidden) -->
+                <div id="audit_table_ai_personal" class="hidden" style="padding: 16px; background: #f8fafc;">
                     ${dailyJudgeCardsHtml}
                 </div>
             </div>`;
@@ -14519,11 +14534,14 @@ window.renderGpsAuditContent = function() {
 
             reportHtml += `
             <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+                <!-- Đổi thành thanh Toggle Accordion và mặc định đóng -->
                 <div onclick="toggleOrderAccordion('audit_table_ai_team')" style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); padding: 12px 16px; font-size: 13.5px; font-weight: 800; color: #fff; display: flex; justify-content: space-between; align-items: center; cursor:pointer;">
                     <div><i class="fa-solid fa-robot" style="color: #fbbf24; margin-right:6px;"></i> 4. AI TÓM TẮT & PHÁN XÉT NHANH TOÀN ĐỘI SALES (BẤM VÀO NV ĐỂ MỔ XẺ THEO NGÀY)</div>
-                    <i id="icon_audit_table_ai_team" class="fa-solid fa-chevron-down" style="color: #fff; transition: 0.3s; transform: rotate(180deg);"></i>
+                    <!-- Mũi tên mặc định trỏ xuống -->
+                    <i id="icon_audit_table_ai_team" class="fa-solid fa-chevron-down" style="color: #fff; transition: 0.3s;"></i>
                 </div>
-                <div id="audit_table_ai_team" style="padding: 14px; background: #f8fafc; display:flex; flex-direction:column; gap:8px;">
+                <!-- Vùng chứa danh sách (Mặc định thêm class hidden) -->
+                <div id="audit_table_ai_team" class="hidden" style="padding: 14px; background: #f8fafc; display:flex; flex-direction:column; gap:8px;">
                     ${teamSummaryHtml}
                 </div>
             </div>`;
