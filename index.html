@@ -13545,23 +13545,56 @@ window.changeGpsAuditFilter = function(type, val) {
     renderGpsAuditContent();
 };
 
-// HÀM XÓA NHANH GPS CỦA 1 CỤM HOẶC TOÀN BỘ CỤM TRÙNG CỦA 1 NHÂN VIÊN
+// HÀM XÓA NHANH GPS CỦA 1 TIỆM LẺ HOẶC TOÀN BỘ CỤM TRÙNG (HỎI 2-3 LẦN CHỐNG BẤM NHẦM)
 window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-        return alert("⛔ Chỉ Admin hoặc Manager mới có quyền xóa GPS hàng loạt!");
+        return alert("⛔ Chỉ Admin hoặc Manager mới có quyền xóa GPS!");
     }
     const storeIds = decodeURIComponent(encodedStoreIds).split(',').filter(Boolean);
     if (storeIds.length === 0) return;
 
-    const confirmReset = await window.showCustomConfirm(
-        "Xóa GPS Trùng Hàng Loạt",
-        `Bạn có chắc chắn muốn XÓA SẠCH tọa độ GPS của ${storeIds.length} tiệm thuộc [${labelName}] về 0 để bắt buộc nhân viên đi ghim lại không?`,
+    // Phân biệt đang xóa 1 tiệm hay xóa cả cụm
+    const isMassDelete = storeIds.length > 1;
+
+    // ==========================================
+    // --- HỎI LẦN 1 (Xác nhận cơ bản) ---
+    // ==========================================
+    const confirm1 = await window.showCustomConfirm(
+        isMassDelete ? "Xóa GPS Cụm Trùng Lặp" : "Xóa Lẻ GPS Khách Hàng",
+        `Bạn có chắc chắn muốn xóa sạch tọa độ GPS của ${isMassDelete ? storeIds.length + ' tiệm thuộc' : ''} [${labelName}] không?`,
         "fa-location-crosshairs",
-        `Xóa ${storeIds.length} tiệm`,
+        isMassDelete ? `Xóa cụm ${storeIds.length} tiệm` : `Xóa tiệm này`,
         "Hủy"
     );
-    if (!confirmReset) return;
+    if (!confirm1) return;
 
+    // ==========================================
+    // --- HỎI LẦN 2 (Cảnh báo hậu quả) ---
+    // ==========================================
+    const confirm2 = await window.showCustomConfirm(
+        "CẢNH BÁO LẦN 2 (KHÔNG THỂ HOÀN TÁC)",
+        `Nhân viên sẽ mất hoàn toàn tọa độ và bắt buộc phải xách xe chạy đến tận nơi để ghim lại từ đầu.\n\nBạn có thực sự muốn xóa?`,
+        "fa-triangle-exclamation",
+        "Vẫn Xóa",
+        "Quay Lại"
+    );
+    if (!confirm2) return;
+
+    // ==========================================
+    // --- HỎI LẦN 3 (Chỉ áp dụng khi xóa Hàng Loạt nhiều tiệm) ---
+    // ==========================================
+    if (isMassDelete) {
+        const confirm3 = await window.showCustomConfirm(
+            "XÁC NHẬN LẦN CUỐI",
+            `Hệ thống hỏi lần 3: Bạn chắc chắn 100% muốn thực hiện lệnh trừng phạt này lên toàn bộ ${storeIds.length} tiệm chứ?`,
+            "fa-radiation",
+            "CHẮC CHẮN XÓA SẠCH",
+            "Dừng Lại Kẻo Lỗi"
+        );
+        if (!confirm3) return;
+    }
+
+    // NẾU VƯỢT QUA HẾT CÁC CÂU HỎI -> TIẾN HÀNH XÓA
     try {
         const nowIso = new Date().toISOString();
         const resetPayload = {
@@ -13581,7 +13614,7 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
             await batch.commit();
         }
 
-        // Cập nhật RAM & IndexedDB
+        // Cập nhật RAM & IndexedDB ngay lập tức để giao diện không bị giật
         const idSet = new Set(storeIds.map(String));
         stores.forEach((s, idx) => {
             if (idSet.has(String(s.id))) {
@@ -13594,10 +13627,12 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
         if (typeof filterTabCustomers === 'function') filterTabCustomers(tabCustomerSearchKey);
 
         if (typeof playSystemSound === 'function') playSystemSound('success');
-        alert(`✅ Đã xóa tọa độ của ${storeIds.length} tiệm bị trùng! Nhân viên sẽ phải ghim lại khi ghé thăm.`);
+        alert(`✅ Đã xóa thành công tọa độ của ${storeIds.length} tiệm! Trạng thái đã trả về "Chưa có GPS".`);
+        
+        // Load lại bảng kiểm toán (Các tiệm vừa xóa sẽ tự động biến mất khỏi danh sách vi phạm)
         renderGpsAuditContent();
     } catch (err) {
-        alert("⛔ Lỗi khi xóa GPS hàng loạt: " + err.message);
+        alert("⛔ Lỗi khi xóa GPS: " + err.message);
     }
 };
 
