@@ -13511,9 +13511,13 @@ window.executeSaveDonVi = async function(uid) {
         alert("⛔ Lỗi cập nhật Đơn vị: " + err.message);
     }
 };
- // ==========================================
-// THUẬT TOÁN KIỂM TOÁN GIAN LẬN GPS TOÀN DIỆN (SILENT AUDIT)
-// ==========================================
+// =========================================================================
+// HỆ THỐNG KIỂM TOÁN & XỬ LÝ GIAN LẬN GPS PRO (V2 - FULL ACTION & FILTER)
+// =========================================================================
+window._gpsAuditFilterSales = 'ALL';
+window._gpsAuditFilterTime = 'ALL'; // 'TODAY', 'WEEK', 'MONTH', 'ALL'
+window._lastAuditExportData = [];
+
 window.openGpsAuditModal = function() {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
 
@@ -13522,316 +13526,577 @@ window.openGpsAuditModal = function() {
 
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex; z-index:999999;">
-        <div style="color:#fff; font-size:18px; font-weight:bold; text-align:center;">
-          <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:10px;"></i><br>
-          Đang tổng hợp dữ liệu và phân tích vận tốc di chuyển...
+        <div style="color:#fff; font-size:16px; font-weight:bold; text-align:center;">
+          <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:12px;"></i><br>
+          Đang phân tích dữ liệu tọa độ, vận tốc và vị trí chốt đơn...
         </div>
       </div>
     `;
     modalContainer.classList.remove('hidden');
 
     setTimeout(() => {
-        // ---------------------------------------------------------
-        // THUẬT TOÁN 1: GRID HASHING (PHÁT HIỆN NGỒI 1 CHỖ GHIM TRÙNG)
-        // ---------------------------------------------------------
-        let fraudClusters = {}; 
-        stores.forEach(s => {
-            const latVal = Number(s.lat); const lngVal = Number(s.lng);
-            if (latVal && latVal !== 0 && lngVal && lngVal !== 0) {
-                let latKey = latVal.toFixed(4); let lngKey = lngVal.toFixed(4);
-                let coordKey = `${latKey}_${lngKey}`;
-                let nvCode = s.pinnedByCode ? s.pinnedByCode.trim() : 'UNKNOWN';
-                if (nvCode === '' || nvCode === 'UNKNOWN') return;
-                if (!fraudClusters[nvCode]) fraudClusters[nvCode] = {};
-                if (!fraudClusters[nvCode][coordKey]) fraudClusters[nvCode][coordKey] = [];
-                fraudClusters[nvCode][coordKey].push(s);
-            }
-        });
+        renderGpsAuditContent();
+    }, 80);
+};
 
-        let overlapReport = []; 
-        let totalDupedStores = 0;
-        Object.keys(fraudClusters).forEach(nvCode => {
-            let employeeClusters = [];
-            Object.keys(fraudClusters[nvCode]).forEach(coordKey => {
-                if (fraudClusters[nvCode][coordKey].length > 1) { 
-                    employeeClusters.push({
-                        coordKey: coordKey,
-                        originalLat: fraudClusters[nvCode][coordKey][0].lat, originalLng: fraudClusters[nvCode][coordKey][0].lng,
-                        timeGhim: fraudClusters[nvCode][coordKey][0].pinnedAt,
-                        stores: fraudClusters[nvCode][coordKey]
-                    });
-                    totalDupedStores += fraudClusters[nvCode][coordKey].length;
-                }
-            });
-            if (employeeClusters.length > 0) {
-                let nvName = employeeClusters[0].stores[0].pinnedByName || 'Nhân viên';
-                overlapReport.push({ nvCode, nvName, clusters: employeeClusters });
-            }
-        });
+window.changeGpsAuditFilter = function(type, val) {
+    if (type === 'sales') window._gpsAuditFilterSales = val;
+    if (type === 'time') window._gpsAuditFilterTime = val;
+    renderGpsAuditContent();
+};
 
-        // ---------------------------------------------------------
-        // THUẬT TOÁN 2: SPEED TRAP (PHÁT HIỆN FAKE GPS BAY TỌA ĐỘ)
-        // ---------------------------------------------------------
-        let allGpsEvents = [];
-        
-        // Lấy tọa độ từ các Đơn hàng (Lên đơn)
-        orders.forEach(o => {
-            if (o.lat && o.lng && o.createdAt && o.status !== 'Đã hủy') {
-                let timeMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
-                if (!isNaN(timeMs)) {
-                    allGpsEvents.push({ type: 'Lên đơn', salesCode: o.salesCode, salesName: o.salesName, lat: Number(o.lat), lng: Number(o.lng), time: timeMs, targetName: o.maKH || o.storeId });
-                }
-            }
-        });
-        
-        // Lấy tọa độ từ Lịch sử ghim GPS của Khách hàng
-        stores.forEach(s => {
-            if (s.pinnedHistory && Array.isArray(s.pinnedHistory)) {
-                s.pinnedHistory.forEach(h => {
-                    let timeMs = new Date(h.time).getTime();
-                    if (!isNaN(timeMs)) {
-                        allGpsEvents.push({ type: 'Ghim GPS', salesCode: h.code, salesName: h.name, lat: Number(h.lat), lng: Number(h.lng), time: timeMs, targetName: s.name });
-                    }
-                });
-            }
-        });
+// HÀM XÓA NHANH GPS CỦA 1 CỤM HOẶC TOÀN BỘ CỤM TRÙNG CỦA 1 NHÂN VIÊN
+window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+        return alert("⛔ Chỉ Admin hoặc Manager mới có quyền xóa GPS hàng loạt!");
+    }
+    const storeIds = decodeURIComponent(encodedStoreIds).split(',').filter(Boolean);
+    if (storeIds.length === 0) return;
 
-        // Gom nhóm theo NV và tính Vận tốc
-        let eventsByUser = {};
-        allGpsEvents.forEach(ev => {
-            if (!eventsByUser[ev.salesCode]) eventsByUser[ev.salesCode] = { name: ev.salesName, events: [] };
-            eventsByUser[ev.salesCode].events.push(ev);
-        });
+    const confirmReset = await window.showCustomConfirm(
+        "Xóa GPS Trùng Hàng Loạt",
+        `Bạn có chắc chắn muốn XÓA SẠCH tọa độ GPS của ${storeIds.length} tiệm thuộc [${labelName}] về 0 để bắt buộc nhân viên đi ghim lại không?`,
+        "fa-location-crosshairs",
+        `Xóa ${storeIds.length} tiệm`,
+        "Hủy"
+    );
+    if (!confirmReset) return;
 
-        let fakeGpsReport = [];
-        let totalFakeGpsViolations = 0;
-
-        Object.keys(eventsByUser).forEach(code => {
-            let userObj = eventsByUser[code];
-            // Sắp xếp các mốc định vị theo thứ tự thời gian
-            userObj.events.sort((a, b) => a.time - b.time); 
-
-            let violations = [];
-            for (let i = 1; i < userObj.events.length; i++) {
-                let ev1 = userObj.events[i-1];
-                let ev2 = userObj.events[i];
-                
-                let timeDiffHours = (ev2.time - ev1.time) / (1000 * 60 * 60);
-                
-                // Chỉ xét các thao tác cách nhau từ 1 phút đến 2 tiếng (để tránh sai số ngẫu nhiên)
-                if (timeDiffHours > 0.016 && timeDiffHours < 2) {
-                    let distKm = calculateDistanceMeters(ev1.lat, ev1.lng, ev2.lat, ev2.lng) / 1000;
-                    let speed = distKm / timeDiffHours;
-                    
-                    // CHỐT CHẶN FAKE GPS: Vận tốc di chuyển thị trường tạp hóa > 70 km/h là phi lý
-                    if (speed > 70 && distKm > 2) {
-                        violations.push({ ev1, ev2, speed, distKm, timeDiffMinutes: Math.round(timeDiffHours * 60) });
-                        totalFakeGpsViolations++;
-                    }
-                }
-            }
-
-            if (violations.length > 0) {
-                // Sắp xếp các vi phạm nghiêm trọng nhất (bay xa nhất) lên đầu
-                violations.sort((a, b) => b.speed - a.speed);
-                fakeGpsReport.push({ nvCode: code, nvName: userObj.name, violations: violations });
-            }
-        });
-
-  // ---------------------------------------------------------
-        // TỔNG HỢP GIAO DIỆN HIỂN THỊ (BẢN ERP CHUYÊN NGHIỆP - FIX LỖI SYNTAX)
-        // ---------------------------------------------------------
-        let formatTime = (ms) => {
-            let d = new Date(ms);
-            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} - ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    try {
+        const nowIso = new Date().toISOString();
+        const resetPayload = {
+            lat: 0, lng: 0,
+            pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [],
+            updatedAt: nowIso
         };
 
-        let reportHtml = '';
-
-        // WIDGET TỔNG QUAN (CLEAN & MINIMAL)
-        if (fakeGpsReport.length > 0 || overlapReport.length > 0) {
-            reportHtml += `
-                <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 240px; background: #fff; border: 1px solid #cbd5e1; border-left: 4px solid #ef4444; border-radius: 8px; padding: 16px;">
-                        <div style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 8px;">Cảnh báo Fake GPS</div>
-                        <div style="display: flex; align-items: baseline; gap: 8px;">
-                            <span style="font-size: 28px; font-weight: 900; color: #0f172a; line-height: 1;">${totalFakeGpsViolations}</span>
-                            <span style="font-size: 13px; font-weight: 600; color: #475569;">Lượt bay tọa độ / <b style="color:#ef4444;">${fakeGpsReport.length} NV</b></span>
-                        </div>
-                    </div>
-                    <div style="flex: 1; min-width: 240px; background: #fff; border: 1px solid #cbd5e1; border-left: 4px solid #f97316; border-radius: 8px; padding: 16px;">
-                        <div style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 8px;">Ghim trùng tọa độ</div>
-                        <div style="display: flex; align-items: baseline; gap: 8px;">
-                            <span style="font-size: 28px; font-weight: 900; color: #0f172a; line-height: 1;">${totalDupedStores}</span>
-                            <span style="font-size: 13px; font-weight: 600; color: #475569;">Tiệm bị trùng / <b style="color:#f97316;">${overlapReport.length} NV</b></span>
-                        </div>
-                    </div>
-                </div>
-            `;
+        // Chia batch nếu số lượng lớn
+        const chunkSize = 400;
+        for (let i = 0; i < storeIds.length; i += chunkSize) {
+            const chunk = storeIds.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach(sId => {
+                batch.update(doc(db, "stores", String(sId)), resetPayload);
+            });
+            await batch.commit();
         }
 
-        // BẢNG 1: CHI TIẾT FAKE GPS
-        if (fakeGpsReport.length > 0) {
-            reportHtml += `
-            <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; margin-bottom: 24px;">
-                <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 14px; font-weight: 800; color: #0f172a;">
-                    <i class="fa-solid fa-plane-up" style="color: #ef4444;"></i> CHI TIẾT VI PHẠM FAKE GPS (VẬN TỐC PHI LÝ)
-                </div>
-                <div>
-                ${fakeGpsReport.map((rep, empIdx) => {
-                    let accId = `audit_fake_${empIdx}`;
-                    return `
-                    <div style="border-bottom: 1px solid #e2e8f0;">
-                        <!-- Tiêu đề Accordion (Nhân viên) -->
-                        <div onclick="toggleOrderAccordion('${accId}')" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                            <div style="font-weight: 700; font-size: 14px; color: #1e293b;">
-                                <span style="display:inline-block; width:24px; color:#94a3b8;">${empIdx+1}.</span> 
-                                [${rep.nvCode}]${rep.nvName}
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <span style="background: #fee2e2; color: #ef4444; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">
-                                    ${rep.violations.length} Vi phạm
-                                </span>
-                                <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; font-size: 12px; transition: 0.3s;"></i>
-                            </div>
-                        </div>
+        // Cập nhật RAM & IndexedDB
+        const idSet = new Set(storeIds.map(String));
+        stores.forEach((s, idx) => {
+            if (idSet.has(String(s.id))) {
+                stores[idx] = { ...stores[idx], ...resetPayload };
+            }
+        });
 
-                        <!-- Nội dung Chi tiết (Dạng danh sách phẳng) -->
-                        <div id="${accId}" class="hidden" style="padding: 0 16px 16px 40px; background: #fafafa;">
-                            <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px;">
-                                ${rep.violations.map((v, idx) => `
-                                    <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; display: flex; align-items: stretch; gap: 12px; font-size: 13px;">
-                                        <!-- Cột 1: Thông số vi phạm -->
-                                        <div style="width: 140px; border-right: 1px dashed #cbd5e1; padding-right: 12px; display: flex; flex-direction: column; justify-content: center;">
-                                            <div style="color: #ef4444; font-weight: 800; font-size: 15px; margin-bottom: 4px;">${Math.round(v.speed)} km/h</div>
-                                            <div style="color: #64748b; font-size: 11px;">Quãng đường: <b style="color:#334155;">${v.distKm.toFixed(1)} km</b></div>
-                                            <div style="color: #64748b; font-size: 11px;">Thời gian: <b style="color:#334155;">${v.timeDiffMinutes} phút</b></div>
-                                        </div>
-                                        <!-- Cột 2: Hành trình -->
-                                        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6px;">
-                                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                                <div><span style="color:#94a3b8; width: 35px; display:inline-block;">Từ:</span> <b style="color:#475569;">[${v.ev1.type}]</b> ${v.ev1.targetName} <span style="color:#94a3b8; font-size: 12px;">(${formatTime(v.ev1.time)})</span></div>
-                                                <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev1.lat}, ${v.ev1.lng})" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #3b82f6; padding: 2px 8px; font-size: 11px;"><i class="fa-solid fa-map"></i> Bản đồ</button>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                                <div><span style="color:#94a3b8; width: 35px; display:inline-block;">Đến:</span> <b style="color:#475569;">[${v.ev2.type}]</b> ${v.ev2.targetName} <span style="color:#94a3b8; font-size: 12px;">(${formatTime(v.ev2.time)})</span></div>
-                                                <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev2.lat}, ${v.ev2.lng})" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #3b82f6; padding: 2px 8px; font-size: 11px;"><i class="fa-solid fa-map"></i> Bản đồ</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                    `;
-                }).join('')}
+        if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
+        if (typeof buildStoreIndex === 'function') buildStoreIndex();
+        if (typeof filterTabCustomers === 'function') filterTabCustomers(tabCustomerSearchKey);
+
+        if (typeof playSystemSound === 'function') playSystemSound('success');
+        alert(`✅ Đã xóa tọa độ của ${storeIds.length} tiệm bị trùng! Nhân viên sẽ phải ghim lại khi ghé thăm.`);
+        renderGpsAuditContent();
+    } catch (err) {
+        alert("⛔ Lỗi khi xóa GPS hàng loạt: " + err.message);
+    }
+};
+
+// HÀM XUẤT BIÊN BẢN KIỂM TOÁN RA EXCEL
+window.exportGpsAuditExcel = function() {
+    if (!window._lastAuditExportData || window._lastAuditExportData.length === 0) {
+        return alert("Không có dữ liệu vi phạm nào để xuất Excel!");
+    }
+    const ws = XLSX.utils.json_to_sheet(window._lastAuditExportData);
+    ws['!cols'] = [
+        { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 16 },
+        { wch: 45 }, { wch: 25 }, { wch: 25 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KiemToanGPS");
+    const todayStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `BienBan_KiemToan_GPS_${todayStr}.xlsx`);
+};
+
+window.renderGpsAuditContent = function() {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    const filterSales = window._gpsAuditFilterSales || 'ALL';
+    const filterTime = window._gpsAuditFilterTime || 'ALL';
+
+    // Tính mốc thời gian lọc
+    const now = new Date();
+    let minTimestamp = 0;
+    if (filterTime === 'TODAY') {
+        minTimestamp = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
+    } else if (filterTime === 'WEEK') {
+        const d = new Date(now);
+        const day = d.getDay();
+        d.setDate(now.getDate() - day + (day === 0 ? -6 : 1));
+        d.setHours(0, 0, 0, 0);
+        minTimestamp = d.getTime();
+    } else if (filterTime === 'MONTH') {
+        minTimestamp = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0).getTime();
+    }
+
+    let exportRows = [];
+
+    // ---------------------------------------------------------
+    // THUẬT TOÁN 1: GOM CỤM GHIM TRÙNG TỌA ĐỘ (KHOẢNG CÁCH <= 12 MÉT)
+    // ---------------------------------------------------------
+    let storesByUser = {};
+    stores.forEach(s => {
+        const latVal = Number(s.lat);
+        const lngVal = Number(s.lng);
+        if (!latVal || !lngVal || latVal === 0 || lngVal === 0) return;
+
+        let nvCode = (s.pinnedByCode || '').trim().toUpperCase();
+        if (!nvCode) return;
+        if (filterSales !== 'ALL' && nvCode !== filterSales) return;
+
+        if (minTimestamp > 0 && s.pinnedAt) {
+            const pTime = new Date(s.pinnedAt).getTime();
+            if (!isNaN(pTime) && pTime < minTimestamp) return;
+        }
+
+        if (!storesByUser[nvCode]) {
+            storesByUser[nvCode] = { nvName: s.pinnedByName || nvCode, list: [] };
+        }
+        storesByUser[nvCode].list.push(s);
+    });
+
+    let overlapReport = [];
+    let totalDupedStores = 0;
+
+    Object.keys(storesByUser).forEach(nvCode => {
+        const list = storesByUser[nvCode].list;
+        const visited = new Set();
+        let employeeClusters = [];
+
+        for (let i = 0; i < list.length; i++) {
+            if (visited.has(i)) continue;
+            let cluster = [list[i]];
+            visited.add(i);
+
+            for (let j = i + 1; j < list.length; j++) {
+                if (visited.has(j)) continue;
+                const dist = calculateDistanceMeters(Number(list[i].lat), Number(list[i].lng), Number(list[j].lat), Number(list[j].lng));
+                if (dist <= 12) { // Bắt chính xác mọi điểm ghim trong bán kính 12 mét
+                    cluster.push(list[j]);
+                    visited.add(j);
+                }
+            }
+
+            if (cluster.length > 1) {
+                employeeClusters.push({
+                    originalLat: cluster[0].lat,
+                    originalLng: cluster[0].lng,
+                    timeGhim: cluster[0].pinnedAt,
+                    stores: cluster
+                });
+                totalDupedStores += cluster.length;
+
+                cluster.forEach(st => {
+                    exportRows.push({
+                        "Loại Vi Phạm": "1. Ghim trùng tọa độ (<=12m)",
+                        "Mã NV": nvCode,
+                        "Tên Nhân Viên": storesByUser[nvCode].nvName,
+                        "Thời Gian": st.pinnedAt ? new Date(st.pinnedAt).toLocaleString('vi-VN') : '',
+                        "Chi Tiết / Điểm Bán": `[${st.code}] ${st.name}`,
+                        "Thông Số Lệch": `Trùng cụm ${cluster.length} tiệm`,
+                        "Tọa Độ": `${Number(st.lat).toFixed(5)}, ${Number(st.lng).toFixed(5)}`
+                    });
+                });
+            }
+        }
+
+        if (employeeClusters.length > 0) {
+            employeeClusters.sort((a, b) => b.stores.length - a.stores.length);
+            overlapReport.push({
+                nvCode,
+                nvName: storesByUser[nvCode].nvName,
+                clusters: employeeClusters,
+                allDupStoreIds: employeeClusters.flatMap(c => c.stores.map(s => s.id))
+            });
+        }
+    });
+
+    // ---------------------------------------------------------
+    // THUẬT TOÁN 2: SPEED TRAP (PHÁT HIỆN FAKE GPS BAY TỌA ĐỘ > 70KM/H)
+    // ---------------------------------------------------------
+    let allGpsEvents = [];
+    orders.forEach(o => {
+        if (o.lat && o.lng && o.createdAt && o.status !== 'Đã hủy') {
+            let nvCode = (o.salesCode || '').trim().toUpperCase();
+            if (filterSales !== 'ALL' && nvCode !== filterSales) return;
+            let timeMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
+            if (!isNaN(timeMs) && timeMs >= minTimestamp) {
+                allGpsEvents.push({ type: 'Lên đơn', salesCode: nvCode, salesName: o.salesName, lat: Number(o.lat), lng: Number(o.lng), time: timeMs, targetName: o.maKH || o.storeId });
+            }
+        }
+    });
+
+    stores.forEach(s => {
+        if (s.pinnedHistory && Array.isArray(s.pinnedHistory)) {
+            s.pinnedHistory.forEach(h => {
+                let nvCode = (h.code || '').trim().toUpperCase();
+                if (filterSales !== 'ALL' && nvCode !== filterSales) return;
+                let timeMs = new Date(h.time).getTime();
+                if (!isNaN(timeMs) && timeMs >= minTimestamp) {
+                    allGpsEvents.push({ type: 'Ghim GPS', salesCode: nvCode, salesName: h.name, lat: Number(h.lat), lng: Number(h.lng), time: timeMs, targetName: `[${s.code}] ${s.name}` });
+                }
+            });
+        }
+    });
+
+    let eventsByUser = {};
+    allGpsEvents.forEach(ev => {
+        if (!ev.salesCode) return;
+        if (!eventsByUser[ev.salesCode]) eventsByUser[ev.salesCode] = { name: ev.salesName, events: [] };
+        eventsByUser[ev.salesCode].events.push(ev);
+    });
+
+    let fakeGpsReport = [];
+    let totalFakeGpsViolations = 0;
+
+    Object.keys(eventsByUser).forEach(code => {
+        let userObj = eventsByUser[code];
+        userObj.events.sort((a, b) => a.time - b.time);
+
+        let violations = [];
+        for (let i = 1; i < userObj.events.length; i++) {
+            let ev1 = userObj.events[i - 1];
+            let ev2 = userObj.events[i];
+            let timeDiffHours = (ev2.time - ev1.time) / (1000 * 60 * 60);
+
+            if (timeDiffHours > 0.016 && timeDiffHours < 2) {
+                let distKm = calculateDistanceMeters(ev1.lat, ev1.lng, ev2.lat, ev2.lng) / 1000;
+                let speed = distKm / timeDiffHours;
+
+                if (speed > 70 && distKm > 2) {
+                    let timeMin = Math.round(timeDiffHours * 60);
+                    violations.push({ ev1, ev2, speed, distKm, timeDiffMinutes: timeMin });
+                    totalFakeGpsViolations++;
+
+                    exportRows.push({
+                        "Loại Vi Phạm": "2. Fake GPS (Bay tọa độ)",
+                        "Mã NV": code,
+                        "Tên Nhân Viên": userObj.name,
+                        "Thời Gian": new Date(ev2.time).toLocaleString('vi-VN'),
+                        "Chi Tiết / Điểm Bán": `Từ [${ev1.targetName}] -> Đến [${ev2.targetName}]`,
+                        "Thông Số Lệch": `${Math.round(speed)} km/h (${distKm.toFixed(1)}km / ${timeMin}p)`,
+                        "Tọa Độ": `${ev2.lat.toFixed(5)}, ${ev2.lng.toFixed(5)}`
+                    });
+                }
+            }
+        }
+        if (violations.length > 0) {
+            violations.sort((a, b) => b.speed - a.speed);
+            fakeGpsReport.push({ nvCode: code, nvName: userObj.name, violations });
+        }
+    });
+
+    // ---------------------------------------------------------
+    // THUẬT TOÁN 3: LÊN ĐƠN TỪ XA (LỆCH TỌA ĐỘ QUẦY > 100 MÉT)
+    // ---------------------------------------------------------
+    let remoteOrdersByUser = {};
+    let totalRemoteOrders = 0;
+
+    orders.forEach(o => {
+        if (o.status === 'Đã hủy') return;
+        let nvCode = (o.salesCode || '').trim().toUpperCase();
+        if (!nvCode) return;
+        if (filterSales !== 'ALL' && nvCode !== filterSales) return;
+
+        let timeMs = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt || o.ngayCtu).getTime();
+        if (minTimestamp > 0 && !isNaN(timeMs) && timeMs < minTimestamp) return;
+
+        let inferredMaKH = o.maDTPNNo || (o.maKH && o.maKH.includes(' - ') ? o.maKH.split(' - ')[0].trim() : '');
+        const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaKH));
+
+        if (matchedStore && matchedStore.lat && matchedStore.lng && Number(matchedStore.lat) !== 0) {
+            if (!o.lat || !o.lng || Number(o.lat) === 0) {
+                // Tắt GPS khi lên đơn
+                if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: o.salesName || nvCode, list: [] };
+                remoteOrdersByUser[nvCode].list.push({ order: o, store: matchedStore, distMeters: -1, timeMs });
+                totalRemoteOrders++;
+            } else {
+                const distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
+                if (distMeters > 100) {
+                    if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: o.salesName || nvCode, list: [] };
+                    remoteOrdersByUser[nvCode].list.push({ order: o, store: matchedStore, distMeters, timeMs });
+                    totalRemoteOrders++;
+
+                    exportRows.push({
+                        "Loại Vi Phạm": "3. Chốt đơn từ xa (>100m)",
+                        "Mã NV": nvCode,
+                        "Tên Nhân Viên": o.salesName || nvCode,
+                        "Thời Gian": !isNaN(timeMs) ? new Date(timeMs).toLocaleString('vi-VN') : o.ngayCtu,
+                        "Chi Tiết / Điểm Bán": `Đơn #${o.soCtu} - ${o.maKH || matchedStore.name}`,
+                        "Thông Số Lệch": `Cách tiệm ${distMeters > 1000 ? (distMeters/1000).toFixed(1) + ' km' : distMeters + ' m'}`,
+                        "Tọa Độ": `${Number(o.lat).toFixed(5)}, ${Number(o.lng).toFixed(5)}`
+                    });
+                }
+            }
+        }
+    });
+
+    let remoteOrderReport = Object.keys(remoteOrdersByUser).map(nvCode => {
+        const item = remoteOrdersByUser[nvCode];
+        item.list.sort((a, b) => b.distMeters - a.distMeters);
+        return { nvCode, nvName: item.nvName, list: item.list };
+    }).sort((a, b) => b.list.length - a.list.length);
+
+    window._lastAuditExportData = exportRows;
+
+    // ---------------------------------------------------------
+    // HIỂN THỊ GIAO DIỆN KIỂM TOÁN NÂNG CẤP
+    // ---------------------------------------------------------
+    const formatTime = (ms) => {
+        if (!ms || isNaN(ms)) return '--:--';
+        let d = new Date(ms);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} - ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    // Lấy danh sách NV để đưa vào dropdown lọc
+    const uniqueSales = Array.from(new Set([
+        ...stores.map(s => (s.pinnedByCode || '').trim().toUpperCase()),
+        ...orders.map(o => (o.salesCode || '').trim().toUpperCase())
+    ])).filter(Boolean).sort();
+
+    let reportHtml = `
+        <!-- THANH BỘ LỌC & CÔNG CỤ -->
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; background:#fff; padding:12px 16px; border-radius:10px; border:1px solid #cbd5e1; margin-bottom:18px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:12px; font-weight:800; color:#475569;"><i class="fa-solid fa-filter"></i> KỲ QUÉT:</span>
+                <button class="btn btn-sm ${filterTime === 'ALL' ? 'btn-amber' : ''}" onclick="changeGpsAuditFilter('time', 'ALL')">Tất cả</button>
+                <button class="btn btn-sm ${filterTime === 'MONTH' ? 'btn-amber' : ''}" onclick="changeGpsAuditFilter('time', 'MONTH')">Tháng này</button>
+                <button class="btn btn-sm ${filterTime === 'WEEK' ? 'btn-amber' : ''}" onclick="changeGpsAuditFilter('time', 'WEEK')">Tuần này</button>
+                <button class="btn btn-sm ${filterTime === 'TODAY' ? 'btn-amber' : ''}" onclick="changeGpsAuditFilter('time', 'TODAY')">Hôm nay</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select onchange="changeGpsAuditFilter('sales', this.value)" style="margin:0; padding:6px 12px; font-size:12.5px; font-weight:800; border-radius:8px; width:auto; min-width:160px;">
+                    <option value="ALL">-- Tất cả Nhân viên --</option>
+                    ${uniqueSales.map(code => `<option value="${code}" ${filterSales === code ? 'selected' : ''}>Mã NV: ${code}</option>`).join('')}
+                </select>
+                <button class="btn btn-green btn-sm" onclick="exportGpsAuditExcel()" style="padding:7px 12px; font-weight:800;">
+                    <i class="fa-solid fa-file-excel"></i> Xuất Excel Vi Phạm (${exportRows.length})
+                </button>
+            </div>
+        </div>
+
+        <!-- 3 WIDGET TỔNG QUAN -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px;">
+            <div style="background: #fff; border: 1px solid #cbd5e1; border-left: 5px solid #ef4444; border-radius: 10px; padding: 14px 16px;">
+                <div style="font-size: 11.5px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">1. Cảnh báo Fake GPS (Bay tọa độ)</div>
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                    <span style="font-size: 26px; font-weight: 900; color: #0f172a;">${totalFakeGpsViolations}</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #475569;">Lượt bay / <b style="color:#ef4444;">${fakeGpsReport.length} NV</b></span>
                 </div>
             </div>
-            `;
-        }
-
-        // BẢNG 2: CHI TIẾT GHIM TRÙNG
-        if (overlapReport.length > 0) {
-            reportHtml += `
-            <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; margin-bottom: 24px;">
-                <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 14px; font-weight: 800; color: #0f172a;">
-                    <i class="fa-solid fa-map-pin" style="color: #f97316;"></i> CHI TIẾT VI PHẠM GHIM TRÙNG TỌA ĐỘ
-                </div>
-                <div>
-                ${overlapReport.sort((a, b) => b.clusters.length - a.clusters.length).map((rep, empIdx) => {
-                    let accId = `audit_dup_${empIdx}`;
-                    return `
-                    <div style="border-bottom: 1px solid #e2e8f0;">
-                        <!-- Tiêu đề Accordion -->
-                        <div onclick="toggleOrderAccordion('${accId}')" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                            <div style="font-weight: 700; font-size: 14px; color: #1e293b;">
-                                <span style="display:inline-block; width:24px; color:#94a3b8;">${empIdx+1}.</span> 
-                                [${rep.nvCode}]${rep.nvName}
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <span style="background: #ffedd5; color: #f97316; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;">
-                                    ${rep.clusters.length} Cụm trùng
-                                </span>
-                                <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; font-size: 12px; transition: 0.3s;"></i>
-                            </div>
-                        </div>
-
-                        <!-- Nội dung Chi tiết -->
-                        <div id="${accId}" class="hidden" style="padding: 0 16px 16px 40px; background: #fafafa;">
-                            <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px;">
-                                ${rep.clusters.map((cluster, cIdx) => {
-                                    let timeStr = cluster.timeGhim ? formatTime(new Date(cluster.timeGhim).getTime()) : '--:--';
-                                    return `
-                                    <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px dashed #cbd5e1; padding-bottom: 8px;">
-                                            <div>
-                                                <span style="color:#ef4444; font-weight:800; font-size: 14px;">Cụm ${cIdx + 1}</span> 
-                                                <span style="color:#64748b; margin-left: 8px;">(Thời điểm: ${timeStr})</span>
-                                                <div style="margin-top: 4px; color: #334155;">
-                                                    Ngồi 1 vị trí ghim cho <b style="color:#0f172a;">${cluster.stores.length}</b> khách hàng
-                                                </div>
-                                            </div>
-                                            <div style="text-align: right;">
-                                                <div style="font-size: 12px; color: #64748b; margin-bottom: 4px; font-family: monospace;">${Number(cluster.originalLat).toFixed(5)}, ${Number(cluster.originalLng).toFixed(5)}</div>
-                                                <button class="btn btn-sm" onclick="openNativeNavigator(${cluster.originalLat}, ${cluster.originalLng})" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #3b82f6; padding: 4px 12px; font-size: 12px; font-weight: 700;"><i class="fa-solid fa-map-location-dot"></i> Soi Bản đồ</button>
-                                            </div>
-                                        </div>
-                                        <div style="color: #475569; line-height: 1.6;">
-                                            ${cluster.stores.map(s => `<span style="display:inline-block; background:#f1f5f9; border:1px solid #e2e8f0; padding:1px 6px; border-radius:4px; margin-right:6px; margin-bottom:4px;">[${s.code}]${s.name}</span>`).join('')}
-                                        </div>
-                                    </div>
-                                    `;
-                                }).join('')}
-                            </div>
-                        </div>
-                    </div>
-                    `;
-                }).join('')}
+            <div style="background: #fff; border: 1px solid #cbd5e1; border-left: 5px solid #f97316; border-radius: 10px; padding: 14px 16px;">
+                <div style="font-size: 11.5px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">2. Ghim trùng tọa độ (<= 12m)</div>
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                    <span style="font-size: 26px; font-weight: 900; color: #0f172a;">${totalDupedStores}</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #475569;">Tiệm bị trùng / <b style="color:#f97316;">${overlapReport.length} NV</b></span>
                 </div>
             </div>
-            `;
-        }
-
-        if (fakeGpsReport.length === 0 && overlapReport.length === 0) {
-            reportHtml = `
-                <div style="text-align: center; padding: 60px 20px; color: #10b981; background: #fff; border-radius: 8px; border: 1px solid #cbd5e1;">
-                    <i class="fa-solid fa-shield-check fa-3x" style="margin-bottom: 16px;"></i>
-                    <div style="font-size: 16px; font-weight: 800; text-transform: uppercase;">Mọi thứ đều ổn</div>
-                    <div style="font-size: 14px; margin-top: 8px; color: #64748b;">Không phát hiện dữ liệu gian lận định vị trong thời gian này.</div>
+            <div style="background: #fff; border: 1px solid #cbd5e1; border-left: 5px solid #8b5cf6; border-radius: 10px; padding: 14px 16px;">
+                <div style="font-size: 11.5px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">3. Chốt đơn lệch quầy (> 100m)</div>
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                    <span style="font-size: 26px; font-weight: 900; color: #0f172a;">${totalRemoteOrders}</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #475569;">Đơn từ xa / <b style="color:#8b5cf6;">${remoteOrderReport.length} NV</b></span>
                 </div>
-            `;
-        }
+            </div>
+        </div>
+    `;
 
-        modalContainer.innerHTML = `
-            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
-                <div class="modal-content fullscreen-modal" style="max-width: 850px; padding: 0; background: #f8fafc; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);">
-                    
-                    <!-- HEADER MODAL -->
-                    <div style="background: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; border-bottom: 1px solid #cbd5e1;">
-                        <div>
-                            <h3 style="font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; text-transform: uppercase;">
-                                <i class="fa-solid fa-file-contract" style="color: #64748b; margin-right: 6px;"></i> KIỂM TOÁN LỘ TRÌNH GPS
-                            </h3>
+    // BẢNG 1: CHI TIẾT FAKE GPS
+    if (fakeGpsReport.length > 0) {
+        reportHtml += `
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+            <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a;">
+                <i class="fa-solid fa-plane-up" style="color: #ef4444;"></i> 1. CHI TIẾT VI PHẠM FAKE GPS (VẬN TỐC DI CHUYỂN > 70 KM/H)
+            </div>
+            <div>
+            ${fakeGpsReport.map((rep, empIdx) => {
+                let accId = `audit_fake_${empIdx}`;
+                return `
+                <div style="border-bottom: 1px solid #e2e8f0;">
+                    <div onclick="toggleOrderAccordion('${accId}')" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                        <div style="font-weight: 800; font-size: 13.5px; color: #1e293b;">
+                            <span style="display:inline-block; width:24px; color:#94a3b8;">${empIdx + 1}.</span> [${rep.nvCode}]${rep.nvName}
                         </div>
-                        <button class="btn" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 6px 16px; border-radius: 6px; font-weight: 700; font-size: 13px; cursor: pointer;">
-                            Đóng
-                        </button>
-                    </div>
-
-                    <!-- NỘI DUNG CUỘN -->
-                    <div style="flex: 1; overflow-y: auto; padding: 24px;">
-                        <div style="max-width: 100%;">
-                            ${reportHtml}
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="background: #fee2e2; color: #ef4444; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${rep.violations.length} Vi phạm</span>
+                            <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; font-size: 12px; transition: 0.3s;"></i>
                         </div>
                     </div>
-                </div>
+                    <div id="${accId}" class="hidden" style="padding: 0 16px 14px 36px; background: #fafafa;">
+                        <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px;">
+                            ${rep.violations.map(v => `
+                                <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; font-size: 12.5px; flex-wrap:wrap;">
+                                    <div style="min-width: 130px; border-right: 1px dashed #cbd5e1; padding-right: 12px;">
+                                        <div style="color: #ef4444; font-weight: 900; font-size: 15px;">🚀 ${Math.round(v.speed)} km/h</div>
+                                        <div style="color: #64748b; font-size: 11px;">Cách <b>${v.distKm.toFixed(1)} km</b> trong <b>${v.timeDiffMinutes} phút</b></div>
+                                    </div>
+                                    <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span><b>Từ (${v.ev1.type}):</b> ${v.ev1.targetName} <i style="color:#64748b;">(${formatTime(v.ev1.time)})</i></span>
+                                            <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev1.lat}, ${v.ev1.lng})" style="padding:2px 8px; font-size:11px;">📍 Điểm 1</button>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span><b>Đến (${v.ev2.type}):</b> ${v.ev2.targetName} <i style="color:#64748b;">(${formatTime(v.ev2.time)})</i></span>
+                                            <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev2.lat}, ${v.ev2.lng})" style="padding:2px 8px; font-size:11px;">📍 Điểm 2</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')}
+            </div>
+        </div>`;
+    }
+
+    // BẢNG 2: CHI TIẾT GHIM TRÙNG TỌA ĐỘ (CÓ NÚT XÓA GPS TRÙNG 1 CHẠM)
+    if (overlapReport.length > 0) {
+        reportHtml += `
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+            <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a;">
+                <i class="fa-solid fa-map-pin" style="color: #f97316;"></i> 2. CHI TIẾT VI PHẠM GHIM TRÙNG TỌA ĐỘ (CÓ NÚT XÓA BẮT GHIM LẠI)
+            </div>
+            <div>
+            ${overlapReport.map((rep, empIdx) => {
+                let accId = `audit_dup_${empIdx}`;
+                let allEmpIdsEncoded = encodeURIComponent(rep.allDupStoreIds.join(','));
+                return `
+                <div style="border-bottom: 1px solid #e2e8f0;">
+                    <div onclick="toggleOrderAccordion('${accId}')" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; flex-wrap:wrap; gap:8px;">
+                        <div style="font-weight: 800; font-size: 13.5px; color: #1e293b;">
+                            <span style="display:inline-block; width:24px; color:#94a3b8;">${empIdx + 1}.</span> [${rep.nvCode}]${rep.nvName}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button class="btn btn-red btn-sm" onclick="event.stopPropagation(); resetFraudClusterGps('${allEmpIdsEncoded}', 'NV${rep.nvName}')" style="padding: 3px 8px; font-size: 11px;">
+                                <i class="fa-solid fa-trash-can"></i> Reset hết (${rep.allDupStoreIds.length} tiệm)
+                            </button>
+                            <span style="background: #ffedd5; color: #f97316; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">
+                                ${rep.clusters.length} Cụm trùng
+                            </span>
+                            <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; font-size: 12px; transition: 0.3s;"></i>
+                        </div>
+                    </div>
+                    <div id="${accId}" class="hidden" style="padding: 0 16px 14px 36px; background: #fafafa;">
+                        <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px;">
+                            ${rep.clusters.map((cluster, cIdx) => {
+                                let timeStr = cluster.timeGhim ? formatTime(new Date(cluster.timeGhim).getTime()) : '--:--';
+                                let clusterIdsEncoded = encodeURIComponent(cluster.stores.map(s => s.id).join(','));
+                                return `
+                                <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #cbd5e1; padding-bottom: 8px; flex-wrap:wrap; gap:8px;">
+                                        <div>
+                                            <span style="color:#ef4444; font-weight:900; font-size: 13.5px;">Cụm ${cIdx + 1} (${cluster.stores.length} tiệm cùng 1 chỗ)</span>
+                                            <span style="color:#64748b; margin-left: 6px;">🕒 ${timeStr}</span>
+                                        </div>
+                                        <div style="display:flex; gap:6px; align-items:center;">
+                                            <button class="btn btn-sm" onclick="openNativeNavigator(${cluster.originalLat}, ${cluster.originalLng})" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #2563eb; padding: 4px 10px; font-size: 11.5px; font-weight: 800;">
+                                                <i class="fa-solid fa-map-location-dot"></i> Xem Map
+                                            </button>
+                                            <button class="btn btn-red btn-sm" onclick="resetFraudClusterGps('${clusterIdsEncoded}', 'Cụm ${cIdx + 1} - ${rep.nvName}')" style="padding: 4px 10px; font-size: 11.5px; font-weight: 800;">
+                                                <i class="fa-solid fa-eraser"></i> Xóa GPS cụm này
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                        ${cluster.stores.map(s => `
+                                            <span style="display:inline-flex; align-items:center; gap:5px; background:#f8fafc; border:1px solid #cbd5e1; padding:3px 8px; border-radius:6px; font-weight:700;">
+                                                <b style="color:var(--primary);">[${s.code}]</b>${s.name}
+                                            </span>
+                                        `).join('')}
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')}
+            </div>
+        </div>`;
+    }
+
+    // BẢNG 3: CHI TIẾT CHỐT ĐƠN TỪ XA (> 100 MÉT SO VỚI VỊ TRÍ TIỆM)
+    if (remoteOrderReport.length > 0) {
+        reportHtml += `
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+            <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a;">
+                <i class="fa-solid fa-satellite-dish" style="color: #8b5cf6;"></i> 3. CHI TIẾT LÊN ĐƠN LỆCH VỊ TRÍ TIỆM (> 100 MÉT HOẶC TẮT GPS)
+            </div>
+            <div>
+            ${remoteOrderReport.map((rep, empIdx) => {
+                let accId = `audit_remote_${empIdx}`;
+                return `
+                <div style="border-bottom: 1px solid #e2e8f0;">
+                    <div onclick="toggleOrderAccordion('${accId}')" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                        <div style="font-weight: 800; font-size: 13.5px; color: #1e293b;">
+                            <span style="display:inline-block; width:24px; color:#94a3b8;">${empIdx + 1}.</span> [${rep.nvCode}]${rep.nvName}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="background: #ede9fe; color: #7c3aed; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${rep.list.length} Đơn lệch</span>
+                            <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color: #94a3b8; font-size: 12px; transition: 0.3s;"></i>
+                        </div>
+                    </div>
+                    <div id="${accId}" class="hidden" style="padding: 0 16px 14px 36px; background: #fafafa;">
+                        <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 8px;">
+                            ${rep.list.slice(0, 30).map(item => {
+                                const distTxt = item.distMeters === -1 ? 'Tắt GPS lúc gửi đơn' : (item.distMeters > 1000 ? (item.distMeters / 1000).toFixed(1) + ' km' : item.distMeters + ' m');
+                                return `
+                                <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; font-size:12.5px; flex-wrap:wrap; gap:8px;">
+                                    <div>
+                                        <span style="font-weight:900; color:var(--primary);">CTu #${item.order.soCtu}</span> — <b>${item.order.maKH || item.store.name}</b>
+                                        <span style="color:#64748b; margin-left:6px;">(${formatTime(item.timeMs)})</span>
+                                    </div>
+                                    <div style="display:flex; gap:8px; align-items:center;">
+                                        <span style="background:#fee2e2; color:#dc2626; padding:2px 8px; border-radius:6px; font-weight:800;">Lệch: ${distTxt}</span>
+                                        ${item.order.lat ? `<button class="btn btn-sm" onclick="openNativeNavigator(${item.order.lat},${item.order.lng})" style="padding:3px 8px; font-size:11px;">📍 Nơi ngồi bấm đơn</button>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')}
+            </div>
+        </div>`;
+    }
+
+    if (fakeGpsReport.length === 0 && overlapReport.length === 0 && remoteOrderReport.length === 0) {
+        reportHtml += `
+            <div style="text-align: center; padding: 60px 20px; color: #10b981; background: #fff; border-radius: 10px; border: 1px solid #cbd5e1;">
+                <i class="fa-solid fa-shield-check fa-3x" style="margin-bottom: 16px;"></i>
+                <div style="font-size: 16px; font-weight: 800; text-transform: uppercase;">Dữ liệu GPS Minh bạch 100%</div>
+                <div style="font-size: 13.5px; margin-top: 6px; color: #64748b;">Không phát hiện gian lận định vị trong kỳ lọc này.</div>
             </div>
         `;
-        
-        if (typeof playSystemSound === 'function') {
-            (fakeGpsReport.length > 0 || overlapReport.length > 0) ? playSystemSound('error') : playSystemSound('success');
-        }
-    }, 100); 
+    }
+
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
+            <div class="modal-content fullscreen-modal" style="max-width: 920px; padding: 0; background: #f1f5f9; border-radius: 12px; overflow: hidden;">
+                <div style="background: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1;">
+                    <h3 style="font-size: 16px; font-weight: 900; color: #0f172a; margin: 0;">
+                        <i class="fa-solid fa-radar" style="color: #ef4444; margin-right: 6px;"></i> TRUNG TÂM KIỂM TOÁN & XỬ LÝ GIAN LẬN GPS
+                    </h3>
+                    <button class="btn btn-red btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="padding: 6px 14px; font-weight: 800;">
+                        Đóng
+                    </button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 18px;">
+                    ${reportHtml}
+                </div>
+            </div>
+        </div>
+    `;
 };
 </script>
 </body>
