@@ -13518,7 +13518,7 @@ window.executeSaveDonVi = async function(uid) {
     }
 };
 // =========================================================================
-// HỆ THỐNG KIỂM TOÁN & XỬ LÝ GIAN LẬN GPS PRO (V2 - FULL ACTION & FILTER)
+// HỆ THỐNG KIỂM TOÁN & AI PHÁN XÉT LỘ TRÌNH GPS PRO (V3 - AI BEHAVIOR JUDGE)
 // =========================================================================
 window._gpsAuditFilterSales = 'ALL';
 window._gpsAuditFilterTime = 'ALL'; // 'TODAY', 'WEEK', 'MONTH', 'ALL'
@@ -13533,8 +13533,8 @@ window.openGpsAuditModal = function() {
     modalContainer.innerHTML = `
       <div class="modal" style="display:flex; z-index:999999;">
         <div style="color:#fff; font-size:16px; font-weight:bold; text-align:center;">
-          <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:12px;"></i><br>
-          Đang phân tích dữ liệu tọa độ, vận tốc và vị trí chốt đơn...
+          <i class="fa-solid fa-robot fa-bounce fa-2x" style="color:var(--amber); margin-bottom:12px;"></i><br>
+          AI đang quét tọa độ, phân tích hành vi di chuyển và lập biên bản phán xét...
         </div>
       </div>
     `;
@@ -13559,12 +13559,8 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
     const storeIds = decodeURIComponent(encodedStoreIds).split(',').filter(Boolean);
     if (storeIds.length === 0) return;
 
-    // Phân biệt đang xóa 1 tiệm hay xóa cả cụm
     const isMassDelete = storeIds.length > 1;
 
-    // ==========================================
-    // --- HỎI LẦN 1 (Xác nhận cơ bản) ---
-    // ==========================================
     const confirm1 = await window.showCustomConfirm(
         isMassDelete ? "Xóa GPS Cụm Trùng Lặp" : "Xóa Lẻ GPS Khách Hàng",
         `Bạn có chắc chắn muốn xóa sạch tọa độ GPS của ${isMassDelete ? storeIds.length + ' tiệm thuộc' : ''} [${labelName}] không?`,
@@ -13574,9 +13570,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
     );
     if (!confirm1) return;
 
-    // ==========================================
-    // --- HỎI LẦN 2 (Cảnh báo hậu quả) ---
-    // ==========================================
     const confirm2 = await window.showCustomConfirm(
         "CẢNH BÁO LẦN 2 (KHÔNG THỂ HOÀN TÁC)",
         `Nhân viên sẽ mất hoàn toàn tọa độ và bắt buộc phải xách xe chạy đến tận nơi để ghim lại từ đầu.\n\nBạn có thực sự muốn xóa?`,
@@ -13586,9 +13579,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
     );
     if (!confirm2) return;
 
-    // ==========================================
-    // --- HỎI LẦN 3 (Chỉ áp dụng khi xóa Hàng Loạt nhiều tiệm) ---
-    // ==========================================
     if (isMassDelete) {
         const confirm3 = await window.showCustomConfirm(
             "XÁC NHẬN LẦN CUỐI",
@@ -13600,7 +13590,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
         if (!confirm3) return;
     }
 
-    // NẾU VƯỢT QUA HẾT CÁC CÂU HỎI -> TIẾN HÀNH XÓA
     try {
         const nowIso = new Date().toISOString();
         const resetPayload = {
@@ -13609,7 +13598,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
             updatedAt: nowIso
         };
 
-        // Chia batch nếu số lượng lớn
         const chunkSize = 400;
         for (let i = 0; i < storeIds.length; i += chunkSize) {
             const chunk = storeIds.slice(i, i + chunkSize);
@@ -13620,7 +13608,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
             await batch.commit();
         }
 
-        // Cập nhật RAM & IndexedDB ngay lập tức để giao diện không bị giật
         const idSet = new Set(storeIds.map(String));
         stores.forEach((s, idx) => {
             if (idSet.has(String(s.id))) {
@@ -13634,8 +13621,6 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
 
         if (typeof playSystemSound === 'function') playSystemSound('success');
         alert(`✅ Đã xóa thành công tọa độ của ${storeIds.length} tiệm! Trạng thái đã trả về "Chưa có GPS".`);
-        
-        // Load lại bảng kiểm toán (Các tiệm vừa xóa sẽ tự động biến mất khỏi danh sách vi phạm)
         renderGpsAuditContent();
     } catch (err) {
         alert("⛔ Lỗi khi xóa GPS: " + err.message);
@@ -13649,8 +13634,8 @@ window.exportGpsAuditExcel = function() {
     }
     const ws = XLSX.utils.json_to_sheet(window._lastAuditExportData);
     ws['!cols'] = [
-        { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 16 },
-        { wch: 45 }, { wch: 25 }, { wch: 25 }
+        { wch: 24 }, { wch: 12 }, { wch: 24 }, { wch: 18 },
+        { wch: 45 }, { wch: 28 }, { wch: 25 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "KiemToanGPS");
@@ -13664,6 +13649,35 @@ window.renderGpsAuditContent = function() {
 
     const filterSales = window._gpsAuditFilterSales || 'ALL';
     const filterTime = window._gpsAuditFilterTime || 'ALL';
+
+    // 1. TẠO TỪ ĐIỂN ÁNH XẠ [MÃ NV] -> HỌ VÀ TÊN ĐẦY ĐỦ
+    const salesNameMap = {};
+    if (typeof users !== 'undefined' && Array.isArray(users)) {
+        users.forEach(u => {
+            if (u && u.code) {
+                salesNameMap[String(u.code).trim().toUpperCase()] = u.name || u.code;
+            }
+        });
+    }
+    stores.forEach(s => {
+        let c = (s.pinnedByCode || '').trim().toUpperCase();
+        if (c && !salesNameMap[c] && s.pinnedByName) salesNameMap[c] = s.pinnedByName;
+        if (Array.isArray(s.pinnedHistory)) {
+            s.pinnedHistory.forEach(h => {
+                let hc = (h.code || '').trim().toUpperCase();
+                if (hc && !salesNameMap[hc] && h.name) salesNameMap[hc] = h.name;
+            });
+        }
+    });
+    orders.forEach(o => {
+        let c = (o.salesCode || '').trim().toUpperCase();
+        if (c && !salesNameMap[c] && o.salesName) salesNameMap[c] = o.salesName;
+    });
+
+    const getFullSalesName = (code) => {
+        const clean = String(code || '').trim().toUpperCase();
+        return salesNameMap[clean] || clean || 'Chưa rõ tên';
+    };
 
     // Tính mốc thời gian lọc
     const now = new Date();
@@ -13701,7 +13715,7 @@ window.renderGpsAuditContent = function() {
         }
 
         if (!storesByUser[nvCode]) {
-            storesByUser[nvCode] = { nvName: s.pinnedByName || nvCode, list: [] };
+            storesByUser[nvCode] = { nvName: getFullSalesName(nvCode), list: [] };
         }
         storesByUser[nvCode].list.push(s);
     });
@@ -13722,7 +13736,7 @@ window.renderGpsAuditContent = function() {
             for (let j = i + 1; j < list.length; j++) {
                 if (visited.has(j)) continue;
                 const dist = calculateDistanceMeters(Number(list[i].lat), Number(list[i].lng), Number(list[j].lat), Number(list[j].lng));
-                if (dist <= 12) { // Bắt chính xác mọi điểm ghim trong bán kính 12 mét
+                if (dist <= 12) {
                     cluster.push(list[j]);
                     visited.add(j);
                 }
@@ -13745,7 +13759,7 @@ window.renderGpsAuditContent = function() {
                         "Thời Gian": st.pinnedAt ? new Date(st.pinnedAt).toLocaleString('vi-VN') : '',
                         "Chi Tiết / Điểm Bán": `[${st.code}] ${st.name}`,
                         "Thông Số Lệch": `Trùng cụm ${cluster.length} tiệm`,
-                        "Tọa Độ": `${Number(st.lat).toFixed(5)}, ${Number(st.lng).toFixed(5)}`
+                        "Tọa Độ": `${Number(st.lat).toFixed(6)}, ${Number(st.lng).toFixed(6)}`
                     });
                 });
             }
@@ -13769,24 +13783,67 @@ window.renderGpsAuditContent = function() {
     orders.forEach(o => {
         if (o.lat && o.lng && o.createdAt && o.status !== 'Đã hủy') {
             let nvCode = (o.salesCode || '').trim().toUpperCase();
+            if (!nvCode) return;
             if (filterSales !== 'ALL' && nvCode !== filterSales) return;
             let timeMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
             if (!isNaN(timeMs) && timeMs >= minTimestamp) {
-                allGpsEvents.push({ type: 'Lên đơn', salesCode: nvCode, salesName: o.salesName, lat: Number(o.lat), lng: Number(o.lng), time: timeMs, targetName: o.maKH || o.storeId });
+                let totalQty = (o.items || []).reduce((s, it) => s + Number(it.qty || 0), 0);
+                allGpsEvents.push({
+                    type: 'Chốt đơn',
+                    salesCode: nvCode,
+                    salesName: getFullSalesName(nvCode),
+                    lat: Number(o.lat),
+                    lng: Number(o.lng),
+                    time: timeMs,
+                    targetName: o.maKH || o.storeId,
+                    extraInfo: `Đơn #${o.soCtu} (SL: ${totalQty})`
+                });
             }
         }
     });
 
     stores.forEach(s => {
-        if (s.pinnedHistory && Array.isArray(s.pinnedHistory)) {
+        let seenTimes = new Set();
+        if (s.pinnedHistory && Array.isArray(s.pinnedHistory) && s.pinnedHistory.length > 0) {
             s.pinnedHistory.forEach(h => {
                 let nvCode = (h.code || '').trim().toUpperCase();
+                if (!nvCode) return;
                 if (filterSales !== 'ALL' && nvCode !== filterSales) return;
                 let timeMs = new Date(h.time).getTime();
-                if (!isNaN(timeMs) && timeMs >= minTimestamp) {
-                    allGpsEvents.push({ type: 'Ghim GPS', salesCode: nvCode, salesName: h.name, lat: Number(h.lat), lng: Number(h.lng), time: timeMs, targetName: `[${s.code}] ${s.name}` });
+                if (!isNaN(timeMs) && timeMs >= minTimestamp && Number(h.lat) !== 0) {
+                    seenTimes.add(Math.floor(timeMs / 60000));
+                    allGpsEvents.push({
+                        type: 'Ghim GPS',
+                        salesCode: nvCode,
+                        salesName: getFullSalesName(nvCode),
+                        lat: Number(h.lat),
+                        lng: Number(h.lng),
+                        time: timeMs,
+                        targetName: `[${s.code}] ${s.name}`,
+                        extraInfo: 'Ghim tọa độ mới'
+                    });
                 }
             });
+        }
+        // Bổ sung trường hợp tiệm có pinnedAt nhưng chưa có trong pinnedHistory
+        if (s.pinnedAt && s.lat && s.lng && Number(s.lat) !== 0) {
+            let nvCode = (s.pinnedByCode || '').trim().toUpperCase();
+            if (nvCode && (filterSales === 'ALL' || nvCode === filterSales)) {
+                let timeMs = new Date(s.pinnedAt).getTime();
+                let minKey = Math.floor(timeMs / 60000);
+                if (!isNaN(timeMs) && timeMs >= minTimestamp && !seenTimes.has(minKey)) {
+                    allGpsEvents.push({
+                        type: 'Ghim GPS',
+                        salesCode: nvCode,
+                        salesName: getFullSalesName(nvCode),
+                        lat: Number(s.lat),
+                        lng: Number(s.lng),
+                        time: timeMs,
+                        targetName: `[${s.code}] ${s.name}`,
+                        extraInfo: 'Ghim tọa độ'
+                    });
+                }
+            }
         }
     });
 
@@ -13808,6 +13865,12 @@ window.renderGpsAuditContent = function() {
         for (let i = 1; i < userObj.events.length; i++) {
             let ev1 = userObj.events[i - 1];
             let ev2 = userObj.events[i];
+            
+            // Chỉ xét 2 sự kiện trong cùng 1 ngày
+            let d1 = new Date(ev1.time).toDateString();
+            let d2 = new Date(ev2.time).toDateString();
+            if (d1 !== d2) continue;
+
             let timeDiffHours = (ev2.time - ev1.time) / (1000 * 60 * 60);
 
             if (timeDiffHours > 0.016 && timeDiffHours < 2) {
@@ -13826,7 +13889,7 @@ window.renderGpsAuditContent = function() {
                         "Thời Gian": new Date(ev2.time).toLocaleString('vi-VN'),
                         "Chi Tiết / Điểm Bán": `Từ [${ev1.targetName}] -> Đến [${ev2.targetName}]`,
                         "Thông Số Lệch": `${Math.round(speed)} km/h (${distKm.toFixed(1)}km / ${timeMin}p)`,
-                        "Tọa Độ": `${ev2.lat.toFixed(5)}, ${ev2.lng.toFixed(5)}`
+                        "Tọa Độ": `${ev2.lat.toFixed(6)}, ${ev2.lng.toFixed(6)}`
                     });
                 }
             }
@@ -13857,25 +13920,24 @@ window.renderGpsAuditContent = function() {
 
         if (matchedStore && matchedStore.lat && matchedStore.lng && Number(matchedStore.lat) !== 0) {
             if (!o.lat || !o.lng || Number(o.lat) === 0) {
-                // Tắt GPS khi lên đơn
-                if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: o.salesName || nvCode, list: [] };
+                if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: getFullSalesName(nvCode), list: [] };
                 remoteOrdersByUser[nvCode].list.push({ order: o, store: matchedStore, distMeters: -1, timeMs });
                 totalRemoteOrders++;
             } else {
                 const distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
                 if (distMeters > 100) {
-                    if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: o.salesName || nvCode, list: [] };
+                    if (!remoteOrdersByUser[nvCode]) remoteOrdersByUser[nvCode] = { nvName: getFullSalesName(nvCode), list: [] };
                     remoteOrdersByUser[nvCode].list.push({ order: o, store: matchedStore, distMeters, timeMs });
                     totalRemoteOrders++;
 
                     exportRows.push({
                         "Loại Vi Phạm": "3. Chốt đơn từ xa (>100m)",
                         "Mã NV": nvCode,
-                        "Tên Nhân Viên": o.salesName || nvCode,
+                        "Tên Nhân Viên": getFullSalesName(nvCode),
                         "Thời Gian": !isNaN(timeMs) ? new Date(timeMs).toLocaleString('vi-VN') : o.ngayCtu,
                         "Chi Tiết / Điểm Bán": `Đơn #${o.soCtu} - ${o.maKH || matchedStore.name}`,
                         "Thông Số Lệch": `Cách tiệm ${distMeters > 1000 ? (distMeters/1000).toFixed(1) + ' km' : distMeters + ' m'}`,
-                        "Tọa Độ": `${Number(o.lat).toFixed(5)}, ${Number(o.lng).toFixed(5)}`
+                        "Tọa Độ": `${Number(o.lat).toFixed(6)}, ${Number(o.lng).toFixed(6)}`
                     });
                 }
             }
@@ -13899,8 +13961,15 @@ window.renderGpsAuditContent = function() {
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} - ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
     };
 
-    // Lấy danh sách NV để đưa vào dropdown lọc
+    const formatHM = (ms) => {
+        if (!ms || isNaN(ms)) return '--:--';
+        let d = new Date(ms);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+
+    // Lấy danh sách NV đầy đủ Mã + Họ Tên để đưa vào dropdown lọc
     const uniqueSales = Array.from(new Set([
+        ...Object.keys(salesNameMap),
         ...stores.map(s => (s.pinnedByCode || '').trim().toUpperCase()),
         ...orders.map(o => (o.salesCode || '').trim().toUpperCase())
     ])).filter(Boolean).sort();
@@ -13916,11 +13985,11 @@ window.renderGpsAuditContent = function() {
                 <button class="btn btn-sm ${filterTime === 'TODAY' ? 'btn-amber' : ''}" onclick="changeGpsAuditFilter('time', 'TODAY')">Hôm nay</button>
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                <select onchange="changeGpsAuditFilter('sales', this.value)" style="margin:0; padding:6px 12px; font-size:12.5px; font-weight:800; border-radius:8px; width:auto; min-width:160px;">
-                    <option value="ALL">-- Tất cả Nhân viên --</option>
-                    ${uniqueSales.map(code => `<option value="${code}" ${filterSales === code ? 'selected' : ''}>Mã NV: ${code}</option>`).join('')}
+                <select onchange="changeGpsAuditFilter('sales', this.value)" style="margin:0; padding:7px 12px; font-size:13px; font-weight:800; border-radius:8px; width:auto; min-width:230px; color:var(--primary); border:1px solid var(--primary);">
+                    <option value="ALL">-- Tất cả Nhân viên (${uniqueSales.length}) --</option>
+                    ${uniqueSales.map(code => `<option value="${code}" ${filterSales === code ? 'selected' : ''}>[${code}]${getFullSalesName(code)}</option>`).join('')}
                 </select>
-                <button class="btn btn-green btn-sm" onclick="exportGpsAuditExcel()" style="padding:7px 12px; font-weight:800;">
+                <button class="btn btn-green btn-sm" onclick="exportGpsAuditExcel()" style="padding:8px 12px; font-weight:800;">
                     <i class="fa-solid fa-file-excel"></i> Xuất Excel Vi Phạm (${exportRows.length})
                 </button>
             </div>
@@ -13952,16 +14021,15 @@ window.renderGpsAuditContent = function() {
         </div>
     `;
 
-// BẢNG 1: CHI TIẾT FAKE GPS
+    // BẢNG 1: CHI TIẾT FAKE GPS (MẶC ĐỊNH THU GỌN)
     if (fakeGpsReport.length > 0) {
         reportHtml += `
-        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 16px; overflow:hidden;">
             <div onclick="toggleOrderAccordion('audit_table_fake')" style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                 <div><i class="fa-solid fa-plane-up" style="color: #ef4444;"></i> 1. CHI TIẾT VI PHẠM FAKE GPS (VẬN TỐC DI CHUYỂN > 70 KM/H)</div>
-                <!-- Mặc định bảng 1 mở ra, mũi tên xoay lên -->
-                <i id="icon_audit_table_fake" class="fa-solid fa-chevron-down" style="color: #94a3b8; transition: 0.3s; transform: rotate(180deg);"></i>
+                <i id="icon_audit_table_fake" class="fa-solid fa-chevron-down" style="color: #94a3b8; transition: 0.3s;"></i>
             </div>
-            <div id="audit_table_fake" style="display: block;">
+            <div id="audit_table_fake" class="hidden">
             ${fakeGpsReport.map((rep, empIdx) => {
                 let accId = `audit_fake_${empIdx}`;
                 return `
@@ -14016,13 +14084,11 @@ window.renderGpsAuditContent = function() {
     // BẢNG 2: CHI TIẾT GHIM TRÙNG TỌA ĐỘ
     if (overlapReport.length > 0) {
         reportHtml += `
-        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
-            <!-- Mặc định bảng 2 đang đóng, nếu nhấn vào sẽ gọi hàm toggleOrderAccordion -->
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 16px; overflow:hidden;">
             <div onclick="toggleOrderAccordion('audit_table_dup')" style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                 <div><i class="fa-solid fa-map-pin" style="color: #f97316;"></i> 2. CHI TIẾT VI PHẠM GHIM TRÙNG TỌA ĐỘ (CÓ NÚT XÓA BẮT GHIM LẠI)</div>
                 <i id="icon_audit_table_dup" class="fa-solid fa-chevron-down" style="color: #94a3b8; transition: 0.3s;"></i>
             </div>
-            <!-- class "hidden" giúp bảng này ẩn đi lúc mới render -->
             <div id="audit_table_dup" class="hidden">
             ${overlapReport.map((rep, empIdx) => {
                 let accId = `audit_dup_${empIdx}`;
@@ -14101,13 +14167,11 @@ window.renderGpsAuditContent = function() {
     // BẢNG 3: CHI TIẾT CHỐT ĐƠN TỪ XA
     if (remoteOrderReport.length > 0) {
         reportHtml += `
-        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
-            <!-- Mặc định bảng 3 đang đóng -->
+        <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 16px; overflow:hidden;">
             <div onclick="toggleOrderAccordion('audit_table_remote')" style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                 <div><i class="fa-solid fa-satellite-dish" style="color: #8b5cf6;"></i> 3. CHI TIẾT LÊN ĐƠN LỆCH VỊ TRÍ TIỆM (> 100 MÉT HOẶC TẮT GPS)</div>
                 <i id="icon_audit_table_remote" class="fa-solid fa-chevron-down" style="color: #94a3b8; transition: 0.3s;"></i>
             </div>
-            <!-- class "hidden" giúp bảng này ẩn đi lúc mới render -->
             <div id="audit_table_remote" class="hidden">
             ${remoteOrderReport.map((rep, empIdx) => {
                 let accId = `audit_remote_${empIdx}`;
@@ -14155,184 +14219,323 @@ window.renderGpsAuditContent = function() {
         </div>`;
     }
 
-    if (fakeGpsReport.length === 0 && overlapReport.length === 0 && remoteOrderReport.length === 0) {
-        reportHtml += `
-            <div style="text-align: center; padding: 60px 20px; color: #10b981; background: #fff; border-radius: 10px; border: 1px solid #cbd5e1;">
-                <i class="fa-solid fa-shield-check fa-3x" style="margin-bottom: 16px;"></i>
-                <div style="font-size: 16px; font-weight: 800; text-transform: uppercase;">Dữ liệu GPS Minh bạch 100%</div>
-                <div style="font-size: 13.5px; margin-top: 6px; color: #64748b;">Không phát hiện gian lận định vị trong kỳ lọc này.</div>
-            </div>
-        `;
-    }
-    // ---------------------------------------------------------
-    // BẢNG 4 (TÍNH NĂNG MỚI): BÁO CÁO LỘ TRÌNH DI CHUYỂN CHI TIẾT
-    // Phân tích đường đi, thời gian dừng đỗ của từng nhân viên
-    // ---------------------------------------------------------
-    let timelineReportHtml = '';
-    let hasRouteData = false;
+    // -------------------------------------------------------------------------
+    // BẢNG 4: AI PHÂN TÍCH HÀNH VI & PHÁN XÉT LỘ TRÌNH THEO NGÀY (DẠNG VĂN BẢN)
+    // -------------------------------------------------------------------------
+    if (filterSales !== 'ALL') {
+        const selectedFullName = getFullSalesName(filterSales);
+        const userEvents = eventsByUser[filterSales] ? eventsByUser[filterSales].events : [];
 
-    // Chỉ áp dụng vẽ lộ trình nếu Admin có chọn lọc THEO 1 NHÂN VIÊN và lọc THEO NGÀY CỤ THỂ
-    if (filterSales !== 'ALL' && filterTime !== 'ALL' && filterTime !== 'MONTH') {
-        hasRouteData = true;
-        
-        // 1. Gom tất cả dấu vết (Trace) của nhân viên này
-        let employeeTraces = [];
-        
-        // Vết 1: Đơn hàng
-        orders.forEach(o => {
-            if (o.status !== 'Đã hủy' && (o.salesCode || '').trim().toUpperCase() === filterSales) {
-                let timeMs = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt || o.ngayCtu).getTime();
-                if (!isNaN(timeMs) && timeMs >= minTimestamp) {
-                    employeeTraces.push({
-                        time: timeMs,
-                        type: 'Chốt đơn hàng',
-                        storeName: o.maKH || o.storeId,
-                        lat: o.lat || 0,
-                        lng: o.lng || 0,
-                        desc: `Lên đơn #${o.soCtu}`
-                    });
-                }
-            }
+        // Gom sự kiện theo từng Ngày (YYYY-MM-DD) để không bị lẫn lộn qua đêm
+        let eventsByDate = {};
+        userEvents.forEach(ev => {
+            let d = new Date(ev.time);
+            let dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if (!eventsByDate[dateKey]) eventsByDate[dateKey] = [];
+            eventsByDate[dateKey].push(ev);
         });
 
-        // Vết 2: Ghim GPS Khách hàng
-        stores.forEach(s => {
-            if (s.pinnedHistory && Array.isArray(s.pinnedHistory)) {
-                s.pinnedHistory.forEach(h => {
-                    if ((h.code || '').trim().toUpperCase() === filterSales) {
-                        let timeMs = new Date(h.time).getTime();
-                        if (!isNaN(timeMs) && timeMs >= minTimestamp) {
-                            employeeTraces.push({
-                                time: timeMs,
-                                type: 'Ghim GPS',
-                                storeName: `[${s.code}] ${s.name}`,
-                                lat: h.lat || 0,
-                                lng: h.lng || 0,
-                                desc: `Ghim mới định vị`
-                            });
-                        }
+        const sortedDates = Object.keys(eventsByDate).sort((a, b) => b.localeCompare(a));
+
+        if (sortedDates.length > 0) {
+            let dailyJudgeCardsHtml = sortedDates.map((dateKey, dIdx) => {
+                let dayEvents = eventsByDate[dateKey].sort((a, b) => a.time - b.time);
+                let parts = dateKey.split('-');
+                let vnDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+                let firstEv = dayEvents[0];
+                let lastEv = dayEvents[dayEvents.length - 1];
+                let firstDateObj = new Date(firstEv.time);
+                let startHour = firstDateObj.getHours() + (firstDateObj.getMinutes() / 60);
+                let spanMinutes = Math.max(0, Math.round((lastEv.time - firstEv.time) / 60000));
+                let spanHoursStr = spanMinutes >= 60 ? `${Math.floor(spanMinutes / 60)} giờ ${spanMinutes % 60} phút` : `${spanMinutes} phút`;
+
+                let orderCount = dayEvents.filter(e => e.type === 'Chốt đơn').length;
+                let pinCount = dayEvents.filter(e => e.type === 'Ghim GPS').length;
+
+                // Tính tổng km thực tế & phát hiện Cụm đứng yên bấm liên thanh + Khoảng dừng đỗ lâu
+                let totalRealKm = 0;
+                let longStops = [];
+                let fakeJumps = [];
+
+                for (let i = 1; i < dayEvents.length; i++) {
+                    let prev = dayEvents[i - 1];
+                    let curr = dayEvents[i];
+                    let gapMin = Math.round((curr.time - prev.time) / 60000);
+                    let distM = calculateDistanceMeters(prev.lat, prev.lng, curr.lat, curr.lng);
+                    let distKm = distM / 1000;
+                    let speed = gapMin > 0 ? (distKm / (gapMin / 60)) : 0;
+
+                    if (speed <= 70 || distKm <= 2) {
+                        totalRealKm += distKm;
+                    } else if (gapMin >= 1) {
+                        fakeJumps.push(`Lúc ${formatHM(curr.time)}: Bay tọa độ ${distKm.toFixed(1)}km chỉ trong ${gapMin} phút (${Math.round(speed)} km/h) đến ${curr.targetName}`);
                     }
-                });
-            }
-        });
 
-        // Vết 3: Phản hồi thị trường (Feedback)
-        if (typeof feedbacksList !== 'undefined') {
-            feedbacksList.forEach(fb => {
-                if ((fb.salesCode || '').trim().toUpperCase() === filterSales) {
-                    let timeMs = new Date(fb.createdAt).getTime();
-                    if (!isNaN(timeMs) && timeMs >= minTimestamp) {
-                        employeeTraces.push({
-                            time: timeMs,
-                            type: 'Phản hồi thị trường',
-                            storeName: `[${fb.storeCode}] ${fb.storeName}`,
-                            lat: fb.lat || 0,
-                            lng: fb.lng || 0,
-                            desc: `Báo cáo: ${fb.type}`
+                    // Phát hiện khoảng ngưng thao tác / dừng đỗ >= 40 phút
+                    if (gapMin >= 40) {
+                        let prevHour = new Date(prev.time).getHours();
+                        let isLunch = (prevHour >= 11 && prevHour <= 13);
+                        longStops.push({
+                            from: formatHM(prev.time),
+                            to: formatHM(curr.time),
+                            minutes: gapMin,
+                            distKm: distKm,
+                            nearStore: prev.targetName,
+                            nextStore: curr.targetName,
+                            lat: prev.lat,
+                            lng: prev.lng,
+                            isLunch: isLunch
                         });
                     }
                 }
-            });
-        }
 
-        // 2. Sắp xếp theo dòng thời gian (Chronological Order)
-        employeeTraces.sort((a, b) => a.time - b.time);
-
-        if (employeeTraces.length > 0) {
-            // 3. Vẽ Timeline Graph
-            timelineReportHtml = employeeTraces.map((trace, idx) => {
-                let timeObj = new Date(trace.time);
-                let timeLabel = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
-                
-                // Tính thời gian dừng nghỉ so với điểm trước đó
-                let stopTimeHtml = '';
-                if (idx > 0) {
-                    let prevTrace = employeeTraces[idx - 1];
-                    let diffMinutes = Math.round((trace.time - prevTrace.time) / 60000);
-                    
-                    let distKm = 0;
-                    if (trace.lat && trace.lng && prevTrace.lat && prevTrace.lng) {
-                        distKm = calculateDistanceMeters(trace.lat, trace.lng, prevTrace.lat, prevTrace.lng) / 1000;
+                // Phát hiện "Ngồi 1 chỗ bấm liên thanh" (Bán kính <= 20m từ 3 thao tác liên tiếp trở lên)
+                let stationaryBursts = [];
+                let idx = 0;
+                while (idx < dayEvents.length) {
+                    let burst = [dayEvents[idx]];
+                    let j = idx + 1;
+                    while (j < dayEvents.length) {
+                        let dMeters = calculateDistanceMeters(dayEvents[idx].lat, dayEvents[idx].lng, dayEvents[j].lat, dayEvents[j].lng);
+                        let tGap = (dayEvents[j].time - dayEvents[j - 1].time) / 60000;
+                        if (dMeters <= 20 && tGap <= 15) {
+                            burst.push(dayEvents[j]);
+                            j++;
+                        } else {
+                            break;
+                        }
                     }
-                    
-                    if (diffMinutes > 5) {
-                        stopTimeHtml = `
-                        <div style="margin-left: 28px; border-left: 2px dashed #cbd5e1; padding: 10px 0 10px 18px; color: #64748b; font-size: 11.5px; font-weight: 600;">
-                            ⏳ Khoảng cách: <b>${diffMinutes} phút</b> 
-                            ${distKm > 0 ? `| 🛵 Di chuyển: <b>${distKm.toFixed(1)} km</b>` : ''}
-                        </div>`;
+                    // Lọc lấy tên các tiệm khác nhau trong cụm đứng yên
+                    let uniqueStoresInBurst = Array.from(new Set(burst.map(b => b.targetName)));
+                    if (uniqueStoresInBurst.length >= 3) {
+                        let burstMin = Math.max(1, Math.round((burst[burst.length - 1].time - burst[0].time) / 60000));
+                        stationaryBursts.push({
+                            from: formatHM(burst[0].time),
+                            to: formatHM(burst[burst.length - 1].time),
+                            durationMin: burstMin,
+                            storeCount: uniqueStoresInBurst.length,
+                            sampleStores: uniqueStoresInBurst.slice(0, 4).join(', ') + (uniqueStoresInBurst.length > 4 ? '...' : ''),
+                            lat: burst[0].lat,
+                            lng: burst[0].lng
+                        });
+                        idx = j;
                     } else {
-                        stopTimeHtml = `<div style="margin-left: 28px; border-left: 2px solid #e2e8f0; height: 15px;"></div>`;
+                        idx++;
                     }
                 }
 
-                // Chọn màu Icon theo loại hành động
-                let iconColor = '#3b82f6';
-                let iconClass = 'fa-solid fa-circle-check';
-                if (trace.type === 'Ghim GPS') { iconColor = '#f97316'; iconClass = 'fa-solid fa-map-pin'; }
-                else if (trace.type === 'Phản hồi thị trường') { iconColor = '#10b981'; iconClass = 'fa-solid fa-comment-dots'; }
+                // Chấm điểm Kỷ luật AI (Thang 100)
+                let score = 100;
+                let verdictReasons = [];
+
+                if (startHour > 8.75) {
+                    score -= 10;
+                    verdictReasons.push(`ra tuyến muộn (${formatHM(firstEv.time)} mới có thao tác đầu tiên)`);
+                }
+                if (spanMinutes < 180 && dayEvents.length < 5) {
+                    score -= 15;
+                    verdictReasons.push(`thời gian hoạt động trên thị trường quá ngắn (${spanHoursStr})`);
+                }
+                if (stationaryBursts.length > 0) {
+                    let totalSpamStores = stationaryBursts.reduce((s, b) => s + b.storeCount, 0);
+                    score -= Math.min(45, stationaryBursts.length * 18);
+                    verdictReasons.push(`phát hiện ${stationaryBursts.length} lần ngồi yên 1 chỗ bấm liên thanh cho ${totalSpamStores} tiệm`);
+                }
+                if (fakeJumps.length > 0) {
+                    score -= 30;
+                    verdictReasons.push(`có ${fakeJumps.length} lượt nhảy tọa độ phi lý (nghi vấn Fake GPS)`);
+                }
+                let nonLunchLongStops = longStops.filter(st => !st.isLunch || st.minutes > 150);
+                if (nonLunchLongStops.length > 0) {
+                    score -= Math.min(20, nonLunchLongStops.length * 10);
+                    verdictReasons.push(`có ${nonLunchLongStops.length} khoảng ngưng thao tác/dừng đỗ kéo dài bất thường trong giờ làm`);
+                }
+                if (totalRealKm < 1.5 && dayEvents.length >= 6) {
+                    score -= 20;
+                    verdictReasons.push(`tổng quãng đường di chuyển quá thấp (${totalRealKm.toFixed(1)} km) so với ${dayEvents.length} thao tác`);
+                }
+                score = Math.max(5, score);
+
+                let badgeBg = '#dcfce7'; let badgeCol = '#15803d'; let verdictTitle = 'KỶ LUẬT TỐT - ĐI TUYẾN THỰC TẾ';
+                if (score < 50) {
+                    badgeBg = '#fee2e2'; badgeCol = '#dc2626'; verdictTitle = 'BÁO ĐỘNG ĐỎ - NGHI VẤN ĐỐI PHÓ / NGỒI QUÁN NƯỚC';
+                } else if (score < 78) {
+                    badgeBg = '#ffedd5'; badgeCol = '#d97706'; verdictTitle = 'CẦN CHẤN CHỈNH - LỘ TRÌNH CÓ ĐIỂM BẤT THƯỜNG';
+                }
+
+                let aiConclusionText = '';
+                if (verdictReasons.length === 0) {
+                    aiConclusionText = `Nhân viên <b>[${filterSales}] ${selectedFullName}</b> có lộ trình di chuyển hợp lý, bắt đầu từ <b>${formatHM(firstEv.time)}</b> tại <i>${firstEv.targetName}</i> đến <b>${formatHM(lastEv.time)}</b> tại <i>${lastEv.targetName}</i>. Tốc độ và khoảng cách giữa các điểm bán rải đều (${totalRealKm.toFixed(1)} km), không phát hiện hành vi ngồi một chỗ gom sổ bấm hàng loạt.`;
+                } else {
+                    aiConclusionText = `Qua phân tích tọa độ ngày <b>${vnDateStr}</b>, AI đánh giá lộ trình của <b>[${filterSales}] ${selectedFullName}</b> ở mức <b>${verdictTitle} (${score}/100 điểm)</b> do: ${verdictReasons.join('; ')}. Quản lý cần đối chiếu các mốc giờ bất thường bên dưới để yêu cầu giải trình!`;
+                }
+
+                let rawLogId = `raw_log_${dIdx}`;
 
                 return `
-                    ${stopTimeHtml}
-                    <div style="display: flex; align-items: flex-start; gap: 12px;">
-                        <div style="background: ${iconColor}; color: #fff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; box-shadow: 0 0 0 4px #f1f5f9;">
-                            <i class="${iconClass}"></i>
+                <div style="background:#fff; border:1px solid #cbd5e1; border-left:5px solid ${badgeCol}; border-radius:10px; padding:16px; margin-bottom:14px; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+                    <!-- Tiêu đề Ngày & Điểm AI -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
+                        <div style="font-size:14.5px; font-weight:900; color:#0f172a;">
+                            📅 NGÀY ${vnDateStr} — <span style="color:var(--primary);">[${filterSales}] ${selectedFullName}</span>
                         </div>
-                        <div style="background: #fff; border: 1px solid #e2e8f0; padding: 12px 14px; border-radius: 8px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; margin-bottom: 6px;">
-                                <span style="font-weight: 800; color: ${iconColor}; font-size: 12.5px;">${trace.type}</span>
-                                <span style="font-weight: 900; color: #1e293b; font-size: 13.5px; background:#f1f5f9; padding:2px 8px; border-radius:6px;">🕒 ${timeLabel}</span>
-                            </div>
-                            <div style="font-size: 14px; font-weight: 800; color: #0f172a; margin-bottom: 2px;">
-                                ${trace.storeName}
-                            </div>
-                            <div style="font-size: 12.5px; color: #475569;">
-                                Lịch sử: <b>${trace.desc}</b>
-                            </div>
-                            ${trace.lat ? `
-                            <div style="text-align:right; margin-top:4px;">
-                                <button class="btn btn-sm" onclick="openNativeNavigator(${trace.lat},${trace.lng})" style="padding:2px 8px; font-size:11px; background:#f8fafc; border:1px solid #cbd5e1; color:#3b82f6;">📍 Soi Tọa Độ</button>
-                            </div>
-                            ` : ''}
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <span style="background:${badgeBg}; color:${badgeCol}; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:900;">
+                                🤖 Điểm AI: ${score}/100 — ${verdictTitle}
+                            </span>
                         </div>
                     </div>
-                `;
+
+                    <!-- Đoạn văn 1: Tóm tắt tổng quan hoạt động trong ngày -->
+                    <div style="font-size:13px; line-height:1.65; color:#1e293b; display:flex; flex-direction:column; gap:8px;">
+                        <div>
+                            • <b>🕒 Thời gian & Hiệu suất:</b> Bắt đầu thao tác đầu tiên lúc <b>${formatHM(firstEv.time)}</b> (tại <i>${firstEv.targetName}</i>) và kết thúc lúc <b>${formatHM(lastEv.time)}</b> (tại <i>${lastEv.targetName}</i>). Tổng thời gian hoạt động: <b>${spanHoursStr}</b> — Thực hiện <b>${dayEvents.length} thao tác</b> (Gồm <b>${orderCount} đơn hàng</b> và <b>${pinCount} lượt ghim GPS</b>) trên tổng quãng đường di chuyển thực tế khoảng <b>${totalRealKm.toFixed(1)} km</b>.
+                        </div>
+
+                        <!-- Đoạn văn 2: Các cụm ngồi 1 chỗ bấm liên thanh (nếu có) -->
+                        ${stationaryBursts.length > 0 ? `
+                        <div style="background:#fff1f2; border:1px dashed #f43f5e; padding:10px 12px; border-radius:8px; color:#9f1239;">
+                            <b>🚨 Phát hiện hành vi đứng yên 1 chỗ bấm hàng loạt (${stationaryBursts.length} cụm):</b>
+                            <ul style="margin:4px 0 0 18px; padding:0;">
+                                ${stationaryBursts.map(b => `
+                                    <li style="margin-bottom:4px;">
+                                        Từ <b>${b.from} đến ${b.to}</b> (${b.durationMin} phút): Đứng yên tại tọa độ <span style="font-family:monospace;">(${b.lat.toFixed(5)}, ${b.lng.toFixed(5)})</span> bấm liên tiếp cho <b>${b.storeCount} tiệm</b>: <i>${b.sampleStores}</i>.
+                                        <button class="btn btn-sm" onclick="openNativeNavigator(${b.lat}, ${b.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f43f5e; color:#e11d48;">📍 Xem vị trí ngồi bấm</button>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                        ` : `
+                        <div style="color:#047857;">
+                            • <b>✅ Tác phong di chuyển:</b> Không phát hiện hiện tượng ngồi một chỗ bấm ghim liên thanh nhiều tiệm cùng lúc.
+                        </div>
+                        `}
+
+                        <!-- Đoạn văn 3: Các khoảng dừng đỗ / ngưng thao tác lâu (nếu có) -->
+                        ${longStops.length > 0 ? `
+                        <div style="background:#fffbeb; border:1px dashed #f59e0b; padding:10px 12px; border-radius:8px; color:#92400e;">
+                            <b>⏳ Các khoảng dừng đỗ / ngưng thao tác trên 40 phút (${longStops.length} lần):</b>
+                            <ul style="margin:4px 0 0 18px; padding:0;">
+                                ${longStops.map(st => `
+                                    <li style="margin-bottom:4px;">
+                                        Từ <b>${st.from} đến ${st.to}</b> (Ngưng <b>${st.minutes} phút</b> ${st.isLunch ? '- Khung giờ trưa' : '- Giờ làm việc'}): 
+                                        ${st.distKm < 0.3
+                                            ? `Đứng yên/dừng đỗ tại khu vực gần <b>${st.nearStore}</b> (chỉ dịch chuyển ${Math.round(st.distKm * 1000)}m).`
+                                            : `Không phát sinh thao tác trên phần mềm, sau đó di chuyển <b>${st.distKm.toFixed(1)} km</b> từ <i>${st.nearStore}</i> sang <i>${st.nextStore}</i>.`
+                                        }
+                                        <button class="btn btn-sm" onclick="openNativeNavigator(${st.lat}, ${st.lng})" style="padding:1px 6px; font-size:10.5px; margin-left:6px; background:#fff; border:1px solid #f59e0b; color:#d97706;">📍 Soi điểm dừng</button>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                        ` : ''}
+
+                        <!-- Đoạn văn 4: Phán xét tổng kết của AI -->
+                        <div style="background:linear-gradient(to right, rgba(37,99,235,0.06), rgba(124,58,237,0.06)); border:1px solid rgba(37,99,235,0.2); padding:10px 12px; border-radius:8px; color:#0f172a;">
+                            <i class="fa-solid fa-gavel" style="color:var(--primary); margin-right:6px;"></i> <b>AI Phán Xét:</b> ${aiConclusionText}
+                        </div>
+
+                        <!-- Nút bật/tắt dòng nhật ký rút gọn 1 dòng -->
+                        <div style="margin-top:4px;">
+                            <button class="btn btn-sm" onclick="toggleOrderAccordion('${rawLogId}')" style="background:#f1f5f9; color:#334155; font-size:11.5px; padding:4px 10px;">
+                                <i class="fa-solid fa-list-ul"></i> Xem / Ẩn danh sách ${dayEvents.length} mốc giờ chi tiết trong ngày
+                            </button>
+                            <div id="${rawLogId}" class="hidden" style="margin-top:8px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; max-height:220px; overflow-y:auto; font-size:12px;">
+                                ${dayEvents.map((ev, k) => {
+                                    let prevEv = k > 0 ? dayEvents[k - 1] : null;
+                                    let dMeters = prevEv ? Math.round(calculateDistanceMeters(prevEv.lat, prevEv.lng, ev.lat, ev.lng)) : 0;
+                                    let dMin = prevEv ? Math.round((ev.time - prevEv.time) / 60000) : 0;
+                                    let moveTag = prevEv ? `<span style="color:#64748b;">(+${dMin}p \vert{} cách ${dMeters > 1000 ? (dMeters/1000).toFixed(1)+'km' : dMeters+'m'})</span>` : '<span style="color:#10b981; font-weight:800;">[Bắt đầu ngày]</span>';
+                                    return `
+                                    <div style="padding:4px 0; border-bottom:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                                        <div>
+                                            <b>${k + 1}. [${formatHM(ev.time)}]</b> <span style="color:${ev.type === 'Chốt đơn' ? '#2563eb' : '#d97706'}; font-weight:800;">${ev.type}:</span> ${ev.targetName}${moveTag}
+                                        </div>
+                                        <span style="font-family:monospace; font-size:11px; color:#64748b; cursor:pointer;" onclick="openNativeNavigator(${ev.lat},${ev.lng})" title="Bấm mở bản đồ">📍 ${ev.lat.toFixed(5)},${ev.lng.toFixed(5)}</span>
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
             }).join('');
 
             reportHtml += `
             <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
-                <div style="background: #f8fafc; padding: 12px 16px; border-bottom: 1px solid #cbd5e1; font-size: 13.5px; font-weight: 800; color: #0f172a; display: flex; justify-content: space-between; align-items: center;">
-                    <div><i class="fa-solid fa-route" style="color: #3b82f6;"></i> 4. PHÂN TÍCH LỘ TRÌNH CHI TIẾT CỦA [${filterSales}]</div>
-                    <span style="background: #eff6ff; color: #2563eb; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${employeeTraces.length} Thao tác</span>
+                <div style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); padding: 12px 16px; font-size: 13.5px; font-weight: 800; color: #fff; display: flex; justify-content: space-between; align-items: center;">
+                    <div><i class="fa-solid fa-robot" style="color: #fbbf24; margin-right:6px;"></i> 4. AI PHÂN TÍCH & PHÁN XÉT LỘ TRÌNH: [${filterSales}] ${selectedFullName}</div>
+                    <span style="background: rgba(255,255,255,0.15); color: #fff; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 800;">${sortedDates.length} Ngày hoạt động</span>
                 </div>
-                <div style="padding: 20px 16px;">
-                    ${timelineReportHtml}
+                <div style="padding: 16px; background: #f8fafc;">
+                    ${dailyJudgeCardsHtml}
                 </div>
             </div>`;
         } else {
             reportHtml += `
             <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; padding: 30px; text-align:center; color:#64748b;">
-                <i class="fa-solid fa-route fa-2x" style="margin-bottom:10px; opacity:0.5;"></i><br>
-                <b>Chưa có dữ liệu Lộ trình</b><br>
-                Nhân viên này không có phát sinh dữ liệu (Chốt đơn/Ghim tọa độ/Phản hồi) trong thời gian đã lọc.
+                <i class="fa-solid fa-robot fa-2x" style="margin-bottom:10px; opacity:0.5;"></i><br>
+                <b>Chưa có dữ liệu tọa độ GPS của [${filterSales}] ${selectedFullName} trong kỳ lọc này.</b>
             </div>`;
         }
     } else {
-        // Thông báo cho người dùng biết cần dùng bộ lọc để bật tính năng Lộ trình
-        reportHtml += `
-        <div style="background: linear-gradient(to right, rgba(59, 130, 246, 0.05), transparent); border: 1px dashed #3b82f6; border-radius: 10px; padding: 16px; text-align: center; color: #1e293b; margin-bottom: 20px;">
-            <i class="fa-solid fa-lightbulb" style="color:#f59e0b; font-size: 18px; margin-bottom:8px;"></i><br>
-            <b>Mẹo: Bật Tính Năng Phân Tích Lộ Trình</b><br>
-            Hãy chọn cụ thể <b>1 Nhân viên</b> ở góc trên bên phải và chọn lọc theo thời gian (Hôm nay/Tuần này) để hệ thống vẽ bản đồ Timeline di chuyển chi tiết!
-        </div>`;
+        // KHI CHỌN "TẤT CẢ NHÂN VIÊN": AI TÓM TẮT & PHÁN XÉT NHANH Từng Nhân Viên Trên 1 Thẻ Gọn
+        let allEmpCodes = Object.keys(eventsByUser).sort();
+        if (allEmpCodes.length > 0) {
+            let teamSummaryHtml = allEmpCodes.map(code => {
+                let empName = getFullSalesName(code);
+                let evs = eventsByUser[code].events;
+                let dupObj = overlapReport.find(r => r.nvCode === code);
+                let dupCount = dupObj ? dupObj.allDupStoreIds.length : 0;
+                let fakeObj = fakeGpsReport.find(r => r.nvCode === code);
+                let fakeCount = fakeObj ? fakeObj.violations.length : 0;
+                let remObj = remoteOrderReport.find(r => r.nvCode === code);
+                let remCount = remObj ? remObj.list.length : 0;
+
+                let statusColor = '#10b981'; let verdict = 'Đi tuyến nghiêm túc, tọa độ minh bạch.';
+                if (fakeCount > 0 || dupCount >= 10) {
+                    statusColor = '#ef4444';
+                    verdict = `Báo động: Phát hiện ${dupCount} tiệm ghim trùng một chỗ, ${fakeCount} lượt bay tọa độ Fake GPS và ${remCount} đơn bắn từ xa. Cần bấm vào xem chi tiết để xử lý!`;
+                } else if (dupCount > 0 || remCount > 0) {
+                    statusColor = '#f59e0b';
+                    verdict = `Cần lưu ý: Có ${dupCount} tiệm ghim trùng vị trí và ${remCount} đơn chốt lệch tọa độ quầy (>100m).`;
+                }
+
+                return `
+                <div onclick="changeGpsAuditFilter('sales', '${code}')" style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid ${statusColor}; border-radius:8px; padding:10px 14px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px;" title="Bấm để AI mổ xẻ chi tiết nhân viên này">
+                    <div style="flex:1;">
+                        <div style="font-weight:900; font-size:13.5px; color:#0f172a;">
+                            [${code}] ${empName} <span style="font-weight:600; font-size:12px; color:#64748b;">(${evs.length} thao tác GPS)</span>
+                        </div>
+                        <div style="font-size:12.5px; color:#334155; margin-top:3px;">
+                            🤖 <b>AI Nhận xét:</b> ${verdict}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-blue" style="flex-shrink:0; font-size:11.5px; padding:6px 10px;">
+                        Mổ xẻ lộ trình <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>`;
+            }).join('');
+
+            reportHtml += `
+            <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 20px; overflow:hidden;">
+                <div onclick="toggleOrderAccordion('audit_table_ai_team')" style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); padding: 12px 16px; font-size: 13.5px; font-weight: 800; color: #fff; display: flex; justify-content: space-between; align-items: center; cursor:pointer;">
+                    <div><i class="fa-solid fa-robot" style="color: #fbbf24; margin-right:6px;"></i> 4. AI TÓM TẮT & PHÁN XÉT NHANH TOÀN ĐỘI SALES (BẤM VÀO NV ĐỂ MỔ XẺ THEO NGÀY)</div>
+                    <i id="icon_audit_table_ai_team" class="fa-solid fa-chevron-down" style="color: #fff; transition: 0.3s; transform: rotate(180deg);"></i>
+                </div>
+                <div id="audit_table_ai_team" style="padding: 14px; background: #f8fafc; display:flex; flex-direction:column; gap:8px;">
+                    ${teamSummaryHtml}
+                </div>
+            </div>`;
+        }
     }
 
     modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
-            <div class="modal-content fullscreen-modal" style="max-width: 920px; padding: 0; background: #f1f5f9; border-radius: 12px; overflow: hidden;">
+            <div class="modal-content fullscreen-modal" style="max-width: 940px; padding: 0; background: #f1f5f9; border-radius: 12px; overflow: hidden;">
                 <div style="background: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1;">
                     <h3 style="font-size: 16px; font-weight: 900; color: #0f172a; margin: 0;">
-                        <i class="fa-solid fa-radar" style="color: #ef4444; margin-right: 6px;"></i> TRUNG TÂM KIỂM TOÁN & XỬ LÝ GIAN LẬN GPS
+                        <i class="fa-solid fa-radar" style="color: #ef4444; margin-right: 6px;"></i> TRUNG TÂM KIỂM TOÁN & AI PHÁN XÉT LỘ TRÌNH GPS
                     </h3>
                     <button class="btn btn-red btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="padding: 6px 14px; font-weight: 800;">
                         Đóng
