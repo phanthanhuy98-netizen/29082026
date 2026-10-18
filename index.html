@@ -13511,26 +13511,28 @@ window.executeSaveDonVi = async function(uid) {
         alert("⛔ Lỗi cập nhật Đơn vị: " + err.message);
     }
 };
- window.openGpsAuditModal = function() {
+ // ==========================================
+// THUẬT TOÁN KIỂM TOÁN GIAN LẬN GPS TOÀN DIỆN (SILENT AUDIT)
+// ==========================================
+window.openGpsAuditModal = function() {
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
 
     const modalContainer = document.getElementById('dynamicModalContainer');
     if (!modalContainer) return;
 
-    // Hiển thị trạng thái đang quét
     modalContainer.innerHTML = `
-        <div class="modal" style="display:flex; z-index:999999;">
-            <div style="color:#fff; font-size:18px; font-weight:bold; text-align:center;">
-                <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:10px;"></i><br>
-                Đang tổng hợp dữ liệu và phân tích vận tốc di chuyển...
-            </div>
+      <div class="modal" style="display:flex; z-index:999999;">
+        <div style="color:#fff; font-size:18px; font-weight:bold; text-align:center;">
+          <i class="fa-solid fa-radar fa-spin fa-2x" style="color:var(--rose); margin-bottom:10px;"></i><br>
+          Đang tổng hợp dữ liệu và phân tích vận tốc di chuyển...
         </div>
+      </div>
     `;
     modalContainer.classList.remove('hidden');
 
     setTimeout(() => {
         // ---------------------------------------------------------
-        // 1. THUẬT TOÁN GRID HASHING (PHÁT HIỆN GHIM TRÙNG TỌA ĐỘ)
+        // THUẬT TOÁN 1: GRID HASHING (PHÁT HIỆN NGỒI 1 CHỖ GHIM TRÙNG)
         // ---------------------------------------------------------
         let fraudClusters = {}; 
         stores.forEach(s => {
@@ -13548,21 +13550,17 @@ window.executeSaveDonVi = async function(uid) {
 
         let overlapReport = []; 
         let totalDupedStores = 0;
-        let totalClusterCount = 0;
-
         Object.keys(fraudClusters).forEach(nvCode => {
             let employeeClusters = [];
             Object.keys(fraudClusters[nvCode]).forEach(coordKey => {
                 if (fraudClusters[nvCode][coordKey].length > 1) { 
                     employeeClusters.push({
                         coordKey: coordKey,
-                        originalLat: fraudClusters[nvCode][coordKey][0].lat, 
-                        originalLng: fraudClusters[nvCode][coordKey][0].lng,
+                        originalLat: fraudClusters[nvCode][coordKey][0].lat, originalLng: fraudClusters[nvCode][coordKey][0].lng,
                         timeGhim: fraudClusters[nvCode][coordKey][0].pinnedAt,
                         stores: fraudClusters[nvCode][coordKey]
                     });
                     totalDupedStores += fraudClusters[nvCode][coordKey].length;
-                    totalClusterCount++;
                 }
             });
             if (employeeClusters.length > 0) {
@@ -13572,10 +13570,11 @@ window.executeSaveDonVi = async function(uid) {
         });
 
         // ---------------------------------------------------------
-        // 2. THUẬT TOÁN SPEED TRAP (PHÁT HIỆN FAKE GPS / BAY TỌA ĐỘ)
+        // THUẬT TOÁN 2: SPEED TRAP (PHÁT HIỆN FAKE GPS BAY TỌA ĐỘ)
         // ---------------------------------------------------------
         let allGpsEvents = [];
         
+        // Lấy tọa độ từ các Đơn hàng (Lên đơn)
         orders.forEach(o => {
             if (o.lat && o.lng && o.createdAt && o.status !== 'Đã hủy') {
                 let timeMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
@@ -13585,6 +13584,7 @@ window.executeSaveDonVi = async function(uid) {
             }
         });
         
+        // Lấy tọa độ từ Lịch sử ghim GPS của Khách hàng
         stores.forEach(s => {
             if (s.pinnedHistory && Array.isArray(s.pinnedHistory)) {
                 s.pinnedHistory.forEach(h => {
@@ -13596,6 +13596,7 @@ window.executeSaveDonVi = async function(uid) {
             }
         });
 
+        // Gom nhóm theo NV và tính Vận tốc
         let eventsByUser = {};
         allGpsEvents.forEach(ev => {
             if (!eventsByUser[ev.salesCode]) eventsByUser[ev.salesCode] = { name: ev.salesName, events: [] };
@@ -13607,6 +13608,7 @@ window.executeSaveDonVi = async function(uid) {
 
         Object.keys(eventsByUser).forEach(code => {
             let userObj = eventsByUser[code];
+            // Sắp xếp các mốc định vị theo thứ tự thời gian
             userObj.events.sort((a, b) => a.time - b.time); 
 
             let violations = [];
@@ -13615,188 +13617,210 @@ window.executeSaveDonVi = async function(uid) {
                 let ev2 = userObj.events[i];
                 
                 let timeDiffHours = (ev2.time - ev1.time) / (1000 * 60 * 60);
+                
+                // Chỉ xét các thao tác cách nhau từ 1 phút đến 2 tiếng (để tránh sai số ngẫu nhiên)
                 if (timeDiffHours > 0.016 && timeDiffHours < 2) {
                     let distKm = calculateDistanceMeters(ev1.lat, ev1.lng, ev2.lat, ev2.lng) / 1000;
                     let speed = distKm / timeDiffHours;
                     
+                    // CHỐT CHẶN FAKE GPS: Vận tốc di chuyển thị trường tạp hóa > 70 km/h là phi lý
                     if (speed > 70 && distKm > 2) {
-                        violations.push({ ev1, ev2, speed: Math.round(speed), distKm: distKm.toFixed(1), minutes: Math.round(timeDiffHours * 60) });
+                        violations.push({ ev1, ev2, speed, distKm, timeDiffMinutes: Math.round(timeDiffHours * 60) });
                         totalFakeGpsViolations++;
                     }
                 }
             }
 
             if (violations.length > 0) {
+                // Sắp xếp các vi phạm nghiêm trọng nhất (bay xa nhất) lên đầu
                 violations.sort((a, b) => b.speed - a.speed);
-                fakeGpsReport.push({ nvCode: code, nvName: userObj.name, events: violations });
+                fakeGpsReport.push({ nvCode: code, nvName: userObj.name, violations: violations });
             }
         });
 
+        // ---------------------------------------------------------
+        // TỔNG HỢP GIAO DIỆN HIỂN THỊ
+        // ---------------------------------------------------------
         let formatTime = (ms) => {
             let d = new Date(ms);
-            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} - ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
         };
 
-        // Tìm nhân viên rủi ro cao nhất
-        let topViolator = overlapReport[0]?.nvName || fakeGpsReport[0]?.nvName || "Không có";
+        let reportHtml = '';
 
-        // ---------------------------------------------------------
-        // 3. RÁP GIAO DIỆN CHUẨN SAAS ENTERPRISE (2 CỘT + 4 THẺ KPI)
-        // ---------------------------------------------------------
+        // Khối 1: Giao diện Fake GPS
+        if (fakeGpsReport.length > 0) {
+            reportHtml += `
+            <div style="margin-bottom: 24px;">
+                <div style="font-size:14px; font-weight:900; color:var(--purple); margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--purple); display:flex; justify-content:space-between; align-items:center;">
+                    <span><i class="fa-solid fa-fighter-jet"></i> NGHI VẤN SỬ DỤNG FAKE GPS</span>
+                    <span style="background:var(--purple); color:#fff; padding:2px 8px; border-radius:6px; font-size:11px;">${fakeGpsReport.length} NV Vi phạm</span>
+                </div>
+                ${fakeGpsReport.map((rep, empIdx) => {
+                    let accId = `audit_fake_${empIdx}`;
+                    return `
+                    <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left: 5px solid var(--purple); border-radius:14px; margin-bottom:12px; overflow:hidden; box-shadow: 0 4px 10px rgba(124, 58, 237, 0.05);">
+                        <div onclick="toggleOrderAccordion('${accId}')" style="background:rgba(124, 58, 237, 0.05); padding:14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+                            <div style="font-weight:900; color:var(--text-main); font-size:15px;">[${rep.nvCode}]${rep.nvName}</div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="color:var(--purple); font-weight:800; font-size:12px;">${rep.violations.length} Lần bay tọa độ</span>
+                                <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+                            </div>
+                        </div>
+                        <div id="${accId}" class="hidden" style="padding:16px; display:flex; flex-direction:column; gap:12px; background:var(--bg-dark);">
+                            ${rep.violations.map(v => `
+                                <div style="background:#fff; border:1px solid var(--card-border); border-radius:10px; padding:12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                                        <div style="background:rgba(225,29,72,0.1); color:var(--rose); padding:4px 8px; border-radius:6px; font-size:11px; font-weight:900;">
+                                            Vận tốc phi lý: ${Math.round(v.speed)} km/h
+                                        </div>
+                                        <div style="font-size:12px; font-weight:800; color:var(--text-muted);">
+                                            Khoảng cách <b style="color:var(--primary);">${v.distKm.toFixed(1)} km</b> chỉ trong <b style="color:var(--primary);">${v.timeDiffMinutes} phút</b>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; flex-direction:column; gap:8px; font-size:13px; font-weight:700; color:var(--text-main);">
+    <!-- Mốc TỪ (Điểm xuất phát) -->
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px; border:1px dashed var(--card-border);">
+        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <span style="color:var(--text-muted); font-size:11px; text-transform:uppercase; width: 35px;">Từ:</span>
+                <span><span style="color:var(--primary);">[${v.ev1.type}]</span> ${v.ev1.targetName}</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; padding-left:43px;">
+                <i class="fa-regular fa-clock" style="color:var(--amber);"></i>
+                <span style="color:var(--text-muted); font-size:12px;">${formatTime(v.ev1.time)}</span>
+            </div>
+        </div>
+        <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev1.lat}, ${v.ev1.lng})" style="background:#fff; color:var(--primary); border:1px solid var(--primary); padding:6px 12px; border-radius:8px; font-size:11px; font-weight:800; flex-shrink:0; box-shadow: 0 2px 4px rgba(37,99,235,0.1);">
+            <i class="fa-solid fa-map-location-dot"></i> Bản Đồ
+        </button>
+    </div>
+    
+    <!-- Mốc ĐẾN (Điểm nhảy tọa độ) -->
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:10px; border:1px dashed var(--card-border);">
+        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <span style="color:var(--text-muted); font-size:11px; text-transform:uppercase; width: 35px;">Đến:</span>
+                <span><span style="color:var(--rose);">[${v.ev2.type}]</span> ${v.ev2.targetName}</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; padding-left:43px;">
+                <i class="fa-regular fa-clock" style="color:var(--amber);"></i>
+                <span style="color:var(--text-muted); font-size:12px;">${formatTime(v.ev2.time)}</span>
+            </div>
+        </div>
+        <button class="btn btn-sm" onclick="openNativeNavigator(${v.ev2.lat}, ${v.ev2.lng})" style="background:#fff; color:var(--primary); border:1px solid var(--primary); padding:6px 12px; border-radius:8px; font-size:11px; font-weight:800; flex-shrink:0; box-shadow: 0 2px 4px rgba(37,99,235,0.1);">
+            <i class="fa-solid fa-map-location-dot"></i> Bản Đồ
+        </button>
+    </div>
+</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    `;
+                }).join('')}
+            </div>
+            `;
+        }
+
+        // Khối 2: Giao diện Ghim Trùng Tọa Độ
+        if (overlapReport.length > 0) {
+            reportHtml += `
+            <div>
+                <div style="font-size:14px; font-weight:900; color:var(--rose); margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--rose); display:flex; justify-content:space-between; align-items:center;">
+                    <span><i class="fa-solid fa-map-pin"></i> CẢNH BÁO GHIM TRÙNG TỌA ĐỘ</span>
+                    <span style="background:var(--rose); color:#fff; padding:2px 8px; border-radius:6px; font-size:11px;">${overlapReport.length} NV Vi phạm</span>
+                </div>
+                ${overlapReport.sort((a, b) => b.clusters.length - a.clusters.length).map((rep, empIdx) => {
+                    let accId = `audit_dup_${empIdx}`;
+                    return `
+                    <div style="background:var(--card-bg); border:1px solid var(--card-border); border-left: 5px solid var(--rose); border-radius:14px; margin-bottom:12px; overflow:hidden; box-shadow: 0 4px 10px rgba(225, 29, 72, 0.05);">
+                        <div onclick="toggleOrderAccordion('${accId}')" style="background:rgba(225, 29, 72, 0.05); padding:14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+                            <div style="font-weight:900; color:var(--text-main); font-size:15px;">[${rep.nvCode}]${rep.nvName}</div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="color:var(--rose); font-weight:800; font-size:12px;">${rep.clusters.length} Cụm trùng lặp</span>
+                                <i id="icon_${accId}" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+                            </div>
+                        </div>
+                        <div id="${accId}" class="hidden" style="padding:16px; display:flex; flex-direction:column; gap:12px; background:var(--bg-dark);">
+                            ${rep.clusters.map((cluster, cIdx) => {
+                                let timeStr = cluster.timeGhim ? formatTime(new Date(cluster.timeGhim).getTime()) : '';
+                                return `
+                                <div style="background:#fff; border:1px solid var(--card-border); border-radius:10px; padding:0; overflow:hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; padding: 10px 14px; background: rgba(0,0,0,0.02); border-bottom: 1px dashed var(--card-border);">
+                                        <div style="font-size:12px; font-weight:800; color: var(--text-muted);">
+                                            <i class="fa-regular fa-clock"></i> ${timeStr}
+                                        </div>
+                                        <button class="btn btn-sm" onclick="openNativeNavigator(${cluster.originalLat}, ${cluster.originalLng})" style="background: #fff; color: var(--primary); border: 1px solid var(--primary); padding:4px 10px; font-size:11px; font-weight:800;">
+                                            <i class="fa-solid fa-map-location-dot"></i> Soi Bản Đồ
+                                        </button>
+                                    </div>
+                                    <div style="padding: 14px;">
+                                        <div style="font-size:12px; font-weight:800; color:var(--text-main); margin-bottom: 8px;">
+                                            Ngồi 1 vị trí ghim cho <b style="color:var(--rose); font-size: 14px;">${cluster.stores.length}</b> khách hàng:
+                                        </div>
+                                        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                            ${cluster.stores.map(s => `
+                                                <span style="background: var(--bg-dark); border: 1px solid var(--card-border); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--text-main);">
+                                                    <span style="color: var(--primary);">[${s.code}]</span>${s.name}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    </div>
+                    `;
+                }).join('')}
+            </div>
+            `;
+        }
+
+        if (fakeGpsReport.length === 0 && overlapReport.length === 0) {
+            reportHtml = `
+                <div style="text-align:center; padding:60px 20px; color:var(--emerald); background: var(--card-bg); border-radius: 16px; border: 1px dashed var(--emerald);">
+                    <div style="width: 80px; height: 80px; background: rgba(16, 185, 129, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
+                        <i class="fa-solid fa-shield-check fa-3x"></i>
+                    </div>
+                    <div style="font-size:18px; font-weight:900;">TUYỆT VỜI! THỊ TRƯỜNG SẠCH</div>
+                    <div style="font-size:14px; margin-top:8px; color:var(--text-muted);">Không phát hiện nhân viên nào có hành vi ghim ảo hay sử dụng Fake GPS.</div>
+                </div>
+            `;
+        }
+
         modalContainer.innerHTML = `
-            <div class="modal" style="display:flex; z-index:999999; padding: 10px;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
-                <div class="modal-content fullscreen-modal" style="max-width: 1200px; height: 92vh; border-radius: 16px; display: flex; flex-direction: column; padding: 0; overflow: hidden; background: #f8fafc;">
+            <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
+                <div class="modal-content fullscreen-modal" style="max-width: 700px; padding: 0; background: var(--bg-dark);">
                     
-                    <!-- 1. HEADER CHUYÊN NGHIỆP -->
-                    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-shrink: 0;">
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <div style="width: 10px; height: 10px; background: #ef4444; border-radius: 50%; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25);"></div>
-                            <div>
-                                <h3 style="font-size: 16px; font-weight: 800; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">Trung Tâm Kiểm Toán & Xác Thực Lộ Trình GPS</h3>
-                                <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">Phân tích tự động dựa trên Vận tốc di chuyển (km/h) và Cụm điểm bán trùng tọa độ (≤10m)</div>
-                            </div>
-                        </div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <button class="btn btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.15); padding: 8px 16px; border-radius: 8px; font-weight: 700;">✕ Đóng</button>
-                        </div>
+                    <div style="background: var(--rose-gradient); padding: 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(225,29,72,0.2);">
+                        <h3 style="font-size: 16px; font-weight: 900; color: #fff; margin: 0;">
+                            <i class="fa-solid fa-radar fa-beat"></i> KẾT QUẢ KIỂM TOÁN LỘ TRÌNH
+                        </h3>
+                        <button class="btn btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="background: rgba(255,255,255,0.2); color: #fff; border: none;"><i class="fa-solid fa-xmark"></i></button>
                     </div>
 
-                    <!-- 2. 4 THẺ KPI TỔNG QUAN -->
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 24px 10px 24px; flex-shrink: 0;">
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Nghi vấn Fake GPS</div>
-                                <div style="font-size: 24px; font-weight: 900; color: #7c3aed; margin: 6px 0 2px 0;">${totalFakeGpsViolations} <span style="font-size:13px; font-weight:600;">lần</span></div>
-                                <div style="font-size: 11px; color: #94a3b8;">Trên ${fakeGpsReport.length} nhân viên vi phạm</div>
-                            </div>
-                            <div style="width: 38px; height: 38px; border-radius: 10px; background: #f5f3ff; color: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 16px;">✈️</div>
-                        </div>
-
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Tiệm Ghim Trùng Tọa Độ</div>
-                                <div style="font-size: 24px; font-weight: 900; color: #dc2626; margin: 6px 0 2px 0;">${totalDupedStores} <span style="font-size:13px; font-weight:600;">tiệm</span></div>
-                                <div style="font-size: 11px; color: #94a3b8;">Gom thành ${totalClusterCount} cụm điểm bán</div>
-                            </div>
-                            <div style="width: 38px; height: 38px; border-radius: 10px; background: #fef2f2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-size: 16px;">📍</div>
-                        </div>
-
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Nhân sự rủi ro nhất</div>
-                                <div style="font-size: 16px; font-weight: 900; color: #0f172a; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;" title="${topViolator}">${topViolator}</div>
-                                <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Cần ưu tiên hậu kiểm</div>
-                            </div>
-                            <div style="width: 38px; height: 38px; border-radius: 10px; background: #fffbeb; color: #d97706; display: flex; align-items: center; justify-content: center; font-size: 16px;">⚠️</div>
-                        </div>
-
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Ngưỡng Kiểm Toán</div>
-                                <div style="font-size: 16px; font-weight: 900; color: #059669; margin-top: 8px;">≤ 10m & >70km/h</div>
-                                <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Thuật toán chuẩn SaaS</div>
-                            </div>
-                            <div style="width: 38px; height: 38px; border-radius: 10px; background: #ecfdf5; color: #059669; display: flex; align-items: center; justify-content: center; font-size: 16px;">🛡️</div>
+                    ${(fakeGpsReport.length > 0 || overlapReport.length > 0) ? `
+                    <div style="padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--card-border); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 13px; font-weight: 900; color: var(--text-main);">TỔNG HỢP VI PHẠM</span>
+                        <div style="font-size: 12px; font-weight: 800; display:flex; gap:10px;">
+                            <span style="color:var(--purple);"><i class="fa-solid fa-fighter-jet"></i> ${totalFakeGpsViolations} Lần Fake GPS</span>
+                            <span style="color:var(--rose);"><i class="fa-solid fa-map-pin"></i> ${totalDupedStores} Tiệm ghim trùng</span>
                         </div>
                     </div>
+                    ` : ''}
 
-                    <!-- 3. BỐ CỤC 2 CỘT KHOA HỌC (TRÁI: FAKE GPS | PHẢI: GHIM TRÙNG) -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 12px 24px 24px 24px; overflow-y: auto; flex: 1; align-items: start;">
-                        
-                        <!-- CỘT TRÁI: FAKE GPS (BAY TỌA ĐỘ) -->
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
-                            <div style="padding: 14px 18px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; background: #fcfcfd;">
-                                <div style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; color: #6d28d9;">
-                                    <span>✈️</span> DỊCH CHUYỂN BẤT THƯỜNG (FAKE GPS)
-                                </div>
-                                <span style="padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; background: #f5f3ff; color: #6d28d9;">${fakeGpsReport.length} NV Vi Phạm</span>
-                            </div>
-                            <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
-                                ${fakeGpsReport.length > 0 ? fakeGpsReport.map((rep, idx) => `
-                                    <div style="border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; overflow: hidden;">
-                                        <div onclick="this.parentElement.querySelector('.audit-details').style.display = this.parentElement.querySelector('.audit-details').style.display === 'block' ? 'none' : 'block'" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
-                                            <div style="display: flex; align-items: center; gap: 12px;">
-                                                <div style="width: 32px; height: 32px; border-radius: 8px; background: #f5f3ff; color: #6d28d9; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px;">${rep.nvCode}</div>
-                                                <div>
-                                                    <div style="font-weight: 800; font-size: 13.5px; color: #1e293b;">${rep.nvName}</div>
-                                                    <div style="font-size: 11px; color: #64748b; margin-top: 1px;">Vận tốc vượt ngưỡng vật lý (>70 km/h)</div>
-                                                </div>
-                                            </div>
-                                            <div style="display: flex; align-items: center; gap: 8px;">
-                                                <span style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 2px 8px; border-radius: 5px; font-weight: 800; font-size: 11px;">${rep.events.length} lần bay</span>
-                                                <span style="color: #94a3b8; font-size: 11px;">▼</span>
-                                            </div>
-                                        </div>
-                                        <div class="audit-details" style="display: none; border-top: 1px solid #f1f5f9; background: #f8fafc; padding: 12px 16px;">
-                                            ${rep.events.map(ev => `
-                                                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
-                                                    <div>
-                                                        <div style="font-weight: 700; color: #1e293b;">${ev.ev1.targetName} ➔ ${ev.ev2.targetName}</div>
-                                                        <div style="color: #64748b; margin-top: 2px;">Cách nhau <b>${ev.distKm} km</b> trong <b>${ev.minutes} phút</b></div>
-                                                    </div>
-                                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                                        <span style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 2px 6px; border-radius: 4px; font-weight: 800; font-size: 11px;">⚡ ${ev.speed} km/h</span>
-                                                        <button class="btn btn-sm" onclick="openNativeNavigator(${ev.ev2.lat}, ${ev.ev2.lng})" style="padding: 4px 8px; font-size: 11px; font-weight: 800; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">Bản đồ</button>
-                                                    </div>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-                                `).join('') : '<div style="text-align:center; padding:24px; color:#94a3b8; font-size:13px; font-weight:700;">Không phát hiện nhân viên nào bay tọa độ.</div>'}
-                            </div>
-                        </div>
-
-                        <!-- CỘT PHẢI: CẢNH BÁO GHIM TRÙNG TỌA ĐỘ -->
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
-                            <div style="padding: 14px 18px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; background: #fcfcfd;">
-                                <div style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; color: #be123c;">
-                                    <span>📍</span> CỤM ĐIỂM BÁN TRÙNG TỌA ĐỘ (≤ 10M)
-                                </div>
-                                <span style="padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; background: #ffe4e6; color: #be123c;">${overlapReport.length} NV Vi Phạm</span>
-                            </div>
-                            <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
-                                ${overlapReport.length > 0 ? overlapReport.map((rep, idx) => `
-                                    <div style="border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; overflow: hidden;">
-                                        <div onclick="this.parentElement.querySelector('.audit-details').style.display = this.parentElement.querySelector('.audit-details').style.display === 'block' ? 'none' : 'block'" style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
-                                            <div style="display: flex; align-items: center; gap: 12px;">
-                                                <div style="width: 32px; height: 32px; border-radius: 8px; background: #fef2f2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px;">${rep.nvCode}</div>
-                                                <div>
-                                                    <div style="font-weight: 800; font-size: 13.5px; color: #1e293b;">${rep.nvName}</div>
-                                                    <div style="font-size: 11px; color: #64748b; margin-top: 1px;">Nghi vấn ngồi 1 chỗ ghim hàng loạt</div>
-                                                </div>
-                                            </div>
-                                            <div style="display: flex; align-items: center; gap: 8px;">
-                                                <span style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; padding: 2px 8px; border-radius: 5px; font-weight: 800; font-size: 11px;">${rep.clusters.length} cụm trùng</span>
-                                                <span style="color: #94a3b8; font-size: 11px;">▼</span>
-                                            </div>
-                                        </div>
-                                        <div class="audit-details" style="display: none; border-top: 1px solid #f1f5f9; background: #f8fafc; padding: 12px 16px;">
-                                            ${rep.clusters.map((cl, cIdx) => `
-                                                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
-                                                    <div>
-                                                        <div style="font-weight: 700; color: #1e293b;">Cụm #${cIdx + 1}: ${cl.stores.map(s => `[${s.code}]${s.name}`).join(' • ')}</div>
-                                                        <div style="color: #64748b; margin-top: 2px;">Thời điểm ghim: <b>${formatTime(new Date(cl.timeGhim).getTime())}</b></div>
-                                                    </div>
-                                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                                        <span style="background: #fffbeb; color: #d97706; border: 1px solid #fde68a; padding: 2px 6px; border-radius: 4px; font-weight: 800; font-size: 11px;">⛔ Ghim tại chỗ</span>
-                                                        <button class="btn btn-sm" onclick="openNativeNavigator(${cl.originalLat}, ${cl.originalLng})" style="padding: 4px 8px; font-size: 11px; font-weight: 800; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">Bản đồ</button>
-                                                    </div>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-                                `).join('') : '<div style="text-align:center; padding:24px; color:#94a3b8; font-size:13px; font-weight:700;">Không phát hiện cụm ghim trùng nào.</div>'}
-                            </div>
-                        </div>
-
+                    <div style="flex: 1; overflow-y: auto; padding: 16px; background: var(--bg-dark);">
+                        ${reportHtml}
                     </div>
                 </div>
             </div>
         `;
+        
         if (typeof playSystemSound === 'function') {
             (fakeGpsReport.length > 0 || overlapReport.length > 0) ? playSystemSound('error') : playSystemSound('success');
         }
-    }, 100);
+    }, 100); 
 };
 </script>
 </body>
