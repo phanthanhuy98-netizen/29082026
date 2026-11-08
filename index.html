@@ -6212,27 +6212,47 @@ ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role 
     const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
     const canModify = isOwner || currentUser.role === 'admin';
     const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
-    const isViewed = viewedData[o.id || o.orderId] ? true : false;
-    
-    // --- BẮT ĐẦU CODE FIX LỖI GIẬT MÀN HÌNH ---
-    let initialDisplay = 'flex';
-    const ctuDate = o.ngayCtu || '';
-    // 1. Kiểm tra điều kiện Ngày tháng
-    if (soGocFilterDateFrom && soGocFilterDateTo) {
-        if (ctuDate < soGocFilterDateFrom || ctuDate > soGocFilterDateTo) {
-            initialDisplay = 'none'; // Giấu ngay từ đầu nếu lệch ngày
-        }
-    }
-    // 2. Kiểm tra điều kiện lọc Nhân viên (Nếu kế toán đang chọn xem riêng 1 NV)
-    const currentSalesFilter = (soGocSalesFilter || '').trim().toLowerCase();
-    if (currentSalesFilter !== "" && (o.salesCode || '').trim().toLowerCase() !== currentSalesFilter) {
-        initialDisplay = 'none';
-    }
-    // --- KẾT THÚC CODE FIX ---
+const isViewed = viewedData[o.id || o.orderId] ? true : false;
 
-    return `
-      <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:${initialDisplay}; flex-direction:column; gap:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+// --- BẮT ĐẦU CODE KIỂM TRA ẨN/HIỆN NGAY TỪ LÚC VẼ HTML (CHỐNG CHỚP) ---
+let initialDisplay = 'flex';
+
+// 1. Kiểm tra Ngày tháng
+const ctuDate = o.ngayCtu || '';
+if (soGocFilterDateFrom && soGocFilterDateTo) {
+    if (ctuDate < soGocFilterDateFrom || ctuDate > soGocFilterDateTo) initialDisplay = 'none';
+} else if (soGocFilterDateFrom && ctuDate < soGocFilterDateFrom) {
+    initialDisplay = 'none';
+} else if (soGocFilterDateTo && ctuDate > soGocFilterDateTo) {
+    initialDisplay = 'none';
+}
+
+// 2. Kiểm tra Nhân viên
+const currentSalesFilter = (typeof soGocSalesFilter !== 'undefined' ? soGocSalesFilter : '').trim().toLowerCase();
+if (initialDisplay !== 'none' && currentSalesFilter !== "" && (o.maNhanVien || o.salesCode || '').trim().toLowerCase() !== currentSalesFilter) {
+    initialDisplay = 'none';
+}
+
+// 3. Kiểm tra Từ khóa tìm kiếm
+const currentKw = (typeof soGocFilterKeyword !== 'undefined' ? soGocFilterKeyword : '').toLowerCase();
+if (initialDisplay !== 'none' && currentKw !== "") {
+    const qKey = removeAccents(currentKw.trim());
+    const cleanCtuKey = qKey.replace('#', '').trim();
+    const maDtpnNo = removeAccents(o.maDTPNNo || '').toLowerCase();
+    const maNv = removeAccents(o.maNhanVien || o.salesCode || '').toLowerCase();
+    const tenNv = removeAccents(o.tenNhanVien || o.salesName || '').toLowerCase();
+    const soCtuStr = String(o.soCtu || '');
+    
+    const matchSoCtu = cleanCtuKey === "" || soCtuStr.includes(cleanCtuKey);
+    const matchOther = matchSoCtu || maDtpnNo.includes(qKey) || maNv.includes(qKey) || tenNv.includes(qKey);
+    
+    if (!matchOther) initialDisplay = 'none';
+}
+// --- KẾT THÚC ---
+
+return `
+  <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien || o.salesCode)}" data-ten-nv="${removeAccents(o.tenNhanVien || o.salesName)}" data-ngay-ctu="${o.ngayCtu}" style="display:${initialDisplay}; flex-direction:column; gap:8px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
 <div style="display:inline-flex; align-items:center; gap:8px;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>${isViewed ? `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap;">✅ Đã xem</span>` : ''}</div>                  <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
                      let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
@@ -6323,11 +6343,6 @@ ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role 
           </table>
         </div>
       `;
-      setTimeout(() => {
-          if (typeof setSoGocQuickDateFilter === 'function') {
-              setSoGocQuickDateFilter(soGocQuickDate);
-          }
-      }, 50);
     } 
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
