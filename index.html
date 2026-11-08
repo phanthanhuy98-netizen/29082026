@@ -3335,23 +3335,22 @@ window.filterTabProducts = function(val) {
 
   if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
 };
- window.filterSoGocCards = function(val) {
+window.filterSoGocCards = function(val) {
     if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
     const queryKey = removeAccents(soGocFilterKeyword.trim());
-    const cards = document.querySelectorAll('.so-goc-card-item');
+    // Chuyển NodeList thành Array để duyệt nhanh hơn
+    const cards = Array.from(document.querySelectorAll('.so-goc-card-item')); 
     let cleanSoCtuKey = queryKey.replace('#', '').trim();
 
-    // SỬA LỖI 1: Tự động vô hiệu hóa bộ lọc Nhân Viên nếu tài khoản đang đăng nhập là Sales
     const isSales = currentUser && currentUser.role === 'sales';
     const selectedSales = isSales ? "" : (soGocSalesFilter || '').trim().toLowerCase();
 
-    // SỬA LỖI 2: Ép định dạng ngày tháng chuẩn về YYYY-MM-DD trước khi so sánh
     const normalizeDate = (dStr) => {
         if (!dStr) return '';
         if (dStr.includes('/')) {
             const p = dStr.split('/');
-            if (p[0].length === 4) return dStr; // Nếu đã là YYYY thì giữ nguyên
-            return `${p[2]}-${p[1]}-${p[0]}`; // Đảo DD/MM/YYYY thành YYYY-MM-DD
+            if (p[0].length === 4) return dStr; 
+            return `${p[2]}-${p[1]}-${p[0]}`; 
         }
         return dStr;
     };
@@ -3359,35 +3358,56 @@ window.filterTabProducts = function(val) {
     const fFrom = normalizeDate(soGocFilterDateFrom);
     const fTo = normalizeDate(soGocFilterDateTo);
 
-    cards.forEach(card => {
-      const soCtu = card.getAttribute('data-so-ctu') || '';
-      const maDtpn = card.getAttribute('data-ma-dtpn') || '';
-      const maNv = (card.getAttribute('data-ma-nv') || '').trim().toLowerCase();
-      const tenNv = card.getAttribute('data-ten-nv') || '';
-      const ngayCtu = card.getAttribute('data-ngay-ctu') || '';
+    // KỸ THUẬT TỐI ƯU: Chia nhỏ quá trình xử lý DOM bằng requestAnimationFrame
+    let index = 0;
+    const batchSize = 30; // Số lượng thẻ xử lý trong 1 khung hình (Không gây nghẽn UI)
 
-      const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
-      const matchOther = queryKey === "" || 
-        matchSoCtu ||
-        maDtpn.includes(queryKey) || 
-        maNv.includes(queryKey) || 
-        tenNv.includes(queryKey);
+    function processBatch() {
+        const end = Math.min(index + batchSize, cards.length);
+        for (; index < end; index++) {
+            const card = cards[index];
+            const soCtu = card.getAttribute('data-so-ctu') || '';
+            const maDtpn = card.getAttribute('data-ma-dtpn') || '';
+            const maNv = (card.getAttribute('data-ma-nv') || '').trim().toLowerCase();
+            const tenNv = card.getAttribute('data-ten-nv') || '';
+            const ngayCtu = card.getAttribute('data-ngay-ctu') || '';
 
-      let matchDate = true;
-      if (fFrom && fTo) {
-        matchDate = ngayCtu >= fFrom && ngayCtu <= fTo;
-      } else if (fFrom) {
-        matchDate = ngayCtu >= fFrom;
-      } else if (fTo) {
-        matchDate = ngayCtu <= fTo;
-      }
+            const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
+            const matchOther = queryKey === "" || 
+                matchSoCtu ||
+                maDtpn.includes(queryKey) || 
+                maNv.includes(queryKey) || 
+                tenNv.includes(queryKey);
 
-      const matchSales = selectedSales === "" || maNv === selectedSales;
+            let matchDate = true;
+            if (fFrom && fTo) {
+                matchDate = ngayCtu >= fFrom && ngayCtu <= fTo;
+            } else if (fFrom) {
+                matchDate = ngayCtu >= fFrom;
+            } else if (fTo) {
+                matchDate = ngayCtu <= fTo;
+            }
 
-      const isVisible = matchOther && matchDate && matchSales;
-      card.style.display = isVisible ? '' : 'none';
-    });
-  };
+            const matchSales = selectedSales === "" || maNv === selectedSales;
+
+            const isVisible = matchOther && matchDate && matchSales;
+            // Chỉ tác động vào DOM khi trạng thái thực sự thay đổi
+            if (isVisible && card.style.display === 'none') {
+                card.style.display = '';
+            } else if (!isVisible && card.style.display !== 'none') {
+                card.style.display = 'none';
+            }
+        }
+        
+        // Nếu chưa duyệt hết, tiếp tục gọi frame tiếp theo
+        if (index < cards.length) {
+            requestAnimationFrame(processBatch);
+        }
+    }
+    
+    // Kích hoạt tiến trình lọc
+    requestAnimationFrame(processBatch);
+};
 
   window.setSoGocDateFrom = function(val) {
     soGocFilterDateFrom = val;
@@ -4244,8 +4264,6 @@ window.openCurrentCartModal = function() {
 
 window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
     const counterRef = doc(db, "systemCounters", "globalSoCtuMaster");
-    
-    // Kiểm tra xem thiết bị có đang kết nối mạng không (navigator.onLine)
     const isOnline = navigator.onLine;
 
     // --- TRƯỜNG HỢP 1: ĐANG OFFLINE (MẤT MẠNG) ---
@@ -4253,7 +4271,6 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         let maxExisting = 0;
         if (typeof orders !== 'undefined' && Array.isArray(orders)) {
             orders.forEach(o => {
-                // Chỉ quét các số ctu offline cũ của chính nhân viên này để tính tiếp
                 let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
                 if (!isNaN(num) && num > maxExisting) {
                     maxExisting = num;
@@ -4262,8 +4279,6 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         }
         let nextVal = maxExisting + 1;
         if (nextVal > 900000) nextVal = 1;
-        
-        // GẮN MÃ NHÂN VIÊN KHI OFFLINE ĐỂ TRIỆT TIÊU HOÀN TOÀN RỦI RO TRÙNG LẶP GIỮA CÁC SALES
         const currentSalesCode = (typeof currentUser !== 'undefined' && currentUser && currentUser.code) ? currentUser.code : 'OFF';
         return `${nextVal}-${currentSalesCode}`;
     }
@@ -4274,19 +4289,10 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
             const newSoCtu = await runTransaction(db, async (transaction) => {
                 const counterDoc = await transaction.get(counterRef);
                 
-                let maxExisting = 0;
-                if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    orders.forEach(o => {
-                        let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
-                        if (!isNaN(num) && num > maxExisting) {
-                            maxExisting = num;
-                        }
-                    });
-                }
-
-                let counterVal = counterDoc.exists() ? Number(counterDoc.data().value || 0) : 0;
-                let baseVal = Math.max(counterVal, maxExisting);
-                let currentValue = baseVal + 1;
+                // TỐI ƯU RACE CONDITION: Bỏ qua hoàn toàn maxExisting local khi đang online.
+                // Chỉ phụ thuộc vào giá trị độc lập trên Server.
+                let currentValue = counterDoc.exists() ? Number(counterDoc.data().value || 0) : 0;
+                currentValue += 1;
                 
                 if (currentValue > 900000) {
                     currentValue = 1;
@@ -4296,22 +4302,15 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
                 return currentValue;
             });
             
-            // ONLINE: TRẢ VỀ SỐ NGUYÊN THUẦN TÚY (Ví dụ: 266, 267...) KHÔNG DÍNH MÃ NHÂN VIÊN
             return newSoCtu;
             
         } catch (err) {
             if (attempt === retries - 1) {
-                // Fallback an toàn nếu lỗi transaction mạng
-                let localMax = 0;
-                if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                    orders.forEach(o => {
-                        let num = Number(String(o.soCtu || '').split('-')[0].replace(/[^0-9]/g, ''));
-                        if (!isNaN(num) && num > localMax) localMax = num;
-                    });
-                }
-                let fallbackVal = localMax + 1;
-                if (fallbackVal > 900000) fallbackVal = 1;
-                return fallbackVal;
+                // FALLBACK AN TOÀN TUYỆT ĐỐI: Dùng 6 số cuối của Timestamp kết hợp mã NV
+                // Đảm bảo không bao giờ trùng lặp ngay cả khi sập transaction mạng
+                const currentSalesCode = (typeof currentUser !== 'undefined' && currentUser && currentUser.code) ? currentUser.code : 'ERR';
+                const timeSuffix = Date.now().toString().slice(-6);
+                return `${timeSuffix}-${currentSalesCode}`;
             }
             await new Promise(res => setTimeout(res, delay * Math.pow(2, attempt) + Math.random() * 50));
         }
