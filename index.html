@@ -1264,64 +1264,7 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       }
     });
   }
-window.cleanupLocalGarbage = async function() {
-  // 1. Chỉ chạy dọn dẹp 1 lần mỗi ngày để không làm chậm lúc mở App
-  const lastCleanup = localStorage.getItem('dms_local_cleanup_date');
-  const todayStr = new Date().toISOString().slice(0, 10);
-  if (lastCleanup === todayStr) return;
 
-  try {
-    if (!idbDb) await initIndexedDB();
-
-    // 2. Dọn dẹp giỏ hàng nháp (cartDrafts) đã bỏ dở quá 7 ngày
-    const txCart = idbDb.transaction(["cartDrafts"], "readwrite");
-    const cartStore = txCart.objectStore("cartDrafts");
-    const cartReq = cartStore.getAll();
-    
-    cartReq.onsuccess = () => {
-      const drafts = cartReq.result || [];
-      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // Mốc 7 ngày
-      
-      drafts.forEach(draft => {
-        if (draft.updatedAt && draft.updatedAt < sevenDaysAgo) {
-          cartStore.delete(draft.storeId);
-        }
-      });
-    };
-
-    // 3. Dọn dẹp cache báo cáo KPI cũ (metaInfo) giữ lại đúng tháng này và tháng trước
-    const txMeta = idbDb.transaction(["metaInfo"], "readwrite");
-    const metaStore = txMeta.objectStore("metaInfo");
-    const metaReq = metaStore.getAllKeys(); 
-    
-    metaReq.onsuccess = () => {
-      const keys = metaReq.result || [];
-      const currentMonth = new Date().toISOString().slice(0, 7);
-      
-      const lastMonthDate = new Date();
-      lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
-      const lastMonth = lastMonthDate.toISOString().slice(0, 7);
-
-      keys.forEach(key => {
-        if (typeof key === 'string' && key.startsWith('kpi_orders_')) {
-          const kpiMonth = key.replace('kpi_orders_', '');
-          // Nếu dữ liệu KPI lưu trong máy không phải của tháng này và tháng trước -> Xóa sạch
-          if (kpiMonth !== currentMonth && kpiMonth !== lastMonth) {
-            metaStore.delete(key);
-          }
-        }
-      });
-    };
-
-    // Ghi nhận đã dọn dẹp hôm nay
-    localStorage.setItem('dms_local_cleanup_date', todayStr);
-    console.log("✅ Đã dọn dẹp bộ nhớ rác trên thiết bị thành công!");
-    
-  } catch (e) {
-    console.warn("Lỗi khi dọn dẹp bộ nhớ đệm: ", e);
-  }
-};
-  
   window.scrollToCartFooter = function() {
     const footer = document.getElementById('dynamicCartFooter');
     if (footer) {
@@ -1977,7 +1920,6 @@ try {
 
     setTimeout(async () => {
       await cleanupExpiredOrdersOptimized();
-      if (typeof cleanupLocalGarbage === 'function') await cleanupLocalGarbage();
       await loadMasterDataOptimized(false);
       try {
         const pos = await getHighAccuracyPosition();
@@ -6212,47 +6154,27 @@ ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role 
     const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
     const canModify = isOwner || currentUser.role === 'admin';
     const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
-const isViewed = viewedData[o.id || o.orderId] ? true : false;
-
-// --- BẮT ĐẦU CODE KIỂM TRA ẨN/HIỆN NGAY TỪ LÚC VẼ HTML (CHỐNG CHỚP) ---
-let initialDisplay = 'flex';
-
-// 1. Kiểm tra Ngày tháng
-const ctuDate = o.ngayCtu || '';
-if (soGocFilterDateFrom && soGocFilterDateTo) {
-    if (ctuDate < soGocFilterDateFrom || ctuDate > soGocFilterDateTo) initialDisplay = 'none';
-} else if (soGocFilterDateFrom && ctuDate < soGocFilterDateFrom) {
-    initialDisplay = 'none';
-} else if (soGocFilterDateTo && ctuDate > soGocFilterDateTo) {
-    initialDisplay = 'none';
-}
-
-// 2. Kiểm tra Nhân viên
-const currentSalesFilter = (typeof soGocSalesFilter !== 'undefined' ? soGocSalesFilter : '').trim().toLowerCase();
-if (initialDisplay !== 'none' && currentSalesFilter !== "" && (o.maNhanVien || o.salesCode || '').trim().toLowerCase() !== currentSalesFilter) {
-    initialDisplay = 'none';
-}
-
-// 3. Kiểm tra Từ khóa tìm kiếm
-const currentKw = (typeof soGocFilterKeyword !== 'undefined' ? soGocFilterKeyword : '').toLowerCase();
-if (initialDisplay !== 'none' && currentKw !== "") {
-    const qKey = removeAccents(currentKw.trim());
-    const cleanCtuKey = qKey.replace('#', '').trim();
-    const maDtpnNo = removeAccents(o.maDTPNNo || '').toLowerCase();
-    const maNv = removeAccents(o.maNhanVien || o.salesCode || '').toLowerCase();
-    const tenNv = removeAccents(o.tenNhanVien || o.salesName || '').toLowerCase();
-    const soCtuStr = String(o.soCtu || '');
+    const isViewed = viewedData[o.id || o.orderId] ? true : false;
     
-    const matchSoCtu = cleanCtuKey === "" || soCtuStr.includes(cleanCtuKey);
-    const matchOther = matchSoCtu || maDtpnNo.includes(qKey) || maNv.includes(qKey) || tenNv.includes(qKey);
-    
-    if (!matchOther) initialDisplay = 'none';
-}
-// --- KẾT THÚC ---
+    // --- BẮT ĐẦU CODE FIX LỖI GIẬT MÀN HÌNH ---
+    let initialDisplay = 'flex';
+    const ctuDate = o.ngayCtu || '';
+    // 1. Kiểm tra điều kiện Ngày tháng
+    if (soGocFilterDateFrom && soGocFilterDateTo) {
+        if (ctuDate < soGocFilterDateFrom || ctuDate > soGocFilterDateTo) {
+            initialDisplay = 'none'; // Giấu ngay từ đầu nếu lệch ngày
+        }
+    }
+    // 2. Kiểm tra điều kiện lọc Nhân viên (Nếu kế toán đang chọn xem riêng 1 NV)
+    const currentSalesFilter = (soGocSalesFilter || '').trim().toLowerCase();
+    if (currentSalesFilter !== "" && (o.salesCode || '').trim().toLowerCase() !== currentSalesFilter) {
+        initialDisplay = 'none';
+    }
+    // --- KẾT THÚC CODE FIX ---
 
-return `
-  <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien || o.salesCode)}" data-ten-nv="${removeAccents(o.tenNhanVien || o.salesName)}" data-ngay-ctu="${o.ngayCtu}" style="display:${initialDisplay}; flex-direction:column; gap:8px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+    return `
+      <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:${initialDisplay}; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
 <div style="display:inline-flex; align-items:center; gap:8px;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>${isViewed ? `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap;">✅ Đã xem</span>` : ''}</div>                  <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
                      let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
@@ -6343,6 +6265,11 @@ return `
           </table>
         </div>
       `;
+      setTimeout(() => {
+          if (typeof setSoGocQuickDateFilter === 'function') {
+              setSoGocQuickDateFilter(soGocQuickDate);
+          }
+      }, 50);
     } 
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
@@ -6906,54 +6833,29 @@ else if (tab === 'kpi') {
       window._kpiDateFrom = window._kpiDateFrom || '';
       window._kpiDateTo = window._kpiDateTo || '';
 
-      // TÌM VÀ THAY THẾ KHỐI NÀY
-window.setKpiDateFrom = function(val) {
-    window._kpiDateFrom = val;
-    window._kpiDateFilter = 'custom';
-    // KHÔNG GỌI RENDER Ở ĐÂY ĐỂ TRÁNH GIẬT MÀN HÌNH VÀ MẤT BÀN PHÍM
-};
+      window.setKpiDateFrom = function(val) {
+        window._kpiDateFrom = val;
+        window._kpiDateFilter = 'custom';
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
 
-window.setKpiDateTo = function(val) {
-    window._kpiDateTo = val;
-    window._kpiDateFilter = 'custom';
-    // KHÔNG GỌI RENDER Ở ĐÂY ĐỂ TRÁNH GIẬT MÀN HÌNH VÀ MẤT BÀN PHÍM
-};
+      window.setKpiDateTo = function(val) {
+        window._kpiDateTo = val;
+        window._kpiDateFilter = 'custom';
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
 
-// HÀM MỚI: Chỉ khi bấm nút "LỌC DỮ LIỆU" mới bắt đầu vẽ lại
-window.applyCustomKpiDate = function() {
-    if (!window._kpiDateFrom || !window._kpiDateTo) {
-        return alert("Vui lòng chọn đầy đủ Từ ngày và Đến ngày!");
-    }
-    if (window._kpiDateFrom > window._kpiDateTo) {
-        return alert("Lỗi: 'Từ ngày' không được lớn hơn 'Đến ngày'!");
-    }
-    const container = document.getElementById('targetDashboardContainer');
-    if (container) {
-        // Hiện loading mượt mà
-        container.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br><b style="font-size:15px;">Đang xử lý dữ liệu...</b></div>`;
-        // Trì hoãn 50ms để giao diện Loading kịp hiện lên, sau đó mới tính toán nặng
-        setTimeout(() => calculateAndRenderTargets(), 50);
-    }
-};
-
-window.changeKpiFilter = function(val) {
-    window._kpiDateFilter = val;
-    const container = document.getElementById('targetDashboardContainer');
-    
-    if (val !== 'custom') {
-        window._kpiDateFrom = '';
-        window._kpiDateTo = '';
-        if (container) {
-            container.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br><b style="font-size:15px;">Đang xử lý dữ liệu...</b></div>`;
-            setTimeout(() => calculateAndRenderTargets(), 50);
+      window.changeKpiFilter = function(val) {
+        window._kpiDateFilter = val;
+        if (val !== 'custom') {
+            window._kpiDateFrom = '';
+            window._kpiDateTo = '';
         }
-    } else {
-        // Nếu chọn "Tùy chỉnh ngày...", chỉ mở khung chọn ngày ra (không load data)
-        if (typeof calculateAndRenderTargets === 'function') {
-            calculateAndRenderTargets(); 
-        }
-    }
-};
+        const activePane = document.getElementById('tabPane_kpi');
+        if (activePane) renderTabContent('kpi', activePane);
+      };
 
       const today = new Date();
       let filterStart = '', filterEnd = '';
@@ -7013,59 +6915,40 @@ window.changeKpiFilter = function(val) {
         }
       }
 
-      // 1. SỬA GIAO DIỆN HEADER (Chống vỡ layout và thêm nút Lọc)
-  container.innerHTML = `
+      // BẮT ĐẦU ĐOẠN SỬA LỖI: TẠO GIAO DIỆN CHỜ (LOADING) ĐỂ TRÁNH GIẬT TRANG
+      container.innerHTML = `
         <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
-          <!-- Khung Tiêu đề & Chọn nhanh (Có flex-wrap chống rớt chữ) -->
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <h2 style="font-weight:900; font-size:20px; margin:0; line-height: 1.2;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
-            <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:900; border:1px solid var(--card-border); padding:8px 12px; border-radius:8px; font-size:13px; outline:none; box-shadow: 0 2px 5px rgba(0,0,0,0.05); max-width: 160px;">
-              <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>Hôm Nay</option>
-              <option value="yesterday" ${window._kpiDateFilter === 'yesterday' ? 'selected' : ''}>Hôm Qua</option>
-              <option value="week" ${window._kpiDateFilter === 'week' ? 'selected' : ''}>Tuần Này</option>
-              <option value="month" ${window._kpiDateFilter === 'month' ? 'selected' : ''}>Tháng Này</option>
-              <option value="all" ${window._kpiDateFilter === 'all' ? 'selected' : ''}>Tất Cả</option>
-              <option value="custom" ${window._kpiDateFilter === 'custom' ? 'selected' : ''}>Tùy chỉnh...</option>
-            </select>
-          </div>
-          
-          <!-- Khung chọn Ngày Tùy Chỉnh (Chỉ hiện khi chọn 'custom') -->
-          <div style="display:${window._kpiDateFilter === 'custom' ? 'flex' : 'none'}; gap:10px; align-items:flex-end; flex-wrap:wrap; background:var(--card-bg); padding:12px; border-radius:12px; border:1px solid var(--card-border);">
-            <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:120px;">
-              <span style="font-size:11px; font-weight:900; color:var(--text-muted); text-transform:uppercase;">Từ ngày:</span>
-              <input type="date" id="kpiDateFrom" value="${window._kpiDateFrom}" onchange="setKpiDateFrom(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:900; color:var(--primary); border-radius:8px; border:1px solid var(--card-border); box-sizing:border-box;">
-            </div>
-            <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:120px;">
-              <span style="font-size:11px; font-weight:900; color:var(--text-muted); text-transform:uppercase;">Đến ngày:</span>
-              <input type="date" id="kpiDateTo" value="${window._kpiDateTo}" onchange="setKpiDateTo(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:900; color:var(--primary); border-radius:8px; border:1px solid var(--card-border); box-sizing:border-box;">
-            </div>
-            <!-- BÚT LỌC DỮ LIỆU ĐỘC LẬP -->
-            <button class="btn btn-amber" style="padding:10px 16px; font-weight:900; border-radius:8px; font-size:13px; width:100%; justify-content:center; margin-top:4px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.2);" onclick="applyCustomKpiDate()">
-                <i class="fa-solid fa-filter"></i> LỌC DỮ LIỆU
-            </button>
-          </div>
+          <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
         </div>
         <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
             <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
             <b style="font-size:15px;">Đang tổng hợp số liệu từ máy chủ...</b>
         </div>`;
 
-  // 2. SỬA LỖI TRUY VẤN DATABASE: Thay vì getDocs, ta lọc trên mảng 'orders' đang lưu ở RAM
-  let analyticsOrders = [];
-  try {
-      let queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
-      let queryEnd = filterEnd;
+      // TRUY VẤN DỮ LIỆU ĐỘC LẬP TỪ FIREBASE THEO ĐÚNG KHOẢNG NGÀY ĐÃ CHỌN
+      let analyticsOrders = [];
+      try {
+          // Gộp cả ngày quá khứ (prevStart) và ngày hiện tại (filterStart) vào 1 lần tải
+          let queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
+          let queryEnd = filterEnd;
 
-      // Chặn hoàn toàn việc gọi Firebase (getDocs) ở đây. Lấy từ mảng local.
-      if (queryStart && queryEnd) {
-          analyticsOrders = orders.filter(o => o.ngayCtu >= queryStart && o.ngayCtu <= queryEnd);
-      } else {
-          analyticsOrders = [...orders]; // Lọc 'Tất cả'
+          if (queryStart && queryEnd) {
+              const q = query(collection(db, "orders"),
+                  where("ngayCtu", ">=", queryStart),
+                  where("ngayCtu", "<=", queryEnd)
+              );
+              const snap = await getDocs(q);
+              analyticsOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+          } else {
+              // Trường hợp chọn "Tất Cả"
+              const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
+              const snapAll = await getDocs(qAll);
+              analyticsOrders = snapAll.docs.map(d => ({id: d.id, ...d.data()}));
+          }
+      } catch (err) {
+          console.error("Lỗi lấy dữ liệu KPI:", err);
+          analyticsOrders = typeof orders !== 'undefined' ? orders : []; // Fallback nếu rớt mạng
       }
-  } catch (err) {
-      console.error("Lỗi lấy dữ liệu KPI:", err);
-      analyticsOrders = typeof orders !== 'undefined' ? orders : [];
-  }
 
       // Khóa an toàn: Nếu người dùng chuyển tab khác trong lúc đang tải thì không vẽ tiếp
       if (currentTab !== 'kpi') return;
