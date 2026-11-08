@@ -1264,7 +1264,64 @@ const thresholdDateStr = pastDate.toISOString().slice(0, 10);
       }
     });
   }
+window.cleanupLocalGarbage = async function() {
+  // 1. Chỉ chạy dọn dẹp 1 lần mỗi ngày để không làm chậm lúc mở App
+  const lastCleanup = localStorage.getItem('dms_local_cleanup_date');
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (lastCleanup === todayStr) return;
 
+  try {
+    if (!idbDb) await initIndexedDB();
+
+    // 2. Dọn dẹp giỏ hàng nháp (cartDrafts) đã bỏ dở quá 7 ngày
+    const txCart = idbDb.transaction(["cartDrafts"], "readwrite");
+    const cartStore = txCart.objectStore("cartDrafts");
+    const cartReq = cartStore.getAll();
+    
+    cartReq.onsuccess = () => {
+      const drafts = cartReq.result || [];
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // Mốc 7 ngày
+      
+      drafts.forEach(draft => {
+        if (draft.updatedAt && draft.updatedAt < sevenDaysAgo) {
+          cartStore.delete(draft.storeId);
+        }
+      });
+    };
+
+    // 3. Dọn dẹp cache báo cáo KPI cũ (metaInfo) giữ lại đúng tháng này và tháng trước
+    const txMeta = idbDb.transaction(["metaInfo"], "readwrite");
+    const metaStore = txMeta.objectStore("metaInfo");
+    const metaReq = metaStore.getAllKeys(); 
+    
+    metaReq.onsuccess = () => {
+      const keys = metaReq.result || [];
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      
+      const lastMonthDate = new Date();
+      lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+      const lastMonth = lastMonthDate.toISOString().slice(0, 7);
+
+      keys.forEach(key => {
+        if (typeof key === 'string' && key.startsWith('kpi_orders_')) {
+          const kpiMonth = key.replace('kpi_orders_', '');
+          // Nếu dữ liệu KPI lưu trong máy không phải của tháng này và tháng trước -> Xóa sạch
+          if (kpiMonth !== currentMonth && kpiMonth !== lastMonth) {
+            metaStore.delete(key);
+          }
+        }
+      });
+    };
+
+    // Ghi nhận đã dọn dẹp hôm nay
+    localStorage.setItem('dms_local_cleanup_date', todayStr);
+    console.log("✅ Đã dọn dẹp bộ nhớ rác trên thiết bị thành công!");
+    
+  } catch (e) {
+    console.warn("Lỗi khi dọn dẹp bộ nhớ đệm: ", e);
+  }
+};
+  
   window.scrollToCartFooter = function() {
     const footer = document.getElementById('dynamicCartFooter');
     if (footer) {
@@ -1920,6 +1977,7 @@ try {
 
     setTimeout(async () => {
       await cleanupExpiredOrdersOptimized();
+      if (typeof cleanupLocalGarbage === 'function') await cleanupLocalGarbage();
       await loadMasterDataOptimized(false);
       try {
         const pos = await getHighAccuracyPosition();
