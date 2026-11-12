@@ -6833,29 +6833,60 @@ else if (tab === 'kpi') {
       const today = new Date();
       const todayStr = toLocalYMD(today);
 
+      // Hàm dịch YYYY-MM-DD sang Thứ, ngày ... tháng ... năm ...
+      const formatFullVNDate = (ymdStr, shortMode = false) => {
+        if (!ymdStr) return '';
+        const parts = ymdStr.split('-');
+        if (parts.length !== 3) return ymdStr;
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        const dateObj = new Date(y, m - 1, d);
+        const dayNames = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+        const dayName = dayNames[dateObj.getDay()];
+        if (shortMode) {
+          return `${dayName}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+        }
+        return `${dayName}, ngày ${String(d).padStart(2, '0')} tháng ${String(m).padStart(2, '0')} năm ${y}`;
+      };
+
+      const extractCompCode = (code) => {
+        const pCodeStr = String(code || '').trim().toUpperCase();
+        if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) return '11';
+        const match = pCodeStr.match(/^\[(.*?)\]/);
+        if (match) return match[1].trim();
+        const parts = pCodeStr.split(/[-_]/);
+        if (parts.length > 1) return parts[0].trim();
+        if (pCodeStr.length >= 2) return pCodeStr.substring(0, 2);
+        return 'KHAC';
+      };
+
       window._kpiDateFilter = window._kpiDateFilter || 'today';
-      window._kpiDateFrom = window._kpiDateFrom || todayStr;
-      window._kpiDateTo = window._kpiDateTo || todayStr;
+      if (window._kpiDateFrom === undefined) window._kpiDateFrom = '';
+      if (window._kpiDateTo === undefined) window._kpiDateTo = '';
       window._kpiRangeCache = window._kpiRangeCache || {};
 
+      // Chỉ tải dữ liệu khi đã chọn đủ cả 2 ô Từ ngày & Đến ngày ở chế độ Tùy chỉnh
       window.setKpiDateFrom = function(val) {
-        if (!val) return;
-        window._kpiDateFrom = val;
-        if (window._kpiDateTo && window._kpiDateFrom > window._kpiDateTo) {
-          window._kpiDateTo = val;
-        }
+        window._kpiDateFrom = val || '';
         window._kpiDateFilter = 'custom';
+        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateFrom > window._kpiDateTo) {
+          const temp = window._kpiDateFrom;
+          window._kpiDateFrom = window._kpiDateTo;
+          window._kpiDateTo = temp;
+        }
         const activePane = document.getElementById('tabPane_kpi');
         if (activePane) renderTabContent('kpi', activePane);
       };
 
       window.setKpiDateTo = function(val) {
-        if (!val) return;
-        window._kpiDateTo = val;
-        if (window._kpiDateFrom && window._kpiDateTo < window._kpiDateFrom) {
-          window._kpiDateFrom = val;
-        }
+        window._kpiDateTo = val || '';
         window._kpiDateFilter = 'custom';
+        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateTo < window._kpiDateFrom) {
+          const temp = window._kpiDateTo;
+          window._kpiDateTo = window._kpiDateFrom;
+          window._kpiDateFrom = temp;
+        }
         const activePane = document.getElementById('tabPane_kpi');
         if (activePane) renderTabContent('kpi', activePane);
       };
@@ -6863,8 +6894,9 @@ else if (tab === 'kpi') {
       window.changeKpiFilter = function(val) {
         window._kpiDateFilter = val;
         if (val === 'custom') {
-          if (!window._kpiDateFrom) window._kpiDateFrom = todayStr;
-          if (!window._kpiDateTo) window._kpiDateTo = todayStr;
+          // Reset 2 ô ngày để người dùng chủ động chọn đủ 2 ô mới chạy, chống giật lag
+          window._kpiDateFrom = '';
+          window._kpiDateTo = '';
         }
         const activePane = document.getElementById('tabPane_kpi');
         if (activePane) renderTabContent('kpi', activePane);
@@ -6877,22 +6909,76 @@ else if (tab === 'kpi') {
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
       };
 
+      // Nếu đang ở chế độ "Tùy chỉnh ngày..." nhưng chưa chọn đủ cả 2 ô -> Hiển thị khung chờ, KHÔNG query Firebase
+      if (window._kpiDateFilter === 'custom' && (!window._kpiDateFrom || !window._kpiDateTo)) {
+        let waitingMessage = 'Vui lòng chọn đầy đủ cả 2 ô <b>Từ ngày</b> và <b>Đến ngày</b> ở trên để hệ thống bắt đầu tổng hợp số liệu.';
+        if (window._kpiDateFrom && !window._kpiDateTo) {
+          waitingMessage = `Đã chọn Từ ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateFrom)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Đến ngày</b> để bắt đầu phân tích.`;
+        } else if (!window._kpiDateFrom && window._kpiDateTo) {
+          waitingMessage = `Đã chọn Đến ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateTo)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Từ ngày</b> để bắt đầu phân tích.`;
+        }
+
+        container.innerHTML = `
+          <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <h2 style="font-weight:800; font-size:20px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <select class="btn btn-sm" onchange="changeKpiFilter(this.value)" style="background:#fff; color:var(--text-main); font-weight:800; border:1px solid var(--card-border); padding:8px 12px; border-radius:10px; font-size:13.5px; outline:none; margin:0; width:auto;">
+                  <option value="today">Hôm Nay</option>
+                  <option value="yesterday">Hôm Qua</option>
+                  <option value="week">Tuần Này</option>
+                  <option value="last_week">Tuần Trước</option>
+                  <option value="month">Tháng Này (MTD)</option>
+                  <option value="last_month">Tháng Trước</option>
+                  <option value="all">Tất Cả (2000 đơn)</option>
+                  <option value="custom" selected>Tùy chỉnh ngày...</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card-bg); padding:12px; border-radius:12px; border:2px solid var(--primary);">
+              <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+                <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ ngày:</span>
+                <input type="date" id="kpiDateFrom" value="${window._kpiDateFrom}" onchange="setKpiDateFrom(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border);">
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+                <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến ngày:</span>
+                <input type="date" id="kpiDateTo" value="${window._kpiDateTo}" onchange="setKpiDateTo(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border);">
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--primary);">
+            <i class="fa-regular fa-calendar-check fa-3x" style="color:var(--primary); margin-bottom:14px; opacity:0.8;"></i>
+            <div style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Đang chờ chọn đủ khoảng ngày</div>
+            <div style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">${waitingMessage}</div>
+          </div>
+        `;
+        return;
+      }
+
       let filterStart = '', filterEnd = '';
       let prevStart = '', prevEnd = '';
+      let periodTitleHtml = '';
+      let compareTitleHtml = '';
+
       const yyyy = today.getFullYear();
       const mm = today.getMonth();
       const dd = today.getDate();
 
       if (window._kpiDateFilter === 'today') {
-        filterStart = todayStr;
-        filterEnd = todayStr;
+        filterStart = filterEnd = todayStr;
         const yesterday = new Date(yyyy, mm, dd - 1);
         prevStart = prevEnd = toLocalYMD(yesterday);
+        periodTitleHtml = `Hôm nay: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`;
+        compareTitleHtml = `So với Hôm qua: <b>${formatFullVNDate(prevStart, true)}</b>`;
       } else if (window._kpiDateFilter === 'yesterday') {
         const yesterday = new Date(yyyy, mm, dd - 1);
         const dayBefore = new Date(yyyy, mm, dd - 2);
         filterStart = filterEnd = toLocalYMD(yesterday);
         prevStart = prevEnd = toLocalYMD(dayBefore);
+        periodTitleHtml = `Hôm qua: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`;
+        compareTitleHtml = `So với Hôm kia: <b>${formatFullVNDate(prevStart, true)}</b>`;
       } else if (window._kpiDateFilter === 'week') {
         const dayOfWeek = today.getDay();
         const diffToMonday = dd - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
@@ -6900,23 +6986,57 @@ else if (tab === 'kpi') {
         filterStart = toLocalYMD(firstDayOfWeek);
         filterEnd = todayStr;
 
+        const daysElapsed = Math.max(0, Math.round((today - firstDayOfWeek) / (1000 * 60 * 60 * 24)));
         const prevWeekStart = new Date(firstDayOfWeek.getFullYear(), firstDayOfWeek.getMonth(), firstDayOfWeek.getDate() - 7);
-        const prevWeekEnd = new Date(firstDayOfWeek.getFullYear(), firstDayOfWeek.getMonth(), firstDayOfWeek.getDate() - 1);
+        const prevWeekSameDay = new Date(prevWeekStart.getFullYear(), prevWeekStart.getMonth(), prevWeekStart.getDate() + daysElapsed);
         prevStart = toLocalYMD(prevWeekStart);
-        prevEnd = toLocalYMD(prevWeekEnd);
+        prevEnd = toLocalYMD(prevWeekSameDay);
+
+        periodTitleHtml = `Tuần này: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
+        compareTitleHtml = `So với cùng kỳ tuần trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
+      } else if (window._kpiDateFilter === 'last_week') {
+        const dayOfWeek = today.getDay();
+        const diffToMonday = dd - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+        const lastWeekStart = new Date(yyyy, mm, diffToMonday - 7);
+        const lastWeekEnd = new Date(yyyy, mm, diffToMonday - 1);
+        filterStart = toLocalYMD(lastWeekStart);
+        filterEnd = toLocalYMD(lastWeekEnd);
+
+        const twoWeeksAgoStart = new Date(yyyy, mm, diffToMonday - 14);
+        const twoWeeksAgoEnd = new Date(yyyy, mm, diffToMonday - 8);
+        prevStart = toLocalYMD(twoWeeksAgoStart);
+        prevEnd = toLocalYMD(twoWeeksAgoEnd);
+
+        periodTitleHtml = `Tuần trước: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
+        compareTitleHtml = `So với tuần liền kề trước đó: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
       } else if (window._kpiDateFilter === 'month') {
         filterStart = `${yyyy}-${String(mm + 1).padStart(2, '0')}-01`;
         filterEnd = todayStr;
 
-        // So sánh cùng kỳ (Month-To-Date) với tháng trước
         const prevMonthFirst = new Date(yyyy, mm - 1, 1);
         const prevMonthLastDay = new Date(yyyy, mm, 0).getDate();
         const prevMonthSameDay = new Date(yyyy, mm - 1, Math.min(dd, prevMonthLastDay));
         prevStart = toLocalYMD(prevMonthFirst);
         prevEnd = toLocalYMD(prevMonthSameDay);
+
+        periodTitleHtml = `Tháng ${mm + 1}/${yyyy}: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
+        compareTitleHtml = `So với cùng kỳ tháng trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
+      } else if (window._kpiDateFilter === 'last_month') {
+        const lastMonthFirst = new Date(yyyy, mm - 1, 1);
+        const lastMonthLast = new Date(yyyy, mm, 0);
+        filterStart = toLocalYMD(lastMonthFirst);
+        filterEnd = toLocalYMD(lastMonthLast);
+
+        const twoMonthsAgoFirst = new Date(yyyy, mm - 2, 1);
+        const twoMonthsAgoLast = new Date(yyyy, mm - 1, 0);
+        prevStart = toLocalYMD(twoMonthsAgoFirst);
+        prevEnd = toLocalYMD(twoMonthsAgoLast);
+
+        periodTitleHtml = `Tháng trước (${lastMonthFirst.getMonth() + 1}/${lastMonthFirst.getFullYear()}): <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
+        compareTitleHtml = `So với tháng ${twoMonthsAgoFirst.getMonth() + 1}/${twoMonthsAgoFirst.getFullYear()}: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
       } else if (window._kpiDateFilter === 'custom') {
-        filterStart = window._kpiDateFrom || todayStr;
-        filterEnd = window._kpiDateTo || todayStr;
+        filterStart = window._kpiDateFrom;
+        filterEnd = window._kpiDateTo;
         const sDate = new Date(filterStart + 'T00:00:00');
         const eDate = new Date(filterEnd + 'T00:00:00');
         const diffDays = Math.max(0, Math.round((eDate - sDate) / (1000 * 60 * 60 * 24)));
@@ -6925,39 +7045,83 @@ else if (tab === 'kpi') {
         const pStart = new Date(pEnd.getFullYear(), pEnd.getMonth(), pEnd.getDate() - diffDays);
         prevStart = toLocalYMD(pStart);
         prevEnd = toLocalYMD(pEnd);
+
+        periodTitleHtml = filterStart === filterEnd
+          ? `Ngày chọn: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`
+          : `Kỳ tùy chỉnh (${diffDays + 1} ngày): <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
+        compareTitleHtml = `So với ${diffDays + 1} ngày liền trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
+      } else {
+        periodTitleHtml = `Toàn bộ dữ liệu (Tối đa 2.000 đơn hàng gần nhất)`;
+        compareTitleHtml = `Không áp dụng so sánh kỳ trước cho chế độ Tất Cả`;
       }
 
       container.innerHTML = `
         <div class="tab-header-actions" style="margin-bottom:14px; flex-direction:column; align-items:stretch; gap:10px;">
-          <h2 style="font-weight:800; font-size:22px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
+          <h2 style="font-weight:800; font-size:20px; margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
         </div>
         <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
           <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
           <b style="font-size:15px;">Đang tổng hợp số liệu...</b>
         </div>`;
 
+      // Hàm tải dữ liệu thông minh theo khoảng ngày có Cache riêng từng dải
+      const fetchOrdersByRange = async (startStr, endStr) => {
+        const key = `${startStr}_${endStr}`;
+        if (window._kpiRangeCache[key]) return window._kpiRangeCache[key];
+        const q = query(
+          collection(db, "orders"),
+          where("ngayCtu", ">=", startStr),
+          where("ngayCtu", "<=", endStr)
+        );
+        const snap = await getDocs(q);
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        window._kpiRangeCache[key] = list;
+        return list;
+      };
+
       let analyticsOrders = [];
       try {
-        const queryStart = prevStart ? (prevStart < filterStart ? prevStart : filterStart) : filterStart;
-        const queryEnd = filterEnd;
-        const cacheKey = queryStart && queryEnd ? `${queryStart}_${queryEnd}` : 'ALL_2000';
+        if (filterStart && filterEnd) {
+          // Nếu kỳ trước và kỳ hiện tại liền kề nhau (không có ngày trống ở giữa) -> Gộp 1 query
+          const prevEndDate = prevEnd ? new Date(prevEnd + 'T00:00:00') : null;
+          const filterStartDate = new Date(filterStart + 'T00:00:00');
+          const gapDays = prevEndDate ? Math.round((filterStartDate - prevEndDate) / (1000 * 60 * 60 * 24)) : 999;
 
-        if (window._kpiRangeCache[cacheKey]) {
-          analyticsOrders = window._kpiRangeCache[cacheKey];
-        } else if (queryStart && queryEnd) {
-          const q = query(
-            collection(db, "orders"),
-            where("ngayCtu", ">=", queryStart),
-            where("ngayCtu", "<=", queryEnd)
-          );
-          const snap = await getDocs(q);
-          analyticsOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          window._kpiRangeCache[cacheKey] = analyticsOrders;
+          if (prevStart && prevEnd && gapDays <= 1) {
+            analyticsOrders = await fetchOrdersByRange(prevStart < filterStart ? prevStart : filterStart, filterEnd);
+          } else if (prevStart && prevEnd) {
+            // Tách 2 query song song để không tốn Read cho những ngày trống ở giữa (VD: ngày 13..31 tháng trước)
+            const [prevList, currList] = await Promise.all([
+              fetchOrdersByRange(prevStart, prevEnd),
+              fetchOrdersByRange(filterStart, filterEnd)
+            ]);
+            const mergedMap = new Map();
+            prevList.forEach(o => mergedMap.set(o.id, o));
+            currList.forEach(o => mergedMap.set(o.id, o));
+            analyticsOrders = Array.from(mergedMap.values());
+          } else {
+            analyticsOrders = await fetchOrdersByRange(filterStart, filterEnd);
+          }
         } else {
-          const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
-          const snapAll = await getDocs(qAll);
-          analyticsOrders = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
-          window._kpiRangeCache[cacheKey] = analyticsOrders;
+          if (window._kpiRangeCache['ALL_2000']) {
+            analyticsOrders = window._kpiRangeCache['ALL_2000'];
+          } else {
+            const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
+            const snapAll = await getDocs(qAll);
+            analyticsOrders = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+            window._kpiRangeCache['ALL_2000'] = analyticsOrders;
+          }
+        }
+
+        // Trộn trực tiếp dữ liệu mới nhất trong RAM (orders) để cập nhật ngay các đơn vừa tạo/sửa/xóa
+        if (Array.isArray(orders) && orders.length > 0) {
+          const ramMap = new Map();
+          analyticsOrders.forEach(o => ramMap.set(o.id, o));
+          orders.forEach(localOrd => {
+            if (!localOrd || !localOrd.id) return;
+            ramMap.set(localOrd.id, localOrd);
+          });
+          analyticsOrders = Array.from(ramMap.values());
         }
       } catch (err) {
         console.error("Lỗi lấy dữ liệu KPI:", err);
@@ -6966,7 +7130,36 @@ else if (tab === 'kpi') {
 
       if (currentTab !== 'kpi') return;
 
-      const GPS_MAX_DISTANCE = 50; // Chuẩn hóa bán kính chốt đơn tại quầy: 50 mét
+      // Tính sẵn số lượng tiệm thuộc từng Tuyến để đo Độ phủ Tuyến & Độ phủ Sales
+      const routeStoresCountMap = new Map();
+      let totalValidStores = 0;
+      if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
+        routeGroupsList.forEach(r => {
+          routeStoresCountMap.set(String(r.nhomDoiTuong || '').trim().toUpperCase(), {
+            code: String(r.nhomDoiTuong || '').trim().toUpperCase(),
+            name: r.noiDung || `Tuyến ${r.nhomDoiTuong}`,
+            totalStores: 0,
+            activeStores: new Set(),
+            don: 0,
+            kien: 0,
+            doanhSo: 0
+          });
+        });
+        stores.forEach(s => {
+          const cleanCode = String(s.code || '').trim().toUpperCase();
+          for (const [rCode, rObj] of routeStoresCountMap.entries()) {
+            if (rCode && cleanCode.startsWith(rCode)) {
+              rObj.totalStores += 1;
+              totalValidStores += 1;
+              break;
+            }
+          }
+        });
+      } else {
+        totalValidStores = stores.length;
+      }
+
+      const GPS_MAX_DISTANCE = 50;
       let kpiMap = new Map();
       let globalSkuMap = new Map();
       let globalStoreStatsMap = new Map();
@@ -6974,7 +7167,6 @@ else if (tab === 'kpi') {
       let currentStats = { kien: 0, don: 0, doanhSo: 0, totalLines: 0, taiQuay: 0, tuXa: 0, tiems: new Set() };
       let prevStats = { kien: 0, don: 0, doanhSo: 0 };
 
-      // Duyệt 1 vòng duy nhất qua analyticsOrders với O(1) Map Lookup
       analyticsOrders.forEach(o => {
         if (!o || o.status === 'Đã hủy') return;
 
@@ -7021,7 +7213,6 @@ else if (tab === 'kpi') {
         sData.don += 1;
         currentStats.don += 1;
 
-        // Ghi nhận giờ mở hàng & chốt đơn cuối
         if (o.createdAt) {
           const tMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
           if (!isNaN(tMs) && tMs > 0) {
@@ -7030,7 +7221,6 @@ else if (tab === 'kpi') {
           }
         }
 
-        // Định danh khách hàng & Kiểm tra khoảng cách GPS đồng nhất
         let inferredCode = o.maDTPNNo || '';
         if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
           inferredCode = o.maKH.split(' - ')[0].trim();
@@ -7054,6 +7244,27 @@ else if (tab === 'kpi') {
         } else {
           currentStats.tuXa += 1;
           sData.tuXa += 1;
+        }
+
+        // Xác định Tuyến của đơn hàng
+        const cleanStoreCode = String(matchedStore?.code || inferredCode || '').trim().toUpperCase();
+        const routePrefixMatch = cleanStoreCode.match(/^(\d+)/);
+        const routePrefix = routePrefixMatch ? routePrefixMatch[1] : 'KHAC';
+        if (!routeStoresCountMap.has(routePrefix) && routePrefix !== 'KHAC') {
+          routeStoresCountMap.set(routePrefix, {
+            code: routePrefix,
+            name: `Tuyến ${routePrefix}`,
+            totalStores: 0,
+            activeStores: new Set(),
+            don: 0,
+            kien: 0,
+            doanhSo: 0
+          });
+        }
+        const routeStatObj = routeStoresCountMap.get(routePrefix);
+        if (routeStatObj) {
+          routeStatObj.don += 1;
+          routeStatObj.activeStores.add(storeIdentifier);
         }
 
         const storeNameDisplay = o.maKH || (matchedStore ? `${matchedStore.code} - ${matchedStore.name}` : storeIdentifier);
@@ -7084,6 +7295,11 @@ else if (tab === 'kpi') {
             currentStats.doanhSo += itemRev;
             currentStats.totalLines += 1;
 
+            if (routeStatObj) {
+              routeStatObj.kien += thungCount;
+              routeStatObj.doanhSo += itemRev;
+            }
+
             const skuKey = String(item.code || item.id || 'SP').trim();
             if (!sData.skuMap.has(skuKey)) {
               sData.skuMap.set(skuKey, { code: skuKey, name: item.name || pObj?.name || skuKey, qty: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
@@ -7103,7 +7319,7 @@ else if (tab === 'kpi') {
             stStat.qty += thungCount;
             stStat.doanhSo += itemRev;
 
-            const ctyKey = getCompCodeFromProductCode(skuKey);
+            const ctyKey = extractCompCode(skuKey);
             const matchedComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey);
             const compDisplayName = matchedComp && matchedComp.tenCtu ? `[${matchedComp.maCtu}] ${matchedComp.tenCtu}` : (ctyKey !== 'KHAC' ? `Công Ty ${ctyKey}` : 'Khác');
 
@@ -7125,11 +7341,9 @@ else if (tab === 'kpi') {
       const leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
       const topDoanhSo = leaderboard.length > 0 && leaderboard[0].doanhSo > 0 ? leaderboard[0].doanhSo : 1;
 
-      // Top 15 sản phẩm bán chạy (Chuẩn hóa thanh tiến độ theo Doanh số)
       const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 15);
       const maxGlobalSkuRev = topGlobalSkus.length > 0 && topGlobalSkus[0].doanhSo > 0 ? topGlobalSkus[0].doanhSo : 1;
 
-      // Top 30 khách hàng (Chuẩn hóa thanh tiến độ theo Doanh số)
       const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 30);
       const maxStoreRev = topStoresList.length > 0 && topStoresList[0].doanhSo > 0 ? topStoresList[0].doanhSo : 1;
 
@@ -7137,26 +7351,21 @@ else if (tab === 'kpi') {
         .map(([name, data]) => ({ name, qty: data.qty, doanhSo: data.doanhSo }))
         .sort((a, b) => b.doanhSo - a.doanhSo);
 
+      const activeRoutesList = Array.from(routeStoresCountMap.values())
+        .filter(r => r.doanhSo > 0 || r.totalStores > 0)
+        .sort((a, b) => b.doanhSo - a.doanhSo);
+      const maxRouteRev = activeRoutesList.length > 0 && activeRoutesList[0].doanhSo > 0 ? activeRoutesList[0].doanhSo : 1;
+
       const calcGrowth = (curr, prev, isVND = false) => {
-        if (prev <= 0) return '<span style="color:#94A3B8; font-size:12px;">— Kỳ trước: 0</span>';
+        if (window._kpiDateFilter === 'all') return '<span style="color:#94A3B8; font-size:12px;">— Toàn thời gian</span>';
+        if (prev <= 0) return '<span style="color:#94A3B8; font-size:12px;">— Kỳ trước: 0K</span>';
         const pct = ((curr - prev) / prev) * 100;
         const diffVal = Math.round((curr - prev) / 1000).toLocaleString('en-US');
         const diffStr = isVND ? `(${curr >= prev ? '+' : ''}${diffVal}K)` : '';
-        if (pct > 0) return `<span style="color:#10B981; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-up"></i> +${pct.toFixed(1)}% so với cùng kỳ ${diffStr}</span>`;
-        if (pct < 0) return `<span style="color:#EF4444; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-down"></i> ${pct.toFixed(1)}% so với cùng kỳ ${diffStr}</span>`;
+        if (pct > 0) return `<span style="color:#10B981; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-up"></i> +${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
+        if (pct < 0) return `<span style="color:#EF4444; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-down"></i> ${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
         return `<span style="color:#94A3B8; font-size:12px;">— Ngang bằng kỳ trước</span>`;
       };
-
-      let totalValidStores = 0;
-      if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
-        stores.forEach(s => {
-          const cleanCode = String(s.code || '').trim().toUpperCase();
-          const hasRoute = routeGroupsList.some(r => cleanCode.startsWith(String(r.nhomDoiTuong || '').trim().toUpperCase()));
-          if (hasRoute) totalValidStores++;
-        });
-      } else {
-        totalValidStores = stores.length;
-      }
 
       const avgDropSize = currentStats.don > 0 ? Math.round(currentStats.doanhSo / currentStats.don / 1000).toLocaleString('en-US') : 0;
       const avgLppc = currentStats.don > 0 ? (currentStats.totalLines / currentStats.don).toFixed(1) : 0;
@@ -7180,21 +7389,33 @@ else if (tab === 'kpi') {
                 <option value="today" ${window._kpiDateFilter === 'today' ? 'selected' : ''}>Hôm Nay</option>
                 <option value="yesterday" ${window._kpiDateFilter === 'yesterday' ? 'selected' : ''}>Hôm Qua</option>
                 <option value="week" ${window._kpiDateFilter === 'week' ? 'selected' : ''}>Tuần Này</option>
+                <option value="last_week" ${window._kpiDateFilter === 'last_week' ? 'selected' : ''}>Tuần Trước</option>
                 <option value="month" ${window._kpiDateFilter === 'month' ? 'selected' : ''}>Tháng Này (MTD)</option>
+                <option value="last_month" ${window._kpiDateFilter === 'last_month' ? 'selected' : ''}>Tháng Trước</option>
                 <option value="all" ${window._kpiDateFilter === 'all' ? 'selected' : ''}>Tất Cả (2000 đơn)</option>
                 <option value="custom" ${window._kpiDateFilter === 'custom' ? 'selected' : ''}>Tùy chỉnh ngày...</option>
               </select>
             </div>
           </div>
 
-          <div style="display:${window._kpiDateFilter === 'custom' ? 'flex' : 'none'}; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--card-border);">
+          <div style="display:${window._kpiDateFilter === 'custom' ? 'flex' : 'none'}; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--primary);">
             <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
-              <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ:</span>
+              <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ ngày:</span>
               <input type="date" id="kpiDateFrom" value="${window._kpiDateFrom}" onchange="setKpiDateFrom(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border);">
             </div>
             <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
-              <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến:</span>
+              <span style="font-size:13px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến ngày:</span>
               <input type="date" id="kpiDateTo" value="${window._kpiDateTo}" onchange="setKpiDateTo(this.value);" style="margin:0; padding:8px; font-size:14px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; border:1px solid var(--card-border);">
+            </div>
+          </div>
+
+          <!-- THANH HIỂN THỊ THỨ / NGÀY / THÁNG / NĂM CHI TIẾT -->
+          <div style="background:rgba(37, 99, 235, 0.06); border:1px solid rgba(37, 99, 235, 0.2); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:4px;">
+            <div style="font-size:13.5px; color:var(--text-main); font-weight:700;">
+              <i class="fa-regular fa-calendar-days" style="color:var(--primary); margin-right:6px;"></i> ${periodTitleHtml}
+            </div>
+            <div style="font-size:12px; color:var(--text-muted);">
+              <i class="fa-solid fa-scale-balanced" style="color:var(--amber); margin-right:6px;"></i> ${compareTitleHtml}
             </div>
           </div>
         </div>
@@ -7227,7 +7448,7 @@ else if (tab === 'kpi') {
             </div>
           </div>
 
-          <!-- Khối 2 & 3: Độ Phủ và Tuân Thủ GPS (Đồng bộ 100% với analyticsOrders) -->
+          <!-- Khối 2 & 3: Độ Phủ và Tuân Thủ GPS -->
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
             <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03); display:flex; flex-direction:column; justify-content:center;">
               <div style="font-size:12px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-map-location-dot" style="color:var(--emerald);"></i> ĐỘ PHỦ (HIT RATE)</div>
@@ -7280,8 +7501,21 @@ else if (tab === 'kpi') {
                 const gpsColor = gpsRatio >= 0.8 ? 'var(--emerald)' : (gpsRatio >= 0.5 ? 'var(--amber)' : 'var(--rose)');
                 const gpsBg = gpsRatio >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : (gpsRatio >= 0.5 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(225, 29, 72, 0.1)');
 
+                // Tính tổng số tiệm trên các tuyến được giao của nhân viên này
+                const userProfile = users.find(u => String(u.code || '').trim().toUpperCase() === String(rep.code).toUpperCase());
+                let assignedStoreTotal = 0;
+                if (userProfile && Array.isArray(userProfile.assignedRoutes) && userProfile.assignedRoutes.length > 0) {
+                  userProfile.assignedRoutes.forEach(rCode => {
+                    const rStat = routeStoresCountMap.get(String(rCode).trim().toUpperCase());
+                    if (rStat) assignedStoreTotal += rStat.totalStores;
+                  });
+                }
+                const coverageBadge = assignedStoreTotal > 0
+                  ? `${rep.tiems.size}/${assignedStoreTotal} Tiệm (${((rep.tiems.size / assignedStoreTotal) * 100).toFixed(0)}%)`
+                  : `${rep.tiems.size} Tiệm`;
+
                 const sortedSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
-                const showTimeSpan = (window._kpiDateFilter === 'today' || window._kpiDateFilter === 'yesterday') && rep.firstTimeMs !== Infinity;
+                const isSingleDay = (filterStart && filterStart === filterEnd) && rep.firstTimeMs !== Infinity;
 
                 return `
                   <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:5px solid ${medalCol}; overflow:hidden; margin-bottom:0;">
@@ -7293,7 +7527,7 @@ else if (tab === 'kpi') {
                             <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">${rep.name}</div>
                             <div style="font-size:12px; font-weight:700; color:var(--text-muted);">
                               Mã: <b style="color:var(--primary);">${rep.code}</b> • <b>${rep.compSet.size}</b> Cty • <b>${rep.skuMap.size}</b> Mã SP
-                              ${showTimeSpan ? ` • 🕒 <b style="color:var(--amber);">${formatShortTime(rep.firstTimeMs)} - ${formatShortTime(rep.lastTimeMs)}</b>` : ''}
+                              ${isSingleDay ? ` • 🕒 <b style="color:var(--amber);">${formatShortTime(rep.firstTimeMs)} - ${formatShortTime(rep.lastTimeMs)}</b>` : ''}
                             </div>
                           </div>
                         </div>
@@ -7304,7 +7538,7 @@ else if (tab === 'kpi') {
                       </div>
 
                       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; font-size:12.5px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.02); padding:8px 10px; border-radius:8px; border:1px dashed var(--card-border);">
-                        <span>🛒 <b style="color:var(--text-main);">${rep.don}</b> Đơn (<b style="color:var(--emerald);">${rep.tiems.size}</b> Tiệm)</span>
+                        <span>🛒 <b style="color:var(--text-main);">${rep.don}</b> Đơn (<b style="color:var(--emerald);">${coverageBadge}</b>)</span>
                         <span>📦 TB: <b style="color:var(--amber);">${dropSize}K</b> • LPPC: <b style="color:var(--primary);">${repLppc}</b></span>
                         <span style="background:${gpsBg}; color:${gpsColor}; padding:3px 8px; border-radius:6px; font-weight:900; font-size:11.5px;">
                           📍 ${rep.taiQuay}/${rep.don} tại quầy
@@ -7354,6 +7588,47 @@ else if (tab === 'kpi') {
             </div>
           </div>
         </div>
+
+        <!-- PHÂN TÍCH ĐỘ PHỦ & DOANH SỐ THEO TUYẾN BÁN HÀNG -->
+        ${activeRoutesList.length > 0 ? `
+        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid #0EA5E9; margin-bottom:20px;">
+          <div onclick="toggleOrderAccordion('acc_route_performance')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-route" style="color:#0EA5E9;"></i> HIỆU SUẤT & ĐỘ PHỦ THEO TUYẾN (${activeRoutesList.length})</div>
+            <i id="icon_acc_route_performance" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+          </div>
+          <div id="acc_route_performance" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              ${activeRoutesList.map((rt, i) => {
+                const activeCount = rt.activeStores.size;
+                const hitRatePct = rt.totalStores > 0 ? ((activeCount / rt.totalStores) * 100).toFixed(1) : 0;
+                const barWidth = Math.min(100, Math.max((rt.doanhSo / maxRouteRev) * 100, 3));
+                return `
+                  <div style="padding-bottom:10px; border-bottom:1px dashed var(--card-border);">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:6px; gap:8px;">
+                      <div style="flex:1;">
+                        <div style="font-weight:900; color:var(--text-main);">
+                          <span style="background:rgba(14,165,233,0.12); color:#0284C7; padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">Tuyến ${rt.code}</span>
+                          ${rt.name}
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px;">
+                          📍 Độ phủ: <b style="color:var(--emerald);">${activeCount}/${rt.totalStores} tiệm (${hitRatePct}%)</b> • 🛒 <b>${rt.don}</b> đơn
+                        </div>
+                      </div>
+                      <div style="text-align:right; flex-shrink:0;">
+                        <div style="font-weight:900; color:var(--primary); font-size:15.5px;">${Math.round(rt.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                        <div style="font-size:12px; color:var(--text-muted); font-weight:800;">${rt.kien.toFixed(1)} Thùng</div>
+                      </div>
+                    </div>
+                    <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                      <div style="height:100%; width:${barWidth}%; background:linear-gradient(90deg, #0EA5E9, #2563EB); border-radius:3px;"></div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+        ` : ''}
 
         <!-- TOP 15 HÀNG BÁN CHẠY -->
         ${topGlobalSkus.length > 0 ? `
