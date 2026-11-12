@@ -7503,6 +7503,23 @@ else if (tab === 'kpi') {
       const complianceRate = totalGpsOrders > 0 ? Math.round((currentStats.taiQuay / totalGpsOrders) * 100) : 0;
       const badgeColor = complianceRate >= 80 ? 'var(--emerald)' : (complianceRate >= 50 ? 'var(--amber)' : 'var(--rose)');
 
+  let actualNewStoresCount = 0;
+      // Lọc các tiệm đã có đơn trong kỳ này
+      const uniqueStoresWithOrders = Array.from(currentStats.tiems);
+      uniqueStoresWithOrders.forEach(storeCode => {
+          let st = stores.find(s => String(s.code || s.id).trim().toUpperCase() === storeCode);
+          if (st) {
+              // Mở điểm mới = Tiệm được ghim GPS lần đầu trong tháng này VÀ có phát sinh đơn
+              let pinnedMonth = st.pinnedAt ? st.pinnedAt.substring(0,7) : '';
+              if (pinnedMonth === window._chiTieuTargetMonth) {
+                  actualNewStoresCount++;
+              }
+          }
+      });
+      
+      // XÁC ĐỊNH MỤC TIÊU HIỂN THỊ TRÊN GIAO DIỆN DỰA THEO TAB (TỔNG QUAN / CÁ NHÂN)
+      const displayTargetVisits = (isAdminOrManager && isTongQuanTab) ? globalTargetVisits : salesTargetVisits;
+      const displayTargetNewStores = (isAdminOrManager && isTongQuanTab) ? globalTargetNewStores : salesTargetNewStores;
       const formatShortTime = (ms) => {
         if (!ms || ms === Infinity || ms === 0) return '--:--';
         const d = new Date(ms);
@@ -7593,11 +7610,11 @@ else if (tab === 'kpi') {
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <div>
                   <div style="font-size:11px; font-weight:800; color:var(--text-muted);">LƯỢT VIẾNG THĂM (VISITS)</div>
-                  <div style="font-size:20px; font-weight:900; color:var(--text-main);">${totalGpsOrders} <span style="font-size:12px;">lượt check-in</span></div>
+                  <div style="font-size:20px; font-weight:900; color:var(--text-main);">${totalGpsOrders} <span style="font-size:12px; color:var(--text-muted);">/ ${displayTargetVisits.toLocaleString('en-US')}</span></div>
                 </div>
                 <div style="text-align:right;">
                   <div style="font-size:11px; font-weight:800; color:var(--text-muted);">MỞ MỚI (HUNTING)</div>
-                  <div style="font-size:20px; font-weight:900; color:var(--emerald);">-- <span style="font-size:12px;">tiệm</span></div>
+                  <div style="font-size:20px; font-weight:900; color:var(--emerald);">${actualNewStoresCount} <span style="font-size:12px; color:var(--text-muted);">/ ${displayTargetNewStores.toLocaleString('en-US')}</span></div>
                 </div>
               </div>
 
@@ -10561,6 +10578,8 @@ window.calculateAndRenderTargets = async function() {
 
     let globalRevTarget = 0; let globalRevActual = 0;
     let salesRevTarget = 0; let salesRevActual = 0;
+    let globalTargetVisits = 0; let globalTargetNewStores = 0;
+    let salesTargetVisits = 0;  let salesTargetNewStores = 0;
 
     let targetItems = [];
     let companyRevenuesMap = {}; 
@@ -12379,6 +12398,8 @@ window.loadAndEditCurrentMonthKpi = async function() {
         }
 
         let totalTarget = 0;
+        let totalTargetVisits = 0;    // THÊM DÒNG NÀY
+        let totalTargetNewStores = 0; // THÊM DÒNG NÀY
         let compMap = {}; 
         let alloc = { initialized: true };
 
@@ -12389,7 +12410,22 @@ window.loadAndEditCurrentMonthKpi = async function() {
 
         // Bóc tách dữ liệu từ Firebase
         foundDocs.forEach(data => {
+            // CỘNG DỒN CHỈ TIÊU VIẾNG THĂM & MỞ MỚI
+            totalTargetVisits += Number(data.targetVisits || 0);
+            totalTargetNewStores += Number(data.targetNewStores || 0);
+            
             const sCode = data.salesCode;
+        
+        // BÓC TÁCH MỤC TIÊU HÀNH VI
+        const tVisits = Number(data.targetVisits || 0);
+        const tNewStores = Number(data.targetNewStores || 0);
+        globalTargetVisits += tVisits;
+        globalTargetNewStores += tNewStores;
+        
+        if (sCode === window._chiTieuTargetSalesCode) {
+            salesTargetVisits += tVisits;
+            salesTargetNewStores += tNewStores;
+        }
             if (!alloc[sCode]) alloc[sCode] = { name: sCode, companies: {}, skus: {} };
 
             // Bóc tách tiền Công ty
@@ -12434,7 +12470,9 @@ window.loadAndEditCurrentMonthKpi = async function() {
         const loadedSalesCodes = new Set(foundDocs.map(d => d.salesCode));
 
         window._masterKpiState = { 
-            totalTarget, 
+            totalTarget,
+            targetVisits: totalTargetVisits,       // BỔ SUNG
+            targetNewStores: totalTargetNewStores, // BỔ SUNG
             companies, 
             selectedSalesCodes: Array.from(loadedSalesCodes), // THÊM DÒNG NÀY
             salesAllocations: alloc 
@@ -13479,7 +13517,7 @@ window.updateStep2DiffUI = function() {
 };
 
 window.validateAndSaveMasterKpiToDatabase = async function() {
-  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+  const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false && window._masterKpiState.selectedSalesCodes.includes(u.code)) : [];
   
   const btn = document.getElementById('btn_save_master_kpi');
   if(btn) {
@@ -13491,6 +13529,11 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
      const batch = typeof writeBatch !== 'undefined' ? writeBatch(db) : null;
      if (!batch) throw new Error("Database không khả dụng.");
      
+     // Tính toán chia đều chỉ tiêu Hành vi cho số lượng nhân viên
+     const totalSalesCount = salesUsers.length;
+     const visitsPerUser = totalSalesCount > 0 ? Math.round((window._masterKpiState.targetVisits || 0) / totalSalesCount) : 0;
+     const newStoresPerUser = totalSalesCount > 0 ? Math.round((window._masterKpiState.targetNewStores || 0) / totalSalesCount) : 0;
+
      salesUsers.forEach(s => {
         const sCode = s.code;
         const safeCode = sCode.replace(/[\/\\]/g, '_');
@@ -13526,8 +13569,9 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
            month: window._chiTieuTargetMonth,
            items: items,
            companyRevenues: companyRevenues,
-           targetVisits: Math.round(window._masterKpiState.targetVisits / salesUsers.length) || 0,
-           targetNewStores: Math.round(window._masterKpiState.targetNewStores / salesUsers.length) || 0,
+           // ĐẨY 2 CHỈ TIÊU MỚI LÊN FIREBASE
+           targetVisits: visitsPerUser,
+           targetNewStores: newStoresPerUser,
            lastUpdatedByCode: currentUser.code,
            lastUpdatedByName: currentUser.name,
            lastUpdatedAt: new Date().toISOString()
@@ -13537,14 +13581,14 @@ window.validateAndSaveMasterKpiToDatabase = async function() {
      await batch.commit();
 
      if (typeof playSystemSound === 'function') playSystemSound('success');
-     alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${salesUsers.length} NHÂN VIÊN!`);
+     alert(`✅ ĐÃ LƯU VÀ GIAO CHỈ TIÊU THÀNH CÔNG XUỐNG THIẾT BỊ CỦA ${totalSalesCount} NHÂN VIÊN!`);
      closeTargetModal();
      if (typeof calculateAndRenderTargets === 'function') calculateAndRenderTargets(); 
 
   } catch (err) {
      alert("Lỗi khi đồng bộ lên hệ thống: " + err.message);
      if(btn) {
-        btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> THỬ LẠI';
+        btn.innerHTML = '<i class="fa-solid fa-check-double"></i> CHỐT & GIAO KPI';
         btn.disabled = false;
      }
   }
