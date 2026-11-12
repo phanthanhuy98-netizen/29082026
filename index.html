@@ -6833,7 +6833,16 @@ else if (tab === 'kpi') {
       const today = new Date();
       const todayStr = toLocalYMD(today);
 
-      // Hàm dịch YYYY-MM-DD sang Thứ, ngày ... tháng ... năm ...
+      // Ghi nhớ các bảng Accordion đang mở để không bị đóng sập khi đổi bộ lọc ngày
+      const savedOpenAccordions = new Set();
+      container.querySelectorAll('div[id^="acc_"]:not(.hidden), div[id^="kpi_acc_"]:not(.hidden)').forEach(el => {
+        savedOpenAccordions.add(el.id);
+      });
+      if (window._kpiOpenAccordions && window._kpiOpenAccordions.size > 0 && savedOpenAccordions.size === 0) {
+        window._kpiOpenAccordions.forEach(id => savedOpenAccordions.add(id));
+      }
+      window._kpiOpenAccordions = savedOpenAccordions;
+
       const formatFullVNDate = (ymdStr, shortMode = false) => {
         if (!ymdStr) return '';
         const parts = ymdStr.split('-');
@@ -6866,11 +6875,32 @@ else if (tab === 'kpi') {
       if (window._kpiDateTo === undefined) window._kpiDateTo = '';
       window._kpiRangeCache = window._kpiRangeCache || {};
 
-      // Chỉ tải dữ liệu khi đã chọn đủ cả 2 ô Từ ngày & Đến ngày ở chế độ Tùy chỉnh
+      // Cập nhật thông báo tại chỗ nếu mới chọn 1 ô ngày (chống giật/nháy lịch trên điện thoại)
+      const updateCustomWaitingNotice = () => {
+        const waitBox = document.getElementById('kpiCustomWaitingText');
+        if (!waitBox) return false;
+        if (window._kpiDateFrom && !window._kpiDateTo) {
+          waitBox.innerHTML = `Đã chọn Từ ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateFrom)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Đến ngày</b> để bắt đầu phân tích.`;
+          return true;
+        }
+        if (!window._kpiDateFrom && window._kpiDateTo) {
+          waitBox.innerHTML = `Đã chọn Đến ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateTo)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Từ ngày</b> để bắt đầu phân tích.`;
+          return true;
+        }
+        return false;
+      };
+
       window.setKpiDateFrom = function(val) {
         window._kpiDateFrom = val || '';
         window._kpiDateFilter = 'custom';
-        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateFrom > window._kpiDateTo) {
+        if (!window._kpiDateFrom || !window._kpiDateTo) {
+          if (!updateCustomWaitingNotice()) {
+            const activePane = document.getElementById('tabPane_kpi');
+            if (activePane) renderTabContent('kpi', activePane);
+          }
+          return;
+        }
+        if (window._kpiDateFrom > window._kpiDateTo) {
           const temp = window._kpiDateFrom;
           window._kpiDateFrom = window._kpiDateTo;
           window._kpiDateTo = temp;
@@ -6882,7 +6912,14 @@ else if (tab === 'kpi') {
       window.setKpiDateTo = function(val) {
         window._kpiDateTo = val || '';
         window._kpiDateFilter = 'custom';
-        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateTo < window._kpiDateFrom) {
+        if (!window._kpiDateFrom || !window._kpiDateTo) {
+          if (!updateCustomWaitingNotice()) {
+            const activePane = document.getElementById('tabPane_kpi');
+            if (activePane) renderTabContent('kpi', activePane);
+          }
+          return;
+        }
+        if (window._kpiDateTo < window._kpiDateFrom) {
           const temp = window._kpiDateTo;
           window._kpiDateTo = window._kpiDateFrom;
           window._kpiDateFrom = temp;
@@ -6894,7 +6931,6 @@ else if (tab === 'kpi') {
       window.changeKpiFilter = function(val) {
         window._kpiDateFilter = val;
         if (val === 'custom') {
-          // Reset 2 ô ngày để người dùng chủ động chọn đủ 2 ô mới chạy, chống giật lag
           window._kpiDateFrom = '';
           window._kpiDateTo = '';
         }
@@ -6909,7 +6945,27 @@ else if (tab === 'kpi') {
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
       };
 
-      // Nếu đang ở chế độ "Tùy chỉnh ngày..." nhưng chưa chọn đủ cả 2 ô -> Hiển thị khung chờ, KHÔNG query Firebase
+      // Chuyển đổi tab con [Sản phẩm đã bán] <-> [Tiệm & Giờ chốt] bên trong thẻ của từng Sales
+      window.switchRepSubView = function(repCode, mode) {
+        const skuBox = document.getElementById(`rep_skus_${repCode}`);
+        const ordBox = document.getElementById(`rep_orders_${repCode}`);
+        const btnSku = document.getElementById(`btn_rep_sku_${repCode}`);
+        const btnOrd = document.getElementById(`btn_rep_ord_${repCode}`);
+        if (!skuBox || !ordBox) return;
+        if (mode === 'orders') {
+          skuBox.classList.add('hidden');
+          ordBox.classList.remove('hidden');
+          if (btnOrd) { btnOrd.style.background = 'var(--primary)'; btnOrd.style.color = '#fff'; }
+          if (btnSku) { btnSku.style.background = 'var(--bg-dark)'; btnSku.style.color = 'var(--text-muted)'; }
+        } else {
+          ordBox.classList.add('hidden');
+          skuBox.classList.remove('hidden');
+          if (btnSku) { btnSku.style.background = 'var(--primary)'; btnSku.style.color = '#fff'; }
+          if (btnOrd) { btnOrd.style.background = 'var(--bg-dark)'; btnOrd.style.color = 'var(--text-muted)'; }
+        }
+      };
+
+      // Chế độ Tùy chỉnh ngày: Chờ chọn đủ cả 2 ô mới chạy truy vấn
       if (window._kpiDateFilter === 'custom' && (!window._kpiDateFrom || !window._kpiDateTo)) {
         let waitingMessage = 'Vui lòng chọn đầy đủ cả 2 ô <b>Từ ngày</b> và <b>Đến ngày</b> ở trên để hệ thống bắt đầu tổng hợp số liệu.';
         if (window._kpiDateFrom && !window._kpiDateTo) {
@@ -6950,8 +7006,8 @@ else if (tab === 'kpi') {
 
           <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--primary);">
             <i class="fa-regular fa-calendar-check fa-3x" style="color:var(--primary); margin-bottom:14px; opacity:0.8;"></i>
-            <div style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Đang chờ chọn đủ khoảng ngày</div>
-            <div style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">${waitingMessage}</div>
+            <div style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Đang chờ chọn đủ 2 mốc thời gian</div>
+            <div id="kpiCustomWaitingText" style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">${waitingMessage}</div>
           </div>
         `;
         return;
@@ -7064,7 +7120,6 @@ else if (tab === 'kpi') {
           <b style="font-size:15px;">Đang tổng hợp số liệu...</b>
         </div>`;
 
-      // Hàm tải dữ liệu thông minh theo khoảng ngày có Cache riêng từng dải
       const fetchOrdersByRange = async (startStr, endStr) => {
         const key = `${startStr}_${endStr}`;
         if (window._kpiRangeCache[key]) return window._kpiRangeCache[key];
@@ -7082,7 +7137,6 @@ else if (tab === 'kpi') {
       let analyticsOrders = [];
       try {
         if (filterStart && filterEnd) {
-          // Nếu kỳ trước và kỳ hiện tại liền kề nhau (không có ngày trống ở giữa) -> Gộp 1 query
           const prevEndDate = prevEnd ? new Date(prevEnd + 'T00:00:00') : null;
           const filterStartDate = new Date(filterStart + 'T00:00:00');
           const gapDays = prevEndDate ? Math.round((filterStartDate - prevEndDate) / (1000 * 60 * 60 * 24)) : 999;
@@ -7090,7 +7144,6 @@ else if (tab === 'kpi') {
           if (prevStart && prevEnd && gapDays <= 1) {
             analyticsOrders = await fetchOrdersByRange(prevStart < filterStart ? prevStart : filterStart, filterEnd);
           } else if (prevStart && prevEnd) {
-            // Tách 2 query song song để không tốn Read cho những ngày trống ở giữa (VD: ngày 13..31 tháng trước)
             const [prevList, currList] = await Promise.all([
               fetchOrdersByRange(prevStart, prevEnd),
               fetchOrdersByRange(filterStart, filterEnd)
@@ -7113,7 +7166,6 @@ else if (tab === 'kpi') {
           }
         }
 
-        // Trộn trực tiếp dữ liệu mới nhất trong RAM (orders) để cập nhật ngay các đơn vừa tạo/sửa/xóa
         if (Array.isArray(orders) && orders.length > 0) {
           const ramMap = new Map();
           analyticsOrders.forEach(o => ramMap.set(o.id, o));
@@ -7130,29 +7182,46 @@ else if (tab === 'kpi') {
 
       if (currentTab !== 'kpi') return;
 
-      // Tính sẵn số lượng tiệm thuộc từng Tuyến để đo Độ phủ Tuyến & Độ phủ Sales
+      // Chuẩn hóa danh sách mã Tuyến (ưu tiên khớp mã dài trước để tránh lỗi Tuyến 10 nuốt Tuyến 102)
       const routeStoresCountMap = new Map();
+      const sortedRouteKeys = [];
       let totalValidStores = 0;
+
       if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
         routeGroupsList.forEach(r => {
-          routeStoresCountMap.set(String(r.nhomDoiTuong || '').trim().toUpperCase(), {
-            code: String(r.nhomDoiTuong || '').trim().toUpperCase(),
-            name: r.noiDung || `Tuyến ${r.nhomDoiTuong}`,
-            totalStores: 0,
-            activeStores: new Set(),
-            don: 0,
-            kien: 0,
-            doanhSo: 0
-          });
+          const rKey = String(r.nhomDoiTuong || '').trim().toUpperCase();
+          if (rKey) {
+            routeStoresCountMap.set(rKey, {
+              code: rKey,
+              name: r.noiDung || `Tuyến ${rKey}`,
+              totalStores: 0,
+              activeStores: new Set(),
+              don: 0,
+              kien: 0,
+              doanhSo: 0
+            });
+            sortedRouteKeys.push(rKey);
+          }
         });
+        sortedRouteKeys.sort((a, b) => b.length - a.length);
+      }
+
+      const resolveStoreRouteCode = (storeCodeStr) => {
+        const clean = String(storeCodeStr || '').trim().toUpperCase();
+        if (!clean) return 'KHAC';
+        for (let i = 0; i < sortedRouteKeys.length; i++) {
+          if (clean.startsWith(sortedRouteKeys[i])) return sortedRouteKeys[i];
+        }
+        const fallbackMatch = clean.match(/^(\d{2})/) || clean.match(/^(\d+)/);
+        return fallbackMatch ? fallbackMatch[1] : 'KHAC';
+      };
+
+      if (sortedRouteKeys.length > 0) {
         stores.forEach(s => {
-          const cleanCode = String(s.code || '').trim().toUpperCase();
-          for (const [rCode, rObj] of routeStoresCountMap.entries()) {
-            if (rCode && cleanCode.startsWith(rCode)) {
-              rObj.totalStores += 1;
-              totalValidStores += 1;
-              break;
-            }
+          const rKey = resolveStoreRouteCode(s.code);
+          if (routeStoresCountMap.has(rKey)) {
+            routeStoresCountMap.get(rKey).totalStores += 1;
+            totalValidStores += 1;
           }
         });
       } else {
@@ -7205,6 +7274,7 @@ else if (tab === 'kpi') {
             lastTimeMs: 0,
             tiems: new Set(),
             skuMap: new Map(),
+            orderList: [],
             compSet: new Set()
           });
         }
@@ -7213,9 +7283,11 @@ else if (tab === 'kpi') {
         sData.don += 1;
         currentStats.don += 1;
 
+        let orderTimeMs = 0;
         if (o.createdAt) {
           const tMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
           if (!isNaN(tMs) && tMs > 0) {
+            orderTimeMs = tMs;
             if (tMs < sData.firstTimeMs) sData.firstTimeMs = tMs;
             if (tMs > sData.lastTimeMs) sData.lastTimeMs = tMs;
           }
@@ -7225,18 +7297,26 @@ else if (tab === 'kpi') {
         if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
           inferredCode = o.maKH.split(' - ')[0].trim();
         }
-        const storeIdentifier = inferredCode || o.storeId || o.maKH || 'KH_LE';
-        sData.tiems.add(storeIdentifier);
-        currentStats.tiems.add(storeIdentifier);
 
         const sEntry = storeIndexMap.get(String(o.storeId)) || storeIndexMap.get(String(inferredCode));
         const matchedStore = sEntry ? sEntry.store : stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredCode));
 
+        // Đồng nhất định danh cửa hàng bằng Mã KH để không bị đếm trùng giữa ID và Code
+        const canonicalStoreKey = matchedStore
+          ? String(matchedStore.code || matchedStore.id).trim().toUpperCase()
+          : String(inferredCode || o.storeId || o.maKH || 'KH_LE').trim().toUpperCase();
+
+        sData.tiems.add(canonicalStoreKey);
+        currentStats.tiems.add(canonicalStoreKey);
+
+        let distMeters = null;
+        let isAtStore = false;
         if (matchedStore && Number(matchedStore.lat) && Number(matchedStore.lng) && Number(o.lat) && Number(o.lng)) {
-          const dist = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
-          if (dist <= GPS_MAX_DISTANCE) {
+          distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
+          if (distMeters <= GPS_MAX_DISTANCE) {
             currentStats.taiQuay += 1;
             sData.taiQuay += 1;
+            isAtStore = true;
           } else {
             currentStats.tuXa += 1;
             sData.tuXa += 1;
@@ -7246,10 +7326,7 @@ else if (tab === 'kpi') {
           sData.tuXa += 1;
         }
 
-        // Xác định Tuyến của đơn hàng
-        const cleanStoreCode = String(matchedStore?.code || inferredCode || '').trim().toUpperCase();
-        const routePrefixMatch = cleanStoreCode.match(/^(\d+)/);
-        const routePrefix = routePrefixMatch ? routePrefixMatch[1] : 'KHAC';
+        const routePrefix = resolveStoreRouteCode(matchedStore?.code || inferredCode);
         if (!routeStoresCountMap.has(routePrefix) && routePrefix !== 'KHAC') {
           routeStoresCountMap.set(routePrefix, {
             code: routePrefix,
@@ -7264,14 +7341,18 @@ else if (tab === 'kpi') {
         const routeStatObj = routeStoresCountMap.get(routePrefix);
         if (routeStatObj) {
           routeStatObj.don += 1;
-          routeStatObj.activeStores.add(storeIdentifier);
+          routeStatObj.activeStores.add(canonicalStoreKey);
         }
 
-        const storeNameDisplay = o.maKH || (matchedStore ? `${matchedStore.code} - ${matchedStore.name}` : storeIdentifier);
-        if (!globalStoreStatsMap.has(storeIdentifier)) {
-          globalStoreStatsMap.set(storeIdentifier, { id: storeIdentifier, name: storeNameDisplay, qty: 0, doanhSo: 0, donCount: 0 });
+        const storeNameDisplay = o.maKH || (matchedStore ? `${matchedStore.code} - ${matchedStore.name}` : canonicalStoreKey);
+        if (!globalStoreStatsMap.has(canonicalStoreKey)) {
+          globalStoreStatsMap.set(canonicalStoreKey, { id: canonicalStoreKey, name: storeNameDisplay, qty: 0, doanhSo: 0, donCount: 0 });
         }
-        globalStoreStatsMap.get(storeIdentifier).donCount += 1;
+        globalStoreStatsMap.get(canonicalStoreKey).donCount += 1;
+
+        let thisOrderRev = 0;
+        let thisOrderThung = 0;
+        let thisOrderSkuCount = 0;
 
         if (Array.isArray(o.items)) {
           o.items.forEach(item => {
@@ -7286,6 +7367,10 @@ else if (tab === 'kpi') {
             const itemPrice = Number(item.price || pObj?.price || 0);
             const itemRev = itemQty * itemPrice;
             const thungCount = itemQty / safeRatio;
+
+            thisOrderRev += itemRev;
+            thisOrderThung += thungCount;
+            thisOrderSkuCount += 1;
 
             sData.kien += thungCount;
             sData.doanhSo += itemRev;
@@ -7315,7 +7400,7 @@ else if (tab === 'kpi') {
             gSku.qty += itemQty;
             gSku.doanhSo += itemRev;
 
-            const stStat = globalStoreStatsMap.get(storeIdentifier);
+            const stStat = globalStoreStatsMap.get(canonicalStoreKey);
             stStat.qty += thungCount;
             stStat.doanhSo += itemRev;
 
@@ -7332,6 +7417,19 @@ else if (tab === 'kpi') {
             sData.compSet.add(compDisplayName);
           });
         }
+
+        sData.orderList.push({
+          id: o.id,
+          soCtu: o.soCtu || 1,
+          ngayCtu: o.ngayCtu || '',
+          timeMs: orderTimeMs,
+          storeName: storeNameDisplay,
+          rev: thisOrderRev,
+          thung: thisOrderThung,
+          skuCount: thisOrderSkuCount,
+          distMeters: distMeters,
+          isAtStore: isAtStore
+        });
       });
 
       const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
@@ -7377,6 +7475,13 @@ else if (tab === 'kpi') {
         if (!ms || ms === Infinity || ms === 0) return '--:--';
         const d = new Date(ms);
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      };
+
+      const isAccOpen = (id, defaultOpen = false) => {
+        if (window._kpiOpenAccordions && window._kpiOpenAccordions.size > 0) {
+          return window._kpiOpenAccordions.has(id);
+        }
+        return defaultOpen;
       };
 
       container.innerHTML = `
@@ -7475,9 +7580,9 @@ else if (tab === 'kpi') {
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--amber); margin-bottom:20px;">
           <div onclick="toggleOrderAccordion('acc_leaderboard_main')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
             <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> BẢNG XẾP HẠNG NHÂN VIÊN (${leaderboard.length})</div>
-            <i id="icon_acc_leaderboard_main" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; transform:rotate(180deg);"></i>
+            <i id="icon_acc_leaderboard_main" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_leaderboard_main', true) ? 'transform:rotate(180deg);' : ''}"></i>
           </div>
-          <div id="acc_leaderboard_main" style="padding:16px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
+          <div id="acc_leaderboard_main" class="${isAccOpen('acc_leaderboard_main', true) ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
             <div style="display:flex; flex-direction:column; gap:12px;">
               ${zeroSales.length > 0 ? `
                 <div style="background:rgba(225, 29, 72, 0.06); border:1px dashed var(--rose); border-radius:12px; padding:12px;">
@@ -7492,7 +7597,8 @@ else if (tab === 'kpi') {
                 const rankColors = ['#F59E0B', '#94A3B8', '#D97706'];
                 const medalCol = index < 3 ? rankColors[index] : 'var(--text-muted)';
                 const progressPercent = Math.max((rep.doanhSo / topDoanhSo) * 100, 2);
-                const accId = `kpi_acc_${rep.code}`;
+                const safeRepCode = String(rep.code || index).replace(/[^a-zA-Z0-9]/g, '_');
+                const accId = `kpi_acc_${safeRepCode}`;
 
                 const revFormatted = Math.round(rep.doanhSo / 1000).toLocaleString('en-US');
                 const dropSize = rep.don > 0 ? Math.round(rep.doanhSo / rep.don / 1000).toLocaleString('en-US') : 0;
@@ -7501,7 +7607,6 @@ else if (tab === 'kpi') {
                 const gpsColor = gpsRatio >= 0.8 ? 'var(--emerald)' : (gpsRatio >= 0.5 ? 'var(--amber)' : 'var(--rose)');
                 const gpsBg = gpsRatio >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : (gpsRatio >= 0.5 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(225, 29, 72, 0.1)');
 
-                // Tính tổng số tiệm trên các tuyến được giao của nhân viên này
                 const userProfile = users.find(u => String(u.code || '').trim().toUpperCase() === String(rep.code).toUpperCase());
                 let assignedStoreTotal = 0;
                 if (userProfile && Array.isArray(userProfile.assignedRoutes) && userProfile.assignedRoutes.length > 0) {
@@ -7515,6 +7620,7 @@ else if (tab === 'kpi') {
                   : `${rep.tiems.size} Tiệm`;
 
                 const sortedSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
+                const sortedOrders = [...rep.orderList].sort((a, b) => (b.timeMs || 0) - (a.timeMs || 0));
                 const isSingleDay = (filterStart && filterStart === filterEnd) && rep.firstTimeMs !== Infinity;
 
                 return `
@@ -7556,12 +7662,18 @@ else if (tab === 'kpi') {
                       </div>
                     </div>
 
-                    <div id="${accId}" class="hidden" style="padding:12px 14px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
-                      <div style="font-size:12.5px; font-weight:800; color:var(--primary); margin-bottom:8px; display:flex; justify-content:space-between;">
-                        <span><i class="fa-solid fa-boxes-stacked"></i> CHI TIẾT MẶT HÀNG ĐÃ BÁN (${sortedSkus.length} mã):</span>
-                        <span>Doanh số / SL</span>
+                    <div id="${accId}" class="${isAccOpen(accId) ? '' : 'hidden'}" style="padding:12px 14px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
+                      <div style="display:flex; gap:6px; margin-bottom:10px;">
+                        <button type="button" id="btn_rep_sku_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'skus')" style="flex:1; justify-content:center; background:var(--primary); color:#fff; font-weight:800; padding:6px;">
+                          📦 Mặt hàng đã bán (${sortedSkus.length})
+                        </button>
+                        <button type="button" id="btn_rep_ord_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'orders')" style="flex:1; justify-content:center; background:var(--bg-dark); color:var(--text-muted); font-weight:800; padding:6px;">
+                          🏪 Nhật ký Tiệm & Giờ chốt (${sortedOrders.length})
+                        </button>
                       </div>
-                      <div style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+
+                      <!-- Sub-view 1: Danh sách mặt hàng -->
+                      <div id="rep_skus_${safeRepCode}" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
                         ${sortedSkus.map(skuObj => {
                           const sKien = Math.floor(skuObj.qty / skuObj.ratio);
                           const sLe = skuObj.qty % skuObj.ratio;
@@ -7572,6 +7684,30 @@ else if (tab === 'kpi') {
                               <div style="text-align:right; flex-shrink:0;">
                                 <div style="color:var(--rose); font-weight:800;">${Math.round(skuObj.doanhSo / 1000).toLocaleString('en-US')}K</div>
                                 <div style="color:var(--text-muted); font-size:11.5px; font-weight:700;">${strQty}</div>
+                              </div>
+                            </div>
+                          `;
+                        }).join('')}
+                      </div>
+
+                      <!-- Sub-view 2: Nhật ký Tiệm & Giờ chốt đơn -->
+                      <div id="rep_orders_${safeRepCode}" class="hidden" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                        ${sortedOrders.map(ord => {
+                          const distLabel = ord.distMeters !== null
+                            ? (ord.distMeters > 1000 ? `${(ord.distMeters / 1000).toFixed(1)}km` : `${ord.distMeters}m`)
+                            : 'Chưa rõ GPS';
+                          const gpsTagColor = ord.isAtStore ? 'var(--emerald)' : 'var(--rose)';
+                          return `
+                            <div onclick="openOrderDetailsModal('${ord.id}')" style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:6px 8px; border-radius:8px; background:var(--panel-bg); border:1px solid var(--card-border); cursor:pointer;">
+                              <div style="flex:1; padding-right:8px;">
+                                <div style="font-weight:800; color:var(--text-main);">#${ord.soCtu} • ${ord.storeName}</div>
+                                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                                  🕒 <b>${formatShortTime(ord.timeMs)}</b> (${formatDateDDMMYYYY(ord.ngayCtu)}) • <span style="color:${gpsTagColor}; font-weight:800;">${ord.isAtStore ? '🟢 Tại quầy' : '🔴 Lệch'} (${distLabel})</span>
+                                </div>
+                              </div>
+                              <div style="text-align:right; flex-shrink:0;">
+                                <div style="color:var(--rose); font-weight:900;">${Math.round(ord.rev / 1000).toLocaleString('en-US')}K</div>
+                                <div style="color:var(--primary); font-size:11px; font-weight:800;">${ord.skuCount} mã • ${ord.thung.toFixed(1)}T</div>
                               </div>
                             </div>
                           `;
@@ -7594,9 +7730,9 @@ else if (tab === 'kpi') {
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid #0EA5E9; margin-bottom:20px;">
           <div onclick="toggleOrderAccordion('acc_route_performance')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
             <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-route" style="color:#0EA5E9;"></i> HIỆU SUẤT & ĐỘ PHỦ THEO TUYẾN (${activeRoutesList.length})</div>
-            <i id="icon_acc_route_performance" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+            <i id="icon_acc_route_performance" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_route_performance') ? 'transform:rotate(180deg);' : ''}"></i>
           </div>
-          <div id="acc_route_performance" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+          <div id="acc_route_performance" class="${isAccOpen('acc_route_performance') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
             <div style="display:flex; flex-direction:column; gap:12px;">
               ${activeRoutesList.map((rt, i) => {
                 const activeCount = rt.activeStores.size;
@@ -7635,9 +7771,9 @@ else if (tab === 'kpi') {
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--rose); margin-bottom:20px;">
           <div onclick="toggleOrderAccordion('acc_top_products')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
             <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-fire" style="color:var(--rose);"></i> TOP ${topGlobalSkus.length} HÀNG BÁN CHẠY NHẤT</div>
-            <i id="icon_acc_top_products" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+            <i id="icon_acc_top_products" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_products') ? 'transform:rotate(180deg);' : ''}"></i>
           </div>
-          <div id="acc_top_products" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+          <div id="acc_top_products" class="${isAccOpen('acc_top_products') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
             <div style="display:flex; flex-direction:column; gap:12px;">
               ${topGlobalSkus.map((sku, i) => {
                 const sKien = Math.floor(sku.qty / sku.ratio);
@@ -7669,9 +7805,9 @@ else if (tab === 'kpi') {
         <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--emerald); margin-bottom:20px;">
           <div onclick="toggleOrderAccordion('acc_top_stores')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
             <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG DOANH SỐ CAO (${topStoresList.length})</div>
-            <i id="icon_acc_top_stores" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+            <i id="icon_acc_top_stores" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_stores') ? 'transform:rotate(180deg);' : ''}"></i>
           </div>
-          <div id="acc_top_stores" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+          <div id="acc_top_stores" class="${isAccOpen('acc_top_stores') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
             <div style="display:flex; flex-direction:column; gap:12px;">
               ${topStoresList.map((st, i) => {
                 const rawIdentifier = st.id || st.name;
@@ -7686,13 +7822,9 @@ else if (tab === 'kpi') {
                   storeName = parts.slice(1).join(' - ').trim();
                 }
 
-                let routeName = "Chưa phân tuyến";
-                const routePrefixMatch = String(storeCode).trim().toUpperCase().match(/^(\d+)/);
-                if (routePrefixMatch) {
-                  const prefixNum = routePrefixMatch[1];
-                  const matchedRoute = (routeGroupsList || []).find(r => String(r.nhomDoiTuong).trim() === prefixNum);
-                  routeName = matchedRoute ? `Tuyến ${matchedRoute.nhomDoiTuong} ${matchedRoute.noiDung ? '- ' + matchedRoute.noiDung : ''}` : `Tuyến ${prefixNum}`;
-                }
+                const rKey = resolveStoreRouteCode(storeCode);
+                const rObj = routeStoresCountMap.get(rKey);
+                const routeName = rObj ? `Tuyến ${rObj.code} - ${rObj.name}` : (rKey !== 'KHAC' ? `Tuyến ${rKey}` : 'Chưa phân tuyến');
 
                 const barWidth = Math.min(100, Math.max((st.doanhSo / maxStoreRev) * 100, 4));
                 return `
@@ -7731,9 +7863,9 @@ else if (tab === 'kpi') {
             <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">
               <i class="fa-solid fa-chart-pie" style="color:var(--purple); margin-right:6px;"></i> TỶ TRỌNG DOANH SỐ NHÃN HÀNG (${companyDistList.length})
             </div>
-            <i id="icon_acc_top_companies" class="fa-solid fa-chevron-down" style="color:var(--purple); transition:0.3s;"></i>
+            <i id="icon_acc_top_companies" class="fa-solid fa-chevron-down" style="color:var(--purple); transition:0.3s; ${isAccOpen('acc_top_companies') ? 'transform:rotate(180deg);' : ''}"></i>
           </div>
-          <div id="acc_top_companies" class="hidden" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+          <div id="acc_top_companies" class="${isAccOpen('acc_top_companies') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
             <div style="display:flex; flex-direction:column; gap:14px;">
               ${(() => {
                 const totalCompanyRev = companyDistList.reduce((sum, c) => sum + c.doanhSo, 0);
