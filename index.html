@@ -6969,8 +6969,6 @@ else if (tab === 'kpi') {
                   <option value="week">Tuần Này</option>
                   <option value="last_week">Tuần Trước</option>
                   <option value="month">Tháng Này (MTD)</option>
-                  <option value="last_month">Tháng Trước</option>
-                  <option value="all">Tất Cả (2000 đơn)</option>
                   <option value="custom" selected>Tùy chỉnh ngày...</option>
                 </select>
               </div>
@@ -7118,52 +7116,35 @@ else if (tab === 'kpi') {
         return list;
       };
 
+      // NÂNG CẤP TỐI ƯU HÓA: LỌC TRỰC TIẾP TRÊN RAM, KHÔNG GỌI FIREBASE
       let analyticsOrders = [];
       try {
-        if (filterStart && filterEnd) {
-          const prevEndDate = prevEnd ? new Date(prevEnd + 'T00:00:00') : null;
-          const filterStartDate = new Date(filterStart + 'T00:00:00');
-          const gapDays = prevEndDate ? Math.round((filterStartDate - prevEndDate) / (1000 * 60 * 60 * 24)) : 999;
-
-          if (prevStart && prevEnd && gapDays <= 1) {
-            analyticsOrders = await fetchOrdersByRange(prevStart < filterStart ? prevStart : filterStart, filterEnd);
-          } else if (prevStart && prevEnd) {
-            const [prevList, currList] = await Promise.all([
-              fetchOrdersByRange(prevStart, prevEnd),
-              fetchOrdersByRange(filterStart, filterEnd)
-            ]);
-            const mergedMap = new Map();
-            prevList.forEach(o => mergedMap.set(o.id, o));
-            currList.forEach(o => mergedMap.set(o.id, o));
-            analyticsOrders = Array.from(mergedMap.values());
+          if (filterStart && filterEnd) {
+              // Dùng luôn mảng dữ liệu tháng đã được cache ở trên
+              const baseOrders = Array.isArray(monthlyOrdersForKpi) ? monthlyOrdersForKpi : [];
+              
+              // Lọc cho kỳ hiện tại
+              analyticsOrders = baseOrders.filter(o => o.ngayCtu >= filterStart && o.ngayCtu <= filterEnd);
+              
+              // Tích hợp thêm các đơn hàng vừa mới tạo (chưa kịp lưu vào cache nhưng đang nằm trong biến orders toàn cục)
+              if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+                  const ramMap = new Map();
+                  analyticsOrders.forEach(o => ramMap.set(o.id, o));
+                  orders.forEach(localOrd => {
+                      if (localOrd && localOrd.status !== 'Đã hủy' && localOrd.ngayCtu >= filterStart && localOrd.ngayCtu <= filterEnd) {
+                          ramMap.set(localOrd.id, localOrd);
+                      }
+                  });
+                  analyticsOrders = Array.from(ramMap.values());
+              }
           } else {
-            analyticsOrders = await fetchOrdersByRange(filterStart, filterEnd);
+              // Nếu chưa chọn ngày Custom hợp lệ, trả về mảng rỗng để chờ
+              analyticsOrders = [];
           }
-        } else {
-          if (window._kpiRangeCache['ALL_2000']) {
-            analyticsOrders = window._kpiRangeCache['ALL_2000'];
-          } else {
-            const qAll = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(2000));
-            const snapAll = await getDocs(qAll);
-            analyticsOrders = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
-            window._kpiRangeCache['ALL_2000'] = analyticsOrders;
-          }
-        }
-
-        if (Array.isArray(orders) && orders.length > 0) {
-          const ramMap = new Map();
-          analyticsOrders.forEach(o => ramMap.set(o.id, o));
-          orders.forEach(localOrd => {
-            if (!localOrd || !localOrd.id) return;
-            ramMap.set(localOrd.id, localOrd);
-          });
-          analyticsOrders = Array.from(ramMap.values());
-        }
       } catch (err) {
-        console.error("Lỗi lấy dữ liệu KPI:", err);
-        analyticsOrders = typeof orders !== 'undefined' ? orders : [];
+          console.error("Lỗi lọc dữ liệu KPI:", err);
+          analyticsOrders = [];
       }
-
       if (currentTab !== 'kpi') return;
 
       const routeStoresCountMap = new Map();
