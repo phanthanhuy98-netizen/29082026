@@ -6820,16 +6820,6 @@ else if (tab === 'kpi') {
       const today = new Date();
       const todayStr = toLocalYMD(today);
 
-      // Ghi nhớ các bảng Accordion đang mở để không bị đóng sập khi đổi bộ lọc ngày
-      const savedOpenAccordions = new Set();
-      container.querySelectorAll('div[id^="acc_"]:not(.hidden), div[id^="kpi_acc_"]:not(.hidden)').forEach(el => {
-        savedOpenAccordions.add(el.id);
-      });
-      if (window._kpiOpenAccordions && window._kpiOpenAccordions.size > 0 && savedOpenAccordions.size === 0) {
-        window._kpiOpenAccordions.forEach(id => savedOpenAccordions.add(id));
-      }
-      window._kpiOpenAccordions = savedOpenAccordions;
-
       const formatFullVNDate = (ymdStr, shortMode = false) => {
         if (!ymdStr) return '';
         const parts = ymdStr.split('-');
@@ -6846,174 +6836,154 @@ else if (tab === 'kpi') {
         return `${dayName}, ngày ${String(d).padStart(2, '0')} tháng ${String(m).padStart(2, '0')} năm ${y}`;
       };
 
-      const extractCompCode = (code) => {
-        const pCodeStr = String(code || '').trim().toUpperCase();
-        if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) return '11';
-        const match = pCodeStr.match(/^\[(.*?)\]/);
-        if (match) return match[1].trim();
-        const parts = pCodeStr.split(/[-_]/);
-        if (parts.length > 1) return parts[0].trim();
-        if (pCodeStr.length >= 2) return pCodeStr.substring(0, 2);
-        return 'KHAC';
-      };
-
-      // Chặn triệt để các giá trị cũ ('all', 'last_month') nếu còn lưu trong RAM
-      const validKpiFilters = ['today', 'yesterday', 'week', 'last_week', 'month', 'custom'];
+      // BIẾN TRẠNG THÁI (STATE MANAGEMENT) XỊN XÒ
+      const validKpiFilters = ['today', 'week', 'month', 'custom'];
       if (!window._kpiDateFilter || !validKpiFilters.includes(window._kpiDateFilter)) {
         window._kpiDateFilter = 'today';
       }
       if (window._kpiDateFrom === undefined) window._kpiDateFrom = todayStr;
       if (window._kpiDateTo === undefined) window._kpiDateTo = todayStr;
+      if (window._kpiCustomStep === undefined) window._kpiCustomStep = 0; 
+      
       window._kpiRangeCache = window._kpiRangeCache || {};
+      
+      // HÀM XỬ LÝ CHỌN NGÀY THÔNG MINH (SMART SWAP & TRIGGER)
+      const handleSmartDateSelection = (side, val) => {
+        if (side === 'from') window._kpiDateFrom = val;
+        if (side === 'to') window._kpiDateTo = val;
 
-      window.setKpiDateFrom = function(val) {
-        window._kpiDateFrom = val || '';
         window._kpiDateFilter = 'custom';
-        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateFrom > window._kpiDateTo) {
-          const temp = window._kpiDateFrom;
-          window._kpiDateFrom = window._kpiDateTo;
-          window._kpiDateTo = temp;
+        syncQuickButtonsUI();
+
+        // Nếu 1 trong 2 ô bị xóa rỗng -> Khóa render, đợi chọn lại
+        if (!window._kpiDateFrom || !window._kpiDateTo) {
+            window._kpiCustomStep = 1;
+            window.renderKpiAnalyticsBody(); 
+            return;
         }
-        const activePane = document.getElementById('tabPane_kpi');
-        if (activePane) renderTabContent('kpi', activePane);
+
+        // Nếu chọn đủ 2 ô -> Kiểm tra ngược ngày và Tự động đảo (Smart Swap)
+        if (window._kpiDateFrom > window._kpiDateTo) {
+            const temp = window._kpiDateFrom;
+            window._kpiDateFrom = window._kpiDateTo;
+            window._kpiDateTo = temp;
+            
+            // Cập nhật lại UI ô Input cho khớp sau khi đảo
+            const inputFrom = document.getElementById('kpiDateFrom');
+            const inputTo = document.getElementById('kpiDateTo');
+            if (inputFrom) inputFrom.value = window._kpiDateFrom;
+            if (inputTo) inputTo.value = window._kpiDateTo;
+        }
+
+        // Mở khóa Render
+        window._kpiCustomStep = 2;
+        window.renderKpiAnalyticsBody();
       };
 
-      window.setKpiDateTo = function(val) {
-        window._kpiDateTo = val || '';
-        window._kpiDateFilter = 'custom';
-        if (window._kpiDateFrom && window._kpiDateTo && window._kpiDateTo < window._kpiDateFrom) {
-          const temp = window._kpiDateTo;
-          window._kpiDateTo = window._kpiDateFrom;
-          window._kpiDateFrom = temp;
+      window.setKpiDateFrom = (val) => handleSmartDateSelection('from', val);
+      window.setKpiDateTo = (val) => handleSmartDateSelection('to', val);
+
+      // TÍNH TOÁN NGÀY CHO 3 NÚT BẤM NHANH
+      const computePresetDates = (filterType) => {
+        const yyyy = today.getFullYear();
+        const mm = today.getMonth();
+        const dd = today.getDate();
+        let fStart = '', fEnd = '', pStart = '', pEnd = '', pTitle = '', cTitle = '';
+
+        if (filterType === 'today') {
+          fStart = fEnd = todayStr;
+          const yesterday = new Date(yyyy, mm, dd - 1);
+          pStart = pEnd = toLocalYMD(yesterday);
+          pTitle = `Hôm nay: <b style="color:var(--primary);">${formatFullVNDate(fStart)}</b>`;
+          cTitle = `So với Hôm qua: <b>${formatFullVNDate(pStart, true)}</b>`;
+        } else if (filterType === 'week') {
+          const dayOfWeek = today.getDay();
+          const diffToMonday = dd - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const firstDayOfWeek = new Date(yyyy, mm, diffToMonday);
+          fStart = toLocalYMD(firstDayOfWeek);
+          fEnd = todayStr;
+
+          const daysElapsed = Math.max(0, Math.round((today - firstDayOfWeek) / (1000 * 60 * 60 * 24)));
+          const prevWeekStart = new Date(firstDayOfWeek.getFullYear(), firstDayOfWeek.getMonth(), firstDayOfWeek.getDate() - 7);
+          const prevWeekSameDay = new Date(prevWeekStart.getFullYear(), prevWeekStart.getMonth(), prevWeekStart.getDate() + daysElapsed);
+          pStart = toLocalYMD(prevWeekStart);
+          pEnd = toLocalYMD(prevWeekSameDay);
+
+          pTitle = `Tuần này: <b style="color:var(--primary);">${formatFullVNDate(fStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(fEnd, true)}</b>`;
+          cTitle = `So với cùng kỳ tuần trước: <b>${formatFullVNDate(pStart, true)} ➔ ${formatFullVNDate(pEnd, true)}</b>`;
+        } else if (filterType === 'month') {
+          fStart = `${yyyy}-${String(mm + 1).padStart(2, '0')}-01`;
+          fEnd = todayStr;
+
+          const prevMonthFirst = new Date(yyyy, mm - 1, 1);
+          const prevMonthLastDay = new Date(yyyy, mm, 0).getDate();
+          const prevMonthSameDay = new Date(yyyy, mm - 1, Math.min(dd, prevMonthLastDay));
+          pStart = toLocalYMD(prevMonthFirst);
+          pEnd = toLocalYMD(prevMonthSameDay);
+
+          pTitle = `Tháng ${mm + 1}/${yyyy}: <b style="color:var(--primary);">${formatFullVNDate(fStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(fEnd, true)}</b>`;
+          cTitle = `So với cùng kỳ tháng trước: <b>${formatFullVNDate(pStart, true)} ➔ ${formatFullVNDate(pEnd, true)}</b>`;
+        } else if (filterType === 'custom') {
+          fStart = window._kpiDateFrom;
+          fEnd = window._kpiDateTo;
+          if (fStart && fEnd) {
+            const sDate = new Date(fStart + 'T00:00:00');
+            const eDate = new Date(fEnd + 'T00:00:00');
+            const diffDays = Math.max(0, Math.round((eDate - sDate) / (1000 * 60 * 60 * 24)));
+
+            const prevE = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate() - 1);
+            const prevS = new Date(prevE.getFullYear(), prevE.getMonth(), prevE.getDate() - diffDays);
+            pStart = toLocalYMD(prevS);
+            pEnd = toLocalYMD(prevE);
+
+            pTitle = fStart === fEnd
+              ? `Ngày chọn: <b style="color:var(--primary);">${formatFullVNDate(fStart)}</b>`
+              : `Kỳ tùy chỉnh (${diffDays + 1} ngày): <b style="color:var(--primary);">${formatFullVNDate(fStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(fEnd, true)}</b>`;
+            cTitle = `So với ${diffDays + 1} ngày liền trước: <b>${formatFullVNDate(pStart, true)} ➔ ${formatFullVNDate(pEnd, true)}</b>`;
+          }
         }
-        const activePane = document.getElementById('tabPane_kpi');
-        if (activePane) renderTabContent('kpi', activePane);
+        return { fStart, fEnd, pStart, pEnd, pTitle, cTitle };
+      };
+
+      const syncQuickButtonsUI = () => {
+        ['today', 'week', 'month'].forEach(k => {
+          const btn = document.getElementById(`kpiQuickBtn_${k}`);
+          if (btn) btn.className = (k === window._kpiDateFilter) ? "btn btn-amber" : "btn";
+        });
       };
 
       window.changeKpiFilter = function(val) {
         window._kpiDateFilter = val;
-        const activePane = document.getElementById('tabPane_kpi');
-        if (activePane) renderTabContent('kpi', activePane);
+        window._kpiCustomStep = 0;
+        
+        const preset = computePresetDates(val);
+        window._kpiDateFrom = preset.fStart;
+        window._kpiDateTo = preset.fEnd;
+
+        const inputFrom = document.getElementById('kpiDateFrom');
+        const inputTo = document.getElementById('kpiDateTo');
+        if (inputFrom) inputFrom.value = window._kpiDateFrom || '';
+        if (inputTo) inputTo.value = window._kpiDateTo || '';
+
+        syncQuickButtonsUI();
+        window.renderKpiAnalyticsBody();
       };
 
       window.forceRefreshKpiAnalytics = function() {
         window._kpiRangeCache = {};
-        const activePane = document.getElementById('tabPane_kpi');
-        if (activePane) renderTabContent('kpi', activePane);
+        window.renderKpiAnalyticsBody();
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
       };
 
-      window.switchRepSubView = function(repCode, mode) {
-        const skuBox = document.getElementById(`rep_skus_${repCode}`);
-        const ordBox = document.getElementById(`rep_orders_${repCode}`);
-        const btnSku = document.getElementById(`btn_rep_sku_${repCode}`);
-        const btnOrd = document.getElementById(`btn_rep_ord_${repCode}`);
-        if (!skuBox || !ordBox) return;
-        if (mode === 'orders') {
-          skuBox.classList.add('hidden');
-          ordBox.classList.remove('hidden');
-          if (btnOrd) { btnOrd.style.background = 'var(--primary)'; btnOrd.style.color = '#fff'; }
-          if (btnSku) { btnSku.style.background = 'var(--bg-dark)'; btnSku.style.color = 'var(--text-muted)'; }
-        } else {
-          ordBox.classList.add('hidden');
-          skuBox.classList.remove('hidden');
-          if (btnSku) { btnSku.style.background = 'var(--primary)'; btnSku.style.color = '#fff'; }
-          if (btnOrd) { btnOrd.style.background = 'var(--bg-dark)'; btnOrd.style.color = 'var(--text-muted)'; }
-        }
-      };
-
-      let filterStart = '', filterEnd = '';
-      let prevStart = '', prevEnd = '';
-      let periodTitleHtml = '';
-      let compareTitleHtml = '';
-
-      const yyyy = today.getFullYear();
-      const mm = today.getMonth();
-      const dd = today.getDate();
-
-      if (window._kpiDateFilter === 'today') {
-        filterStart = filterEnd = todayStr;
-        const yesterday = new Date(yyyy, mm, dd - 1);
-        prevStart = prevEnd = toLocalYMD(yesterday);
-        periodTitleHtml = `Hôm nay: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`;
-        compareTitleHtml = `So với Hôm qua: <b>${formatFullVNDate(prevStart, true)}</b>`;
-      } else if (window._kpiDateFilter === 'yesterday') {
-        const yesterday = new Date(yyyy, mm, dd - 1);
-        const dayBefore = new Date(yyyy, mm, dd - 2);
-        filterStart = filterEnd = toLocalYMD(yesterday);
-        prevStart = prevEnd = toLocalYMD(dayBefore);
-        periodTitleHtml = `Hôm qua: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`;
-        compareTitleHtml = `So với Hôm kia: <b>${formatFullVNDate(prevStart, true)}</b>`;
-      } else if (window._kpiDateFilter === 'week') {
-        const dayOfWeek = today.getDay();
-        const diffToMonday = dd - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-        const firstDayOfWeek = new Date(yyyy, mm, diffToMonday);
-        filterStart = toLocalYMD(firstDayOfWeek);
-        filterEnd = todayStr;
-
-        const daysElapsed = Math.max(0, Math.round((today - firstDayOfWeek) / (1000 * 60 * 60 * 24)));
-        const prevWeekStart = new Date(firstDayOfWeek.getFullYear(), firstDayOfWeek.getMonth(), firstDayOfWeek.getDate() - 7);
-        const prevWeekSameDay = new Date(prevWeekStart.getFullYear(), prevWeekStart.getMonth(), prevWeekStart.getDate() + daysElapsed);
-        prevStart = toLocalYMD(prevWeekStart);
-        prevEnd = toLocalYMD(prevWeekSameDay);
-
-        periodTitleHtml = `Tuần này: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
-        compareTitleHtml = `So với cùng kỳ tuần trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
-      } else if (window._kpiDateFilter === 'last_week') {
-        const dayOfWeek = today.getDay();
-        const diffToMonday = dd - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-        const lastWeekStart = new Date(yyyy, mm, diffToMonday - 7);
-        const lastWeekEnd = new Date(yyyy, mm, diffToMonday - 1);
-        filterStart = toLocalYMD(lastWeekStart);
-        filterEnd = toLocalYMD(lastWeekEnd);
-
-        const twoWeeksAgoStart = new Date(yyyy, mm, diffToMonday - 14);
-        const twoWeeksAgoEnd = new Date(yyyy, mm, diffToMonday - 8);
-        prevStart = toLocalYMD(twoWeeksAgoStart);
-        prevEnd = toLocalYMD(twoWeeksAgoEnd);
-
-        periodTitleHtml = `Tuần trước: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
-        compareTitleHtml = `So với tuần liền kề trước đó: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
-      } else if (window._kpiDateFilter === 'month') {
-        filterStart = `${yyyy}-${String(mm + 1).padStart(2, '0')}-01`;
-        filterEnd = todayStr;
-
-        const prevMonthFirst = new Date(yyyy, mm - 1, 1);
-        const prevMonthLastDay = new Date(yyyy, mm, 0).getDate();
-        const prevMonthSameDay = new Date(yyyy, mm - 1, Math.min(dd, prevMonthLastDay));
-        prevStart = toLocalYMD(prevMonthFirst);
-        prevEnd = toLocalYMD(prevMonthSameDay);
-
-        periodTitleHtml = `Tháng ${mm + 1}/${yyyy}: <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
-        compareTitleHtml = `So với cùng kỳ tháng trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
-      } else if (window._kpiDateFilter === 'custom') {
-        filterStart = window._kpiDateFrom;
-        filterEnd = window._kpiDateTo;
-        if (filterStart && filterEnd) {
-          const sDate = new Date(filterStart + 'T00:00:00');
-          const eDate = new Date(filterEnd + 'T00:00:00');
-          const diffDays = Math.max(0, Math.round((eDate - sDate) / (1000 * 60 * 60 * 24)));
-
-          const pEnd = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate() - 1);
-          const pStart = new Date(pEnd.getFullYear(), pEnd.getMonth(), pEnd.getDate() - diffDays);
-          prevStart = toLocalYMD(pStart);
-          prevEnd = toLocalYMD(pEnd);
-
-          periodTitleHtml = filterStart === filterEnd
-            ? `Ngày chọn: <b style="color:var(--primary);">${formatFullVNDate(filterStart)}</b>`
-            : `Kỳ tùy chỉnh (${diffDays + 1} ngày): <b style="color:var(--primary);">${formatFullVNDate(filterStart, true)}</b> ➔ <b style="color:var(--primary);">${formatFullVNDate(filterEnd, true)}</b>`;
-          compareTitleHtml = `So với ${diffDays + 1} ngày liền trước: <b>${formatFullVNDate(prevStart, true)} ➔ ${formatFullVNDate(prevEnd, true)}</b>`;
-        }
-      }
-
-      // Đồng bộ ngược lại 2 ô input Từ - Đến khi chọn các nút mốc thời gian nhanh
+      // Đồng bộ ngày hiển thị ban đầu
       if (window._kpiDateFilter !== 'custom') {
-        window._kpiDateFrom = filterStart;
-        window._kpiDateTo = filterEnd;
+        const initPreset = computePresetDates(window._kpiDateFilter);
+        window._kpiDateFrom = initPreset.fStart;
+        window._kpiDateTo = initPreset.fEnd;
       }
 
-      // Khung giao diện bộ lọc ngày đồng bộ 100% với Sổ Gốc Bán Hàng
-      const buildKpiFilterHeaderHtml = () => `
+      // VẼ KHUNG LỌC CỐ ĐỊNH (GIỐNG HỆT SỔ GỐC - CHỈ 3 NÚT)
+      container.innerHTML = `
         <div class="tab-header-actions">
           <h2 style="font-size: 20px; font-weight:800;"><i class="fa-solid fa-chart-line" style="color:var(--rose);"></i> Phân Tích Hiệu Suất</h2>
           <div class="excel-group-btns">
@@ -7023,11 +6993,9 @@ else if (tab === 'kpi') {
 
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--card-border);">
           <div style="display:flex; gap:6px; margin-bottom: 15px; flex-wrap:nowrap; overflow-x:auto;">
-            <button class="btn ${window._kpiDateFilter==='today'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('today')">Hôm Nay</button>
-            <button class="btn ${window._kpiDateFilter==='yesterday'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('yesterday')">Hôm Qua</button>
-            <button class="btn ${window._kpiDateFilter==='week'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('week')">Tuần Này</button>
-            <button class="btn ${window._kpiDateFilter==='last_week'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('last_week')">Tuần Trước</button>
-            <button class="btn ${window._kpiDateFilter==='month'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('month')">Tháng Này</button>
+            <button id="kpiQuickBtn_today" class="btn ${window._kpiDateFilter==='today'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('today')">Hôm Nay</button>
+            <button id="kpiQuickBtn_week" class="btn ${window._kpiDateFilter==='week'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('week')">Tuần Này</button>
+            <button id="kpiQuickBtn_month" class="btn ${window._kpiDateFilter==='month'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="changeKpiFilter('month')">Tháng Này</button>
           </div>
 
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -7050,891 +7018,649 @@ else if (tab === 'kpi') {
             </div>
           </div>
         </div>
+
+        <!-- VÙNG HIỂN THỊ KẾT QUẢ PHÂN TÍCH ĐỘC LẬP -->
+        <div id="kpiAnalyticsResultsContainer"></div>
       `;
 
-      // Nếu người dùng xóa trống 1 trong 2 ô ngày thì chờ chọn đủ
-      if (!filterStart || !filterEnd) {
-        let waitingMessage = 'Vui lòng chọn đầy đủ cả 2 ô <b>Từ</b> và <b>Đến</b> ở trên để hệ thống bắt đầu tổng hợp số liệu.';
-        if (window._kpiDateFrom && !window._kpiDateTo) {
-          waitingMessage = `Đã chọn Từ ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateFrom)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Đến</b> để bắt đầu phân tích.`;
-        } else if (!window._kpiDateFrom && window._kpiDateTo) {
-          waitingMessage = `Đã chọn Đến ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateTo)}</b>.<br>Vui lòng chọn tiếp ô <b style="color:var(--rose);">Từ</b> để bắt đầu phân tích.`;
+      // HÀM RENDER KẾT QUẢ ĐỘC LẬP (CHỐT CHẶN BẢO VỆ)
+      window.renderKpiAnalyticsBody = async function() {
+        const bodyContainer = document.getElementById('kpiAnalyticsResultsContainer');
+        if (!bodyContainer) return;
+
+        // CHỐT CHẶN: Chỉ khi chọn đủ 2 ngày mới chạy Data, nếu thiếu 1 ngày thì dừng và hiện thông báo
+        if (window._kpiDateFilter === 'custom' && (!window._kpiDateFrom || !window._kpiDateTo)) {
+          let waitingMessage = 'Vui lòng chọn đầy đủ cả 2 ô <b>Từ</b> và <b>Đến</b> ở trên để hệ thống bắt đầu tổng hợp số liệu.';
+          if (window._kpiDateFrom && !window._kpiDateTo) {
+            waitingMessage = `Đã chọn Từ ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateFrom)}</b>.<br>Vui lòng bấm chọn tiếp ô <b style="color:var(--rose);">Đến</b> ở bên phải để hiển thị dữ liệu.`;
+          } else if (!window._kpiDateFrom && window._kpiDateTo) {
+            waitingMessage = `Đã chọn Đến ngày: <b style="color:var(--primary);">${formatFullVNDate(window._kpiDateTo)}</b>.<br>Vui lòng bấm chọn tiếp ô <b style="color:var(--rose);">Từ</b> ở bên trái để hiển thị dữ liệu.`;
+          }
+
+          bodyContainer.innerHTML = `
+            <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--primary);">
+              <i class="fa-regular fa-calendar-check fa-3x" style="color:var(--primary); margin-bottom:14px; opacity:0.8;"></i>
+              <div style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Đang chờ chọn đủ 2 mốc thời gian (Từ ngày - Đến ngày)</div>
+              <div style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">${waitingMessage}</div>
+            </div>
+          `;
+          return;
         }
 
-        container.innerHTML = `
-          ${buildKpiFilterHeaderHtml()}
-          <div style="text-align:center; padding:45px 20px; background:var(--card-bg); border-radius:16px; border:1px dashed var(--primary);">
-            <i class="fa-regular fa-calendar-check fa-3x" style="color:var(--primary); margin-bottom:14px; opacity:0.8;"></i>
-            <div style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Đang chờ chọn đủ 2 mốc thời gian</div>
-            <div id="kpiCustomWaitingText" style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">${waitingMessage}</div>
-          </div>
-        `;
-        return;
-      }
+        const { fStart: filterStart, fEnd: filterEnd, pStart: prevStart, pEnd: prevEnd, pTitle: periodTitleHtml, cTitle: compareTitleHtml } = computePresetDates(window._kpiDateFilter);
 
-      container.innerHTML = `
-        ${buildKpiFilterHeaderHtml()}
-        <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
-          <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
-          <b style="font-size:15px;">Đang tổng hợp số liệu...</b>
-        </div>`;
+        bodyContainer.innerHTML = `
+          <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--rose); margin-bottom:15px;"></i><br>
+            <b style="font-size:15px;">Đang tổng hợp số liệu...</b>
+          </div>`;
 
-      const fetchOrdersByRange = async (startStr, endStr) => {
-        const key = `${startStr}_${endStr}`;
-        if (window._kpiRangeCache[key]) return window._kpiRangeCache[key];
-        const q = query(
-          collection(db, "orders"),
-          where("ngayCtu", ">=", startStr),
-          where("ngayCtu", "<=", endStr)
-        );
-        const snap = await getDocs(q);
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        window._kpiRangeCache[key] = list;
-        return list;
-      };
+        const fetchOrdersByRange = async (startStr, endStr) => {
+          const key = `${startStr}_${endStr}`;
+          if (window._kpiRangeCache[key]) return window._kpiRangeCache[key];
+          const q = query(
+            collection(db, "orders"),
+            where("ngayCtu", ">=", startStr),
+            where("ngayCtu", "<=", endStr)
+          );
+          const snap = await getDocs(q);
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          window._kpiRangeCache[key] = list;
+          return list;
+        };
 
-      let analyticsOrders = [];
-      try {
-        const prevEndDate = prevEnd ? new Date(prevEnd + 'T00:00:00') : null;
-        const filterStartDate = new Date(filterStart + 'T00:00:00');
-        const gapDays = prevEndDate ? Math.round((filterStartDate - prevEndDate) / (1000 * 60 * 60 * 24)) : 999;
+        let analyticsOrders = [];
+        try {
+          const prevEndDate = prevEnd ? new Date(prevEnd + 'T00:00:00') : null;
+          const filterStartDate = new Date(filterStart + 'T00:00:00');
+          const gapDays = prevEndDate ? Math.round((filterStartDate - prevEndDate) / (1000 * 60 * 60 * 24)) : 999;
 
-        if (prevStart && prevEnd && gapDays <= 1) {
-          analyticsOrders = await fetchOrdersByRange(prevStart < filterStart ? prevStart : filterStart, filterEnd);
-        } else if (prevStart && prevEnd) {
-          const [prevList, currList] = await Promise.all([
-            fetchOrdersByRange(prevStart, prevEnd),
-            fetchOrdersByRange(filterStart, filterEnd)
-          ]);
-          const mergedMap = new Map();
-          prevList.forEach(o => mergedMap.set(o.id, o));
-          currList.forEach(o => mergedMap.set(o.id, o));
-          analyticsOrders = Array.from(mergedMap.values());
-        } else {
-          analyticsOrders = await fetchOrdersByRange(filterStart, filterEnd);
+          if (prevStart && prevEnd && gapDays <= 1) {
+            analyticsOrders = await fetchOrdersByRange(prevStart < filterStart ? prevStart : filterStart, filterEnd);
+          } else if (prevStart && prevEnd) {
+            const [prevList, currList] = await Promise.all([
+              fetchOrdersByRange(prevStart, prevEnd),
+              fetchOrdersByRange(filterStart, filterEnd)
+            ]);
+            const mergedMap = new Map();
+            prevList.forEach(o => mergedMap.set(o.id, o));
+            currList.forEach(o => mergedMap.set(o.id, o));
+            analyticsOrders = Array.from(mergedMap.values());
+          } else {
+            analyticsOrders = await fetchOrdersByRange(filterStart, filterEnd);
+          }
+
+          if (Array.isArray(orders) && orders.length > 0) {
+            const ramMap = new Map();
+            analyticsOrders.forEach(o => ramMap.set(o.id, o));
+            orders.forEach(localOrd => {
+              if (!localOrd || !localOrd.id) return;
+              ramMap.set(localOrd.id, localOrd);
+            });
+            analyticsOrders = Array.from(ramMap.values());
+          }
+        } catch (err) {
+          console.error("Lỗi lấy dữ liệu KPI:", err);
+          analyticsOrders = typeof orders !== 'undefined' ? orders : [];
         }
 
-        if (Array.isArray(orders) && orders.length > 0) {
-          const ramMap = new Map();
-          analyticsOrders.forEach(o => ramMap.set(o.id, o));
-          orders.forEach(localOrd => {
-            if (!localOrd || !localOrd.id) return;
-            ramMap.set(localOrd.id, localOrd);
+        if (currentTab !== 'kpi') return;
+
+        // --- CÁC LOGIC TÍNH TOÁN DATA BÊN DƯỚI GIỮ NGUYÊN HOÀN TOÀN ---
+        const routeStoresCountMap = new Map();
+        const sortedRouteKeys = [];
+        let totalValidStores = 0;
+
+        if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
+          routeGroupsList.forEach(r => {
+            const rKey = String(r.nhomDoiTuong || '').trim().toUpperCase();
+            if (rKey) {
+              routeStoresCountMap.set(rKey, {
+                code: rKey,
+                name: r.noiDung || `Tuyến ${rKey}`,
+                totalStores: 0,
+                activeStores: new Set(),
+                don: 0,
+                kien: 0,
+                doanhSo: 0
+              });
+              sortedRouteKeys.push(rKey);
+            }
           });
-          analyticsOrders = Array.from(ramMap.values());
+          sortedRouteKeys.sort((a, b) => b.length - a.length);
         }
-      } catch (err) {
-        console.error("Lỗi lấy dữ liệu KPI:", err);
-        analyticsOrders = typeof orders !== 'undefined' ? orders : [];
-      }
 
-      if (currentTab !== 'kpi') return;
+        const resolveStoreRouteCode = (storeCodeStr) => {
+          const clean = String(storeCodeStr || '').trim().toUpperCase();
+          if (!clean) return 'KHAC';
+          for (let i = 0; i < sortedRouteKeys.length; i++) {
+            if (clean.startsWith(sortedRouteKeys[i])) return sortedRouteKeys[i];
+          }
+          const fallbackMatch = clean.match(/^(\d{2})/) || clean.match(/^(\d+)/);
+          return fallbackMatch ? fallbackMatch[1] : 'KHAC';
+        };
 
-      const routeStoresCountMap = new Map();
-      const sortedRouteKeys = [];
-      let totalValidStores = 0;
+        if (sortedRouteKeys.length > 0) {
+          stores.forEach(s => {
+            const rKey = resolveStoreRouteCode(s.code);
+            if (routeStoresCountMap.has(rKey)) {
+              routeStoresCountMap.get(rKey).totalStores += 1;
+              totalValidStores += 1;
+            }
+          });
+        } else {
+          totalValidStores = stores.length;
+        }
 
-      if (Array.isArray(routeGroupsList) && routeGroupsList.length > 0) {
-        routeGroupsList.forEach(r => {
-          const rKey = String(r.nhomDoiTuong || '').trim().toUpperCase();
-          if (rKey) {
-            routeStoresCountMap.set(rKey, {
-              code: rKey,
-              name: r.noiDung || `Tuyến ${rKey}`,
+        const GPS_MAX_DISTANCE = 50;
+        let kpiMap = new Map();
+        let globalSkuMap = new Map();
+        let globalStoreStatsMap = new Map();
+        let globalCompanyStatsMap = new Map();
+        let currentStats = { kien: 0, don: 0, doanhSo: 0, totalLines: 0, taiQuay: 0, tuXa: 0, tiems: new Set() };
+        let prevStats = { kien: 0, don: 0, doanhSo: 0 };
+
+        const extractCompCode = (code) => {
+            const pCodeStr = String(code || '').trim().toUpperCase();
+            if (pCodeStr.startsWith('11') || pCodeStr.includes('TLSG')) return '11';
+            const match = pCodeStr.match(/^\[(.*?)\]/);
+            if (match) return match[1].trim();
+            const parts = pCodeStr.split(/[-_]/);
+            if (parts.length > 1) return parts[0].trim();
+            if (pCodeStr.length >= 2) return pCodeStr.substring(0, 2);
+            return 'KHAC';
+        };
+
+        analyticsOrders.forEach(o => {
+          if (!o || o.status === 'Đã hủy') return;
+
+          // 1. Tính số liệu kỳ trước
+          if (prevStart && prevEnd && o.ngayCtu >= prevStart && o.ngayCtu <= prevEnd) {
+            prevStats.don += 1;
+            if (Array.isArray(o.items)) {
+              o.items.forEach(item => {
+                const itemQty = Number(item.qty || 0);
+                if (itemQty <= 0) return;
+                const pEntry = typeof productIndexMap !== 'undefined' ? productIndexMap.get(item.id || item.code) : null;
+                const pObj = pEntry ? pEntry.product : (typeof products !== 'undefined' ? products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code)) : null);
+                const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+                const itemPrice = Number(item.price || pObj?.price || 0);
+                prevStats.kien += (itemQty / (ratio > 0 ? ratio : 50));
+                prevStats.doanhSo += (itemQty * itemPrice);
+              });
+            }
+          }
+
+          // 2. Kiểm tra điều kiện thuộc kỳ hiện tại
+          if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
+
+          const salesKey = (o.salesCode || 'UNKNOWN').trim();
+          if (!kpiMap.has(salesKey)) {
+            kpiMap.set(salesKey, {
+              name: o.salesName || 'Không xác định',
+              code: salesKey,
+              kien: 0,
+              don: 0,
+              doanhSo: 0,
+              totalLines: 0,
+              taiQuay: 0,
+              tuXa: 0,
+              firstTimeMs: Infinity,
+              lastTimeMs: 0,
+              tiems: new Set(),
+              skuMap: new Map(),
+              orderList: [],
+              compSet: new Set()
+            });
+          }
+          const sData = kpiMap.get(salesKey);
+
+          sData.don += 1;
+          currentStats.don += 1;
+
+          let orderTimeMs = 0;
+          if (o.createdAt) {
+            const tMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
+            if (!isNaN(tMs) && tMs > 0) {
+              orderTimeMs = tMs;
+              if (tMs < sData.firstTimeMs) sData.firstTimeMs = tMs;
+              if (tMs > sData.lastTimeMs) sData.lastTimeMs = tMs;
+            }
+          }
+
+          let inferredCode = o.maDTPNNo || '';
+          if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
+            inferredCode = o.maKH.split(' - ')[0].trim();
+          }
+
+          const sEntry = typeof storeIndexMap !== 'undefined' ? storeIndexMap.get(String(o.storeId)) || storeIndexMap.get(String(inferredCode)) : null;
+          const matchedStore = sEntry ? sEntry.store : (typeof stores !== 'undefined' ? stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredCode)) : null);
+
+          const canonicalStoreKey = matchedStore
+            ? String(matchedStore.code || matchedStore.id).trim().toUpperCase()
+            : String(inferredCode || o.storeId || o.maKH || 'KH_LE').trim().toUpperCase();
+
+          sData.tiems.add(canonicalStoreKey);
+          currentStats.tiems.add(canonicalStoreKey);
+
+          let distMeters = null;
+          let isAtStore = false;
+          if (matchedStore && Number(matchedStore.lat) && Number(matchedStore.lng) && Number(o.lat) && Number(o.lng)) {
+            distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
+            if (distMeters <= GPS_MAX_DISTANCE) {
+              currentStats.taiQuay += 1;
+              sData.taiQuay += 1;
+              isAtStore = true;
+            } else {
+              currentStats.tuXa += 1;
+              sData.tuXa += 1;
+            }
+          } else {
+            currentStats.tuXa += 1;
+            sData.tuXa += 1;
+          }
+
+          const routePrefix = resolveStoreRouteCode(matchedStore?.code || inferredCode);
+          if (!routeStoresCountMap.has(routePrefix) && routePrefix !== 'KHAC') {
+            routeStoresCountMap.set(routePrefix, {
+              code: routePrefix,
+              name: `Tuyến ${routePrefix}`,
               totalStores: 0,
               activeStores: new Set(),
               don: 0,
               kien: 0,
               doanhSo: 0
             });
-            sortedRouteKeys.push(rKey);
           }
-        });
-        sortedRouteKeys.sort((a, b) => b.length - a.length);
-      }
-
-      const resolveStoreRouteCode = (storeCodeStr) => {
-        const clean = String(storeCodeStr || '').trim().toUpperCase();
-        if (!clean) return 'KHAC';
-        for (let i = 0; i < sortedRouteKeys.length; i++) {
-          if (clean.startsWith(sortedRouteKeys[i])) return sortedRouteKeys[i];
-        }
-        const fallbackMatch = clean.match(/^(\d{2})/) || clean.match(/^(\d+)/);
-        return fallbackMatch ? fallbackMatch[1] : 'KHAC';
-      };
-
-      if (sortedRouteKeys.length > 0) {
-        stores.forEach(s => {
-          const rKey = resolveStoreRouteCode(s.code);
-          if (routeStoresCountMap.has(rKey)) {
-            routeStoresCountMap.get(rKey).totalStores += 1;
-            totalValidStores += 1;
+          const routeStatObj = routeStoresCountMap.get(routePrefix);
+          if (routeStatObj) {
+            routeStatObj.don += 1;
+            routeStatObj.activeStores.add(canonicalStoreKey);
           }
-        });
-      } else {
-        totalValidStores = stores.length;
-      }
 
-      const GPS_MAX_DISTANCE = 50;
-      let kpiMap = new Map();
-      let globalSkuMap = new Map();
-      let globalStoreStatsMap = new Map();
-      let globalCompanyStatsMap = new Map();
-      let currentStats = { kien: 0, don: 0, doanhSo: 0, totalLines: 0, taiQuay: 0, tuXa: 0, tiems: new Set() };
-      let prevStats = { kien: 0, don: 0, doanhSo: 0 };
+          const storeNameDisplay = o.maKH || (matchedStore ? `${matchedStore.code} - ${matchedStore.name}` : canonicalStoreKey);
+          if (!globalStoreStatsMap.has(canonicalStoreKey)) {
+            globalStoreStatsMap.set(canonicalStoreKey, {
+              id: canonicalStoreKey,
+              name: storeNameDisplay,
+              qty: 0,
+              doanhSo: 0,
+              donCount: 0,
+              skuMap: new Map()
+            });
+          }
+          const stStat = globalStoreStatsMap.get(canonicalStoreKey);
+          stStat.donCount += 1;
 
-      analyticsOrders.forEach(o => {
-        if (!o || o.status === 'Đã hủy') return;
+          let thisOrderRev = 0;
+          let thisOrderThung = 0;
+          let thisOrderSkuCount = 0;
 
-        // 1. Tính số liệu kỳ trước
-        if (prevStart && prevEnd && o.ngayCtu >= prevStart && o.ngayCtu <= prevEnd) {
-          prevStats.don += 1;
           if (Array.isArray(o.items)) {
             o.items.forEach(item => {
               const itemQty = Number(item.qty || 0);
               if (itemQty <= 0) return;
-              const pEntry = productIndexMap.get(item.id || item.code);
-              const pObj = pEntry ? pEntry.product : products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
+
+              const pEntry = typeof productIndexMap !== 'undefined' ? productIndexMap.get(item.id || item.code) : null;
+              const pObj = pEntry ? pEntry.product : (typeof products !== 'undefined' ? products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code)) : null);
               const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
+              const safeRatio = ratio > 0 ? ratio : 50;
+              const unitName = item.dvt || pObj?.dvt || 'hộp';
               const itemPrice = Number(item.price || pObj?.price || 0);
-              prevStats.kien += (itemQty / (ratio > 0 ? ratio : 50));
-              prevStats.doanhSo += (itemQty * itemPrice);
+              const itemRev = itemQty * itemPrice;
+              const thungCount = itemQty / safeRatio;
+
+              thisOrderRev += itemRev;
+              thisOrderThung += thungCount;
+              thisOrderSkuCount += 1;
+
+              sData.kien += thungCount;
+              sData.doanhSo += itemRev;
+              sData.totalLines += 1;
+
+              currentStats.kien += thungCount;
+              currentStats.doanhSo += itemRev;
+              currentStats.totalLines += 1;
+
+              if (routeStatObj) {
+                routeStatObj.kien += thungCount;
+                routeStatObj.doanhSo += itemRev;
+              }
+
+              const skuKey = String(item.code || item.id || 'SP').trim();
+              const fullSkuName = item.name || pObj?.name || skuKey;
+
+              if (!sData.skuMap.has(skuKey)) {
+                sData.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
+              }
+              const repSku = sData.skuMap.get(skuKey);
+              repSku.qty += itemQty;
+              repSku.doanhSo += itemRev;
+
+              if (!globalSkuMap.has(skuKey)) {
+                globalSkuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
+              }
+              const gSku = globalSkuMap.get(skuKey);
+              gSku.qty += itemQty;
+              gSku.thung += thungCount;
+              gSku.doanhSo += itemRev;
+
+              stStat.qty += thungCount;
+              stStat.doanhSo += itemRev;
+              if (!stStat.skuMap.has(skuKey)) {
+                stStat.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
+              }
+              const stSku = stStat.skuMap.get(skuKey);
+              stSku.qty += itemQty;
+              stSku.thung += thungCount;
+              stSku.doanhSo += itemRev;
+
+              const ctyKey = extractCompCode(skuKey);
+              const matchedComp = typeof companyList !== 'undefined' ? companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey) : null;
+              const compDisplayName = matchedComp && matchedComp.tenCtu ? `[${matchedComp.maCtu}] ${matchedComp.tenCtu}` : (ctyKey !== 'KHAC' ? `Công Ty ${ctyKey}` : 'Khác');
+
+              if (!globalCompanyStatsMap.has(compDisplayName)) {
+                globalCompanyStatsMap.set(compDisplayName, { qty: 0, rawQty: 0, doanhSo: 0, skuMap: new Map() });
+              }
+              const cStat = globalCompanyStatsMap.get(compDisplayName);
+              cStat.qty += thungCount;
+              cStat.rawQty += itemQty;
+              cStat.doanhSo += itemRev;
+
+              if (!cStat.skuMap.has(skuKey)) {
+                cStat.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
+              }
+              const cSku = cStat.skuMap.get(skuKey);
+              cSku.qty += itemQty;
+              cSku.thung += thungCount;
+              cSku.doanhSo += itemRev;
+
+              sData.compSet.add(compDisplayName);
             });
           }
-        }
 
-        // 2. Kiểm tra điều kiện thuộc kỳ hiện tại
-        if (filterStart && (o.ngayCtu < filterStart || o.ngayCtu > filterEnd)) return;
-
-        const salesKey = (o.salesCode || 'UNKNOWN').trim();
-        if (!kpiMap.has(salesKey)) {
-          kpiMap.set(salesKey, {
-            name: o.salesName || 'Không xác định',
-            code: salesKey,
-            kien: 0,
-            don: 0,
-            doanhSo: 0,
-            totalLines: 0,
-            taiQuay: 0,
-            tuXa: 0,
-            firstTimeMs: Infinity,
-            lastTimeMs: 0,
-            tiems: new Set(),
-            skuMap: new Map(),
-            orderList: [],
-            compSet: new Set()
+          sData.orderList.push({
+            id: o.id,
+            soCtu: o.soCtu || 1,
+            ngayCtu: o.ngayCtu || '',
+            timeMs: orderTimeMs,
+            storeName: storeNameDisplay,
+            rev: thisOrderRev,
+            thung: thisOrderThung,
+            skuCount: thisOrderSkuCount,
+            distMeters: distMeters,
+            isAtStore: isAtStore
           });
-        }
-        const sData = kpiMap.get(salesKey);
-
-        sData.don += 1;
-        currentStats.don += 1;
-
-        let orderTimeMs = 0;
-        if (o.createdAt) {
-          const tMs = o.createdAt.toDate ? o.createdAt.toDate().getTime() : new Date(o.createdAt).getTime();
-          if (!isNaN(tMs) && tMs > 0) {
-            orderTimeMs = tMs;
-            if (tMs < sData.firstTimeMs) sData.firstTimeMs = tMs;
-            if (tMs > sData.lastTimeMs) sData.lastTimeMs = tMs;
-          }
-        }
-
-        let inferredCode = o.maDTPNNo || '';
-        if (!inferredCode && o.maKH && o.maKH.includes(' - ')) {
-          inferredCode = o.maKH.split(' - ')[0].trim();
-        }
-
-        const sEntry = storeIndexMap.get(String(o.storeId)) || storeIndexMap.get(String(inferredCode));
-        const matchedStore = sEntry ? sEntry.store : stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredCode));
-
-        const canonicalStoreKey = matchedStore
-          ? String(matchedStore.code || matchedStore.id).trim().toUpperCase()
-          : String(inferredCode || o.storeId || o.maKH || 'KH_LE').trim().toUpperCase();
-
-        sData.tiems.add(canonicalStoreKey);
-        currentStats.tiems.add(canonicalStoreKey);
-
-        let distMeters = null;
-        let isAtStore = false;
-        if (matchedStore && Number(matchedStore.lat) && Number(matchedStore.lng) && Number(o.lat) && Number(o.lng)) {
-          distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
-          if (distMeters <= GPS_MAX_DISTANCE) {
-            currentStats.taiQuay += 1;
-            sData.taiQuay += 1;
-            isAtStore = true;
-          } else {
-            currentStats.tuXa += 1;
-            sData.tuXa += 1;
-          }
-        } else {
-          currentStats.tuXa += 1;
-          sData.tuXa += 1;
-        }
-
-        const routePrefix = resolveStoreRouteCode(matchedStore?.code || inferredCode);
-        if (!routeStoresCountMap.has(routePrefix) && routePrefix !== 'KHAC') {
-          routeStoresCountMap.set(routePrefix, {
-            code: routePrefix,
-            name: `Tuyến ${routePrefix}`,
-            totalStores: 0,
-            activeStores: new Set(),
-            don: 0,
-            kien: 0,
-            doanhSo: 0
-          });
-        }
-        const routeStatObj = routeStoresCountMap.get(routePrefix);
-        if (routeStatObj) {
-          routeStatObj.don += 1;
-          routeStatObj.activeStores.add(canonicalStoreKey);
-        }
-
-        const storeNameDisplay = o.maKH || (matchedStore ? `${matchedStore.code} - ${matchedStore.name}` : canonicalStoreKey);
-        if (!globalStoreStatsMap.has(canonicalStoreKey)) {
-          globalStoreStatsMap.set(canonicalStoreKey, {
-            id: canonicalStoreKey,
-            name: storeNameDisplay,
-            qty: 0,
-            doanhSo: 0,
-            donCount: 0,
-            skuMap: new Map()
-          });
-        }
-        const stStat = globalStoreStatsMap.get(canonicalStoreKey);
-        stStat.donCount += 1;
-
-        let thisOrderRev = 0;
-        let thisOrderThung = 0;
-        let thisOrderSkuCount = 0;
-
-        if (Array.isArray(o.items)) {
-          o.items.forEach(item => {
-            const itemQty = Number(item.qty || 0);
-            if (itemQty <= 0) return;
-
-            const pEntry = productIndexMap.get(item.id || item.code);
-            const pObj = pEntry ? pEntry.product : products.find(p => p.id === (item.id || item.code) || p.code === (item.id || item.code));
-            const ratio = Number(pObj?.tyLeQuyDoi || item.tyLeQuyDoi || 50);
-            const safeRatio = ratio > 0 ? ratio : 50;
-            const unitName = item.dvt || pObj?.dvt || 'hộp';
-            const itemPrice = Number(item.price || pObj?.price || 0);
-            const itemRev = itemQty * itemPrice;
-            const thungCount = itemQty / safeRatio;
-
-            thisOrderRev += itemRev;
-            thisOrderThung += thungCount;
-            thisOrderSkuCount += 1;
-
-            sData.kien += thungCount;
-            sData.doanhSo += itemRev;
-            sData.totalLines += 1;
-
-            currentStats.kien += thungCount;
-            currentStats.doanhSo += itemRev;
-            currentStats.totalLines += 1;
-
-            if (routeStatObj) {
-              routeStatObj.kien += thungCount;
-              routeStatObj.doanhSo += itemRev;
-            }
-
-            const skuKey = String(item.code || item.id || 'SP').trim();
-            const fullSkuName = item.name || pObj?.name || skuKey;
-
-            // 1. Lưu SKU vào Nhân viên Sales
-            if (!sData.skuMap.has(skuKey)) {
-              sData.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
-            }
-            const repSku = sData.skuMap.get(skuKey);
-            repSku.qty += itemQty;
-            repSku.doanhSo += itemRev;
-
-            // 2. Lưu SKU vào Top Hàng Toàn Công Ty
-            if (!globalSkuMap.has(skuKey)) {
-              globalSkuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
-            }
-            const gSku = globalSkuMap.get(skuKey);
-            gSku.qty += itemQty;
-            gSku.thung += thungCount;
-            gSku.doanhSo += itemRev;
-
-            // 3. Lưu tổng & chi tiết SKU vào từng Khách Hàng (Top Khách Hàng)
-            stStat.qty += thungCount;
-            stStat.doanhSo += itemRev;
-            if (!stStat.skuMap.has(skuKey)) {
-              stStat.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
-            }
-            const stSku = stStat.skuMap.get(skuKey);
-            stSku.qty += itemQty;
-            stSku.thung += thungCount;
-            stSku.doanhSo += itemRev;
-
-            // 4. Lưu tổng & chi tiết SKU kèm Giá bán trung bình vào từng Nhãn Hàng / Công Ty
-            const ctyKey = extractCompCode(skuKey);
-            const matchedComp = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === ctyKey);
-            const compDisplayName = matchedComp && matchedComp.tenCtu ? `[${matchedComp.maCtu}] ${matchedComp.tenCtu}` : (ctyKey !== 'KHAC' ? `Công Ty ${ctyKey}` : 'Khác');
-
-            if (!globalCompanyStatsMap.has(compDisplayName)) {
-              globalCompanyStatsMap.set(compDisplayName, { qty: 0, rawQty: 0, doanhSo: 0, skuMap: new Map() });
-            }
-            const cStat = globalCompanyStatsMap.get(compDisplayName);
-            cStat.qty += thungCount;
-            cStat.rawQty += itemQty;
-            cStat.doanhSo += itemRev;
-
-            if (!cStat.skuMap.has(skuKey)) {
-              cStat.skuMap.set(skuKey, { code: skuKey, name: fullSkuName, qty: 0, thung: 0, doanhSo: 0, unit: unitName, ratio: safeRatio });
-            }
-            const cSku = cStat.skuMap.get(skuKey);
-            cSku.qty += itemQty;
-            cSku.thung += thungCount;
-            cSku.doanhSo += itemRev;
-
-            sData.compSet.add(compDisplayName);
-          });
-        }
-
-        sData.orderList.push({
-          id: o.id,
-          soCtu: o.soCtu || 1,
-          ngayCtu: o.ngayCtu || '',
-          timeMs: orderTimeMs,
-          storeName: storeNameDisplay,
-          rev: thisOrderRev,
-          thung: thisOrderThung,
-          skuCount: thisOrderSkuCount,
-          distMeters: distMeters,
-          isAtStore: isAtStore
         });
-      });
 
-      const salesUsers = users.filter(u => u.role === 'sales' && u.active !== false);
-      const activeSalesCodes = Array.from(kpiMap.keys());
-      const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
+        const salesUsers = typeof users !== 'undefined' ? users.filter(u => u.role === 'sales' && u.active !== false) : [];
+        const activeSalesCodes = Array.from(kpiMap.keys());
+        const zeroSales = salesUsers.filter(u => !activeSalesCodes.includes(u.code));
 
-      const leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
-      const topDoanhSo = leaderboard.length > 0 && leaderboard[0].doanhSo > 0 ? leaderboard[0].doanhSo : 1;
+        const leaderboard = Array.from(kpiMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
+        const topDoanhSo = leaderboard.length > 0 && leaderboard[0].doanhSo > 0 ? leaderboard[0].doanhSo : 1;
 
-      const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 15);
-      const maxGlobalSkuRev = topGlobalSkus.length > 0 && topGlobalSkus[0].doanhSo > 0 ? topGlobalSkus[0].doanhSo : 1;
+        const topGlobalSkus = Array.from(globalSkuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 15);
+        const maxGlobalSkuRev = topGlobalSkus.length > 0 && topGlobalSkus[0].doanhSo > 0 ? topGlobalSkus[0].doanhSo : 1;
 
-      const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 30);
-      const maxStoreRev = topStoresList.length > 0 && topStoresList[0].doanhSo > 0 ? topStoresList[0].doanhSo : 1;
+        const topStoresList = Array.from(globalStoreStatsMap.values()).sort((a, b) => b.doanhSo - a.doanhSo).slice(0, 30);
+        const maxStoreRev = topStoresList.length > 0 && topStoresList[0].doanhSo > 0 ? topStoresList[0].doanhSo : 1;
 
-      const companyDistList = Array.from(globalCompanyStatsMap.entries())
-        .map(([name, data]) => ({
-          name,
-          qty: data.qty,
-          rawQty: data.rawQty,
-          doanhSo: data.doanhSo,
-          skuList: Array.from(data.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo)
-        }))
-        .sort((a, b) => b.doanhSo - a.doanhSo);
+        const companyDistList = Array.from(globalCompanyStatsMap.entries())
+          .map(([name, data]) => ({
+            name,
+            qty: data.qty,
+            rawQty: data.rawQty,
+            doanhSo: data.doanhSo,
+            skuList: Array.from(data.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo)
+          }))
+          .sort((a, b) => b.doanhSo - a.doanhSo);
 
-      const activeRoutesList = Array.from(routeStoresCountMap.values())
-        .filter(r => r.doanhSo > 0 || r.totalStores > 0)
-        .sort((a, b) => b.doanhSo - a.doanhSo);
-      const maxRouteRev = activeRoutesList.length > 0 && activeRoutesList[0].doanhSo > 0 ? activeRoutesList[0].doanhSo : 1;
+        const activeRoutesList = Array.from(routeStoresCountMap.values())
+          .filter(r => r.doanhSo > 0 || r.totalStores > 0)
+          .sort((a, b) => b.doanhSo - a.doanhSo);
+        const maxRouteRev = activeRoutesList.length > 0 && activeRoutesList[0].doanhSo > 0 ? activeRoutesList[0].doanhSo : 1;
 
-      const calcGrowth = (curr, prev, isVND = false) => {
-        if (prev <= 0) return '<span style="color:#94A3B8; font-size:12px;">— Kỳ trước: 0K</span>';
-        const pct = ((curr - prev) / prev) * 100;
-        const diffVal = Math.round((curr - prev) / 1000).toLocaleString('en-US');
-        const diffStr = isVND ? `(${curr >= prev ? '+' : ''}${diffVal}K)` : '';
-        if (pct > 0) return `<span style="color:#10B981; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-up"></i> +${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
-        if (pct < 0) return `<span style="color:#EF4444; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-down"></i> ${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
-        return `<span style="color:#94A3B8; font-size:12px;">— Ngang bằng kỳ trước</span>`;
-      };
+        const calcGrowth = (curr, prev, isVND = false) => {
+          if (prev <= 0) return '<span style="color:#94A3B8; font-size:12px;">— Kỳ trước: 0K</span>';
+          const pct = ((curr - prev) / prev) * 100;
+          const diffVal = Math.round((curr - prev) / 1000).toLocaleString('en-US');
+          const diffStr = isVND ? `(${curr >= prev ? '+' : ''}${diffVal}K)` : '';
+          if (pct > 0) return `<span style="color:#10B981; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-up"></i> +${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
+          if (pct < 0) return `<span style="color:#EF4444; font-size:12px; font-weight:800;"><i class="fa-solid fa-arrow-trend-down"></i> ${pct.toFixed(1)}% so với kỳ trước ${diffStr}</span>`;
+          return `<span style="color:#94A3B8; font-size:12px;">— Ngang bằng kỳ trước</span>`;
+        };
 
-      const avgDropSize = currentStats.don > 0 ? Math.round(currentStats.doanhSo / currentStats.don / 1000).toLocaleString('en-US') : 0;
-      const avgLppc = currentStats.don > 0 ? (currentStats.totalLines / currentStats.don).toFixed(1) : 0;
-      const totalGpsOrders = currentStats.taiQuay + currentStats.tuXa;
-      const complianceRate = totalGpsOrders > 0 ? Math.round((currentStats.taiQuay / totalGpsOrders) * 100) : 0;
-      const badgeColor = complianceRate >= 80 ? 'var(--emerald)' : (complianceRate >= 50 ? 'var(--amber)' : 'var(--rose)');
+        const avgDropSize = currentStats.don > 0 ? Math.round(currentStats.doanhSo / currentStats.don / 1000).toLocaleString('en-US') : 0;
+        const avgLppc = currentStats.don > 0 ? (currentStats.totalLines / currentStats.don).toFixed(1) : 0;
+        const totalGpsOrders = currentStats.taiQuay + currentStats.tuXa;
+        const complianceRate = totalGpsOrders > 0 ? Math.round((currentStats.taiQuay / totalGpsOrders) * 100) : 0;
+        const badgeColor = complianceRate >= 80 ? 'var(--emerald)' : (complianceRate >= 50 ? 'var(--amber)' : 'var(--rose)');
 
-      const formatShortTime = (ms) => {
-        if (!ms || ms === Infinity || ms === 0) return '--:--';
-        const d = new Date(ms);
-        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      };
+        const formatShortTime = (ms) => {
+          if (!ms || ms === Infinity || ms === 0) return '--:--';
+          const d = new Date(ms);
+          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        };
 
-      const isAccOpen = (id, defaultOpen = false) => {
-        if (window._kpiOpenAccordions && window._kpiOpenAccordions.size > 0) {
-          return window._kpiOpenAccordions.has(id);
-        }
-        return defaultOpen;
-      };
+        const isAccOpen = (id, defaultOpen = false) => {
+          if (window._kpiOpenAccordions && window._kpiOpenAccordions.size > 0) {
+            return window._kpiOpenAccordions.has(id);
+          }
+          return defaultOpen;
+        };
+        
+        window.toggleOrderAccordion = function(accId) {
+          const el = document.getElementById(accId);
+          const iconEl = document.getElementById(`icon_${accId}`);
+          if (!el) return;
+          if (el.classList.contains('hidden')) {
+            el.classList.remove('hidden');
+            if (iconEl) iconEl.style.transform = 'rotate(180deg)';
+          } else {
+            el.classList.add('hidden');
+            if (iconEl) iconEl.style.transform = 'rotate(0deg)';
+          }
+        };
 
-      container.innerHTML = `
-        ${buildKpiFilterHeaderHtml()}
-
-        <!-- THANH HIỂN THỊ THỨ / NGÀY / THÁNG / NĂM CHI TIẾT -->
-        <div style="background:rgba(37, 99, 235, 0.06); border:1px solid rgba(37, 99, 235, 0.2); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:4px; margin-bottom:14px;">
-          <div style="font-size:13.5px; color:var(--text-main); font-weight:700;">
-            <i class="fa-regular fa-calendar-days" style="color:var(--primary); margin-right:6px;"></i> ${periodTitleHtml}
-          </div>
-          <div style="font-size:12px; color:var(--text-muted);">
-            <i class="fa-solid fa-scale-balanced" style="color:var(--amber); margin-right:6px;"></i> ${compareTitleHtml}
-          </div>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
-          <!-- Khối 1: Tổng Doanh Số & Chất Lượng Đơn -->
-          <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.03);">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed rgba(0,0,0,0.08); padding-bottom:10px; margin-bottom:12px; flex-wrap:wrap; gap:6px;">
-              <div style="font-size:13px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-coins" style="color:var(--amber);"></i> TỔNG DOANH SỐ & SẢN LƯỢNG</div>
-              <div style="background:rgba(0,0,0,0.03); border-radius:8px; padding:4px 8px;">${calcGrowth(currentStats.doanhSo, prevStats.doanhSo, true)}</div>
+        bodyContainer.innerHTML = `
+          <!-- THANH HIỂN THỊ THỨ / NGÀY / THÁNG / NĂM CHI TIẾT -->
+          <div style="background:rgba(37, 99, 235, 0.06); border:1px solid rgba(37, 99, 235, 0.2); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:4px; margin-bottom:14px;">
+            <div style="font-size:13.5px; color:var(--text-main); font-weight:700;">
+              <i class="fa-regular fa-calendar-days" style="color:var(--primary); margin-right:6px;"></i> ${periodTitleHtml}
             </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-              <div>
-                <div style="font-size:28px; font-weight:900; color:var(--rose); line-height:1.15;">
-                  ${Math.round(currentStats.doanhSo / 1000).toLocaleString('en-US')}K
-                </div>
-                <div style="font-size:12.5px; font-weight:800; color:#D97706; margin-top:6px;">
-                  📦 <b>${currentStats.don}</b> Đơn • 🏢 <b>${globalCompanyStatsMap.size}</b> Cty • 🏷️ <b>${globalSkuMap.size}</b> SKUs
-                </div>
-              </div>
-              <div style="text-align:right;">
-                <div style="font-size:21px; font-weight:900; color:var(--primary); line-height:1.2;">
-                  ${currentStats.kien.toFixed(1)} <span style="font-size:13px; color:var(--text-muted); font-weight:700;">Thùng</span>
-                </div>
-                <div style="font-size:12px; font-weight:800; color:var(--text-muted); margin-top:4px;">
-                  TB: <b style="color:var(--text-main);">${avgDropSize}K</b>/đơn • LPPC: <b style="color:var(--emerald);">${avgLppc}</b> mã
-                </div>
-              </div>
+            <div style="font-size:12px; color:var(--text-muted);">
+              <i class="fa-solid fa-scale-balanced" style="color:var(--amber); margin-right:6px;"></i> ${compareTitleHtml}
             </div>
           </div>
 
-          <!-- Khối 2 & 3: Độ Phủ và Tuân Thủ GPS -->
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-            <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03); display:flex; flex-direction:column; justify-content:center;">
-              <div style="font-size:12px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-map-location-dot" style="color:var(--emerald);"></i> ĐỘ PHỦ (HIT RATE)</div>
-              <div style="font-size:24px; font-weight:900; color:var(--emerald); margin:8px 0;">${currentStats.tiems.size} <span style="font-size:13px; color:var(--text-muted); font-weight:700;">/ ${totalValidStores} Tiệm</span></div>
-              <div style="font-size:12px; font-weight:800; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:8px; padding:6px;">
-                Đạt <b>${totalValidStores > 0 ? ((currentStats.tiems.size / totalValidStores) * 100).toFixed(1) : 0}%</b> toàn hệ thống
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+            <!-- Khối 1: Tổng Doanh Số & Chất Lượng Đơn -->
+            <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:18px; box-shadow:0 4px 15px rgba(0,0,0,0.03);">
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed rgba(0,0,0,0.08); padding-bottom:10px; margin-bottom:12px; flex-wrap:wrap; gap:6px;">
+                <div style="font-size:13px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-coins" style="color:var(--amber);"></i> TỔNG DOANH SỐ & SẢN LƯỢNG</div>
+                <div style="background:rgba(0,0,0,0.03); border-radius:8px; padding:4px 8px;">${calcGrowth(currentStats.doanhSo, prevStats.doanhSo, true)}</div>
               </div>
-            </div>
 
-            <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
-              <div style="font-size:12px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-location-crosshairs" style="color:${badgeColor};"></i> KỶ LUẬT GPS (50M)</div>
-              <div style="font-size:20px; font-weight:900; color:${badgeColor}; margin:8px 0 6px 0;">
-                ${complianceRate}% <span style="font-size:12px; font-weight:700; color:var(--text-main);">(${currentStats.taiQuay}/${totalGpsOrders})</span>
-              </div>
-              <div style="display:flex; justify-content:space-around; font-size:11.5px; font-weight:800; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:8px; padding:6px;">
-                <span>🟢 Quầy: <b style="color:var(--emerald);">${currentStats.taiQuay}</b></span>
-                <span>🔴 Xa: <b style="color:var(--rose);">${currentStats.tuXa}</b></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- BẢNG XẾP HẠNG NHÂN VIÊN -->
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--amber); margin-bottom:20px;">
-          <div onclick="toggleOrderAccordion('acc_leaderboard_main')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> BẢNG XẾP HẠNG NHÂN VIÊN (${leaderboard.length})</div>
-            <i id="icon_acc_leaderboard_main" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_leaderboard_main', true) ? 'transform:rotate(180deg);' : ''}"></i>
-          </div>
-          <div id="acc_leaderboard_main" class="${isAccOpen('acc_leaderboard_main', true) ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${zeroSales.length > 0 ? `
-                <div style="background:rgba(225, 29, 72, 0.06); border:1px dashed var(--rose); border-radius:12px; padding:12px;">
-                  <div style="font-size:13.5px; font-weight:800; color:var(--rose); margin-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> CHƯA PHÁT SINH ĐƠN TRONG KỲ (${zeroSales.length}):</div>
-                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    ${zeroSales.map(u => `<span style="font-size:12px; font-weight:800; background:#fff; color:var(--rose); border:1px solid rgba(225,29,72,0.3); padding:4px 10px; border-radius:8px;">[${u.code}] ${u.name}</span>`).join('')}
+              <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+                <div>
+                  <div style="font-size:28px; font-weight:900; color:var(--rose); line-height:1.15;">
+                    ${Math.round(currentStats.doanhSo / 1000).toLocaleString('en-US')}K
+                  </div>
+                  <div style="font-size:12.5px; font-weight:800; color:#D97706; margin-top:6px;">
+                    📦 <b>${currentStats.don}</b> Đơn • 🏢 <b>${globalCompanyStatsMap.size}</b> Cty • 🏷️ <b>${globalSkuMap.size}</b> SKUs
                   </div>
                 </div>
-              ` : ''}
-
-              ${leaderboard.length > 0 ? leaderboard.map((rep, index) => {
-                const rankColors = ['#F59E0B', '#94A3B8', '#D97706'];
-                const medalCol = index < 3 ? rankColors[index] : 'var(--text-muted)';
-                const progressPercent = Math.max((rep.doanhSo / topDoanhSo) * 100, 2);
-                const safeRepCode = String(rep.code || index).replace(/[^a-zA-Z0-9]/g, '_');
-                const accId = `kpi_acc_${safeRepCode}`;
-
-                const revFormatted = Math.round(rep.doanhSo / 1000).toLocaleString('en-US');
-                const dropSize = rep.don > 0 ? Math.round(rep.doanhSo / rep.don / 1000).toLocaleString('en-US') : 0;
-                const repLppc = rep.don > 0 ? (rep.totalLines / rep.don).toFixed(1) : 0;
-                const gpsRatio = rep.don > 0 ? (rep.taiQuay / rep.don) : 0;
-                const gpsColor = gpsRatio >= 0.8 ? 'var(--emerald)' : (gpsRatio >= 0.5 ? 'var(--amber)' : 'var(--rose)');
-                const gpsBg = gpsRatio >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : (gpsRatio >= 0.5 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(225, 29, 72, 0.1)');
-
-                const userProfile = users.find(u => String(u.code || '').trim().toUpperCase() === String(rep.code).toUpperCase());
-                let assignedStoreTotal = 0;
-                if (userProfile && Array.isArray(userProfile.assignedRoutes) && userProfile.assignedRoutes.length > 0) {
-                  userProfile.assignedRoutes.forEach(rCode => {
-                    const rStat = routeStoresCountMap.get(String(rCode).trim().toUpperCase());
-                    if (rStat) assignedStoreTotal += rStat.totalStores;
-                  });
-                }
-                const coverageBadge = assignedStoreTotal > 0
-                  ? `${rep.tiems.size}/${assignedStoreTotal} Tiệm (${((rep.tiems.size / assignedStoreTotal) * 100).toFixed(0)}%)`
-                  : `${rep.tiems.size} Tiệm`;
-
-                const sortedSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
-                const sortedOrders = [...rep.orderList].sort((a, b) => (b.timeMs || 0) - (a.timeMs || 0));
-                const isSingleDay = (filterStart && filterStart === filterEnd) && rep.firstTimeMs !== Infinity;
-
-                return `
-                  <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:5px solid ${medalCol}; overflow:hidden; margin-bottom:0;">
-                    <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px; display:flex; flex-direction:column; gap:8px; cursor:pointer;">
-                      <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                          <div style="width:32px; height:32px; border-radius:50%; background:${medalCol}; color:#fff; display:flex; justify-content:center; align-items:center; font-weight:900; font-size:15px;">${index + 1}</div>
-                          <div>
-                            <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">${rep.name}</div>
-                            <div style="font-size:12px; font-weight:700; color:var(--text-muted);">
-                              Mã: <b style="color:var(--primary);">${rep.code}</b> • <b>${rep.compSet.size}</b> Cty • <b>${rep.skuMap.size}</b> Mã SP
-                              ${isSingleDay ? ` • 🕒 <b style="color:var(--amber);">${formatShortTime(rep.firstTimeMs)} - ${formatShortTime(rep.lastTimeMs)}</b>` : ''}
-                            </div>
-                          </div>
-                        </div>
-                        <div style="text-align:right;">
-                          <div style="font-size:19px; font-weight:900; color:var(--rose);">${revFormatted}K</div>
-                          <div style="font-size:12.5px; font-weight:800; color:var(--primary);">${rep.kien.toFixed(1)} Thùng</div>
-                        </div>
-                      </div>
-
-                      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; font-size:12.5px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.02); padding:8px 10px; border-radius:8px; border:1px dashed var(--card-border);">
-                        <span>🛒 <b style="color:var(--text-main);">${rep.don}</b> Đơn (<b style="color:var(--emerald);">${coverageBadge}</b>)</span>
-                        <span>📦 TB: <b style="color:var(--amber);">${dropSize}K</b> • LPPC: <b style="color:var(--primary);">${repLppc}</b></span>
-                        <span style="background:${gpsBg}; color:${gpsColor}; padding:3px 8px; border-radius:6px; font-weight:900; font-size:11.5px;">
-                          📍 ${rep.taiQuay}/${rep.don} tại quầy
-                        </span>
-                      </div>
-
-                      <div>
-                        <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:3px;">
-                          <span>Tỷ trọng so với Top 1</span>
-                          <span style="color:${index === 0 ? 'var(--emerald)' : 'var(--primary)'};">${progressPercent.toFixed(0)}%</span>
-                        </div>
-                        <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
-                          <div style="height:100%; width:${progressPercent}%; background:${index === 0 ? 'var(--emerald-gradient)' : 'linear-gradient(90deg, #3B82F6, #60A5FA)'}; border-radius:3px;"></div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div id="${accId}" class="${isAccOpen(accId) ? '' : 'hidden'}" style="padding:12px 14px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
-                      <div style="display:flex; gap:6px; margin-bottom:10px;">
-                        <button type="button" id="btn_rep_sku_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'skus')" style="flex:1; justify-content:center; background:var(--primary); color:#fff; font-weight:800; padding:6px;">
-                          📦 Mặt hàng đã bán (${sortedSkus.length})
-                        </button>
-                        <button type="button" id="btn_rep_ord_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'orders')" style="flex:1; justify-content:center; background:var(--bg-dark); color:var(--text-muted); font-weight:800; padding:6px;">
-                          🏪 Nhật ký Tiệm & Giờ chốt (${sortedOrders.length})
-                        </button>
-                      </div>
-
-                      <!-- Sub-view 1: Danh sách mặt hàng -->
-                      <div id="rep_skus_${safeRepCode}" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
-                        ${sortedSkus.map(skuObj => {
-                          const sKien = Math.floor(skuObj.qty / skuObj.ratio);
-                          const sLe = skuObj.qty % skuObj.ratio;
-                          const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${skuObj.unit}` : `${sKien} Thùng`) : `${skuObj.qty} ${skuObj.unit}`;
-                          const avgUnitPrice = skuObj.qty > 0 ? (skuObj.doanhSo / skuObj.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
-                          return `
-                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:5px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
-                              <div style="flex:1; padding-right:8px;">
-                                <div style="color:var(--text-main); font-weight:700;">[${skuObj.code}] ${skuObj.name}</div>
-                                <div style="font-size:11.5px; color:var(--text-muted);">Đơn giá: <b>${avgUnitPrice}K/${skuObj.unit}</b></div>
-                              </div>
-                              <div style="text-align:right; flex-shrink:0;">
-                                <div style="color:var(--rose); font-weight:800;">${Math.round(skuObj.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                                <div style="color:var(--primary); font-size:11.5px; font-weight:800;">${strQty}</div>
-                              </div>
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-
-                      <!-- Sub-view 2: Nhật ký Tiệm & Giờ chốt đơn -->
-                      <div id="rep_orders_${safeRepCode}" class="hidden" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
-                        ${sortedOrders.map(ord => {
-                          const distLabel = ord.distMeters !== null
-                            ? (ord.distMeters > 1000 ? `${(ord.distMeters / 1000).toFixed(1)}km` : `${ord.distMeters}m`)
-                            : 'Chưa rõ GPS';
-                          const gpsTagColor = ord.isAtStore ? 'var(--emerald)' : 'var(--rose)';
-                          return `
-                            <div onclick="openOrderDetailsModal('${ord.id}')" style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:6px 8px; border-radius:8px; background:var(--panel-bg); border:1px solid var(--card-border); cursor:pointer;">
-                              <div style="flex:1; padding-right:8px;">
-                                <div style="font-weight:800; color:var(--text-main);">#${ord.soCtu} • ${ord.storeName}</div>
-                                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                                  🕒 <b>${formatShortTime(ord.timeMs)}</b> (${formatDateDDMMYYYY(ord.ngayCtu)}) • <span style="color:${gpsTagColor}; font-weight:800;">${ord.isAtStore ? '🟢 Tại quầy' : '🔴 Lệch'} (${distLabel})</span>
-                                </div>
-                              </div>
-                              <div style="text-align:right; flex-shrink:0;">
-                                <div style="color:var(--rose); font-weight:900;">${Math.round(ord.rev / 1000).toLocaleString('en-US')}K</div>
-                                <div style="color:var(--primary); font-size:11px; font-weight:800;">${ord.skuCount} mã • ${ord.thung.toFixed(1)}T</div>
-                              </div>
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-                    </div>
+                <div style="text-align:right;">
+                  <div style="font-size:21px; font-weight:900; color:var(--primary); line-height:1.2;">
+                    ${currentStats.kien.toFixed(1)} <span style="font-size:13px; color:var(--text-muted); font-weight:700;">Thùng</span>
                   </div>
-                `;
-              }).join('') : `
-                <div style="text-align:center; padding:30px; background:var(--card-bg); border-radius:12px; color:var(--text-muted); font-weight:800;">
-                  Chưa có giao dịch nào trong khoảng thời gian này.
+                  <div style="font-size:12px; font-weight:800; color:var(--text-muted); margin-top:4px;">
+                    TB: <b style="color:var(--text-main);">${avgDropSize}K</b>/đơn • LPPC: <b style="color:var(--emerald);">${avgLppc}</b> mã
+                  </div>
                 </div>
-              `}
+              </div>
+            </div>
+
+            <!-- Khối 2 & 3: Độ Phủ và Tuân Thủ GPS -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03); display:flex; flex-direction:column; justify-content:center;">
+                <div style="font-size:12px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-map-location-dot" style="color:var(--emerald);"></i> ĐỘ PHỦ (HIT RATE)</div>
+                <div style="font-size:24px; font-weight:900; color:var(--emerald); margin:8px 0;">${currentStats.tiems.size} <span style="font-size:13px; color:var(--text-muted); font-weight:700;">/ ${totalValidStores} Tiệm</span></div>
+                <div style="font-size:12px; font-weight:800; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:8px; padding:6px;">
+                  Đạt <b>${totalValidStores > 0 ? ((currentStats.tiems.size / totalValidStores) * 100).toFixed(1) : 0}%</b> toàn hệ thống
+                </div>
+              </div>
+
+              <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:14px 10px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.03);">
+                <div style="font-size:12px; font-weight:900; color:var(--text-muted);"><i class="fa-solid fa-location-crosshairs" style="color:${badgeColor};"></i> KỶ LUẬT GPS (50M)</div>
+                <div style="font-size:20px; font-weight:900; color:${badgeColor}; margin:8px 0 6px 0;">
+                  ${complianceRate}% <span style="font-size:12px; font-weight:700; color:var(--text-main);">(${currentStats.taiQuay}/${totalGpsOrders})</span>
+                </div>
+                <div style="display:flex; justify-content:space-around; font-size:11.5px; font-weight:800; color:var(--text-muted); background:rgba(0,0,0,0.04); border-radius:8px; padding:6px;">
+                  <span>🟢 Quầy: <b style="color:var(--emerald);">${currentStats.taiQuay}</b></span>
+                  <span>🔴 Xa: <b style="color:var(--rose);">${currentStats.tuXa}</b></span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- PHÂN TÍCH ĐỘ PHỦ & DOANH SỐ THEO TUYẾN BÁN HÀNG -->
-        ${activeRoutesList.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid #0EA5E9; margin-bottom:20px;">
-          <div onclick="toggleOrderAccordion('acc_route_performance')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-route" style="color:#0EA5E9;"></i> HIỆU SUẤT & ĐỘ PHỦ THEO TUYẾN (${activeRoutesList.length})</div>
-            <i id="icon_acc_route_performance" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_route_performance') ? 'transform:rotate(180deg);' : ''}"></i>
-          </div>
-          <div id="acc_route_performance" class="${isAccOpen('acc_route_performance') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${activeRoutesList.map((rt, i) => {
-                const activeCount = rt.activeStores.size;
-                const hitRatePct = rt.totalStores > 0 ? ((activeCount / rt.totalStores) * 100).toFixed(1) : 0;
-                const barWidth = Math.min(100, Math.max((rt.doanhSo / maxRouteRev) * 100, 3));
-                return `
-                  <div style="padding-bottom:10px; border-bottom:1px dashed var(--card-border);">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:6px; gap:8px;">
-                      <div style="flex:1;">
-                        <div style="font-weight:900; color:var(--text-main);">
-                          <span style="background:rgba(14,165,233,0.12); color:#0284C7; padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">Tuyến ${rt.code}</span>
-                          ${rt.name}
-                        </div>
-                        <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px;">
-                          📍 Độ phủ: <b style="color:var(--emerald);">${activeCount}/${rt.totalStores} tiệm (${hitRatePct}%)</b> • 🛒 <b>${rt.don}</b> đơn
-                        </div>
-                      </div>
-                      <div style="text-align:right; flex-shrink:0;">
-                        <div style="font-weight:900; color:var(--primary); font-size:15.5px;">${Math.round(rt.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                        <div style="font-size:12px; color:var(--text-muted); font-weight:800;">${rt.kien.toFixed(1)} Thùng</div>
-                      </div>
-                    </div>
-                    <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
-                      <div style="height:100%; width:${barWidth}%; background:linear-gradient(90deg, #0EA5E9, #2563EB); border-radius:3px;"></div>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+          <!-- BẢNG XẾP HẠNG NHÂN VIÊN -->
+          <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--amber); margin-bottom:20px;">
+            <div onclick="toggleOrderAccordion('acc_leaderboard_main')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-trophy" style="color:var(--amber);"></i> BẢNG XẾP HẠNG NHÂN VIÊN (${leaderboard.length})</div>
+              <i id="icon_acc_leaderboard_main" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_leaderboard_main', true) ? 'transform:rotate(180deg);' : ''}"></i>
             </div>
-          </div>
-        </div>
-        ` : ''}
-
-        <!-- TOP 15 HÀNG BÁN CHẠY -->
-        ${topGlobalSkus.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--rose); margin-bottom:20px;">
-          <div onclick="toggleOrderAccordion('acc_top_products')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-fire" style="color:var(--rose);"></i> TOP ${topGlobalSkus.length} HÀNG BÁN CHẠY NHẤT</div>
-            <i id="icon_acc_top_products" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_products') ? 'transform:rotate(180deg);' : ''}"></i>
-          </div>
-          <div id="acc_top_products" class="${isAccOpen('acc_top_products') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${topGlobalSkus.map((sku, i) => {
-                const sKien = Math.floor(sku.qty / sku.ratio);
-                const sLe = sku.qty % sku.ratio;
-                const qtyStr = sKien > 0 ? (sLe > 0 ? `${sKien}T ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
-                const avgUnitPrice = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
-                const avgCartonPrice = sku.thung > 0 ? Math.round(sku.doanhSo / sku.thung / 1000).toLocaleString('en-US') : 0;
-                const barWidth = Math.min(100, Math.max((sku.doanhSo / maxGlobalSkuRev) * 100, 4));
-                return `
-                  <div>
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:5px; gap:8px;">
-                      <div style="flex:1;">
-                        <div style="font-weight:800; color:var(--text-main);">${i + 1}. <span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
-                        <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:2px;">
-                          💰 Giá bán TB: <b style="color:var(--amber);">${avgUnitPrice}K/${sku.unit}</b> (~<b>${avgCartonPrice}K/Thùng</b>)
-                        </div>
-                      </div>
-                      <div style="text-align:right; flex-shrink:0;">
-                        <div style="font-weight:900; color:var(--rose);">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                        <div style="font-size:12px; color:var(--text-muted); font-weight:700;">${qtyStr} (${sku.thung.toFixed(1)}T)</div>
-                      </div>
-                    </div>
-                    <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
-                      <div style="height:100%; width:${barWidth}%; background:var(--rose-gradient); border-radius:3px;"></div>
+            <div id="acc_leaderboard_main" class="${isAccOpen('acc_leaderboard_main', true) ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--bg-dark);">
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                ${zeroSales.length > 0 ? `
+                  <div style="background:rgba(225, 29, 72, 0.06); border:1px dashed var(--rose); border-radius:12px; padding:12px;">
+                    <div style="font-size:13.5px; font-weight:800; color:var(--rose); margin-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> CHƯA PHÁT SINH ĐƠN TRONG KỲ (${zeroSales.length}):</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                      ${zeroSales.map(u => `<span style="font-size:12px; font-weight:800; background:#fff; color:var(--rose); border:1px solid rgba(225,29,72,0.3); padding:4px 10px; border-radius:8px;">[${u.code}] ${u.name}</span>`).join('')}
                     </div>
                   </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        </div>
-        ` : ''}
+                ` : ''}
 
-        <!-- TOP 30 KHÁCH HÀNG NỔI BẬT -->
-        ${topStoresList.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--emerald); margin-bottom:20px;">
-          <div onclick="toggleOrderAccordion('acc_top_stores')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG DOANH SỐ CAO (${topStoresList.length})</div>
-            <i id="icon_acc_top_stores" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_stores') ? 'transform:rotate(180deg);' : ''}"></i>
-          </div>
-          <div id="acc_top_stores" class="${isAccOpen('acc_top_stores') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:10px; font-style:italic;">
-              * Bấm vào từng khách hàng để xem chi tiết các mặt hàng đã lấy và giá trị từng món:
-            </div>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${topStoresList.map((st, i) => {
-                const rawIdentifier = st.id || st.name;
-                const sEntry = storeIndexMap.get(String(rawIdentifier));
-                const matchedStore = sEntry ? sEntry.store : stores.find(s => s.id === rawIdentifier || s.code === rawIdentifier);
+                ${leaderboard.length > 0 ? leaderboard.map((rep, index) => {
+                  const rankColors = ['#F59E0B', '#94A3B8', '#D97706'];
+                  const medalCol = index < 3 ? rankColors[index] : 'var(--text-muted)';
+                  const progressPercent = Math.max((rep.doanhSo / topDoanhSo) * 100, 2);
+                  const safeRepCode = String(rep.code || index).replace(/[^a-zA-Z0-9]/g, '_');
+                  const accId = `kpi_acc_${safeRepCode}`;
 
-                let storeCode = matchedStore ? matchedStore.code : "KH";
-                let storeName = matchedStore ? matchedStore.name : st.name;
-                if (!matchedStore && st.name && st.name.includes(' - ')) {
-                  const parts = st.name.split(' - ');
-                  storeCode = parts[0].trim();
-                  storeName = parts.slice(1).join(' - ').trim();
-                }
+                  const revFormatted = Math.round(rep.doanhSo / 1000).toLocaleString('en-US');
+                  const dropSize = rep.don > 0 ? Math.round(rep.doanhSo / rep.don / 1000).toLocaleString('en-US') : 0;
+                  const repLppc = rep.don > 0 ? (rep.totalLines / rep.don).toFixed(1) : 0;
+                  const gpsRatio = rep.don > 0 ? (rep.taiQuay / rep.don) : 0;
+                  const gpsColor = gpsRatio >= 0.8 ? 'var(--emerald)' : (gpsRatio >= 0.5 ? 'var(--amber)' : 'var(--rose)');
+                  const gpsBg = gpsRatio >= 0.8 ? 'rgba(16, 185, 129, 0.1)' : (gpsRatio >= 0.5 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(225, 29, 72, 0.1)');
 
-                const rKey = resolveStoreRouteCode(storeCode);
-                const rObj = routeStoresCountMap.get(rKey);
-                const routeName = rObj ? `Tuyến ${rObj.code} - ${rObj.name}` : (rKey !== 'KHAC' ? `Tuyến ${rKey}` : 'Chưa phân tuyến');
+                  const userProfile = typeof users !== 'undefined' ? users.find(u => String(u.code || '').trim().toUpperCase() === String(rep.code).toUpperCase()) : null;
+                  let assignedStoreTotal = 0;
+                  if (userProfile && Array.isArray(userProfile.assignedRoutes) && userProfile.assignedRoutes.length > 0) {
+                    userProfile.assignedRoutes.forEach(rCode => {
+                      const rStat = routeStoresCountMap.get(String(rCode).trim().toUpperCase());
+                      if (rStat) assignedStoreTotal += rStat.totalStores;
+                    });
+                  }
+                  const coverageBadge = assignedStoreTotal > 0
+                    ? `${rep.tiems.size}/${assignedStoreTotal} Tiệm (${((rep.tiems.size / assignedStoreTotal) * 100).toFixed(0)}%)`
+                    : `${rep.tiems.size} Tiệm`;
 
-                const barWidth = Math.min(100, Math.max((st.doanhSo / maxStoreRev) * 100, 4));
-                const storeSkus = Array.from(st.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
-                const safeStoreAccId = `acc_top_store_${String(storeCode || i).replace(/[^a-zA-Z0-9]/g, '_')}_${i}`;
-
-                return `
-                  <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden;">
-                    <div onclick="toggleOrderAccordion('${safeStoreAccId}')" style="padding:12px; cursor:pointer;">
-                      <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:6px; gap:8px;">
-                        <div style="flex:1; min-width:0;">
-                          <div style="font-weight:900; color:var(--text-main); line-height:1.35;">
-                            <span style="color:var(--amber); margin-right:4px;">#${i + 1}</span>
-                            <span style="background:var(--prod-code-bg); color:var(--primary); font-size:11.5px; padding:2px 6px; border-radius:4px; margin-right:4px;">${storeCode}</span>
-                            ${storeName}
-                          </div>
-                          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-top:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                            <span><i class="fa-solid fa-route" style="color:var(--emerald);"></i> ${routeName}</span>
-                            <span>• 🛒 <b>${st.donCount}</b> đơn</span>
-                            <span style="color:var(--primary); background:rgba(37,99,235,0.08); padding:2px 6px; border-radius:6px; font-weight:800;">
-                              📦 Xem ${storeSkus.length} mặt hàng <i id="icon_${safeStoreAccId}" class="fa-solid fa-chevron-down" style="font-size:10px; margin-left:3px; transition:0.3s; ${isAccOpen(safeStoreAccId) ? 'transform:rotate(180deg);' : ''}"></i>
-                            </span>
-                          </div>
-                        </div>
-                        <div style="text-align:right; flex-shrink:0;">
-                          <div style="font-weight:900; color:var(--emerald); font-size:16px;">${Math.round(st.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                          <div style="font-size:12px; color:var(--text-muted); font-weight:800;">${st.qty.toFixed(1)} Thùng</div>
-                        </div>
-                      </div>
-                      <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
-                        <div style="height:100%; width:${barWidth}%; background:var(--emerald-gradient); border-radius:3px;"></div>
-                      </div>
-                    </div>
-
-                    <!-- Danh sách mặt hàng khách đã mua -->
-                    <div id="${safeStoreAccId}" class="${isAccOpen(safeStoreAccId) ? '' : 'hidden'}" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
-                      <div style="font-size:12px; font-weight:800; color:var(--primary); margin-bottom:6px; display:flex; justify-content:space-between;">
-                        <span>MẶT HÀNG KHÁCH ĐÃ LẤY (${storeSkus.length} mã):</span>
-                        <span>Thành tiền / SL</span>
-                      </div>
-                      <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
-                        ${storeSkus.map(sku => {
-                          const sKien = Math.floor(sku.qty / sku.ratio);
-                          const sLe = sku.qty % sku.ratio;
-                          const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
-                          const unitPriceK = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
-                          return `
-                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
-                              <div style="flex:1; padding-right:8px;">
-                                <div style="font-weight:800; color:var(--text-main);"><span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
-                                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                                  Đơn giá: <b style="color:var(--amber);">${unitPriceK}K/${sku.unit}</b> (Q/C: ${sku.ratio})
-                                </div>
-                              </div>
-                              <div style="text-align:right; flex-shrink:0;">
-                                <div style="font-weight:900; color:var(--rose); font-size:14px;">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                                <div style="font-size:11.5px; font-weight:800; color:var(--emerald);">${strQty}</div>
-                              </div>
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        </div>
-        ` : ''}
-
-        <!-- TỶ TRỌNG DOANH SỐ NHÃN HÀNG -->
-        ${companyDistList.length > 0 ? `
-        <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--purple); margin-bottom:20px;">
-          <div onclick="toggleOrderAccordion('acc_top_companies')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
-            <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">
-              <i class="fa-solid fa-chart-pie" style="color:var(--purple); margin-right:6px;"></i> TỶ TRỌNG DOANH SỐ NHÃN HÀNG (${companyDistList.length})
-            </div>
-            <i id="icon_acc_top_companies" class="fa-solid fa-chevron-down" style="color:var(--purple); transition:0.3s; ${isAccOpen('acc_top_companies') ? 'transform:rotate(180deg);' : ''}"></i>
-          </div>
-          <div id="acc_top_companies" class="${isAccOpen('acc_top_companies') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
-            <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:10px; font-style:italic;">
-              * Công thức khớp tổng: <b>Sản lượng (Thùng) × Giá TB/Thùng = Tổng Doanh Số</b>. Bấm vào từng nhãn hàng để kiểm tra giá bán và sản lượng của từng sản phẩm:
-            </div>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${(() => {
-                const totalCompanyRev = companyDistList.reduce((sum, c) => sum + c.doanhSo, 0);
-                return companyDistList.map((comp, i) => {
-                  const pct = totalCompanyRev > 0 ? ((comp.doanhSo / totalCompanyRev) * 100).toFixed(1) : 0;
-                  const barWidth = Math.min(100, Math.max(Number(pct), 2));
-                  const avgPricePerCartonK = comp.qty > 0 ? Math.round(comp.doanhSo / comp.qty / 1000).toLocaleString('en-US') : 0;
-                  const compAccId = `acc_comp_detail_${i}`;
+                  const sortedSkus = Array.from(rep.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
+                  const sortedOrders = [...rep.orderList].sort((a, b) => (b.timeMs || 0) - (a.timeMs || 0));
+                  const isSingleDay = (filterStart && filterStart === filterEnd) && rep.firstTimeMs !== Infinity;
 
                   return `
-                    <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden;">
-                      <div onclick="toggleOrderAccordion('${compAccId}')" style="padding:12px; cursor:pointer;">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; gap:8px;">
-                          <div style="flex:1;">
-                            <div style="font-weight:800; color:var(--text-main); font-size:14.5px;">#${i + 1}. ${comp.name}</div>
-                            <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                              <span>📦 SL: <b style="color:var(--text-main);">${comp.qty.toFixed(1)} Thùng</b></span>
-                              <span>• 💰 Giá TB: <b style="color:var(--amber);">${avgPricePerCartonK}K/Thùng</b></span>
-                              <span style="color:var(--purple); background:rgba(124,58,237,0.08); padding:2px 6px; border-radius:6px; font-weight:800;">
-                                🏷️ ${comp.skuList.length} mã SP <i id="icon_${compAccId}" class="fa-solid fa-chevron-down" style="font-size:10px; margin-left:3px; transition:0.3s; ${isAccOpen(compAccId) ? 'transform:rotate(180deg);' : ''}"></i>
-                              </span>
+                    <div class="mobile-item-card" style="display:flex; flex-direction:column; padding:0; border-left:5px solid ${medalCol}; overflow:hidden; margin-bottom:0;">
+                      <div onclick="toggleOrderAccordion('${accId}')" style="padding:14px; display:flex; flex-direction:column; gap:8px; cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                          <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="width:32px; height:32px; border-radius:50%; background:${medalCol}; color:#fff; display:flex; justify-content:center; align-items:center; font-weight:900; font-size:15px;">${index + 1}</div>
+                            <div>
+                              <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">${rep.name}</div>
+                              <div style="font-size:12px; font-weight:700; color:var(--text-muted);">
+                                Mã: <b style="color:var(--primary);">${rep.code}</b> • <b>${rep.compSet.size}</b> Cty • <b>${rep.skuMap.size}</b> Mã SP
+                                ${isSingleDay ? ` • 🕒 <b style="color:var(--amber);">${formatShortTime(rep.firstTimeMs)} - ${formatShortTime(rep.lastTimeMs)}</b>` : ''}
+                              </div>
                             </div>
                           </div>
-                          <div style="text-align:right; flex-shrink:0;">
-                            <div style="font-weight:900; color:var(--primary); font-size:16px;">${Math.round(comp.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                            <span style="font-size:11.5px; color:var(--purple); font-weight:900; background:rgba(124, 58, 237, 0.1); padding:2px 8px; border-radius:6px; display:inline-block; margin-top:3px;">
-                              Chiếm ${pct}%
-                            </span>
+                          <div style="text-align:right;">
+                            <div style="font-size:19px; font-weight:900; color:var(--rose);">${revFormatted}K</div>
+                            <div style="font-size:12.5px; font-weight:800; color:var(--primary);">${rep.kien.toFixed(1)} Thùng</div>
                           </div>
                         </div>
-                        <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
-                          <div style="height:100%; width:${barWidth}%; background:var(--purple-gradient); border-radius:3px;"></div>
+
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; font-size:12.5px; color:var(--text-muted); font-weight:700; background:rgba(0,0,0,0.02); padding:8px 10px; border-radius:8px; border:1px dashed var(--card-border);">
+                          <span>🛒 <b style="color:var(--text-main);">${rep.don}</b> Đơn (<b style="color:var(--emerald);">${coverageBadge}</b>)</span>
+                          <span>📦 TB: <b style="color:var(--amber);">${dropSize}K</b> • LPPC: <b style="color:var(--primary);">${repLppc}</b></span>
+                          <span style="background:${gpsBg}; color:${gpsColor}; padding:3px 8px; border-radius:6px; font-weight:900; font-size:11.5px;">
+                            📍 ${rep.taiQuay}/${rep.don} tại quầy
+                          </span>
+                        </div>
+
+                        <div>
+                          <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800; color:var(--text-muted); margin-bottom:3px;">
+                            <span>Tỷ trọng so với Top 1</span>
+                            <span style="color:${index === 0 ? 'var(--emerald)' : 'var(--primary)'};">${progressPercent.toFixed(0)}%</span>
+                          </div>
+                          <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; width:${progressPercent}%; background:${index === 0 ? 'var(--emerald-gradient)' : 'linear-gradient(90deg, #3B82F6, #60A5FA)'}; border-radius:3px;"></div>
+                          </div>
                         </div>
                       </div>
 
-                      <!-- Chi tiết từng sản phẩm thuộc Nhãn hàng kèm Giá bán TB và Thành tiền -->
-                      <div id="${compAccId}" class="${isAccOpen(compAccId) ? '' : 'hidden'}" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
-                        <div style="font-size:12px; font-weight:800; color:var(--purple); margin-bottom:6px; display:flex; justify-content:space-between;">
-                          <span>CHI TIẾT SẢN PHẨM & ĐƠN GIÁ BÁN (${comp.skuList.length} mã):</span>
-                          <span>Thành tiền / SL</span>
+                      <div id="${accId}" class="${isAccOpen(accId) ? '' : 'hidden'}" style="padding:12px 14px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
+                        <div style="display:flex; gap:6px; margin-bottom:10px;">
+                          <button type="button" id="btn_rep_sku_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'skus')" style="flex:1; justify-content:center; background:var(--primary); color:#fff; font-weight:800; padding:6px;">
+                            📦 Mặt hàng đã bán (${sortedSkus.length})
+                          </button>
+                          <button type="button" id="btn_rep_ord_${safeRepCode}" class="btn btn-sm" onclick="switchRepSubView('${safeRepCode}', 'orders')" style="flex:1; justify-content:center; background:var(--bg-dark); color:var(--text-muted); font-weight:800; padding:6px;">
+                            🏪 Nhật ký Tiệm & Giờ chốt (${sortedOrders.length})
+                          </button>
                         </div>
-                        <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
-                          ${comp.skuList.map(sku => {
-                            const sKien = Math.floor(sku.qty / sku.ratio);
-                            const sLe = sku.qty % sku.ratio;
-                            const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
-                            const unitPriceK = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
-                            const cartonPriceK = sku.thung > 0 ? Math.round(sku.doanhSo / sku.thung / 1000).toLocaleString('en-US') : 0;
+
+                        <!-- Sub-view 1: Danh sách mặt hàng -->
+                        <div id="rep_skus_${safeRepCode}" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                          ${sortedSkus.map(skuObj => {
+                            const sKien = Math.floor(skuObj.qty / skuObj.ratio);
+                            const sLe = skuObj.qty % skuObj.ratio;
+                            const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${skuObj.unit}` : `${sKien} Thùng`) : `${skuObj.qty} ${skuObj.unit}`;
+                            const avgUnitPrice = skuObj.qty > 0 ? (skuObj.doanhSo / skuObj.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
                             return `
-                              <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
+                              <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:5px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
                                 <div style="flex:1; padding-right:8px;">
-                                  <div style="font-weight:800; color:var(--text-main);"><span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
+                                  <div style="color:var(--text-main); font-weight:700;">[${skuObj.code}] ${skuObj.name}</div>
+                                  <div style="font-size:11.5px; color:var(--text-muted);">Đơn giá: <b>${avgUnitPrice}K/${skuObj.unit}</b></div>
+                                </div>
+                                <div style="text-align:right; flex-shrink:0;">
+                                  <div style="color:var(--rose); font-weight:800;">${Math.round(skuObj.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                                  <div style="color:var(--primary); font-size:11.5px; font-weight:800;">${strQty}</div>
+                                </div>
+                              </div>
+                            `;
+                          }).join('')}
+                        </div>
+
+                        <!-- Sub-view 2: Nhật ký Tiệm & Giờ chốt đơn -->
+                        <div id="rep_orders_${safeRepCode}" class="hidden" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                          ${sortedOrders.map(ord => {
+                            const distLabel = ord.distMeters !== null
+                              ? (ord.distMeters > 1000 ? `${(ord.distMeters / 1000).toFixed(1)}km` : `${ord.distMeters}m`)
+                              : 'Chưa rõ GPS';
+                            const gpsTagColor = ord.isAtStore ? 'var(--emerald)' : 'var(--rose)';
+                            return `
+                              <div onclick="openOrderDetailsModal('${ord.id}')" style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:6px 8px; border-radius:8px; background:var(--panel-bg); border:1px solid var(--card-border); cursor:pointer;">
+                                <div style="flex:1; padding-right:8px;">
+                                  <div style="font-weight:800; color:var(--text-main);">#${ord.soCtu} • ${ord.storeName}</div>
                                   <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                                    🏷️ Giá bán: <b style="color:var(--amber);">${unitPriceK}K/${sku.unit}</b> (~<b>${cartonPriceK}K/Thùng</b> • Q/C ${sku.ratio})
+                                    🕒 <b>${formatShortTime(ord.timeMs)}</b> (${formatDateDDMMYYYY(ord.ngayCtu)}) • <span style="color:${gpsTagColor}; font-weight:800;">${ord.isAtStore ? '🟢 Tại quầy' : '🔴 Lệch'} (${distLabel})</span>
                                   </div>
                                 </div>
                                 <div style="text-align:right; flex-shrink:0;">
-                                  <div style="font-weight:900; color:var(--rose); font-size:14px;">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
-                                  <div style="font-size:11.5px; font-weight:800; color:var(--primary);">${strQty} (${sku.thung.toFixed(1)}T)</div>
+                                  <div style="color:var(--rose); font-weight:900;">${Math.round(ord.rev / 1000).toLocaleString('en-US')}K</div>
+                                  <div style="color:var(--primary); font-size:11px; font-weight:800;">${ord.skuCount} mã • ${ord.thung.toFixed(1)}T</div>
                                 </div>
                               </div>
                             `;
@@ -7943,15 +7669,285 @@ else if (tab === 'kpi') {
                       </div>
                     </div>
                   `;
-                }).join('');
-              })()}
+                }).join('') : `
+                  <div style="text-align:center; padding:30px; background:var(--card-bg); border-radius:12px; color:var(--text-muted); font-weight:800;">
+                    Chưa có giao dịch nào trong khoảng thời gian này.
+                  </div>
+                `}
+              </div>
             </div>
           </div>
-        </div>
-        ` : ''}
-      `;
+
+          <!-- PHÂN TÍCH ĐỘ PHỦ & DOANH SỐ THEO TUYẾN BÁN HÀNG -->
+          ${activeRoutesList.length > 0 ? `
+          <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid #0EA5E9; margin-bottom:20px;">
+            <div onclick="toggleOrderAccordion('acc_route_performance')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-route" style="color:#0EA5E9;"></i> HIỆU SUẤT & ĐỘ PHỦ THEO TUYẾN (${activeRoutesList.length})</div>
+              <i id="icon_acc_route_performance" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_route_performance') ? 'transform:rotate(180deg);' : ''}"></i>
+            </div>
+            <div id="acc_route_performance" class="${isAccOpen('acc_route_performance') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                ${activeRoutesList.map((rt, i) => {
+                  const activeCount = rt.activeStores.size;
+                  const hitRatePct = rt.totalStores > 0 ? ((activeCount / rt.totalStores) * 100).toFixed(1) : 0;
+                  const barWidth = Math.min(100, Math.max((rt.doanhSo / maxRouteRev) * 100, 3));
+                  return `
+                    <div style="padding-bottom:10px; border-bottom:1px dashed var(--card-border);">
+                      <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:6px; gap:8px;">
+                        <div style="flex:1;">
+                          <div style="font-weight:900; color:var(--text-main);">
+                            <span style="background:rgba(14,165,233,0.12); color:#0284C7; padding:2px 8px; border-radius:6px; font-size:12px; margin-right:6px;">Tuyến ${rt.code}</span>
+                            ${rt.name}
+                          </div>
+                          <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px;">
+                            📍 Độ phủ: <b style="color:var(--emerald);">${activeCount}/${rt.totalStores} tiệm (${hitRatePct}%)</b> • 🛒 <b>${rt.don}</b> đơn
+                          </div>
+                        </div>
+                        <div style="text-align:right; flex-shrink:0;">
+                          <div style="font-weight:900; color:var(--primary); font-size:15.5px;">${Math.round(rt.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                          <div style="font-size:12px; color:var(--text-muted); font-weight:800;">${rt.kien.toFixed(1)} Thùng</div>
+                        </div>
+                      </div>
+                      <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                        <div style="height:100%; width:${barWidth}%; background:linear-gradient(90deg, #0EA5E9, #2563EB); border-radius:3px;"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- TOP 15 HÀNG BÁN CHẠY -->
+          ${topGlobalSkus.length > 0 ? `
+          <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--rose); margin-bottom:20px;">
+            <div onclick="toggleOrderAccordion('acc_top_products')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-fire" style="color:var(--rose);"></i> TOP ${topGlobalSkus.length} HÀNG BÁN CHẠY NHẤT</div>
+              <i id="icon_acc_top_products" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_products') ? 'transform:rotate(180deg);' : ''}"></i>
+            </div>
+            <div id="acc_top_products" class="${isAccOpen('acc_top_products') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                ${topGlobalSkus.map((sku, i) => {
+                  const sKien = Math.floor(sku.qty / sku.ratio);
+                  const sLe = sku.qty % sku.ratio;
+                  const qtyStr = sKien > 0 ? (sLe > 0 ? `${sKien}T ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
+                  const avgUnitPrice = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
+                  const avgCartonPrice = sku.thung > 0 ? Math.round(sku.doanhSo / sku.thung / 1000).toLocaleString('en-US') : 0;
+                  const barWidth = Math.min(100, Math.max((sku.doanhSo / maxGlobalSkuRev) * 100, 4));
+                  return `
+                    <div>
+                      <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:5px; gap:8px;">
+                        <div style="flex:1;">
+                          <div style="font-weight:800; color:var(--text-main);">${i + 1}. <span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
+                          <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:2px;">
+                            💰 Giá bán TB: <b style="color:var(--amber);">${avgUnitPrice}K/${sku.unit}</b> (~<b>${avgCartonPrice}K/Thùng</b>)
+                          </div>
+                        </div>
+                        <div style="text-align:right; flex-shrink:0;">
+                          <div style="font-weight:900; color:var(--rose);">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                          <div style="font-size:12px; color:var(--text-muted); font-weight:700;">${qtyStr} (${sku.thung.toFixed(1)}T)</div>
+                        </div>
+                      </div>
+                      <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                        <div style="height:100%; width:${barWidth}%; background:var(--rose-gradient); border-radius:3px;"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- TOP 30 KHÁCH HÀNG NỔI BẬT -->
+          ${topStoresList.length > 0 ? `
+          <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--emerald); margin-bottom:20px;">
+            <div onclick="toggleOrderAccordion('acc_top_stores')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="font-size:15.5px; font-weight:800; color:var(--text-main);"><i class="fa-solid fa-crown" style="color:var(--amber);"></i> TOP KHÁCH HÀNG DOANH SỐ CAO (${topStoresList.length})</div>
+              <i id="icon_acc_top_stores" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s; ${isAccOpen('acc_top_stores') ? 'transform:rotate(180deg);' : ''}"></i>
+            </div>
+            <div id="acc_top_stores" class="${isAccOpen('acc_top_stores') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+              <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:10px; font-style:italic;">
+                * Bấm vào từng khách hàng để xem chi tiết các mặt hàng đã lấy và giá trị từng món:
+              </div>
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                ${topStoresList.map((st, i) => {
+                  const rawIdentifier = st.id || st.name;
+                  const sEntry = storeIndexMap.get(String(rawIdentifier));
+                  const matchedStore = sEntry ? sEntry.store : stores.find(s => s.id === rawIdentifier || s.code === rawIdentifier);
+
+                  let storeCode = matchedStore ? matchedStore.code : "KH";
+                  let storeName = matchedStore ? matchedStore.name : st.name;
+                  if (!matchedStore && st.name && st.name.includes(' - ')) {
+                    const parts = st.name.split(' - ');
+                    storeCode = parts[0].trim();
+                    storeName = parts.slice(1).join(' - ').trim();
+                  }
+
+                  const rKey = resolveStoreRouteCode(storeCode);
+                  const rObj = routeStoresCountMap.get(rKey);
+                  const routeName = rObj ? `Tuyến ${rObj.code} - ${rObj.name}` : (rKey !== 'KHAC' ? `Tuyến ${rKey}` : 'Chưa phân tuyến');
+
+                  const barWidth = Math.min(100, Math.max((st.doanhSo / maxStoreRev) * 100, 4));
+                  const storeSkus = Array.from(st.skuMap.values()).sort((a, b) => b.doanhSo - a.doanhSo);
+                  const safeStoreAccId = `acc_top_store_${String(storeCode || i).replace(/[^a-zA-Z0-9]/g, '_')}_${i}`;
+
+                  return `
+                    <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden;">
+                      <div onclick="toggleOrderAccordion('${safeStoreAccId}')" style="padding:12px; cursor:pointer;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; font-size:14px; margin-bottom:6px; gap:8px;">
+                          <div style="flex:1; min-width:0;">
+                            <div style="font-weight:900; color:var(--text-main); line-height:1.35;">
+                              <span style="color:var(--amber); margin-right:4px;">#${i + 1}</span>
+                              <span style="background:var(--prod-code-bg); color:var(--primary); font-size:11.5px; padding:2px 6px; border-radius:4px; margin-right:4px;">${storeCode}</span>
+                              ${storeName}
+                            </div>
+                            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-top:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                              <span><i class="fa-solid fa-route" style="color:var(--emerald);"></i> ${routeName}</span>
+                              <span>• 🛒 <b>${st.donCount}</b> đơn</span>
+                              <span style="color:var(--primary); background:rgba(37,99,235,0.08); padding:2px 6px; border-radius:6px; font-weight:800;">
+                                📦 Xem ${storeSkus.length} mặt hàng <i id="icon_${safeStoreAccId}" class="fa-solid fa-chevron-down" style="font-size:10px; margin-left:3px; transition:0.3s; ${isAccOpen(safeStoreAccId) ? 'transform:rotate(180deg);' : ''}"></i>
+                              </span>
+                            </div>
+                          </div>
+                          <div style="text-align:right; flex-shrink:0;">
+                            <div style="font-weight:900; color:var(--emerald); font-size:16px;">${Math.round(st.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                            <div style="font-size:12px; color:var(--text-muted); font-weight:800;">${st.qty.toFixed(1)} Thùng</div>
+                          </div>
+                        </div>
+                        <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                          <div style="height:100%; width:${barWidth}%; background:var(--emerald-gradient); border-radius:3px;"></div>
+                        </div>
+                      </div>
+
+                      <div id="${safeStoreAccId}" class="${isAccOpen(safeStoreAccId) ? '' : 'hidden'}" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
+                        <div style="font-size:12px; font-weight:800; color:var(--primary); margin-bottom:6px; display:flex; justify-content:space-between;">
+                          <span>MẶT HÀNG KHÁCH ĐÃ LẤY (${storeSkus.length} mã):</span>
+                          <span>Thành tiền / SL</span>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
+                          ${storeSkus.map(sku => {
+                            const sKien = Math.floor(sku.qty / sku.ratio);
+                            const sLe = sku.qty % sku.ratio;
+                            const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
+                            const unitPriceK = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
+                            return `
+                              <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
+                                <div style="flex:1; padding-right:8px;">
+                                  <div style="font-weight:800; color:var(--text-main);"><span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
+                                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                                    Đơn giá: <b style="color:var(--amber);">${unitPriceK}K/${sku.unit}</b> (Q/C: ${sku.ratio})
+                                  </div>
+                                </div>
+                                <div style="text-align:right; flex-shrink:0;">
+                                  <div style="font-weight:900; color:var(--rose); font-size:14px;">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                                  <div style="font-size:11.5px; font-weight:800; color:var(--primary);">${strQty}</div>
+                                </div>
+                              </div>
+                            `;
+                          }).join('')}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- TỶ TRỌNG DOANH SỐ NHÃN HÀNG -->
+          ${companyDistList.length > 0 ? `
+          <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid var(--purple); margin-bottom:20px;">
+            <div onclick="toggleOrderAccordion('acc_top_companies')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+              <div style="font-size:15.5px; font-weight:900; color:var(--text-main);">
+                <i class="fa-solid fa-chart-pie" style="color:var(--purple); margin-right:6px;"></i> TỶ TRỌNG DOANH SỐ NHÃN HÀNG (${companyDistList.length})
+              </div>
+              <i id="icon_acc_top_companies" class="fa-solid fa-chevron-down" style="color:var(--purple); transition:0.3s; ${isAccOpen('acc_top_companies') ? 'transform:rotate(180deg);' : ''}"></i>
+            </div>
+            <div id="acc_top_companies" class="${isAccOpen('acc_top_companies') ? '' : 'hidden'}" style="padding:16px; border-top:1px solid var(--card-border); background:var(--card-bg);">
+              <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-bottom:10px; font-style:italic;">
+                * Công thức khớp tổng: <b>Sản lượng (Thùng) × Giá TB/Thùng = Tổng Doanh Số</b>. Bấm vào từng nhãn hàng để kiểm tra giá bán và sản lượng của từng sản phẩm:
+              </div>
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                ${(() => {
+                  const totalCompanyRev = companyDistList.reduce((sum, c) => sum + c.doanhSo, 0);
+                  return companyDistList.map((comp, i) => {
+                    const pct = totalCompanyRev > 0 ? ((comp.doanhSo / totalCompanyRev) * 100).toFixed(1) : 0;
+                    const barWidth = Math.min(100, Math.max(Number(pct), 2));
+                    const avgPricePerCartonK = comp.qty > 0 ? Math.round(comp.doanhSo / comp.qty / 1000).toLocaleString('en-US') : 0;
+                    const compAccId = `acc_comp_detail_${i}`;
+
+                    return `
+                      <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:12px; overflow:hidden;">
+                        <div onclick="toggleOrderAccordion('${compAccId}')" style="padding:12px; cursor:pointer;">
+                          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; gap:8px;">
+                            <div style="flex:1;">
+                              <div style="font-weight:800; color:var(--text-main); font-size:14.5px;">#${i + 1}. ${comp.name}</div>
+                              <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                <span>📦 SL: <b style="color:var(--text-main);">${comp.qty.toFixed(1)} Thùng</b></span>
+                                <span>• 💰 Giá TB: <b style="color:var(--amber);">${avgPricePerCartonK}K/Thùng</b></span>
+                                <span style="color:var(--purple); background:rgba(124,58,237,0.08); padding:2px 6px; border-radius:6px; font-weight:800;">
+                                  🏷️ ${comp.skuList.length} mã SP <i id="icon_${compAccId}" class="fa-solid fa-chevron-down" style="font-size:10px; margin-left:3px; transition:0.3s; ${isAccOpen(compAccId) ? 'transform:rotate(180deg);' : ''}"></i>
+                                </span>
+                              </div>
+                            </div>
+                            <div style="text-align:right; flex-shrink:0;">
+                              <div style="font-weight:900; color:var(--primary); font-size:16px;">${Math.round(comp.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                              <span style="font-size:11.5px; color:var(--purple); font-weight:900; background:rgba(124, 58, 237, 0.1); padding:2px 8px; border-radius:6px; display:inline-block; margin-top:3px;">
+                                Chiếm ${pct}%
+                              </span>
+                            </div>
+                          </div>
+                          <div style="width:100%; height:6px; background:rgba(0,0,0,0.05); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; width:${barWidth}%; background:var(--purple-gradient); border-radius:3px;"></div>
+                          </div>
+                        </div>
+
+                        <div id="${compAccId}" class="${isAccOpen(compAccId) ? '' : 'hidden'}" style="padding:10px 12px; border-top:1px dashed var(--card-border); background:var(--card-bg);">
+                          <div style="font-size:12px; font-weight:800; color:var(--purple); margin-bottom:6px; display:flex; justify-content:space-between;">
+                            <span>CHI TIẾT SẢN PHẨM & ĐƠN GIÁ BÁN (${comp.skuList.length} mã):</span>
+                            <span>Thành tiền / SL</span>
+                          </div>
+                          <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
+                            ${comp.skuList.map(sku => {
+                              const sKien = Math.floor(sku.qty / sku.ratio);
+                              const sLe = sku.qty % sku.ratio;
+                              const strQty = sKien > 0 ? (sLe > 0 ? `${sKien} Thùng ${sLe} ${sku.unit}` : `${sKien} Thùng`) : `${sku.qty} ${sku.unit}`;
+                              const unitPriceK = sku.qty > 0 ? (sku.doanhSo / sku.qty / 1000).toLocaleString('en-US', {maximumFractionDigits: 1}) : 0;
+                              const cartonPriceK = sku.thung > 0 ? Math.round(sku.doanhSo / sku.thung / 1000).toLocaleString('en-US') : 0;
+                              return `
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.04);">
+                                  <div style="flex:1; padding-right:8px;">
+                                    <div style="font-weight:800; color:var(--text-main);"><span style="color:var(--primary);">[${sku.code}]</span> ${sku.name}</div>
+                                    <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                                      🏷️ Giá bán: <b style="color:var(--amber);">${unitPriceK}K/${sku.unit}</b> (~<b>${cartonPriceK}K/Thùng</b> • Q/C ${sku.ratio})
+                                    </div>
+                                  </div>
+                                  <div style="text-align:right; flex-shrink:0;">
+                                    <div style="font-weight:900; color:var(--rose); font-size:14px;">${Math.round(sku.doanhSo / 1000).toLocaleString('en-US')}K</div>
+                                    <div style="font-size:11.5px; font-weight:800; color:var(--primary);">${strQty} (${sku.thung.toFixed(1)}T)</div>
+                                  </div>
+                                </div>
+                              `;
+                            }).join('')}
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  }).join('');
+                })()}
+              </div>
+            </div>
+          </div>
+          ` : ''}
+        `;
+      };
+
+      // Chạy lần đầu khi mở tab
+      window.renderKpiAnalyticsBody();
     }
-       }
 // ==========================================
 // KHỐI XỬ LÝ LỊCH SỬ KHÁCH HÀNG (GỘP THEO 2 KÝ TỰ ĐẦU MÃ SẢN PHẨM)
 // ==========================================
