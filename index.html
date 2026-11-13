@@ -7116,34 +7116,46 @@ else if (tab === 'kpi') {
         return list;
       };
 
-      // NÂNG CẤP TỐI ƯU HÓA: LỌC TRỰC TIẾP TRÊN RAM, KHÔNG GỌI FIREBASE
+     // NÂNG CẤP TỐI ƯU HÓA: LỌC TRỰC TIẾP TRÊN RAM, KHÔNG GỌI FIREBASE
       let analyticsOrders = [];
       try {
+          // Lấy dữ liệu nền: Dùng monthlyOrdersForKpi (chứa đơn của tháng hiện tại đã load sẵn từ cache)
+          const baseOrders = Array.isArray(monthlyOrdersForKpi) ? monthlyOrdersForKpi : [];
+
           if (filterStart && filterEnd) {
-              // Dùng luôn mảng dữ liệu tháng đã được cache ở trên
-              const baseOrders = Array.isArray(monthlyOrdersForKpi) ? monthlyOrdersForKpi : [];
-              
-              // Lọc cho kỳ hiện tại
+              // Nếu CÓ BỘ LỌC NGÀY: Lọc ra các đơn nằm trong khoảng ngày đó
               analyticsOrders = baseOrders.filter(o => o.ngayCtu >= filterStart && o.ngayCtu <= filterEnd);
+          } else {
+              // Nếu KHÔNG CÓ BỘ LỌC NGÀY (VD: Mới load trang, hoặc chế độ xem "Tháng Này"):
+              // Lấy toàn bộ đơn hàng của tháng mục tiêu
+              analyticsOrders = [...baseOrders];
+          }
+
+          // Tích hợp thêm các đơn hàng vừa mới tạo (chưa kịp lưu vào cache nhưng đang nằm trong biến orders toàn cục)
+          if (typeof orders !== 'undefined' && Array.isArray(orders)) {
+              const ramMap = new Map();
+              analyticsOrders.forEach(o => ramMap.set(o.id, o));
               
-              // Tích hợp thêm các đơn hàng vừa mới tạo (chưa kịp lưu vào cache nhưng đang nằm trong biến orders toàn cục)
-              if (typeof orders !== 'undefined' && Array.isArray(orders)) {
-                  const ramMap = new Map();
-                  analyticsOrders.forEach(o => ramMap.set(o.id, o));
-                  orders.forEach(localOrd => {
-                      if (localOrd && localOrd.status !== 'Đã hủy' && localOrd.ngayCtu >= filterStart && localOrd.ngayCtu <= filterEnd) {
+              orders.forEach(localOrd => {
+                  if (localOrd && localOrd.status !== 'Đã hủy') {
+                      // Nếu có bộ lọc thì check ngày, không có bộ lọc thì chỉ check xem có thuộc tháng này không
+                      let isValid = false;
+                      if (filterStart && filterEnd) {
+                          isValid = (localOrd.ngayCtu >= filterStart && localOrd.ngayCtu <= filterEnd);
+                      } else {
+                          isValid = localOrd.ngayCtu && localOrd.ngayCtu.startsWith(window._chiTieuTargetMonth);
+                      }
+                      
+                      if (isValid) {
                           ramMap.set(localOrd.id, localOrd);
                       }
-                  });
-                  analyticsOrders = Array.from(ramMap.values());
-              }
-          } else {
-              // Nếu chưa chọn ngày Custom hợp lệ, trả về mảng rỗng để chờ
-              analyticsOrders = [];
+                  }
+              });
+              analyticsOrders = Array.from(ramMap.values());
           }
       } catch (err) {
           console.error("Lỗi lọc dữ liệu KPI:", err);
-          analyticsOrders = [];
+          analyticsOrders = typeof orders !== 'undefined' ? orders.filter(o => o.status !== 'Đã hủy' && o.ngayCtu && o.ngayCtu.startsWith(window._chiTieuTargetMonth)) : [];
       }
       if (currentTab !== 'kpi') return;
 
