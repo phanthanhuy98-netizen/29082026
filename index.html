@@ -3584,43 +3584,45 @@ window.filterTabProducts = function(val) {
       alert("Lỗi tải lại dữ liệu: " + e.message);
     }
   };
-  window.reloadCompanyDataManually = async function() {
-  try {
-    const btn = document.querySelector('button[onclick="reloadCompanyDataManually()"]');
-    if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+ window.reloadCustomersDataManually = async function() {
+    try {
+        const btn = document.getElementById('btnRefreshCustomers');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-    // Kéo dữ liệu mới nhất từ Firebase về
-    const cSnap = await getDocs(collection(db, "companies"));
-    companyList = cSnap.docs.map(d => d.data());
-    window.allCompanies = companyList;
+        // Kéo TOÀN BỘ danh sách khách hàng mới nhất từ Firebase về (Bỏ qua bộ nhớ đệm)
+        const sSnap = await getDocs(collection(db, "stores"));
+        const freshStores = sSnap.docs.map(d => d.data());
+        
+        stores = freshStores;
+        window.allStores = stores;
 
-    // Lưu vào Cache
-    if (typeof saveCompaniesToLocalCache === 'function') {
-      await saveCompaniesToLocalCache(companyList);
+        // Lưu vào bộ nhớ máy (IndexedDB)
+        if (typeof saveStoresToLocalCache === 'function') {
+            await saveStoresToLocalCache(stores);
+        }
+        
+        // Cập nhật biến Version để máy hiểu là đã lấy dữ liệu mới nhất
+        const serverMetaSnap = await getDoc(doc(db, "systemMeta", "version"));
+        if (serverMetaSnap.exists()) {
+            localStorage.setItem("storesVersion", serverMetaSnap.data().storesVersion || Date.now());
+        }
+
+        buildStoreIndex();
+
+        // Load lại giao diện tab Khách hàng
+        const activePane = document.getElementById('tabPane_customers');
+        if (activePane) {
+            renderTabContent('customers', activePane);
+        }
+
+        if (typeof triggerHaptic === 'function') triggerHaptic(20);
+        alert(`✅ Đã đồng bộ DNA thành công! Hiện hệ thống có chính xác ${stores.length} khách hàng.`);
+    } catch (err) {
+        alert("Lỗi tải lại dữ liệu: " + err.message);
+    } finally {
+        const btn = document.getElementById('btnRefreshCustomers');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới DS';
     }
-    
-    // Cập nhật local version bằng với server để không bị tải lặp
-    const serverMetaSnap = await getDoc(doc(db, "systemMeta", "version"));
-    if (serverMetaSnap.exists()) {
-      localStorage.setItem("companiesVersion", serverMetaSnap.data().companiesVersion || Date.now());
-    }
-
-    // Load lại giao diện
-    const activePane = document.getElementById('tabPane_company');
-    if (activePane) {
-      renderTabContent('company', activePane);
-    } else {
-      refreshCompanyListUI();
-    }
-
-    if (typeof triggerHaptic === 'function') triggerHaptic(20);
-    alert("✅ Đã làm mới dữ liệu Công ty thành công!");
-  } catch (err) {
-    alert("Lỗi tải lại dữ liệu: " + err.message);
-  } finally {
-    const btn = document.querySelector('button[onclick="reloadCompanyDataManually()"]');
-    if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
-  }
 };
 window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
@@ -4898,15 +4900,31 @@ window.importProductsExcel = function(event) {
           await batch.commit();
           await new Promise(resolve => setTimeout(resolve, 50));
         }
+// Cập nhật Version để đánh thức các máy khác đồng bộ
+        const newStoresVersion = Date.now();
+        await setDoc(doc(db, "systemMeta", "version"), { storesVersion: newStoresVersion }, { merge: true });
+        localStorage.setItem("storesVersion", newStoresVersion);
 
-        const metaRef = doc(db, "systemCounters", "globalMetadata");
-        await setDoc(metaRef, { version: serverTimestamp() }, { merge: true });
+        // THUẬT TOÁN CỘNG DỒN (APPEND & MERGE)
+        rawCustomers.forEach(newCust => {
+            const idx = stores.findIndex(s => s.code === newCust.code || s.id === newCust.id);
+            if (idx > -1) {
+                // Đã có mã này -> Cập nhật thông tin mới
+                stores[idx] = { ...stores[idx], ...newCust };
+            } else {
+                // Chưa có -> Thêm nối tiếp vào danh sách
+                stores.push(newCust);
+            }
+        });
 
-        stores = rawCustomers;
         buildStoreIndex();
         await saveStoresToLocalCache(stores);
-        renderUI();
-        alert(`✅ Đã đẩy thành công ${stores.length} khách hàng lên Firebase Firestore!`);
+        
+        // Render lại giao diện
+        const activePane = document.getElementById('tabPane_customers');
+        if (activePane) renderTabContent('customers', activePane);
+        
+        alert(`✅ Đã thêm/cập nhật thành công ${rawCustomers.length} khách hàng!\nTổng số lượng KH hiện tại trên máy bạn là: ${stores.length}`);
       } catch (err) { 
         alert("Lỗi đẩy lên Firebase: " + err.message); 
       }
@@ -6025,7 +6043,7 @@ ${activeVisitedStore ? `
       setTimeout(() => filterSalesProducts(''), 50);
     }
 
-    else if (tab === 'customers') {
+ else if (tab === 'customers') {
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
       container.innerHTML = `
@@ -6033,28 +6051,34 @@ ${activeVisitedStore ? `
           <h2 style="font-weight:800;"><i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})</h2>
           <div class="excel-group-btns">
             
-            <!-- THÊM NÚT QUÉT GIAN LẬN Ở ĐÂY -->
             ${currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') ? `
             <button class="btn btn-red btn-sm" onclick="openGpsAuditModal()" style="font-weight:900; font-size:12px; box-shadow: 0 2px 8px rgba(225,29,72,0.3);" title="Quét phát hiện nhân viên ghim trùng tọa độ">
               <i class="fa-solid fa-radar fa-spin-pulse"></i> Quét Gian Lận GPS
             </button>
             ` : ''}
 
-            <!-- Nút Làm Mới GPS Riêng Biệt -->
-            <button class="btn btn-amber btn-sm" onclick="refreshStoresGPSData()" style="font-weight:700; font-size:12px;" title="Cập nhật vị trí ghim GPS mới nhất từ máy chủ">
-              <i class="fa-solid fa-rotate"></i> Làm mới GPS
+            <!-- NÚT MỚI: LÀM MỚI TỔNG BỘ DANH SÁCH (DNA) -->
+            <button id="btnRefreshCustomers" class="btn btn-blue btn-sm" onclick="reloadCustomersDataManually()" style="font-weight:900; font-size:12px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);" title="Đồng bộ danh sách KH chuẩn nhất từ máy chủ">
+              <i class="fa-solid fa-rotate"></i> Làm mới DS
             </button>
 
-    <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
-      <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
-    </button>
+            <!-- Nút Làm Mới GPS -->
+            <button class="btn btn-amber btn-sm" onclick="refreshStoresGPSData()" style="font-weight:700; font-size:12px;" title="Cập nhật vị trí ghim GPS mới nhất">
+              <i class="fa-solid fa-location-dot"></i> Cập nhật GPS
+            </button>
+
+            <button id="togglePinnedGPSBtn" class="btn btn-sm" onclick="togglePinnedGPSFilter()" style="background:${showOnlyPinnedGPS ? 'var(--primary)' : '#E2E8F0'}; color:${showOnlyPinnedGPS ? '#fff' : '#1E293B'}; font-weight:700; font-size:12px;">
+              <i class="fa-solid fa-map-location-dot"></i> ${showOnlyPinnedGPS ? 'Ẩn ghim' : 'Xem KH ghim GPS'}
+            </button>
+            
             ${!isSales && !isViewer ? `
               <button class="btn btn-green btn-sm" onclick="exportCustomersExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
               <label class="btn btn-green btn-sm" style="cursor:pointer;margin:0;"><i class="fa-solid fa-file-arrow-up"></i> Tải Excel <input type="file" accept=".xlsx, .csv" onchange="importCustomersExcel(event)" style="display:none;"></label>
             ` : ''}  
-           ${currentUser && currentUser.role === 'admin' ? `
-  <button class="btn btn-red btn-sm" onclick="deleteAllAndImportCustomersExcel(event)"><i class="fa-solid fa-triangle-exclamation"></i> Xóa & Tải Mới KH</button>
-` : ''}
+            
+            ${currentUser && currentUser.role === 'admin' ? `
+              <button class="btn btn-red btn-sm" onclick="deleteAllAndImportCustomersExcel(event)"><i class="fa-solid fa-triangle-exclamation"></i> Xóa & Tải Mới KH</button>
+            ` : ''}
           </div>
         </div>
 
