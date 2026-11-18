@@ -1882,9 +1882,13 @@ try {
     });
 
     // 2. Lắng nghe thay đổi danh sách CÔNG TY
+  // 2. Lắng nghe thay đổi danh sách CÔNG TY & KHÁCH HÀNG (Dùng chung 1 Listener để tiết kiệm Read)
     compListenerUnsub = onSnapshot(doc(db, "systemMeta", "version"), async (docSnap) => {
         if (docSnap.exists()) {
-            const serverCompsVersion = Number(docSnap.data().companiesVersion || 1);
+            const data = docSnap.data();
+            
+            // --- A. XỬ LÝ NHẢY SỐ CÔNG TY ---
+            const serverCompsVersion = Number(data.companiesVersion || 1);
             const localCompsVersion = Number(localStorage.getItem("companiesVersion") || 0);
             
             if (serverCompsVersion > localCompsVersion) {
@@ -1897,9 +1901,23 @@ try {
                 }
                 localStorage.setItem("companiesVersion", serverCompsVersion);
                 
-                if (typeof renderUI === 'function' && currentTab === 'company') {
-                    renderUI();
-                }
+                if (typeof renderUI === 'function' && currentTab === 'company') renderUI();
+            }
+
+            // --- B. XỬ LÝ NHẢY SỐ KHÁCH HÀNG (REAL-TIME) ---
+            const serverStoresVersion = Number(data.storesVersion || 1);
+            const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
+
+            // Nếu phát hiện Version Khách hàng trên server lớn hơn Version máy Sales
+            if (serverStoresVersion > localStoresVersion) {
+                // Gọi hàm đồng bộ ngầm siêu tốc
+                await syncStoresRealtime(); 
+                
+                // Cập nhật lại Version cho máy Sales
+                localStorage.setItem("storesVersion", serverStoresVersion);
+                
+                // Rung điện thoại nhẹ để Sales biết có khách hàng mới vừa được Admin đẩy xuống
+                if (typeof triggerHaptic === 'function') triggerHaptic(15); 
             }
         }
     });
@@ -3622,6 +3640,47 @@ window.filterTabProducts = function(val) {
     } finally {
         const btn = document.getElementById('btnRefreshCustomers');
         if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới DS';
+    }
+};
+  // HÀM ĐỒNG BỘ NGẦM KHÁCH HÀNG: CHỈ TẢI DATA MỚI, KHÔNG TẢI LẠI TOÀN BỘ (TIẾT KIỆM BĂNG THÔNG)
+window.syncStoresRealtime = async function() {
+    try {
+        if (!stores || stores.length === 0) {
+            stores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
+        }
+
+        // Lấy mốc thời gian đồng bộ lần cuối
+        const lastSyncStore = localStorage.getItem("dms_last_sync_stores") || "2000-01-01T00:00:00.000Z";
+
+        // Chỉ Query lấy những khách hàng có sự thay đổi sau mốc thời gian trên
+        const qStore = query(collection(db, "stores"), where("updatedAt", ">", lastSyncStore));
+        const sSnap = await getDocs(qStore);
+
+        if (!sSnap.empty) {
+            const updatedStores = sSnap.docs.map(d => d.data());
+
+            // Dùng Map để ghi đè khách cũ / thêm khách mới mà không bị nhân đôi
+            const storeMap = new Map();
+            stores.forEach(s => storeMap.set(String(s.id || s.code), s));
+            updatedStores.forEach(s => storeMap.set(String(s.id || s.code), s));
+
+            stores = Array.from(storeMap.values());
+            window.allStores = stores;
+
+            if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
+            if (typeof buildStoreIndex === 'function') buildStoreIndex();
+
+            // Tự động nhảy số và vẽ lại giao diện nếu Sales đang mở tab Khách Hàng
+            if (currentTab === 'customers') {
+                const activePane = document.getElementById('tabPane_customers');
+                if (activePane) renderTabContent('customers', activePane);
+            }
+        }
+        
+        // Lưu lại mốc thời gian vừa đồng bộ xong
+        localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
+    } catch (e) {
+        console.error("Lỗi đồng bộ khách hàng ngầm:", e);
     }
 };
 window.loadMoreSoGoc = async function() {
