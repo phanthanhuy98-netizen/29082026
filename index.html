@@ -367,8 +367,6 @@
     <div class="panel">
       <!-- TAB SALES -->
       <div id="tabPane_sales" style="display:none;"></div>
-      <!-- TAB TELESALES (MỚI) -->
-      <div id="tabPane_telesales" style="display:none;"></div>
       <!-- TAB SOGOC BH -->
       <div id="tabPane_soGocBH" style="display:none;"></div>
       <!-- TAB CTKM (MỚI THÊM) -->
@@ -466,7 +464,7 @@ let compListenerUnsub = null;
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-let defaultTabOrder = ['sales', 'telesales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'];
+let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
@@ -739,7 +737,6 @@ let defaultTabOrder = ['sales', 'telesales', 'soGocBH', 'ctkm', 'customers', 'pr
 
     const tabLabels = {
       sales: "Bán Hàng",
-      telesales: "Telesales",
       soGocBH: "Sổ Gốc BH",
       customers: "Khách Hàng",
       productsAdmin: "Vật Tư",
@@ -750,7 +747,6 @@ let defaultTabOrder = ['sales', 'telesales', 'soGocBH', 'ctkm', 'customers', 'pr
 
     const tabDefaultColors = {
       sales: "#F59E0B",
-      telesales: "#0284C7",
       soGocBH: "#10B981",
       customers: "#0D9488",
       productsAdmin: "#3B82F6",
@@ -5645,7 +5641,7 @@ if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'gocS
     }
     renderUserProfileBar();
     renderTabBarOrder();
-['sales', 'telesales', 'customers', 'soGocBH', 'ctkm', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'].forEach(tabName => {
+['sales', 'customers', 'soGocBH', 'ctkm', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'].forEach(tabName => {
   const pane = document.getElementById(`tabPane_${tabName}`);
   if (pane) pane.style.display = 'none';
 });
@@ -5674,7 +5670,6 @@ if ((currentTab === 'users' || currentTab === 'soGocBH') && users.length === 0 &
 
     const tabConfigMap = {
       sales: { id: 'navSales', label: 'Bán Hàng', icon: 'fa-cart-shopping', defaultColor: '#F59E0B', perm: currentUser && currentUser.role !== 'accountant' && currentUser.role !== 'viewer' },
-      telesales: { id: 'navTelesales', label: 'Telesales', icon: 'fa-headset', defaultColor: '#0284C7', perm: currentUser && currentUser.role !== 'accountant' && currentUser.role !== 'viewer' },
       soGocBH: { id: 'navSoGocBH', label: 'Sổ Gốc BH', icon: 'fa-book', defaultColor: '#38A169', perm: currentUser && currentUser.role !== 'viewer' },
       ctkm: { id: 'navCtkm', label: 'CTKM', icon: 'fa-gift', defaultColor: '#E11D48', perm: currentUser && currentUser.role !== 'accountant' && currentUser.role !== 'viewer' },
        // Đã mở tab KH cho nhân viên Sales
@@ -5966,160 +5961,6 @@ ${activeVisitedStore ? `
         </small>
       `;
       setTimeout(() => filterTabCustomers(''), 50);
-    }
-      else if (tab === 'telesales') {
-      // 1. TÍNH TOÁN DỮ LIỆU GỢI Ý THÔNG MINH (AI SUGGESTION)
-      const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      
-      // Tạo Map chứa ngày mua cuối cùng của từng khách hàng
-      let lastOrderMap = new Map();
-      orders.forEach(o => {
-        if (o.status === 'Đã hủy') return;
-        const sId = String(o.storeId || '');
-        const sCode = String(o.maDTPNNo || o.maKH?.split('-')[0]?.trim() || '');
-        
-        const oDate = new Date(o.ngayCtu).getTime();
-        
-        if (sId) {
-           if (!lastOrderMap.has(sId) || lastOrderMap.get(sId).time < oDate) {
-               lastOrderMap.set(sId, { time: oDate, dateStr: o.ngayCtu, soCtu: o.soCtu });
-           }
-        }
-        if (sCode) {
-           if (!lastOrderMap.has(sCode) || lastOrderMap.get(sCode).time < oDate) {
-               lastOrderMap.set(sCode, { time: oDate, dateStr: o.ngayCtu, soCtu: o.soCtu });
-           }
-        }
-      });
-
-      // Lọc danh sách Telesales theo tuyến (Nếu Sales đi thị trường thì chỉ thấy tuyến của mình)
-      const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      let availableStores = stores;
-      if (!isAdminOrManager && Array.isArray(currentUser.assignedRoutes) && currentUser.assignedRoutes.length > 0) {
-          availableStores = stores.filter(s => {
-             const rCode = resolveStoreRouteCode(s.code);
-             return currentUser.assignedRoutes.includes(rCode);
-          });
-      }
-
-      // Xếp hạng khách hàng: Đã lâu không mua lên đầu
-      let teleList = availableStores.map(s => {
-          let lastOrd = lastOrderMap.get(String(s.id)) || lastOrderMap.get(String(s.code));
-          let daysSince = -1;
-          if (lastOrd) {
-              const diffTime = Math.abs(now - new Date(lastOrd.dateStr));
-              daysSince = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          }
-          return { ...s, daysSince, lastOrd };
-      });
-
-      // Đưa những người > 7 ngày chưa mua hoặc chưa từng mua lên đầu
-      teleList.sort((a, b) => {
-          if (a.daysSince === -1 && b.daysSince === -1) return 0;
-          if (a.daysSince === -1) return -1;
-          if (b.daysSince === -1) return 1;
-          return b.daysSince - a.daysSince;
-      });
-
-      // Render UI
-      container.innerHTML = `
-        <div class="tab-header-actions" style="margin-bottom:14px; border-bottom: 2px solid rgba(0,0,0,0.05); padding-bottom: 12px;">
-          <h2 style="font-weight:900; font-size:20px; color:var(--text-main); margin:0;">
-            <i class="fa-solid fa-headset" style="color:var(--primary);"></i> Tổng Đài Telesales
-          </h2>
-          <div style="font-size:12px; color:var(--text-muted); font-weight:700; margin-top:4px;">Danh sách khách hàng ưu tiên gọi chăm sóc & chốt đơn</div>
-        </div>
-
-        <!-- DASHBOARD MINI TỔNG ĐÀI -->
-        <div style="display:flex; gap:10px; margin-bottom:16px;">
-            <div style="flex:1; background:linear-gradient(135deg, rgba(37,99,235,0.1) 0%, rgba(37,99,235,0.05) 100%); border:1px solid rgba(37,99,235,0.2); border-radius:12px; padding:12px; text-align:center;">
-                <div style="font-size:11px; font-weight:800; color:var(--primary); text-transform:uppercase; margin-bottom:4px;">KH cần chăm sóc</div>
-                <div style="font-size:24px; font-weight:900; color:var(--text-main);">${teleList.length}</div>
-            </div>
-            <div style="flex:1; background:linear-gradient(135deg, rgba(245,158,11,0.1) 0%, rgba(245,158,11,0.05) 100%); border:1px solid rgba(245,158,11,0.2); border-radius:12px; padding:12px; text-align:center;">
-                <div style="font-size:11px; font-weight:800; color:var(--amber); text-transform:uppercase; margin-bottom:4px;">KH Cảnh báo rời bỏ</div>
-                <div style="font-size:24px; font-weight:900; color:var(--rose);">${teleList.filter(s => s.daysSince > 14 || s.daysSince === -1).length}</div>
-            </div>
-        </div>
-
-        <!-- Ô TÌM KIẾM -->
-        <div class="card" style="margin-bottom:12px; padding:10px;">
-          <input type="text" id="teleSearchInput" placeholder="🔍 Gõ nhanh mã KH, tên tiệm, hoặc số điện thoại..." 
-                 oninput="filterTelesales(this.value)" autocomplete="off" 
-                 style="margin:0; padding:13px 15px; font-size: 14px; font-weight: 700; background:var(--bg-dark); border-radius:10px; border:1px solid var(--card-border); width:100%;">
-        </div>
-
-        <div id="telesalesListContainer" style="display:flex; flex-direction:column; gap:10px;">
-          ${teleList.slice(0, 30).map(s => {
-             // Kịch bản Cố vấn
-             let statusBadge = '';
-             let callScript = '';
-             
-             if (s.daysSince === -1) {
-                 statusBadge = `<span style="background:#fee2e2; color:#ef4444; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:800;">Chưa từng mua</span>`;
-                 callScript = `Dạ em chào anh/chị, em là ${currentUser.name} gọi từ NPP Đại Đông. Em thấy tiệm nhà mình sầm uất nên nay em gọi để xin phép gửi anh/chị cuốn bảng giá 60 hãng nhà em tham khảo ạ. Hiện tại bên em đang có CTKM rất lớn...`;
-             } else if (s.daysSince > 14) {
-                 statusBadge = `<span style="background:#ffedd5; color:#d97706; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:800;">Đã ${s.daysSince} ngày chưa nhập</span>`;
-                 callScript = `Dạ em chào anh/chị, dạo này buôn bán đắt hàng không ạ? Lâu rồi em không thấy nhà mình lên đơn. Không biết hàng hóa trên kệ nhà mình có bị hụt mã nào không để em hỗ trợ lên toa kịp thời ạ?`;
-             } else {
-                 statusBadge = `<span style="background:#dcfce7; color:#10b981; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:800;">Mua ${s.daysSince} ngày trước</span>`;
-                 callScript = `Dạ em chào anh/chị, đơn hàng số #${s.lastOrd.soCtu} đợt trước mình nhận bán tốt chứ ạ? Hôm nay kho nhà em vừa về đợt hàng mới kèm chương trình chiết khấu 5%, em gọi để ưu tiên chừa hàng cho nhà mình...`;
-             }
-
-             return `
-              <div class="mobile-item-card tele-card-item" data-search="${removeAccents(s.code + ' ' + s.name + ' ' + (s.phone||'')).toLowerCase()}" style="display:flex; flex-direction:column; gap:10px; padding: 14px; border-left: 4px solid var(--primary);">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="flex:1;">
-                        <div style="font-weight:900; font-size:15px; color:var(--text-main); margin-bottom:4px; line-height:1.3;">
-                            <span style="color:var(--primary);">[${s.code}]</span> ${s.name}
-                        </div>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            ${statusBadge}
-                            <span style="font-size:12px; color:var(--text-muted); font-weight:700;"><i class="fa-solid fa-phone"></i> ${s.phone || 'Chưa có SĐT'}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- BẢNG KỊCH BẢN CHUYÊN NGHIỆP -->
-                <div style="background:rgba(0,0,0,0.02); border:1px dashed var(--card-border); padding:10px; border-radius:8px; font-size:13px; color:var(--text-main); line-height:1.5;">
-                    <b style="color:var(--amber);"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Gợi ý Kịch bản:</b><br>
-                    <i>"${callScript}"</i>
-                </div>
-                
-                <div style="display:flex; gap:8px; margin-top:4px;">
-                    <a href="tel:${s.phone || ''}" class="btn btn-green" style="flex:1; justify-content:center; padding:10px; font-size:13px; font-weight:900; text-decoration:none;" ${!s.phone ? 'onclick="event.preventDefault(); alert(\'Khách hàng chưa có số điện thoại\');"' : ''}>
-                        <i class="fa-solid fa-phone-volume"></i> GỌI ĐIỆN
-                    </a>
-                    <a href="https://zalo.me/${(s.zalo || s.phone || '').replace(/[^0-9]/g, '')}" target="_blank" class="btn btn-blue" style="flex:1; justify-content:center; padding:10px; font-size:13px; font-weight:900; text-decoration:none;" ${!s.phone && !s.zalo ? 'onclick="event.preventDefault(); alert(\'Chưa có số Zalo\');"' : ''}>
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Icon_of_Zalo.svg/1200px-Icon_of_Zalo.svg.png" style="width:14px; height:14px; filter:brightness(0) invert(1);"> ZALO
-                    </a>
-                    <button type="button" class="btn btn-amber" style="flex:1; justify-content:center; padding:10px; font-size:13px; font-weight:900; box-shadow:0 4px 10px rgba(245,158,11,0.3);" onclick="teleCreateOrder('${s.id}')">
-                        <i class="fa-solid fa-cart-arrow-down"></i> LÊN ĐƠN
-                    </button>
-                </div>
-              </div>
-             `;
-          }).join('')}
-        </div>
-      `;
-
-      // Khai báo hàm dùng riêng cho tab này
-      window.filterTelesales = function(val) {
-          const q = removeAccents(val.trim().toLowerCase());
-          const cards = document.querySelectorAll('.tele-card-item');
-          cards.forEach(c => {
-             const data = c.getAttribute('data-search') || '';
-             if (data.includes(q)) c.style.display = 'flex';
-             else c.style.display = 'none';
-          });
-      };
-
-      // Tích hợp thần thánh: Từ Telesales nhảy sang Bán Hàng
-      window.teleCreateOrder = function(storeId) {
-          selectStoreDirectly(storeId);
-          switchTab('sales');
-      };
     }
 
    else if (tab === 'soGocBH') {
