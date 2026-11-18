@@ -2159,56 +2159,12 @@ window.handleLogout = async function() {
       alert("✅ Đã xóa GPS thành công! Khách hàng đã ở trạng thái trống, có thể ghim lại.");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
-  // HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG
-  window.updateCustomerPhone = async function(storeId) {
-      const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
-      if (storeIndex === -1) return alert("Không tìm thấy khách hàng!");
 
-      const s = stores[storeIndex];
-      const newPhone = prompt(`NHẬP SỐ ĐIỆN THOẠI CHO KHÁCH HÀNG:\n[${s.code}] ${s.name}\n(Bắt buộc phải nhập để được phép bán hàng)`, s.phone || '');
-
-      if (newPhone !== null) {
-          const phoneStr = newPhone.trim().replace(/[^0-9]/g, ''); // Chỉ lấy số
-          
-          if (phoneStr === '') {
-              return alert("⛔ Lỗi: Số điện thoại không được để trống!");
-          }
-          if (phoneStr.length < 9 || phoneStr.length > 11) {
-              return alert("⛔ Lỗi: Số điện thoại không hợp lệ (Phải từ 9 đến 11 số)!");
-          }
-
-          try {
-              // Lưu lên Firebase
-              const storeRef = doc(db, "stores", String(s.id));
-              await updateDoc(storeRef, {
-                  phone: phoneStr,
-                  updatedAt: new Date().toISOString()
-              });
-
-              // Lưu vào biến cục bộ & Local Storage
-              stores[storeIndex].phone = phoneStr;
-              if (typeof saveStoresToLocalCache === 'function') {
-                  await saveStoresToLocalCache(stores);
-              }
-              if (typeof buildStoreIndex === 'function') buildStoreIndex();
-
-              // Cập nhật lại giao diện ngay lập tức
-              if (currentTab === 'customers' && typeof filterTabCustomers === 'function') filterTabCustomers(tabCustomerSearchKey);
-              if (currentTab === 'sales' && typeof filterSalesCustomers === 'function') filterSalesCustomers(customerSearchKeyword);
-
-              alert("✅ Đã cập nhật số điện thoại thành công! Bạn đã có thể tiếp tục bán hàng.");
-          } catch (err) {
-              alert("⛔ Lỗi cập nhật số điện thoại: " + err.message);
-          }
-      }
-  };
-
-window.selectStoreDirectly = async function(storeId, event) {
+  window.selectStoreDirectly = async function(storeId, event) {
     if (event) {
       event.preventDefault();
       event.stopPropagation();
     }
-    
     let targetStore = stores.find(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
     if (!targetStore) {
       targetStore = stores.find(s => removeAccents(String(s.name)).includes(removeAccents(String(storeId))));
@@ -2217,26 +2173,6 @@ window.selectStoreDirectly = async function(storeId, event) {
       alert("Không tìm thấy thông tin khách hàng này!");
       return;
     }
-
-    // ==================== CHỐT CHẶN SĐT (BẢN VÁ LỖI CỰC MẠNH) ====================
-    // Lọc sạch mọi khoảng trắng, chữ cái, ký tự đặc biệt... chỉ giữ lại đúng con số
-    const checkPhone = String(targetStore.phone || '').replace(/[^0-9]/g, '');
-    
-    // Nếu không có số nào, hoặc số quá ngắn (< 9 số) -> CHẶN ĐỨNG
-    if (checkPhone === '' || checkPhone.length < 9) {
-        alert(`⛔ CHẶN LÊN ĐƠN LẬP TỨC:\nKhách hàng "${targetStore.name}" chưa có số điện thoại (hoặc số không hợp lệ).\n\nBắt buộc phải cập nhật SĐT chuẩn mới được phép mở giỏ hàng!`);
-        
-        // Gọi hàm hiển thị bảng nhập SĐT cho Sales
-        if (typeof updateCustomerPhone === 'function') {
-            updateCustomerPhone(targetStore.id);
-        } else {
-            alert("Lỗi: Chưa cài đặt hàm updateCustomerPhone!");
-        }
-        
-        // LỆNH NÀY QUAN TRỌNG NHẤT: Đá văng tiến trình, tuyệt đối không cho chạy tiếp xuống dưới
-        return; 
-    }
-    // ==================== KẾT THÚC CHỐT CHẶN ====================================
 
     const hasGPSAlready = Boolean(targetStore.lat && Number(targetStore.lat) !== 0 && targetStore.lng && Number(targetStore.lng) !== 0);
 
@@ -2284,7 +2220,7 @@ window.selectStoreDirectly = async function(storeId, event) {
           pinnedHistory: [...existingHistory, newHistoryItem]
         };
 
-        const storeRef = doc(db, "stores", String(targetStore.id));
+       const storeRef = doc(db, "stores", String(targetStore.id));
         setDoc(storeRef, updatePayload, { merge: true }).catch(e => console.log("Lưu tạm GPS", e));
         
         addDoc(collection(db, "checkins"), {
@@ -2608,9 +2544,6 @@ window.selectStoreDirectly = async function(storeId, event) {
           </div>
           <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word; overflow-wrap: break-word; white-space: normal;" title="${s.name}">${s.name}</div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || 'Chưa có địa chỉ'}</div>
-          <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted); margin-top:3px; cursor:pointer;" onclick="updateCustomerPhone('${s.id}')">
-  <i class="fa-solid fa-phone" style="color:var(--emerald);"></i> SĐT: ${s.phone ? `<b style="color:var(--text-main);">${s.phone}</b>` : `<b style="color:var(--rose);">Chưa có (Bấm để thêm)</b>`} <i class="fa-solid fa-pen" style="color:var(--primary); font-size:11px; margin-left:4px;"></i>
-</div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
           <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:2px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
             <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
@@ -3296,10 +3229,7 @@ window.filterSalesProducts = function(val) {
         <div style="font-size: var(--font-size-customer-name); font-weight: 800; color: var(--text-main); line-height: 1.4; word-break: break-word;" title="${s.name}">${s.name}</div>
         <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-solid fa-location-dot" style="color:var(--rose);"></i> ${s.address || '—'}</div>
         <div style="display:flex; justify-content:space-between; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
-         <span onclick="updateCustomerPhone('${s.id}')" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
-  📞 SĐT: ${s.phone ? `<b style="color:var(--text-main);">${s.phone}</b>` : `<b style="color:var(--rose);">Trống (Bấm thêm)</b>`}
-  <i class="fa-solid fa-pen" style="color:var(--primary); font-size:11px;"></i>
-</span>
+          <span>📞 SĐT: <b>${s.phone || '—'}</b></span>
           <span>💬 Zalo: <b>${s.zalo || '—'}</b></span>
         </div>
         <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pInfo}</b></div>
