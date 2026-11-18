@@ -387,6 +387,8 @@
       <div id="tabPane_kpi" style="display:none;"></div>
       <!-- TAB USERS -->
       <div id="tabPane_users" style="display:none;"></div>
+      <!-- TAB TELESALES (MỚI THÊM) -->
+      <div id="tabPane_telesales" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -464,7 +466,7 @@ let compListenerUnsub = null;
     midnight: { name: 'Xanh Đêm', bgDark: '#0B0F19', bgGrad: 'radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%)', panelBg: 'rgba(15, 23, 42, 0.85)', cardBg: 'rgba(30, 41, 59, 0.75)', textMain: '#F1F5F9', textMuted: '#94A3B8', border: 'rgba(255, 255, 255, 0.1)' }
   };
 
-let defaultTabOrder = ['sales', 'soGocBH', 'ctkm', 'customers', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'];
+let defaultTabOrder = ['sales', 'soGocBH', 'telesales', 'ctkm', 'customers', 'productsAdmin', 'routes', 'company', 'gocSales', 'chiTieu', 'kpi', 'users'];
   let currentTabOrder = [...defaultTabOrder];
 
   let searchDebounceTimer = null;
@@ -5645,15 +5647,17 @@ if (isViewer && ['sales', 'soGocBH', 'productsAdmin', 'routes', 'company', 'gocS
   const pane = document.getElementById(`tabPane_${tabName}`);
   if (pane) pane.style.display = 'none';
 });
-    const activePane = document.getElementById(`tabPane_${currentTab}`);
+   const activePane = document.getElementById(`tabPane_${currentTab}`);
     if (activePane) {
-      activePane.style.display = 'block';
-   // Đoạn code mới sửa lại: Tải danh sách NV nếu ở tab Sổ Gốc BH hoặc tab Nhân viên
-if ((currentTab === 'users' || currentTab === 'soGocBH') && users.length === 0 && (isAdmin || isManager || currentUser.role === 'accountant')) {
-  getDocs(collection(db, "users")).then(snap => {
-    users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
-    renderTabContent(currentTab, activePane);
-  }).catch(e => { renderTabContent(currentTab, activePane); });
+      // Tải danh sách NV nếu ở tab Sổ Gốc BH hoặc tab Nhân viên
+      if ((currentTab === 'users' || currentTab === 'soGocBH') && users.length === 0 && (isAdmin || isManager || currentUser.role === 'accountant')) {
+        getDocs(collection(db, "users")).then(snap => {
+          users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+          renderTabContent(currentTab, activePane);
+        }).catch(e => { renderTabContent(currentTab, activePane); });
+      } else if (currentTab === 'telesales') {
+        // THÊM DÒNG NÀY ĐỂ GỌI HÀM VẼ TELESALES
+        renderTelesalesTab();
       } else {
         renderTabContent(currentTab, activePane);
       }
@@ -5683,6 +5687,7 @@ if ((currentTab === 'users' || currentTab === 'soGocBH') && users.length === 0 &
       gocSales: { id: 'navGocSales', label: 'Góc Sales', icon: 'fa-lightbulb', defaultColor: '#0EA5E9', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'sales') },
       chiTieu: { id: 'navChiTieu', label: 'Chỉ Tiêu', icon: 'fa-crosshairs', defaultColor: '#E11D48', perm: currentUser && currentUser.role !== 'accountant' && currentUser.role !== 'viewer' },
       kpi: { id: 'navKpi', label: 'Hiệu Suất', icon: 'fa-chart-pie', defaultColor: '#F43F5E', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') },
+      telesales: { id: 'navTelesales', label: 'Telesales', icon: 'fa-headset', defaultColor: '#0284C7', perm: currentUser && currentUser.role !== 'accountant' && currentUser.role !== 'viewer' },
       users: { id: 'navusers', label: 'NV', icon: 'fa-users', defaultColor: '#D97706', perm: currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') }
     };
 
@@ -15051,6 +15056,235 @@ window.renderGpsAuditContent = function() {
             </div>
         </div>
     `;
+};
+  // =========================================================
+// PHÂN HỆ TELESALES & CRM DOANH NGHIỆP TÍCH HỢP KỊCH BẢN AI
+// =========================================================
+
+// Biến lưu trữ log gọi điện (Tạm thời lưu local/RAM, sẽ đẩy lên Firebase)
+window._callLogs = [];
+window._telesalesFilter = 'all';
+
+window.renderTelesalesTab = function() {
+    const container = document.getElementById('tabPane_telesales');
+    if (!container) return;
+
+    // 1. Phân loại data khách hàng thông minh cho Telesales
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    
+    // Tìm các khách hàng đã mua hôm nay để loại ra khỏi danh sách cần gọi
+    const soldStoreIdsToday = new Set(
+        orders.filter(o => o.ngayCtu === todayStr && o.status !== 'Đã hủy').map(o => String(o.storeId))
+    );
+
+    let targetCustomers = stores.filter(s => !soldStoreIdsToday.has(String(s.id)));
+
+    // Lọc theo tùy chọn
+    if (window._telesalesFilter === 'no_gps') {
+        targetCustomers = targetCustomers.filter(s => !s.lat || Number(s.lat) === 0);
+    } else if (window._telesalesFilter === 'long_time') {
+        // Thuật toán tìm khách hàng rớt nhịp (> 14 ngày chưa mua)
+        const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+        targetCustomers = targetCustomers.filter(s => {
+            const lastOrder = orders.find(o => String(o.storeId) === String(s.id) && o.status !== 'Đã hủy');
+            return !lastOrder || lastOrder.ngayCtu < fourteenDaysAgo;
+        });
+    }
+
+    container.innerHTML = `
+        <div class="tab-header-actions" style="margin-bottom:14px;">
+            <h2 style="font-weight:900; font-size:20px; color:var(--text-main);"><i class="fa-solid fa-headset" style="color:#0284C7;"></i> Trung Tâm Telesales & CSKH</h2>
+        </div>
+
+        <!-- BẢNG ĐIỀU KHIỂN CHIẾN DỊCH GỌI ĐIỆN -->
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:18px; margin-bottom:16px; box-shadow:0 8px 20px rgba(0,0,0,0.15); color:#fff;">
+            <div style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;">Báo cáo ca trực hôm nay</div>
+            <div style="display:flex; justify-content:space-between; gap:12px; text-align:center;">
+                <div style="flex:1; background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
+                    <div style="font-size:24px; font-weight:900; color:#38bdf8;">${stores.length - soldStoreIdsToday.size}</div>
+                    <div style="font-size:11px; font-weight:700; color:#cbd5e1; margin-top:4px;">CẦN LIÊN HỆ</div>
+                </div>
+                <div style="flex:1; background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
+                    <div style="font-size:24px; font-weight:900; color:#fbbf24;">${window._callLogs.filter(c => c.date === todayStr).length}</div>
+                    <div style="font-size:11px; font-weight:700; color:#cbd5e1; margin-top:4px;">ĐÃ GỌI</div>
+                </div>
+                <div style="flex:1; background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
+                    <div style="font-size:24px; font-weight:900; color:#34d399;">${window._callLogs.filter(c => c.date === todayStr && c.status === 'Chốt đơn').length}</div>
+                    <div style="font-size:11px; font-weight:700; color:#cbd5e1; margin-top:4px;">CHỐT ĐƠN</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BỘ LỌC CHIẾN DỊCH -->
+        <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:12px; margin-bottom:10px; scroll-snap-type: x mandatory;">
+            <button class="btn ${window._telesalesFilter === 'all' ? 'btn-blue' : ''}" style="scroll-snap-align:start; font-weight:800; padding:8px 16px; border-radius:20px; white-space:nowrap;" onclick="window._telesalesFilter='all'; renderTelesalesTab();">Tất cả Khách Hàng</button>
+            <button class="btn ${window._telesalesFilter === 'long_time' ? 'btn-blue' : ''}" style="scroll-snap-align:start; font-weight:800; padding:8px 16px; border-radius:20px; white-space:nowrap;" onclick="window._telesalesFilter='long_time'; renderTelesalesTab();">⚠️ Khách rớt nhịp (>14 ngày)</button>
+            <button class="btn ${window._telesalesFilter === 'no_gps' ? 'btn-blue' : ''}" style="scroll-snap-align:start; font-weight:800; padding:8px 16px; border-radius:20px; white-space:nowrap;" onclick="window._telesalesFilter='no_gps'; renderTelesalesTab();">📍 Khách chưa ghim GPS</button>
+        </div>
+
+        <!-- DANH SÁCH GỌI (CALL LIST) -->
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            ${targetCustomers.slice(0, 30).map(s => {
+                const callHistory = window._callLogs.find(c => c.storeId === String(s.id) && c.date === todayStr);
+                let callStatusHtml = '';
+                if (callHistory) {
+                    let color = '#94a3b8';
+                    if (callHistory.status === 'Chốt đơn') color = '#10b981';
+                    if (callHistory.status === 'Khách bận') color = '#f59e0b';
+                    if (callHistory.status === 'Từ chối') color = '#e11d48';
+                    callStatusHtml = `<span style="font-size:11px; font-weight:800; color:${color}; border:1px solid ${color}; padding:2px 8px; border-radius:4px;"><i class="fa-solid fa-check"></i> Đã gọi: ${callHistory.status}</span>`;
+                }
+
+                return `
+                <div class="mobile-item-card" style="display:flex; justify-content:space-between; align-items:center; padding:16px; gap:12px; background:var(--card-bg);">
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                            <span style="font-size:12px; font-weight:900; color:var(--primary); background:var(--prod-code-bg); padding:2px 6px; border-radius:4px;">${s.code}</span>
+                            ${callStatusHtml}
+                        </div>
+                        <div style="font-size:15px; font-weight:900; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
+                        <div style="font-size:12px; color:var(--text-muted); font-weight:600; margin-top:4px;">
+                            <i class="fa-solid fa-phone" style="color:var(--amber);"></i> ${s.phone || 'Chưa cập nhật SĐT'}
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-green" style="border-radius:50%; width:44px; height:44px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(16,185,129,0.3); flex-shrink:0;" 
+                            onclick="openCallCenterModal('${s.id}', '${(s.name).replace(/'/g, "\\'")}', '${s.phone || ''}')" title="Mở kịch bản gọi">
+                        <i class="fa-solid fa-phone-volume" style="font-size:16px;"></i>
+                    </button>
+                </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+};
+
+// HÀM MỞ GIAO DIỆN CALL CENTER & KỊCH BẢN CHỐT SALES
+window.openCallCenterModal = function(storeId, storeName, phone) {
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    // Sinh kịch bản mặc định
+    const scriptPromo = `Dạ em chào anh/chị, em là ${currentUser.name.split(' ').pop()} gọi từ NPP Đại Đông. Đợt này công ty em đang có chương trình Khuyến mãi lớn cho các dòng sản phẩm trọng tâm, em gọi báo ưu tiên để tiệm mình trữ hàng bán lấy lời ạ...`;
+    
+    const scriptCare = `Dạ em chào anh/chị, dạo này tiệm mình bán buôn tốt không ạ? Em check sổ thấy tầm này tháng trước nhà mình hay lấy hàng, nay em gọi hỏi thăm xem kệ nhà mình vơi chưa để em cho xe tuyến xuống giao luôn cho tiện ạ...`;
+
+    const scriptNew = `Dạ em chào anh/chị, bên công ty em mới về mã sản phẩm mới, chiết khấu cực kỳ tốt. Em ưu tiên gọi báo cho tiệm mình trước để anh/chị chưng bán thử, khách hỏi là có liền...`;
+
+    modalContainer.innerHTML = `
+        <div class="modal" style="display:flex; z-index:999999;">
+            <div class="modal-content fullscreen-modal" style="max-width: 600px; padding:0; background:var(--bg-dark); display:flex; flex-direction:column; overflow:hidden;">
+                
+                <!-- HEADER GỌI ĐIỆN -->
+                <div style="background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                    <div style="color: #fff; display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; font-size:18px;">
+                            <i class="fa-solid fa-headset fa-beat"></i>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; font-weight: 900; margin: 0; line-height:1.2;">ĐANG KẾT NỐI...</div>
+                            <div style="font-size: 13px; font-weight: 600; opacity: 0.9;">${storeName}</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm" onclick="document.getElementById('dynamicModalContainer').classList.add('hidden')" style="background:rgba(255,255,255,0.2); color:#fff; border:none;"><i class="fa-solid fa-xmark"></i> Thoát</button>
+                </div>
+
+                <!-- INFO & DIALER -->
+                <div style="padding:16px; background:#fff; border-bottom:1px solid var(--card-border);">
+                    <div style="font-size:24px; font-weight:900; color:var(--text-main); text-align:center; letter-spacing:2px; margin-bottom:12px;">
+                        ${phone || 'Không có SĐT'}
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:center;">
+                        <a href="tel:${phone}" class="btn btn-green" style="padding:12px 30px; border-radius:24px; font-size:15px; font-weight:900; box-shadow:0 4px 12px rgba(16,185,129,0.3); text-decoration:none;">
+                            <i class="fa-solid fa-phone"></i> GỌI THỰC TẾ
+                        </a>
+                    </div>
+                </div>
+
+                <!-- KỊCH BẢN CHỐT SALES (THE SCRIPT) -->
+                <div style="flex:1; overflow-y:auto; padding:16px;">
+                    <div style="font-size:12px; font-weight:900; color:var(--primary); margin-bottom:10px; text-transform:uppercase;"><i class="fa-solid fa-book-open"></i> Kịch bản tư vấn (Scripts)</div>
+                    
+                    <select id="scriptSelector" onchange="changeCallScript(this.value)" style="width:100%; padding:12px; border-radius:10px; border:2px solid var(--primary); font-weight:800; color:var(--primary); margin-bottom:12px; outline:none; background:rgba(37,99,235,0.05);">
+                        <option value="promo">🎉 Kịch bản: Thông báo Khuyến Mãi</option>
+                        <option value="care">🤝 Kịch bản: Chăm sóc tiệm lâu không lấy</option>
+                        <option value="new">🌟 Kịch bản: Chào mặt hàng mới</option>
+                    </select>
+
+                    <div id="scriptDisplayBox" style="background:#fff; border:1px dashed var(--primary); padding:16px; border-radius:12px; font-size:15px; font-weight:700; color:var(--text-main); line-height:1.6; box-shadow:inset 0 2px 8px rgba(0,0,0,0.02);">
+                        ${scriptPromo}
+                    </div>
+                </div>
+
+                <!-- KHU VỰC CHỐT KẾT QUẢ CUỘC GỌI -->
+                <div style="background:#fff; padding:16px; border-top:1px solid var(--card-border); padding-bottom:30px;">
+                    <div style="font-size:12px; font-weight:900; color:var(--text-muted); margin-bottom:10px; text-align:center; text-transform:uppercase;">Ghi nhận kết quả cuộc gọi</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <button class="btn btn-green" style="padding:14px; font-weight:900; border-radius:10px;" onclick="saveCallLog('${storeId}', 'Chốt đơn')">
+                            <i class="fa-solid fa-cart-arrow-down"></i> CHỐT ĐƠN HÀNG
+                        </button>
+                        <button class="btn btn-amber" style="padding:14px; font-weight:900; border-radius:10px;" onclick="saveCallLog('${storeId}', 'Khách bận')">
+                            <i class="fa-solid fa-clock"></i> KHÁCH BẬN / GỌI LẠI
+                        </button>
+                        <button class="btn btn-blue" style="padding:14px; font-weight:900; border-radius:10px;" onclick="saveCallLog('${storeId}', 'Sai số')">
+                            <i class="fa-solid fa-phone-slash"></i> SAI SỐ / KHÔNG BẮT MÁY
+                        </button>
+                        <button class="btn btn-red" style="padding:14px; font-weight:900; border-radius:10px;" onclick="saveCallLog('${storeId}', 'Từ chối')">
+                            <i class="fa-solid fa-xmark"></i> KHÁCH TỪ CHỐI
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    `;
+
+    // Lưu các biến script vào toàn cục để đổi
+    window._scripts = { promo: scriptPromo, care: scriptCare, new: scriptNew };
+    modalContainer.classList.remove('hidden');
+};
+
+// Đổi text kịch bản mượt mà
+window.changeCallScript = function(type) {
+    const box = document.getElementById('scriptDisplayBox');
+    if (box && window._scripts[type]) {
+        box.innerHTML = window._scripts[type];
+    }
+};
+
+// LƯU KẾT QUẢ CUỘC GỌI & ĐIỀU HƯỚNG
+window.saveCallLog = async function(storeId, result) {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    
+    // Lưu vào mảng tạm (Có thể viết thêm logic đẩy Push Firebase vào 'callLogs' collection ở đây)
+    window._callLogs.push({
+        storeId: storeId,
+        date: todayStr,
+        status: result,
+        salesCode: currentUser.code,
+        timestamp: now.toISOString()
+    });
+
+    document.getElementById('dynamicModalContainer').classList.add('hidden');
+    
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+
+    // Xử lý điều hướng thông minh
+    if (result === 'Chốt đơn') {
+        // Tự động chọn khách hàng này và nhảy sang tab Bán Hàng
+        alert("Tuyệt vời! Hệ thống sẽ chuyển bạn sang Giỏ hàng để lên toa ngay.");
+        if (typeof selectStoreDirectly === 'function') {
+            await selectStoreDirectly(storeId); // Móc nối với hàm chốt đơn đã có của anh
+            switchTab('sales');
+        }
+    } else {
+        // Chỉ lưu log và ở lại tab Telesales để gọi tiếp
+        alert(`Đã ghi nhận kết quả: ${result}`);
+        renderTelesalesTab();
+    }
 };
 </script>
 </body>
