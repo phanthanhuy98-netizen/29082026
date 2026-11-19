@@ -1941,21 +1941,17 @@ try {
     renderUI();
 
     setTimeout(async () => {
-      // 1. Tải Sổ Gốc ngay lập tức, không chờ GPS hay dọn dẹp
-      attachListeners();
-
-      // 2. Lấy GPS chạy ngầm (không dùng await chặn giao diện)
-      if (currentUser && currentUser.role !== 'accountant') {
-        getHighAccuracyPosition()
-          .then(pos => { currentSalesGPS = { lat: pos.lat, lng: pos.lng }; })
-          .catch(() => { currentSalesGPS = DEFAULT_MAP_CENTER; });
-      }
-
-      // 3. Tải dữ liệu danh mục & đồng bộ đơn offline
       await cleanupExpiredOrdersOptimized();
       await loadMasterDataOptimized(false);
+      try {
+        const pos = await getHighAccuracyPosition();
+        currentSalesGPS = { lat: pos.lat, lng: pos.lng };
+      } catch (e) {
+        currentSalesGPS = DEFAULT_MAP_CENTER;
+      }
+      attachListeners();
       if (typeof window.syncOfflineCheckins === 'function') window.syncOfflineCheckins();
-      if (typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
+if (typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
     }, 50);
 
     // 4. LẮNG NGHE REAL-TIME: ĐÁ VĂNG MÁY CŨ
@@ -3478,191 +3474,70 @@ window.filterTabProducts = function(val) {
 
   if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
 };
- window._soGocRangeCache = {};
-  window._isLoadingSoGoc = false;
-
-  function toLocalYMD(dateObj) {
-    const y = dateObj.getFullYear();
-    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const d = String(dateObj.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  function updateQuickDateButtonsUI(activeType) {
-    ['today', 'week', 'month', 'all'].forEach(k => {
-      const btn = document.getElementById(`quickDateBtn_${k}`);
-      if (btn) btn.className = (k === activeType) ? "btn btn-amber" : "btn";
-    });
-  }
-  window.syncSoGocRangeCache = function(orderItems, action = 'upsert') {
-    if (!window._soGocRangeCache) window._soGocRangeCache = {};
-    const items = Array.isArray(orderItems) ? orderItems : [orderItems];
-    if (items.length === 0) return;
-
-    const idSet = new Set(items.map(it => String(it.id)));
-
-    Object.keys(window._soGocRangeCache).forEach(rangeKey => {
-      const cacheEntry = window._soGocRangeCache[rangeKey];
-      if (!cacheEntry || !Array.isArray(cacheEntry.list)) return;
-
-      if (action === 'delete') {
-        cacheEntry.list.forEach(o => {
-          if (idSet.has(String(o.id))) {
-            o.status = 'Đã hủy';
-          }
-        });
-      } else if (action === 'upsert') {
-        const isAll = rangeKey === 'ALL';
-        const [fFrom, fTo] = isAll ? ['', ''] : rangeKey.split('_');
-
-        items.forEach(newOrd => {
-          const ordDate = newOrd.ngayCtu || '';
-          const inRange = isAll || ((!fFrom || ordDate >= fFrom) && (!fTo || ordDate <= fTo));
-          const idx = cacheEntry.list.findIndex(o => String(o.id) === String(newOrd.id));
-
-          if (inRange) {
-            if (idx > -1) cacheEntry.list[idx] = newOrd;
-            else cacheEntry.list.unshift(newOrd);
-          } else if (idx > -1) {
-            // Gỡ khỏi cache cũ nếu sửa đơn làm đổi ngày chứng từ ra khỏi khoảng ngày này
-            cacheEntry.list.splice(idx, 1);
-          }
-        });
-      }
-    });
-  };
-
-  window.fetchSoGocOrders = async function(forceCloud = false) {
-    const fromDate = soGocFilterDateFrom || '';
-    const toDate = soGocFilterDateTo || '';
-    const isAllMode = soGocQuickDate === 'all' || (!fromDate && !toDate);
-
-    if (!isAllMode && fromDate && toDate && fromDate > toDate) {
-      return;
-    }
-
-    const rangeKey = isAllMode ? 'ALL' : `${fromDate}_${toDate}`;
-
-    // Nếu khoảng ngày này đã tải rồi và không bấm Làm mới -> lấy ngay từ RAM (0 Read)
-    if (!forceCloud && window._soGocRangeCache[rangeKey]) {
-      orders = window._soGocRangeCache[rangeKey].list;
-      lastVisibleOrderDoc = window._soGocRangeCache[rangeKey].lastDoc;
-      hasMoreOrders = window._soGocRangeCache[rangeKey].hasMore;
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (currentTab === 'soGocBH' && activePane) {
-        await renderTabContent('soGocBH', activePane);
-      }
-      return;
-    }
-
-    window._isLoadingSoGoc = true;
-    const listEl = document.getElementById('soGocCardsContainer');
-    if (currentTab === 'soGocBH' && listEl) {
-      listEl.innerHTML = `<div style="text-align:center; padding:28px; color:var(--text-muted); font-weight:700;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải đơn hàng...</div>`;
-    }
-
-    try {
-      let q;
-      if (isAllMode) {
-        q = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(300));
-      } else if (fromDate && toDate) {
-        q = query(
-          collection(db, "orders"),
-          where("ngayCtu", ">=", fromDate),
-          where("ngayCtu", "<=", toDate)
-        );
-      } else if (fromDate) {
-        q = query(collection(db, "orders"), where("ngayCtu", ">=", fromDate), limit(300));
-      } else {
-        q = query(collection(db, "orders"), where("ngayCtu", "<=", toDate), limit(300));
-      }
-
-      const snap = await getDocs(q);
-      const orderMap = new Map();
-      snap.docs.forEach(d => orderMap.set(d.id, { id: d.id, ...d.data() }));
-      orders = Array.from(orderMap.values());
-
-      if (isAllMode && !snap.empty) {
-        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 300;
-      } else {
-        lastVisibleOrderDoc = null;
-        hasMoreOrders = false;
-      }
-
-      window._soGocRangeCache[rangeKey] = {
-        list: orders,
-        lastDoc: lastVisibleOrderDoc,
-        hasMore: hasMoreOrders
-      };
-    } catch (e) {
-      console.error("Lỗi tải Sổ Gốc:", e);
-      alert("⛔ Lỗi tải dữ liệu Sổ Gốc: " + e.message);
-    } finally {
-      window._isLoadingSoGoc = false;
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (currentTab === 'soGocBH' && activePane) {
-        await renderTabContent('soGocBH', activePane);
-      } else if (currentTab === 'sales') {
-        const salesPane = document.getElementById('tabPane_sales');
-        if (salesPane) renderTabContent('sales', salesPane);
-      }
-    }
-  };
-
-  window.filterSoGocCards = function(val) {
-    if (val !== undefined) soGocFilterKeyword = val;
-    const queryKey = removeAccents((soGocFilterKeyword || '').trim());
-    const cleanSoCtuKey = queryKey.replace('#', '').trim();
+ window.filterSoGocCards = function(val) {
+    if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
+    const queryKey = removeAccents(soGocFilterKeyword.trim());
     const cards = document.querySelectorAll('.so-goc-card-item');
+    let cleanSoCtuKey = queryKey.replace('#', '').trim();
 
+    // SỬA LỖI 1: Tự động vô hiệu hóa bộ lọc Nhân Viên nếu tài khoản đang đăng nhập là Sales
     const isSales = currentUser && currentUser.role === 'sales';
-    const selectedSales = isSales ? "" : removeAccents((soGocSalesFilter || '').trim());
+    const selectedSales = isSales ? "" : (soGocSalesFilter || '').trim().toLowerCase();
 
-    const fFrom = soGocFilterDateFrom || '';
-    const fTo = soGocFilterDateTo || '';
+    // SỬA LỖI 2: Ép định dạng ngày tháng chuẩn về YYYY-MM-DD trước khi so sánh
+    const normalizeDate = (dStr) => {
+        if (!dStr) return '';
+        if (dStr.includes('/')) {
+            const p = dStr.split('/');
+            if (p[0].length === 4) return dStr; // Nếu đã là YYYY thì giữ nguyên
+            return `${p[2]}-${p[1]}-${p[0]}`; // Đảo DD/MM/YYYY thành YYYY-MM-DD
+        }
+        return dStr;
+    };
+    
+    const fFrom = normalizeDate(soGocFilterDateFrom);
+    const fTo = normalizeDate(soGocFilterDateTo);
 
     cards.forEach(card => {
-      const soCtu = removeAccents(card.getAttribute('data-so-ctu') || '');
+      const soCtu = card.getAttribute('data-so-ctu') || '';
       const maDtpn = card.getAttribute('data-ma-dtpn') || '';
-      const tenKh = card.getAttribute('data-ten-kh') || '';
-      const maNv = card.getAttribute('data-ma-nv') || '';
+      const maNv = (card.getAttribute('data-ma-nv') || '').trim().toLowerCase();
       const tenNv = card.getAttribute('data-ten-nv') || '';
       const ngayCtu = card.getAttribute('data-ngay-ctu') || '';
 
-      const matchOther = queryKey === "" ||
-        soCtu.includes(cleanSoCtuKey) ||
-        maDtpn.includes(queryKey) ||
-        tenKh.includes(queryKey) ||
-        maNv.includes(queryKey) ||
+      const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
+      const matchOther = queryKey === "" || 
+        matchSoCtu ||
+        maDtpn.includes(queryKey) || 
+        maNv.includes(queryKey) || 
         tenNv.includes(queryKey);
 
       let matchDate = true;
-      if (fFrom && fTo) matchDate = ngayCtu >= fFrom && ngayCtu <= fTo;
-      else if (fFrom) matchDate = ngayCtu >= fFrom;
-      else if (fTo) matchDate = ngayCtu <= fTo;
+      if (fFrom && fTo) {
+        matchDate = ngayCtu >= fFrom && ngayCtu <= fTo;
+      } else if (fFrom) {
+        matchDate = ngayCtu >= fFrom;
+      } else if (fTo) {
+        matchDate = ngayCtu <= fTo;
+      }
 
       const matchSales = selectedSales === "" || maNv === selectedSales;
-      card.style.display = (matchOther && matchDate && matchSales) ? '' : 'none';
+
+      const isVisible = matchOther && matchDate && matchSales;
+      card.style.display = isVisible ? '' : 'none';
     });
   };
 
   window.setSoGocDateFrom = function(val) {
     soGocFilterDateFrom = val;
-    soGocQuickDate = 'custom';
     localStorage.setItem('dms_sogoc_date_from', val);
-    localStorage.setItem('dms_sogoc_quickdate', 'custom');
-    updateQuickDateButtonsUI('custom');
-    window.fetchSoGocOrders(false);
+    filterSoGocCards();
   };
 
   window.setSoGocDateTo = function(val) {
     soGocFilterDateTo = val;
-    soGocQuickDate = 'custom';
     localStorage.setItem('dms_sogoc_date_to', val);
-    localStorage.setItem('dms_sogoc_quickdate', 'custom');
-    updateQuickDateButtonsUI('custom');
-    window.fetchSoGocOrders(false);
+    filterSoGocCards();
   };
 
   window.setSoGocSalesFilter = function(val) {
@@ -3676,20 +3551,23 @@ window.filterTabProducts = function(val) {
     localStorage.setItem('dms_sogoc_quickdate', type);
 
     const today = new Date();
-    const todayStr = toLocalYMD(today);
+    const yyyy = today.getFullYear();
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let dd = String(today.getDate()).padStart(2, '0');
+    let todayStr = `${yyyy}-${mm}-${dd}`;
 
     if (type === 'today') {
       soGocFilterDateFrom = todayStr;
       soGocFilterDateTo = todayStr;
     } else if (type === 'week') {
-      const firstDayOfWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const firstDayOfWeek = new Date(today);
       const day = today.getDay();
-      const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
       firstDayOfWeek.setDate(diff);
-      soGocFilterDateFrom = toLocalYMD(firstDayOfWeek);
+      soGocFilterDateFrom = firstDayOfWeek.toISOString().slice(0, 10);
       soGocFilterDateTo = todayStr;
     } else if (type === 'month') {
-      soGocFilterDateFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      soGocFilterDateFrom = `${yyyy}-${mm}-01`;
       soGocFilterDateTo = todayStr;
     } else if (type === 'all') {
       soGocFilterDateFrom = '';
@@ -3699,20 +3577,60 @@ window.filterTabProducts = function(val) {
     localStorage.setItem('dms_sogoc_date_from', soGocFilterDateFrom);
     localStorage.setItem('dms_sogoc_date_to', soGocFilterDateTo);
 
-    const inputFrom = document.getElementById('soGocDateFrom');
+   const inputFrom = document.getElementById('soGocDateFrom');
     const inputTo = document.getElementById('soGocDateTo');
+    // Truyền thẳng định dạng Năm-Tháng-Ngày cho trình duyệt tự xử lý
     if (inputFrom) inputFrom.value = soGocFilterDateFrom || '';
     if (inputTo) inputTo.value = soGocFilterDateTo || '';
-    updateQuickDateButtonsUI(type);
+    ['today', 'week', 'month', 'all'].forEach(k => {
+      const btn = document.getElementById(`quickDateBtn_${k}`);
+      if (btn) {
+        if (k === type) {
+          btn.className = "btn btn-sm btn-amber";
+        } else {
+          btn.className = "btn btn-sm";
+        }
+      }
+    });
 
-    window.fetchSoGocOrders(false);
+    filterSoGocCards();
   };
 
-  window.reloadSoGocDataManually = async function() {
-    const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
-    if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
-    await window.fetchSoGocOrders(true);
-    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+ window.reloadSoGocDataManually = async function() {
+    try {
+      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
+      const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
+      if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+
+      // Tải dữ liệu mới từ Firebase
+     const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(300)));
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 300;
+      } else {
+        hasMoreOrders = false;
+      }
+      
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) {
+        // 1. Vẽ lại toàn bộ HTML với dữ liệu mới
+        await renderTabContent('soGocBH', activePane);
+
+        // 2. QUAN TRỌNG: Gọi lại hàm lọc để giữ nguyên trạng thái Nhân viên, Ngày tháng và Từ khóa đang nhập
+        setTimeout(() => {
+          if (typeof filterSoGocCards === 'function') {
+            filterSoGocCards(soGocFilterKeyword);
+          }
+        }, 50);
+      }
+      
+      if (typeof triggerHaptic === 'function') triggerHaptic(20);
+
+    } catch (e) {
+      alert("Lỗi tải lại dữ liệu: " + e.message);
+    }
   };
  window.reloadCustomersDataManually = async function() {
     try {
@@ -3817,40 +3735,129 @@ window.syncStoresRealtime = async function() {
 };
 window.loadMoreSoGoc = async function() {
     if (!hasMoreOrders || !lastVisibleOrderDoc) return;
-
+    
     const btn = document.getElementById('loadMoreSoGocBtn');
     if (btn) {
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải thêm...';
-      btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải thêm...';
+        btn.disabled = true;
     }
 
     try {
-      const q = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(100));
-      const snap = await getDocs(q);
+        let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
+        const snap = await getDocs(q);
+        
+        if (snap.empty) {
+            hasMoreOrders = false;
+            if (btn) { btn.innerHTML = 'Đã tải hết lịch sử'; btn.disabled = true; }
+            return;
+        }
 
-      if (snap.empty) {
-        hasMoreOrders = false;
-      } else {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-        hasMoreOrders = snap.docs.length >= 100;
+        const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        orders = [...orders, ...newOrders];
 
-        const map = new Map(orders.map(o => [o.id, o]));
-        snap.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
-        orders = Array.from(map.values());
-        window._soGocRangeCache['ALL'] = { list: orders, lastDoc: lastVisibleOrderDoc, hasMore: hasMoreOrders };
-      }
+        if (snap.docs.length < 30) {
+            hasMoreOrders = false;
+            if (btn) btn.style.display = 'none';
+        } else {
+            if (btn) {
+                btn.innerHTML = 'Tải Thêm Đơn Hàng Cũ Hơn';
+                btn.disabled = false;
+            }
+        }
 
-      const scrollY = window.scrollY || document.documentElement.scrollTop;
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) {
-        await renderTabContent('soGocBH', activePane);
-        window.scrollTo({ top: scrollY, behavior: 'instant' });
-      }
+        // TỐI ƯU HÓA: Chỉ chèn thêm HTML vào cuối, không vẽ lại toàn bộ
+        const container = document.getElementById('soGocCardsContainer');
+        if (container) {
+            const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
+            const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
+
+            let appendHtml = '';
+            newOrders.forEach(o => {
+                if (o.status === 'Đã hủy' || !o.items || o.items.length === 0) return;
+                
+                const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+                if (currentUser.role === 'sales' && !isOwner) return;
+
+                const canModify = isOwner || currentUser.role === 'admin';
+                const isViewed = viewedData[o.id || o.orderId] ? true : false;
+                
+                let inferredMaDTPN = o.maDTPNNo || '';
+                if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
+                    inferredMaDTPN = o.maKH.split(' - ')[0].trim();
+                }
+                
+              let orderTotalQty = 0;
+                let orderTotalRev = 0;
+                o.items.forEach(item => {
+                    const qty = Number(item.qty || 0);
+                    orderTotalQty += qty;
+                    const pObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
+                    const iPrice = Number(item.price || pObj?.price || 0);
+                    orderTotalRev += (qty * iPrice);
+                });
+
+                let distHtml = '';
+                let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaDTPN));
+                if (matchedStore && matchedStore.lat && o.lat) {
+                    let distance = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
+                    let distStr = distance > 1000 ? (distance / 1000).toFixed(1) + ' km' : Math.round(distance) + ' m';
+                    distHtml = `<span style="font-size:11px; font-weight:700; color:${distance <= 50 ? 'var(--emerald)' : 'var(--amber)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>`;
+                }
+
+                appendHtml += `
+                    <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(inferredMaDTPN)}" data-ma-nv="${removeAccents(o.salesCode || '')}" data-ten-nv="${removeAccents(o.salesName || '')}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+                            <div style="display:inline-flex; align-items:center; gap:8px;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:11px; font-weight:800;">CTu #${o.soCtu}</span>${isViewed ? '<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800;">✅ Đã xem</span>' : ''}</div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                ${distHtml}
+                                <span style="font-size:11px; color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${formatDateDDMMYYYY(o.ngayCtu)}</span>
+                            </div>
+                        </div>
+                        <div style="font-size:14px; font-weight:800; color:var(--text-main); word-break:break-word;">
+                            ${o.maKH || inferredMaDTPN}
+                        </div>
+                       <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
+                            <span>👤 NV: <b style="color:#2563EB;">[${o.salesCode}] ${o.salesName}</b></span>
+                            <div style="display:flex; gap: 8px;">
+                                <span>📦 SL: <b style="color:var(--emerald);">${orderTotalQty}</b></span>
+                                <span>💰 <b style="color:var(--rose);">${(orderTotalRev / 1000).toLocaleString('en-US')}K</b></span>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
+                            <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.id || o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
+                            ${canModify ? `
+                            <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.id || o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+                            <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.id || o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.insertAdjacentHTML('beforeend', appendHtml);
+            
+            // Cập nhật lại bộ lọc nếu có
+            if (typeof filterSoGocCards === 'function') {
+                filterSoGocCards(soGocFilterKeyword);
+                
+                // Cập nhật giao diện nút tải thêm nếu lọc xong không thấy đơn nào
+                setTimeout(() => {
+                    const visibleNow = container.querySelectorAll('.so-goc-card-item:not([style*="display: none"])').length;
+                    if (visibleNow === 0 && hasMoreOrders) {
+                        if (btn) {
+                            btn.innerHTML = 'Tải Thêm (Đang bị bộ lọc che khuất)';
+                            btn.disabled = false;
+                        }
+                    }
+                }, 100);
+            }
+        }
     } catch (e) {
-      alert("Lỗi tải thêm: " + e.message);
-      if (btn) { btn.innerHTML = 'Tải Thêm Đơn Hàng Cũ Hơn'; btn.disabled = false; }
+        alert("Lỗi tải thêm: " + e.message);
+        if (btn) { btn.innerHTML = 'Tải Thêm Đơn Hàng Cũ Hơn'; btn.disabled = false; }
     }
-  };
+};
 
 window.editOrder = function(orderId) {
   const order = orders.find(o => o.id === orderId);
@@ -3943,12 +3950,10 @@ window.deleteSingleOrder = async function(orderId) {
           status: "Đã hủy", 
           updatedAt: new Date().toISOString() 
       });
-     // Cập nhật lại mảng hiển thị trên màn hình hiện tại và toàn bộ Cache Sổ Gốc
+      
+      // Cập nhật lại mảng hiển thị trên màn hình hiện tại
       const idx = orders.findIndex(o => o.id === orderId);
       if (idx > -1) orders[idx].status = 'Đã hủy';
-      if (typeof window.syncSoGocRangeCache === 'function') {
-        window.syncSoGocRangeCache({ id: orderId }, 'delete');
-      }
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -4062,14 +4067,11 @@ window.deleteSingleOrder = async function(orderId) {
       if (count > 0) batches.push(currentBatch.commit());
       await Promise.all(batches);
 
-     // Cập nhật lại mảng dữ liệu trên máy, toàn bộ Cache Sổ Gốc & Giao diện
+      // Cập nhật lại mảng dữ liệu trên máy & Giao diện
       targetOrders.forEach(to => {
           const idx = orders.findIndex(o => o.id === to.id);
           if (idx > -1) orders[idx].status = 'Đã hủy';
       });
-      if (typeof window.syncSoGocRangeCache === 'function') {
-        window.syncSoGocRangeCache(targetOrders, 'delete');
-      }
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -4644,30 +4646,16 @@ setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa v�
         createdAt: new Date()
       };
 
-      // Đồng bộ đơn mới/đơn sửa vào toàn bộ các khoảng ngày đã cache
-      if (typeof window.syncSoGocRangeCache === 'function') {
-        window.syncSoGocRangeCache(localRenderOrder, 'upsert');
-      }
-
-      // Nếu trước đó Sổ Gốc đang lọc ngày cũ không chứa hôm nay -> đưa về Hôm nay để hiện đơn vừa gửi
-      const todayRangeKey = `${todayStr}_${todayStr}`;
-      if (soGocFilterDateFrom && soGocFilterDateTo && (todayStr < soGocFilterDateFrom || todayStr > soGocFilterDateTo)) {
-        soGocQuickDate = 'today';
-        soGocFilterDateFrom = todayStr;
-        soGocFilterDateTo = todayStr;
-        localStorage.setItem('dms_sogoc_quickdate', 'today');
-        localStorage.setItem('dms_sogoc_date_from', todayStr);
-        localStorage.setItem('dms_sogoc_date_to', todayStr);
-        orders = window._soGocRangeCache?.[todayRangeKey]?.list || [localRenderOrder];
-      } else {
-        const idx = orders.findIndex(o => o.id === localRenderOrder.id);
+      if (editingOrderId) {
+        const idx = orders.findIndex(o => o.id === editingOrderId);
         if (idx > -1) {
           orders[idx] = localRenderOrder;
         } else {
           orders.unshift(localRenderOrder);
         }
+      } else {
+        orders.unshift(localRenderOrder);
       }
-
       clearCartDraftAsync(savedStoreId).catch(e => console.log("Xóa giỏ hàng offline", e));    
       currentCart = {}; 
       activeVisitedStore = null; 
@@ -4681,6 +4669,11 @@ setDoc(docRef, orderData, { merge: true }).catch(e => console.log("Đã đưa v�
       playSystemSound('success');
       triggerHaptic(50);
       switchTab('soGocBH');
+      
+      const soGocPane = document.getElementById('tabPane_soGocBH');
+      if (soGocPane) {
+        renderTabContent('soGocBH', soGocPane);
+      }
       window.scrollTo({ top: 0, behavior: 'instant' });
     } finally {
       isSubmittingOrder = false;
@@ -4943,7 +4936,7 @@ window.importProductsExcel = function(event) {
   event.target.value = ''; // Reset file input
 };
 
-window.importCustomersExcel = function(event) {
+  window.importCustomersExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
     if (!file) return;
@@ -4967,6 +4960,7 @@ window.importCustomersExcel = function(event) {
             return alert("⛔ LỖI BẢO MẬT: File Excel không có cột 'DonVi'. Hệ thống từ chối tải file!");
         }
 
+        // Kiểm tra từng dòng xem có đúng chữ BH_ không (Bỏ qua dòng tiêu đề)
         for (let i = 1; i < jsonRows.length; i++) {
             if (!jsonRows[i] || jsonRows[i].length === 0) continue;
             let val = String(jsonRows[i][donViColIndex] || '').trim();
@@ -4976,60 +4970,26 @@ window.importCustomersExcel = function(event) {
         }
         // ================= KẾT THÚC CHỐT CHẶN =================
         
-        const nowIso = new Date().toISOString();
         const uniqueCustomerMap = new Map();
-
-        // Bắt đầu từ i = 1 để bỏ qua dòng tiêu đề
-        for (let i = 1; i < jsonRows.length; i++) {
+        for (let i = 0; i < jsonRows.length; i++) {
           const r = jsonRows[i];
-          if (!r || r.length === 0) continue;
+          const maDtpn = r[0] ? String(r[0]).trim() : '';
+          const tenDtpn = r[1] ? String(r[1]).trim() : '';
+          const address = r[2] ? String(r[2]).trim() : '';
+          const phone = r[3] ? String(r[3]).trim() : '';
+          const zalo = r[4] ? String(r[4]).trim() : '';
 
-          const maDtpn = r[0] !== undefined && r[0] !== null ? String(r[0]).trim() : '';
-          const tenDtpn = r[1] !== undefined && r[1] !== null ? String(r[1]).trim() : '';
-          const address = r[2] !== undefined && r[2] !== null ? String(r[2]).trim() : '';
-          const phone = r[3] !== undefined && r[3] !== null ? String(r[3]).trim() : '';
-          const zalo = r[4] !== undefined && r[4] !== null ? String(r[4]).trim() : '';
-
-          // Đọc cột F (5), G (6), H (7), I (8)
-          const latVal = Number(String(r[5] ?? '0').replace(',', '.').trim()) || 0;
-          const lngVal = Number(String(r[6] ?? '0').replace(',', '.').trim()) || 0;
-          const pinnedByCode = r[7] !== undefined && r[7] !== null ? String(r[7]).trim() : '';
-          const pinnedByName = r[8] !== undefined && r[8] !== null ? String(r[8]).trim() : '';
-
-          if (tenDtpn && tenDtpn !== 'Ten DTPN' && tenDtpn !== 'Tên Khách Hàng') {
+          if (tenDtpn && tenDtpn !== 'Ten DTPN') {
             const codeVal = maDtpn || `KH${i}`;
-            const existingStore = stores.find(s => String(s.id) === codeVal || String(s.code) === codeVal);
-
-            const custObj = {
+            uniqueCustomerMap.set(codeVal, {
               id: codeVal,
               code: codeVal,
               name: tenDtpn,
-              address,
-              phone,
-              zalo,
-              updatedAt: nowIso
-            };
-
-            if (latVal !== 0 && lngVal !== 0) {
-              // File Excel có tọa độ -> cập nhật luôn GPS và NV ghim
-              custObj.lat = latVal;
-              custObj.lng = lngVal;
-              custObj.pinnedByCode = pinnedByCode;
-              custObj.pinnedByName = pinnedByName;
-              custObj.pinnedAt = existingStore?.pinnedAt || nowIso;
-              custObj.pinnedHistory = existingStore?.pinnedHistory || [];
-            } else if (!existingStore) {
-              // Khách mới hoàn toàn và chưa có GPS -> khởi tạo giá trị mặc định
-              custObj.lat = 0;
-              custObj.lng = 0;
-              custObj.pinnedByCode = '';
-              custObj.pinnedByName = '';
-              custObj.pinnedAt = '';
-              custObj.pinnedHistory = [];
-            }
-            // Nếu là khách cũ đã có GPS trên hệ thống mà Excel để trống -> không ghi đè để tránh mất GPS cũ
-
-            uniqueCustomerMap.set(codeVal, custObj);
+              address, phone, zalo,
+             lat: 0, lng: 0,
+              pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: [],
+              updatedAt: new Date().toISOString()
+            });
           }
         }
 
@@ -5049,8 +5009,7 @@ window.importCustomersExcel = function(event) {
           await batch.commit();
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-
-        // Cập nhật Version để đánh thức các máy khác đồng bộ
+// Cập nhật Version để đánh thức các máy khác đồng bộ
         const newStoresVersion = Date.now();
         await setDoc(doc(db, "systemMeta", "version"), { storesVersion: newStoresVersion }, { merge: true });
         localStorage.setItem("storesVersion", newStoresVersion);
@@ -5059,8 +5018,10 @@ window.importCustomersExcel = function(event) {
         rawCustomers.forEach(newCust => {
             const idx = stores.findIndex(s => s.code === newCust.code || s.id === newCust.id);
             if (idx > -1) {
+                // Đã có mã này -> Cập nhật thông tin mới
                 stores[idx] = { ...stores[idx], ...newCust };
             } else {
+                // Chưa có -> Thêm nối tiếp vào danh sách
                 stores.push(newCust);
             }
         });
@@ -5068,18 +5029,117 @@ window.importCustomersExcel = function(event) {
         buildStoreIndex();
         await saveStoresToLocalCache(stores);
         
+        // Render lại giao diện
         const activePane = document.getElementById('tabPane_customers');
         if (activePane) renderTabContent('customers', activePane);
         
         alert(`✅ Đã thêm/cập nhật thành công ${rawCustomers.length} khách hàng!\nTổng số lượng KH hiện tại trên máy bạn là: ${stores.length}`);
       } catch (err) { 
         alert("Lỗi đẩy lên Firebase: " + err.message); 
-      } finally {
-        event.target.value = '';
       }
     };
     reader.readAsArrayBuffer(file);
   };
+
+window.importCompanyExcel = function(event) {
+  if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+      // ================= CHỐT CHẶN BẢO MẬT ĐƠN VỊ =================
+        let headerRow = jsonRows[0] || [];
+        let donViColIndex = -1;
+        for (let j = 0; j < headerRow.length; j++) {
+            if (String(headerRow[j]).trim().toLowerCase() === 'donvi') {
+                donViColIndex = j; break;
+            }
+        }
+        
+        if (donViColIndex === -1) {
+            return alert("⛔ LỖI BẢO MẬT: File Excel không có cột 'DonVi'. Hệ thống từ chối tải file!");
+        }
+
+        // Kiểm tra từng dòng xem có đúng chữ BH_ không (Bỏ qua dòng tiêu đề)
+        for (let i = 1; i < jsonRows.length; i++) {
+            if (!jsonRows[i] || jsonRows[i].length === 0) continue;
+            let val = String(jsonRows[i][donViColIndex] || '').trim();
+            if (val !== 'BH_') {
+                return alert(`⛔ LỖI BẢO MẬT: Dòng số ${i+1} có Đơn vị là "${val}" (Bắt buộc phải là "BH_"). Hệ thống từ chối tải file!`);
+            }
+        }
+        // ================= KẾT THÚC CHỐT CHẶN =================
+      
+      let newOrUpdatedComps = [];
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      for (let i = 0; i < jsonRows.length; i++) {
+        const r = jsonRows[i];
+        const maCtu = r[0] ? String(r[0]).trim() : '';
+        const tenCtu = r[1] ? String(r[1]).trim() : '';
+        
+        if (maCtu && maCtu !== 'MaCTu') {
+          // TÌM XEM CÔNG TY ĐÃ CÓ TRONG HỆ THỐNG CHƯA
+          let existingCompIndex = companyList.findIndex(c => c.maCtu === maCtu);
+          
+          if (existingCompIndex > -1) {
+            // NẾU ĐÃ CÓ: Giữ nguyên ĐVT và Trạng thái Đóng/Mở, chỉ cập nhật Tên
+            companyList[existingCompIndex].tenCtu = tenCtu;
+            companyList[existingCompIndex].updatedAt = new Date().toISOString();
+            newOrUpdatedComps.push(companyList[existingCompIndex]);
+            updatedCount++;
+          } else {
+            // NẾU CHƯA CÓ: Tạo mới hoàn toàn
+            let newComp = { 
+              id: `${window.currentWorkingTenant}_${maCtu}`, 
+              maDonVi: window.currentWorkingTenant, 
+              maCtu: maCtu, 
+              tenCtu: tenCtu, 
+              dvtDetails: [], 
+              status: "Mở", 
+              updatedAt: new Date().toISOString() 
+            };
+            companyList.push(newComp); // Thêm nối tiếp vào danh sách cũ
+            newOrUpdatedComps.push(newComp);
+            addedCount++;
+          }
+        }
+      }
+
+      if (newOrUpdatedComps.length > 0) {
+        // Đẩy lên Firebase bằng Batch
+        const batch = writeBatch(db);
+        newOrUpdatedComps.forEach(c => {
+          const docRef = doc(db, "companies", String(c.id || c.maCtu));
+          batch.set(docRef, c, { merge: true }); // Giữ lại các trường cũ trên Firebase nếu có
+        });
+        await batch.commit();
+
+        // Kích hoạt đồng bộ cho các máy khác
+        const newVersion = Date.now();
+        await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+        localStorage.setItem("companiesVersion", newVersion);
+        
+        // Lưu lại bộ nhớ máy toàn bộ danh sách (Cũ + Mới)
+        await saveCompaniesToLocalCache(companyList); 
+        renderUI();
+        alert(`✅ Đã nhập Excel thành công!\n- Thêm mới: ${addedCount} công ty\n- Cập nhật tên: ${updatedCount} công ty\n(Các thiết lập ĐVT và trạng thái cũ được giữ nguyên).`);
+      } else {
+        alert("Không tìm thấy dữ liệu hợp lệ trong file!");
+      }
+    } catch (err) {
+      alert("Lỗi khi xử lý file Excel: " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = ''; // Reset input file để có thể chọn lại cùng 1 file
+};
   window.importRoutesExcel = function(event) {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file này!");
     const file = event.target.files[0];
@@ -5416,6 +5476,28 @@ window.updateRouteField = async function(index, field, val) {
   renderUI();
 };
 
+window.deleteCompanyItem = async function(index) {
+  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
+  const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
+  if (!confirmDel) return;
+  
+  const c = companyList[index];
+  try {
+    // THAY VÌ deleteDoc, TA DÙNG UPDATE ĐỂ BÁO HIỆU CHO MÁY SALES BIẾT ĐÃ XÓA
+    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
+        isDeleted: true, 
+        updatedAt: new Date().toISOString() 
+    });
+    
+    companyList.splice(index, 1);
+    await saveCompaniesToLocalCache(companyList);
+    refreshCompanyListUI();
+    alert("✅ Đã xóa thành công!");
+  } catch (err) {
+    alert("Lỗi: " + err.message);
+  }
+};
+
 window.deleteRouteItem = async function(index) {
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
   const confirmDel = await window.showCustomConfirm("Xóa Tuyến", "Bạn có chắc muốn xóa tuyến này không?", "fa-trash", "Xóa", "Hủy");
@@ -5673,13 +5755,26 @@ window.filterUsersList = function(val) {
   };
 
 function attachListeners() {
-    window.fetchSoGocOrders(true);
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(300))).then(snap => {
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 300;
+      } else {
+        hasMoreOrders = false;
+      }
 
-    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'accountant')) {
+      if (currentTab === 'soGocBH' || currentTab === 'sales') {
+        const activePane = document.getElementById(`tabPane_${currentTab}`);
+        if (activePane) renderTabContent(currentTab, activePane);
+      }
+    }).catch(e => {});
+
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
       getDocs(collection(db, "users")).then(snap => {
-        users = snap.docs.map(d => ({ id: d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase() }));
-        if (currentTab === 'users' || currentTab === 'soGocBH') {
-          const activePane = document.getElementById(`tabPane_${currentTab}`);
+        users = snap.docs.map(d => ({id:d.id, ...d.data(), role: (d.data().role || 'sales').toLowerCase()}));
+        if (currentTab === 'users') {
+          const activePane = document.getElementById('tabPane_users');
           if (activePane) renderTabContent(currentTab, activePane);
         }
       }).catch(e => {});
@@ -6124,11 +6219,9 @@ ${activeVisitedStore ? `
 
     const isSales = currentUser && currentUser.role === 'sales';
 const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.role === 'accountant');
-     const sortedOrders = [...orders].sort((a, b) => {
-     const dCmp = String(b.ngayCtu || '').localeCompare(String(a.ngayCtu || ''));
-     if (dCmp !== 0) return dCmp;
-     const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
-     return getNum(b.soCtu) - getNum(a.soCtu);
+      const sortedOrders = [...orders].sort((a, b) => {
+    const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
+    return getNum(b.soCtu) - getNum(a.soCtu);
 });
 
       sortedOrders.forEach(o => {
@@ -6299,8 +6392,8 @@ ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role 
         </div>
 
         <div style="margin-bottom: 10px;">
-     <input type="text" value="${soGocFilterKeyword || ''}" placeholder="🔍 Tìm theo số CTu, mã KH, tên KH hoặc mã NV..." oninput="filterSoGocCards(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
-   </div>
+          <input type="text" placeholder="🔍 Tìm theo số CTu, mã KH, tên KH hoặc mã NV..." oninput="filterSoGocCards(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
+        </div>
 
         <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
           ${allGroupedList.length > 0 ? allGroupedList.map(o => {
@@ -6309,7 +6402,8 @@ ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role 
 const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
   const isViewed = viewedData[o.id || o.orderId] ? true : false;
            return `
-<div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ten-kh="${removeAccents(o.maKH || '')}" data-ma-nv="${removeAccents(o.salesCode || '')}" data-ten-nv="${removeAccents(o.salesName || '')}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
 <div style="display:inline-flex; align-items:center; gap:8px;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>${isViewed ? `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap;">✅ Đã xem</span>` : ''}</div>                  <div style="display:flex; align-items:center; gap:8px;">
                     ${(() => {
                      let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
@@ -6399,13 +6493,13 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
         </tbody>
           </table>
         </div>
-     `;
-   setTimeout(() => {
-       if (typeof filterSoGocCards === 'function') {
-           filterSoGocCards();
-       }
-   }, 30);
- }
+      `;
+      setTimeout(() => {
+          if (typeof setSoGocQuickDateFilter === 'function') {
+              setSoGocQuickDateFilter(soGocQuickDate);
+          }
+      }, 50);
+    } 
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
@@ -10277,7 +10371,7 @@ window.deleteAllKpiForCurrentMonth = async function() {
     }
 
     try {
-        const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", currentMonth)));
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
         const batch = writeBatch(db);
         let count = 0;
 
@@ -11981,7 +12075,7 @@ window.executeMonthlyClone = async function(srcMonth, destMonth) {
     }
 
     try {
-       const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", srcMonth)));
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
         const batch = writeBatch(db);
         let clonedCount = 0;
         const nowISO = new Date().toISOString();
@@ -12304,7 +12398,7 @@ window.openTargetModal = async function() {
     }
 
     // 1. KIỂM TRA BẢO VỆ: Quét xem tháng hiện tại đã có KPI trên hệ thống chưa?
-    const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth), limit(1)));
+    const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
     let hasExisting = false;
     targetsSnap.forEach(docSnap => {
         const data = docSnap.data();
@@ -12422,7 +12516,7 @@ window.loadAndEditCurrentMonthKpi = async function() {
     }
 
     try {
-        const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth)));
+        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
         let foundDocs = [];
         targetsSnap.forEach(docSnap => {
             const data = docSnap.data();
