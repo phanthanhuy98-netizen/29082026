@@ -1693,7 +1693,7 @@ const sSnap = await getDocs(qStore);
 
 // 4. Gộp dữ liệu an toàn bằng Map (Chống trùng lặp, không bao giờ bị về 0)
 if (!sSnap.empty) {
-    const updatedStores = sSnap.docs.map(d => d.data());
+    const updatedStores = sSnap.docs.map(d => ({ ...d.data(), id: d.id }));
     
     // Dùng Map để gom nhóm theo ID, tự động loại bỏ các bản ghi bị nhân đôi
     const storeMap = new Map();
@@ -2178,44 +2178,72 @@ window.handleLogout = async function() {
     } catch (err) { alert("Lỗi: " + err.message); }
   };
   // HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG
+// HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG (CHO PHÉP ADMIN, MANAGER, SALES)
   window.updateCustomerPhone = async function(storeId) {
+      if (!currentUser || !['admin', 'manager', 'sales'].includes(currentUser.role)) {
+          return alert("⛔ Tài khoản của bạn không có quyền cập nhật số điện thoại khách hàng!");
+      }
+
       const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
       if (storeIndex === -1) return alert("Không tìm thấy khách hàng!");
 
       const s = stores[storeIndex];
-      const newPhone = prompt(`NHẬP SỐ ĐIỆN THOẠI CHO KHÁCH HÀNG:\n[${s.code}] ${s.name}\n(Bắt buộc phải nhập để được phép bán hàng)`, s.phone || '');
+      const newPhone = prompt(
+          `NHẬP SỐ ĐIỆN THOẠI CHO KHÁCH HÀNG:\n[${s.code}] ${s.name}\n(Nhập 9 - 11 chữ số, bắt buộc để bán hàng)`,
+          s.phone || ''
+      );
 
-      if (newPhone !== null) {
-          const phoneStr = newPhone.trim().replace(/[^0-9]/g, ''); // Chỉ lấy số
-          
-          if (phoneStr === '') {
-              return alert("⛔ Lỗi: Số điện thoại không được để trống!");
+      if (newPhone === null) return;
+
+      const phoneStr = newPhone.trim().replace(/[^0-9]/g, '');
+      if (phoneStr === '') {
+          return alert("⛔ Lỗi: Số điện thoại không được để trống!");
+      }
+      if (phoneStr.length < 9 || phoneStr.length > 11) {
+          return alert("⛔ Lỗi: Số điện thoại không hợp lệ (Phải từ 9 đến 11 số)!");
+      }
+
+      const nowIso = new Date().toISOString();
+      const updatePayload = {
+          phone: phoneStr,
+          phoneUpdatedByCode: currentUser.code || 'NV',
+          phoneUpdatedByName: currentUser.name || 'Nhân viên',
+          updatedAt: nowIso
+      };
+
+      try {
+          // Dùng setDoc + merge: true để an toàn cả khi mạng yếu/offline và tránh lỗi thiếu field
+          const storeRef = doc(db, "stores", String(s.id));
+          await setDoc(storeRef, updatePayload, { merge: true });
+
+          // Cập nhật biến cục bộ, Index & Cache máy
+          stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
+          if (activeVisitedStore && (String(activeVisitedStore.id) === String(s.id) || String(activeVisitedStore.code) === String(s.code))) {
+              activeVisitedStore = { ...activeVisitedStore, ...updatePayload };
           }
-          if (phoneStr.length < 9 || phoneStr.length > 11) {
-              return alert("⛔ Lỗi: Số điện thoại không hợp lệ (Phải từ 9 đến 11 số)!");
+
+          if (typeof saveStoresToLocalCache === 'function') {
+              await saveStoresToLocalCache(stores);
           }
+          if (typeof buildStoreIndex === 'function') buildStoreIndex();
 
-          try {
-              // Lưu lên Firebase
-              const storeRef = doc(db, "stores", String(s.id));
-              await updateDoc(storeRef, {
-                  phone: phoneStr,
-                  updatedAt: new Date().toISOString()
-              });
-
-              // Lưu vào biến cục bộ & Local Storage
-              stores[storeIndex].phone = phoneStr;
-              if (typeof saveStoresToLocalCache === 'function') {
-                  await saveStoresToLocalCache(stores);
+          // Làm mới giao diện tương ứng với màn hình đang mở
+          if (currentTab === 'customers' && typeof filterTabCustomers === 'function') {
+              filterTabCustomers();
+          } else if (currentTab === 'sales') {
+              if (activeVisitedStore) {
+                  renderUI();
+              } else if (typeof filterSalesCustomers === 'function') {
+                  filterSalesCustomers(customerSearchKeyword);
               }
-              if (typeof buildStoreIndex === 'function') buildStoreIndex();
+          }
 
-              // Cập nhật lại giao diện ngay lập tức
-              if (currentTab === 'customers' && typeof filterTabCustomers === 'function') filterTabCustomers(tabCustomerSearchKey);
-              if (currentTab === 'sales' && typeof filterSalesCustomers === 'function') filterSalesCustomers(customerSearchKeyword);
-
-              alert("✅ Đã cập nhật số điện thoại thành công! Bạn đã có thể tiếp tục bán hàng.");
-          } catch (err) {
+          if (typeof triggerHaptic === 'function') triggerHaptic(25);
+          alert("✅ Đã cập nhật số điện thoại thành công! Bạn đã có thể tiếp tục bán hàng.");
+      } catch (err) {
+          if (err.code === 'permission-denied') {
+              alert("⛔ Firebase đang chặn quyền sửa SĐT của Sales! Hãy kiểm tra lại Firestore Security Rules cho collection 'stores'.");
+          } else {
               alert("⛔ Lỗi cập nhật số điện thoại: " + err.message);
           }
       }
@@ -3609,7 +3637,7 @@ window.filterTabProducts = function(val) {
 
         // Kéo TOÀN BỘ danh sách khách hàng mới nhất từ Firebase về (Bỏ qua bộ nhớ đệm)
         const sSnap = await getDocs(collection(db, "stores"));
-        const freshStores = sSnap.docs.map(d => d.data());
+        const freshStores = sSnap.docs.map(d => ({ ...d.data(), id: d.id }))
         
         stores = freshStores;
         window.allStores = stores;
@@ -3657,7 +3685,7 @@ window.syncStoresRealtime = async function() {
         const sSnap = await getDocs(qStore);
 
         if (!sSnap.empty) {
-            const updatedStores = sSnap.docs.map(d => d.data());
+            const updatedStores = sSnap.docs.map(d => ({ ...d.data(), id: d.id }))
 
             // Dùng Map để ghi đè khách cũ / thêm khách mới mà không bị nhân đôi
             const storeMap = new Map();
