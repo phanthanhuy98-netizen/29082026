@@ -4936,7 +4936,7 @@ window.importProductsExcel = function(event) {
   event.target.value = ''; // Reset file input
 };
 
-  window.importCustomersExcel = function(event) {
+window.importCustomersExcel = function(event) {
     if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file khách hàng mới!");
     const file = event.target.files[0];
     if (!file) return;
@@ -4960,7 +4960,6 @@ window.importProductsExcel = function(event) {
             return alert("⛔ LỖI BẢO MẬT: File Excel không có cột 'DonVi'. Hệ thống từ chối tải file!");
         }
 
-        // Kiểm tra từng dòng xem có đúng chữ BH_ không (Bỏ qua dòng tiêu đề)
         for (let i = 1; i < jsonRows.length; i++) {
             if (!jsonRows[i] || jsonRows[i].length === 0) continue;
             let val = String(jsonRows[i][donViColIndex] || '').trim();
@@ -4970,26 +4969,60 @@ window.importProductsExcel = function(event) {
         }
         // ================= KẾT THÚC CHỐT CHẶN =================
         
+        const nowIso = new Date().toISOString();
         const uniqueCustomerMap = new Map();
-        for (let i = 0; i < jsonRows.length; i++) {
-          const r = jsonRows[i];
-          const maDtpn = r[0] ? String(r[0]).trim() : '';
-          const tenDtpn = r[1] ? String(r[1]).trim() : '';
-          const address = r[2] ? String(r[2]).trim() : '';
-          const phone = r[3] ? String(r[3]).trim() : '';
-          const zalo = r[4] ? String(r[4]).trim() : '';
 
-          if (tenDtpn && tenDtpn !== 'Ten DTPN') {
+        // Bắt đầu từ i = 1 để bỏ qua dòng tiêu đề
+        for (let i = 1; i < jsonRows.length; i++) {
+          const r = jsonRows[i];
+          if (!r || r.length === 0) continue;
+
+          const maDtpn = r[0] !== undefined && r[0] !== null ? String(r[0]).trim() : '';
+          const tenDtpn = r[1] !== undefined && r[1] !== null ? String(r[1]).trim() : '';
+          const address = r[2] !== undefined && r[2] !== null ? String(r[2]).trim() : '';
+          const phone = r[3] !== undefined && r[3] !== null ? String(r[3]).trim() : '';
+          const zalo = r[4] !== undefined && r[4] !== null ? String(r[4]).trim() : '';
+
+          // Đọc cột F (5), G (6), H (7), I (8)
+          const latVal = Number(String(r[5] ?? '0').replace(',', '.').trim()) || 0;
+          const lngVal = Number(String(r[6] ?? '0').replace(',', '.').trim()) || 0;
+          const pinnedByCode = r[7] !== undefined && r[7] !== null ? String(r[7]).trim() : '';
+          const pinnedByName = r[8] !== undefined && r[8] !== null ? String(r[8]).trim() : '';
+
+          if (tenDtpn && tenDtpn !== 'Ten DTPN' && tenDtpn !== 'Tên Khách Hàng') {
             const codeVal = maDtpn || `KH${i}`;
-            uniqueCustomerMap.set(codeVal, {
+            const existingStore = stores.find(s => String(s.id) === codeVal || String(s.code) === codeVal);
+
+            const custObj = {
               id: codeVal,
               code: codeVal,
               name: tenDtpn,
-              address, phone, zalo,
-             lat: 0, lng: 0,
-              pinnedByCode: '', pinnedByName: '', pinnedAt: '', pinnedHistory: [],
-              updatedAt: new Date().toISOString()
-            });
+              address,
+              phone,
+              zalo,
+              updatedAt: nowIso
+            };
+
+            if (latVal !== 0 && lngVal !== 0) {
+              // File Excel có tọa độ -> cập nhật luôn GPS và NV ghim
+              custObj.lat = latVal;
+              custObj.lng = lngVal;
+              custObj.pinnedByCode = pinnedByCode;
+              custObj.pinnedByName = pinnedByName;
+              custObj.pinnedAt = existingStore?.pinnedAt || nowIso;
+              custObj.pinnedHistory = existingStore?.pinnedHistory || [];
+            } else if (!existingStore) {
+              // Khách mới hoàn toàn và chưa có GPS -> khởi tạo giá trị mặc định
+              custObj.lat = 0;
+              custObj.lng = 0;
+              custObj.pinnedByCode = '';
+              custObj.pinnedByName = '';
+              custObj.pinnedAt = '';
+              custObj.pinnedHistory = [];
+            }
+            // Nếu là khách cũ đã có GPS trên hệ thống mà Excel để trống -> không ghi đè để tránh mất GPS cũ
+
+            uniqueCustomerMap.set(codeVal, custObj);
           }
         }
 
@@ -5009,7 +5042,8 @@ window.importProductsExcel = function(event) {
           await batch.commit();
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-// Cập nhật Version để đánh thức các máy khác đồng bộ
+
+        // Cập nhật Version để đánh thức các máy khác đồng bộ
         const newStoresVersion = Date.now();
         await setDoc(doc(db, "systemMeta", "version"), { storesVersion: newStoresVersion }, { merge: true });
         localStorage.setItem("storesVersion", newStoresVersion);
@@ -5018,10 +5052,8 @@ window.importProductsExcel = function(event) {
         rawCustomers.forEach(newCust => {
             const idx = stores.findIndex(s => s.code === newCust.code || s.id === newCust.id);
             if (idx > -1) {
-                // Đã có mã này -> Cập nhật thông tin mới
                 stores[idx] = { ...stores[idx], ...newCust };
             } else {
-                // Chưa có -> Thêm nối tiếp vào danh sách
                 stores.push(newCust);
             }
         });
@@ -5029,117 +5061,18 @@ window.importProductsExcel = function(event) {
         buildStoreIndex();
         await saveStoresToLocalCache(stores);
         
-        // Render lại giao diện
         const activePane = document.getElementById('tabPane_customers');
         if (activePane) renderTabContent('customers', activePane);
         
         alert(`✅ Đã thêm/cập nhật thành công ${rawCustomers.length} khách hàng!\nTổng số lượng KH hiện tại trên máy bạn là: ${stores.length}`);
       } catch (err) { 
         alert("Lỗi đẩy lên Firebase: " + err.message); 
+      } finally {
+        event.target.value = '';
       }
     };
     reader.readAsArrayBuffer(file);
   };
-
-window.importCompanyExcel = function(event) {
-  if (currentUser.role === 'sales' || currentUser.role === 'viewer') return alert("⛔ Tài khoản của bạn không có quyền tải file này!");
-  const file = event.target.files[0];
-  if (!file) return;
-  
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
-      // ================= CHỐT CHẶN BẢO MẬT ĐƠN VỊ =================
-        let headerRow = jsonRows[0] || [];
-        let donViColIndex = -1;
-        for (let j = 0; j < headerRow.length; j++) {
-            if (String(headerRow[j]).trim().toLowerCase() === 'donvi') {
-                donViColIndex = j; break;
-            }
-        }
-        
-        if (donViColIndex === -1) {
-            return alert("⛔ LỖI BẢO MẬT: File Excel không có cột 'DonVi'. Hệ thống từ chối tải file!");
-        }
-
-        // Kiểm tra từng dòng xem có đúng chữ BH_ không (Bỏ qua dòng tiêu đề)
-        for (let i = 1; i < jsonRows.length; i++) {
-            if (!jsonRows[i] || jsonRows[i].length === 0) continue;
-            let val = String(jsonRows[i][donViColIndex] || '').trim();
-            if (val !== 'BH_') {
-                return alert(`⛔ LỖI BẢO MẬT: Dòng số ${i+1} có Đơn vị là "${val}" (Bắt buộc phải là "BH_"). Hệ thống từ chối tải file!`);
-            }
-        }
-        // ================= KẾT THÚC CHỐT CHẶN =================
-      
-      let newOrUpdatedComps = [];
-      let addedCount = 0;
-      let updatedCount = 0;
-
-      for (let i = 0; i < jsonRows.length; i++) {
-        const r = jsonRows[i];
-        const maCtu = r[0] ? String(r[0]).trim() : '';
-        const tenCtu = r[1] ? String(r[1]).trim() : '';
-        
-        if (maCtu && maCtu !== 'MaCTu') {
-          // TÌM XEM CÔNG TY ĐÃ CÓ TRONG HỆ THỐNG CHƯA
-          let existingCompIndex = companyList.findIndex(c => c.maCtu === maCtu);
-          
-          if (existingCompIndex > -1) {
-            // NẾU ĐÃ CÓ: Giữ nguyên ĐVT và Trạng thái Đóng/Mở, chỉ cập nhật Tên
-            companyList[existingCompIndex].tenCtu = tenCtu;
-            companyList[existingCompIndex].updatedAt = new Date().toISOString();
-            newOrUpdatedComps.push(companyList[existingCompIndex]);
-            updatedCount++;
-          } else {
-            // NẾU CHƯA CÓ: Tạo mới hoàn toàn
-            let newComp = { 
-              id: `${window.currentWorkingTenant}_${maCtu}`, 
-              maDonVi: window.currentWorkingTenant, 
-              maCtu: maCtu, 
-              tenCtu: tenCtu, 
-              dvtDetails: [], 
-              status: "Mở", 
-              updatedAt: new Date().toISOString() 
-            };
-            companyList.push(newComp); // Thêm nối tiếp vào danh sách cũ
-            newOrUpdatedComps.push(newComp);
-            addedCount++;
-          }
-        }
-      }
-
-      if (newOrUpdatedComps.length > 0) {
-        // Đẩy lên Firebase bằng Batch
-        const batch = writeBatch(db);
-        newOrUpdatedComps.forEach(c => {
-          const docRef = doc(db, "companies", String(c.id || c.maCtu));
-          batch.set(docRef, c, { merge: true }); // Giữ lại các trường cũ trên Firebase nếu có
-        });
-        await batch.commit();
-
-        // Kích hoạt đồng bộ cho các máy khác
-        const newVersion = Date.now();
-        await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
-        localStorage.setItem("companiesVersion", newVersion);
-        
-        // Lưu lại bộ nhớ máy toàn bộ danh sách (Cũ + Mới)
-        await saveCompaniesToLocalCache(companyList); 
-        renderUI();
-        alert(`✅ Đã nhập Excel thành công!\n- Thêm mới: ${addedCount} công ty\n- Cập nhật tên: ${updatedCount} công ty\n(Các thiết lập ĐVT và trạng thái cũ được giữ nguyên).`);
-      } else {
-        alert("Không tìm thấy dữ liệu hợp lệ trong file!");
-      }
-    } catch (err) {
-      alert("Lỗi khi xử lý file Excel: " + err.message);
-    }
-  };
-  reader.readAsArrayBuffer(file);
-  event.target.value = ''; // Reset input file để có thể chọn lại cùng 1 file
-};
   window.importRoutesExcel = function(event) {
     if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file này!");
     const file = event.target.files[0];
@@ -5474,28 +5407,6 @@ window.updateRouteField = async function(index, field, val) {
     await saveRoutesToLocalCache(routeGroupsList);
   } catch (err) {}
   renderUI();
-};
-
-window.deleteCompanyItem = async function(index) {
-  if (currentUser.role !== 'admin' && currentUser.role !== 'manager') return;
-  const confirmDel = await window.showCustomConfirm("Xóa Công Ty", "Bạn có chắc muốn xóa dòng này không?", "fa-trash", "Xóa", "Hủy");
-  if (!confirmDel) return;
-  
-  const c = companyList[index];
-  try {
-    // THAY VÌ deleteDoc, TA DÙNG UPDATE ĐỂ BÁO HIỆU CHO MÁY SALES BIẾT ĐÃ XÓA
-    await updateDoc(doc(db, "companies", String(c.maCtu)), { 
-        isDeleted: true, 
-        updatedAt: new Date().toISOString() 
-    });
-    
-    companyList.splice(index, 1);
-    await saveCompaniesToLocalCache(companyList);
-    refreshCompanyListUI();
-    alert("✅ Đã xóa thành công!");
-  } catch (err) {
-    alert("Lỗi: " + err.message);
-  }
 };
 
 window.deleteRouteItem = async function(index) {
@@ -10371,7 +10282,7 @@ window.deleteAllKpiForCurrentMonth = async function() {
     }
 
     try {
-        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+        const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", currentMonth)));
         const batch = writeBatch(db);
         let count = 0;
 
@@ -12075,7 +11986,7 @@ window.executeMonthlyClone = async function(srcMonth, destMonth) {
     }
 
     try {
-        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+       const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", srcMonth)));
         const batch = writeBatch(db);
         let clonedCount = 0;
         const nowISO = new Date().toISOString();
@@ -12398,7 +12309,7 @@ window.openTargetModal = async function() {
     }
 
     // 1. KIỂM TRA BẢO VỆ: Quét xem tháng hiện tại đã có KPI trên hệ thống chưa?
-    const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+    const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth), limit(1)));
     let hasExisting = false;
     targetsSnap.forEach(docSnap => {
         const data = docSnap.data();
@@ -12516,7 +12427,7 @@ window.loadAndEditCurrentMonthKpi = async function() {
     }
 
     try {
-        const targetsSnap = await getDocs(collection(db, "monthlyTargets"));
+        const targetsSnap = await getDocs(query(collection(db, "monthlyTargets"), where("month", "==", window._chiTieuTargetMonth)));
         let foundDocs = [];
         targetsSnap.forEach(docSnap => {
             const data = docSnap.data();
