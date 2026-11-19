@@ -1553,12 +1553,16 @@ window.isDvtHiddenForCurrentCompany = function(dvt, productCode, productName) {
     let email = usernameInput.includes('@') ? usernameInput.toLowerCase() : usernameInput.toLowerCase() + '@dms.com';
 
     try {
-      if (!usernameInput.includes('@')) {
-        const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
-        const snapByCode = await getDocs(qUsersByCode);
-        if (!snapByCode.empty) {
-          const uData = snapByCode.docs[0].data();
-          if (uData.email) email = uData.email.toLowerCase();
+     if (!usernameInput.includes('@')) {
+        try {
+          const qUsersByCode = query(collection(db, "users"), where("code", "==", usernameInput), limit(1));
+          const snapByCode = await getDocs(qUsersByCode);
+          if (!snapByCode.empty) {
+            const uData = snapByCode.docs[0].data();
+            if (uData.email) email = uData.email.toLowerCase();
+          }
+        } catch (e) {
+          // Bỏ qua lỗi đọc bảng users khi chưa đăng nhập, dùng mặc định mãNV@dms.com
         }
       }
 
@@ -1707,10 +1711,10 @@ if (!sSnap.empty) {
     }
 }
 
-// 5. Lưu lại mốc thời gian đồng bộ
+// 5. Lưu lại mốc thời gian đồng bộ và version để tránh kích hoạt sync thừa
 localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
-
-    window.allCompanies = (cachedComps || []).filter(c => !c.isDeleted);
+localStorage.setItem("storesVersion", serverStoresVersion);
+window.allCompanies = (cachedComps || []).filter(c => !c.isDeleted);
 window.allProducts = (cachedPrds || []).filter(p => !p.isDeleted);
 window.allRoutes = (cachedRoutes || []).filter(r => !r.isDeleted);
 window.allStores = (cachedStores || []).filter(s => !s.isDeleted);
@@ -2177,8 +2181,7 @@ window.handleLogout = async function() {
       alert("✅ Đã xóa GPS thành công! Khách hàng đã ở trạng thái trống, có thể ghim lại.");
     } catch (err) { alert("Lỗi: " + err.message); }
   };
-  // HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG
-// HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG (CHO PHÉP ADMIN, MANAGER, SALES)
+// HÀM CẬP NHẬT SỐ ĐIỆN THOẠI KHÁCH HÀNG + TỰ ĐỘNG ĐỒNG BỘ SANG MÁY KHÁC
   window.updateCustomerPhone = async function(storeId) {
       if (!currentUser || !['admin', 'manager', 'sales'].includes(currentUser.role)) {
           return alert("⛔ Tài khoản của bạn không có quyền cập nhật số điện thoại khách hàng!");
@@ -2196,9 +2199,7 @@ window.handleLogout = async function() {
       if (newPhone === null) return;
 
       const phoneStr = newPhone.trim().replace(/[^0-9]/g, '');
-      if (phoneStr === '') {
-          return alert("⛔ Lỗi: Số điện thoại không được để trống!");
-      }
+      if (phoneStr === '') return alert("⛔ Lỗi: Số điện thoại không được để trống!");
       if (phoneStr.length < 9 || phoneStr.length > 11) {
           return alert("⛔ Lỗi: Số điện thoại không hợp lệ (Phải từ 9 đến 11 số)!");
       }
@@ -2212,37 +2213,38 @@ window.handleLogout = async function() {
       };
 
       try {
-          // Dùng setDoc + merge: true để an toàn cả khi mạng yếu/offline và tránh lỗi thiếu field
+          // 1. Lưu SĐT lên Firestore
           const storeRef = doc(db, "stores", String(s.id));
           await setDoc(storeRef, updatePayload, { merge: true });
 
-          // Cập nhật biến cục bộ, Index & Cache máy
+          // 2. Phát tín hiệu đánh thức các máy Admin & Sales khác (máy hiện tại bỏ qua nhờ lưu localStorage trước)
+          const newStoresVersion = Date.now();
+          localStorage.setItem("storesVersion", newStoresVersion);
+          updateDoc(doc(db, "systemMeta", "version"), { storesVersion: newStoresVersion })
+              .catch(e => console.warn("Không thể cập nhật storesVersion:", e));
+
+          // 3. Cập nhật RAM, Index & Cache cục bộ
           stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
           if (activeVisitedStore && (String(activeVisitedStore.id) === String(s.id) || String(activeVisitedStore.code) === String(s.code))) {
               activeVisitedStore = { ...activeVisitedStore, ...updatePayload };
           }
 
-          if (typeof saveStoresToLocalCache === 'function') {
-              await saveStoresToLocalCache(stores);
-          }
+          if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
           if (typeof buildStoreIndex === 'function') buildStoreIndex();
 
-          // Làm mới giao diện tương ứng với màn hình đang mở
+          // 4. Làm mới giao diện ngay lập tức
           if (currentTab === 'customers' && typeof filterTabCustomers === 'function') {
               filterTabCustomers();
           } else if (currentTab === 'sales') {
-              if (activeVisitedStore) {
-                  renderUI();
-              } else if (typeof filterSalesCustomers === 'function') {
-                  filterSalesCustomers(customerSearchKeyword);
-              }
+              if (activeVisitedStore) renderUI();
+              else if (typeof filterSalesCustomers === 'function') filterSalesCustomers();
           }
 
           if (typeof triggerHaptic === 'function') triggerHaptic(25);
-          alert("✅ Đã cập nhật số điện thoại thành công! Bạn đã có thể tiếp tục bán hàng.");
+          alert("✅ Đã cập nhật SĐT và đồng bộ sang các thiết bị khác thành công!");
       } catch (err) {
           if (err.code === 'permission-denied') {
-              alert("⛔ Firebase đang chặn quyền sửa SĐT của Sales! Hãy kiểm tra lại Firestore Security Rules cho collection 'stores'.");
+              alert("⛔ Firebase đang chặn quyền sửa SĐT! Kiểm tra lại Firestore Rules.");
           } else {
               alert("⛔ Lỗi cập nhật số điện thoại: " + err.message);
           }
@@ -3670,42 +3672,62 @@ window.filterTabProducts = function(val) {
         if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới DS';
     }
 };
-  // HÀM ĐỒNG BỘ NGẦM KHÁCH HÀNG: CHỈ TẢI DATA MỚI, KHÔNG TẢI LẠI TOÀN BỘ (TIẾT KIỆM BĂNG THÔNG)
 window.syncStoresRealtime = async function() {
     try {
         if (!stores || stores.length === 0) {
             stores = typeof loadStoresFromLocalCache === 'function' ? await loadStoresFromLocalCache() : [];
         }
 
-        // Lấy mốc thời gian đồng bộ lần cuối
-        const lastSyncStore = localStorage.getItem("dms_last_sync_stores") || "2000-01-01T00:00:00.000Z";
+        // Lùi mốc truy vấn lại 2 phút để chống sót dữ liệu khi đồng hồ giữa các điện thoại bị lệch giờ nhau
+        const rawLastSync = localStorage.getItem("dms_last_sync_stores") || "2000-01-01T00:00:00.000Z";
+        const lastSyncMs = Date.parse(rawLastSync);
+        const safeFromIso = (!isNaN(lastSyncMs) && lastSyncMs > 1000000000000)
+            ? new Date(lastSyncMs - 2 * 60 * 1000).toISOString()
+            : "2000-01-01T00:00:00.000Z";
 
-        // Chỉ Query lấy những khách hàng có sự thay đổi sau mốc thời gian trên
-        const qStore = query(collection(db, "stores"), where("updatedAt", ">", lastSyncStore));
+        // Chỉ tải đúng các khách hàng thay đổi gần đây (thường chỉ tốn 1-2 lượt Read)
+        const qStore = query(collection(db, "stores"), where("updatedAt", ">", safeFromIso));
         const sSnap = await getDocs(qStore);
 
         if (!sSnap.empty) {
-            const updatedStores = sSnap.docs.map(d => ({ ...d.data(), id: d.id }))
+            const updatedStores = sSnap.docs.map(d => ({ ...d.data(), id: d.id }));
 
-            // Dùng Map để ghi đè khách cũ / thêm khách mới mà không bị nhân đôi
             const storeMap = new Map();
             stores.forEach(s => storeMap.set(String(s.id || s.code), s));
             updatedStores.forEach(s => storeMap.set(String(s.id || s.code), s));
 
-            stores = Array.from(storeMap.values());
+            stores = Array.from(storeMap.values()).filter(s => !s.isDeleted);
             window.allStores = stores;
+
+            // Nếu máy này đang mở đúng khách hàng vừa được cập nhật SĐT/GPS ở tab Bán Hàng
+            let activeStoreChanged = false;
+            if (activeVisitedStore) {
+                const freshActive = storeMap.get(String(activeVisitedStore.id || activeVisitedStore.code));
+                if (freshActive && !freshActive.isDeleted) {
+                    activeVisitedStore = freshActive;
+                    activeStoreChanged = true;
+                }
+            }
 
             if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
             if (typeof buildStoreIndex === 'function') buildStoreIndex();
 
-            // Tự động nhảy số và vẽ lại giao diện nếu Sales đang mở tab Khách Hàng
+            // Cập nhật mượt giao diện đang mở mà không làm mất chữ trong ô tìm kiếm
             if (currentTab === 'customers') {
-                const activePane = document.getElementById('tabPane_customers');
-                if (activePane) renderTabContent('customers', activePane);
+                const titleH2 = document.querySelector('#tabPane_customers h2');
+                if (titleH2) {
+                    titleH2.innerHTML = `<i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})`;
+                }
+                if (typeof filterTabCustomers === 'function') filterTabCustomers();
+            } else if (currentTab === 'sales') {
+                if (activeStoreChanged) {
+                    renderUI();
+                } else if (typeof filterSalesCustomers === 'function') {
+                    filterSalesCustomers();
+                }
             }
         }
-        
-        // Lưu lại mốc thời gian vừa đồng bộ xong
+
         localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
     } catch (e) {
         console.error("Lỗi đồng bộ khách hàng ngầm:", e);
