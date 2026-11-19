@@ -3528,97 +3528,16 @@ window.filterTabProducts = function(val) {
     });
   };
 
-  window._soGocFetchedRanges = window._soGocFetchedRanges || {};
-
-  window.fetchSoGocOrdersByDateRange = async function(fromDate, toDate, forceCloud = false) {
-    if (!fromDate && !toDate) {
-      filterSoGocCards();
-      return;
-    }
-
-    let startStr = fromDate || toDate;
-    let endStr = toDate || fromDate;
-
-    // Tự động đảo lại nếu chọn Từ ngày lớn hơn Đến ngày
-    if (startStr > endStr) {
-      const tmp = startStr;
-      startStr = endStr;
-      endStr = tmp;
-      soGocFilterDateFrom = startStr;
-      soGocFilterDateTo = endStr;
-      const inputFrom = document.getElementById('soGocDateFrom');
-      const inputTo = document.getElementById('soGocDateTo');
-      if (inputFrom) inputFrom.value = startStr;
-      if (inputTo) inputTo.value = endStr;
-    }
-
-    const cacheKey = `${startStr}_${endStr}`;
-    if (!forceCloud && window._soGocFetchedRanges[cacheKey]) {
-      filterSoGocCards();
-      return;
-    }
-
-    const container = document.getElementById('soGocCardsContainer');
-    if (container) {
-      container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:800;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải đơn từ ${formatDateDDMMYYYY(startStr)} đến ${formatDateDDMMYYYY(endStr)}...</div>`;
-    }
-
-    try {
-      const q = query(
-        collection(db, "orders"),
-        where("ngayCtu", ">=", startStr),
-        where("ngayCtu", "<=", endStr)
-      );
-      const snap = await getDocs(q);
-      const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      // Gộp an toàn vào mảng orders theo ID (không mất đơn đã tải)
-      const orderMap = new Map();
-      orders.forEach(o => orderMap.set(o.id, o));
-      fetchedOrders.forEach(o => orderMap.set(o.id, o));
-      orders = Array.from(orderMap.values());
-
-      window._soGocFetchedRanges[cacheKey] = true;
-
-      const activePane = document.getElementById('tabPane_soGocBH');
-      if (activePane) {
-        await renderTabContent('soGocBH', activePane);
-      }
-    } catch (e) {
-      alert("Lỗi tải đơn hàng theo ngày: " + e.message);
-    }
-  };
-
   window.setSoGocDateFrom = function(val) {
     soGocFilterDateFrom = val;
-    soGocQuickDate = 'custom';
     localStorage.setItem('dms_sogoc_date_from', val);
-    localStorage.setItem('dms_sogoc_quickdate', 'custom');
-    ['today', 'week', 'month', 'all'].forEach(k => {
-      const btn = document.getElementById(`quickDateBtn_${k}`);
-      if (btn) btn.className = "btn btn-sm";
-    });
-    if (soGocFilterDateFrom && soGocFilterDateTo) {
-      fetchSoGocOrdersByDateRange(soGocFilterDateFrom, soGocFilterDateTo);
-    } else {
-      filterSoGocCards();
-    }
+    filterSoGocCards();
   };
 
   window.setSoGocDateTo = function(val) {
     soGocFilterDateTo = val;
-    soGocQuickDate = 'custom';
     localStorage.setItem('dms_sogoc_date_to', val);
-    localStorage.setItem('dms_sogoc_quickdate', 'custom');
-    ['today', 'week', 'month', 'all'].forEach(k => {
-      const btn = document.getElementById(`quickDateBtn_${k}`);
-      if (btn) btn.className = "btn btn-sm";
-    });
-    if (soGocFilterDateFrom && soGocFilterDateTo) {
-      fetchSoGocOrdersByDateRange(soGocFilterDateFrom, soGocFilterDateTo);
-    } else {
-      filterSoGocCards();
-    }
+    filterSoGocCards();
   };
 
   window.setSoGocSalesFilter = function(val) {
@@ -3633,9 +3552,9 @@ window.filterTabProducts = function(val) {
 
     const today = new Date();
     const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const todayStr = `${yyyy}-${mm}-${dd}`;
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let dd = String(today.getDate()).padStart(2, '0');
+    let todayStr = `${yyyy}-${mm}-${dd}`;
 
     if (type === 'today') {
       soGocFilterDateFrom = todayStr;
@@ -3643,9 +3562,9 @@ window.filterTabProducts = function(val) {
     } else if (type === 'week') {
       const firstDayOfWeek = new Date(today);
       const day = today.getDay();
-      const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
       firstDayOfWeek.setDate(diff);
-      soGocFilterDateFrom = `${firstDayOfWeek.getFullYear()}-${String(firstDayOfWeek.getMonth() + 1).padStart(2, '0')}-${String(firstDayOfWeek.getDate()).padStart(2, '0')}`;
+      soGocFilterDateFrom = firstDayOfWeek.toISOString().slice(0, 10);
       soGocFilterDateTo = todayStr;
     } else if (type === 'month') {
       soGocFilterDateFrom = `${yyyy}-${mm}-01`;
@@ -3658,46 +3577,57 @@ window.filterTabProducts = function(val) {
     localStorage.setItem('dms_sogoc_date_from', soGocFilterDateFrom);
     localStorage.setItem('dms_sogoc_date_to', soGocFilterDateTo);
 
-    const inputFrom = document.getElementById('soGocDateFrom');
+   const inputFrom = document.getElementById('soGocDateFrom');
     const inputTo = document.getElementById('soGocDateTo');
+    // Truyền thẳng định dạng Năm-Tháng-Ngày cho trình duyệt tự xử lý
     if (inputFrom) inputFrom.value = soGocFilterDateFrom || '';
     if (inputTo) inputTo.value = soGocFilterDateTo || '';
-
     ['today', 'week', 'month', 'all'].forEach(k => {
       const btn = document.getElementById(`quickDateBtn_${k}`);
-      if (btn) btn.className = (k === type) ? "btn btn-sm btn-amber" : "btn btn-sm";
+      if (btn) {
+        if (k === type) {
+          btn.className = "btn btn-sm btn-amber";
+        } else {
+          btn.className = "btn btn-sm";
+        }
+      }
     });
 
-    if (soGocFilterDateFrom && soGocFilterDateTo) {
-      fetchSoGocOrdersByDateRange(soGocFilterDateFrom, soGocFilterDateTo);
-    } else {
-      filterSoGocCards();
-    }
+    filterSoGocCards();
   };
 
-  window.reloadSoGocDataManually = async function() {
-    const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
-    if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
-
+ window.reloadSoGocDataManually = async function() {
     try {
-      window._soGocFetchedRanges = {}; // Xóa cache để tải dữ liệu mới nhất
+      // Lấy icon của nút Làm mới để tạo hiệu ứng xoay (nếu có)
+      const refreshBtn = document.querySelector('button[onclick="reloadSoGocDataManually()"]');
+      if (refreshBtn) refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
 
-      if (soGocFilterDateFrom && soGocFilterDateTo) {
-        await fetchSoGocOrdersByDateRange(soGocFilterDateFrom, soGocFilterDateTo, true);
+      // Tải dữ liệu mới từ Firebase
+     const snap = await getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(300)));
+      orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      if (!snap.empty) {
+        lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
+        hasMoreOrders = snap.docs.length >= 300;
       } else {
-        const snap = await getDocs(query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(300)));
-        orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (!snap.empty) {
-          lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
-          hasMoreOrders = snap.docs.length >= 300;
-        } else {
-          hasMoreOrders = false;
-        }
-        const activePane = document.getElementById('tabPane_soGocBH');
-        if (activePane) await renderTabContent('soGocBH', activePane);
+        hasMoreOrders = false;
       }
+      
+      const activePane = document.getElementById('tabPane_soGocBH');
+      if (activePane) {
+        // 1. Vẽ lại toàn bộ HTML với dữ liệu mới
+        await renderTabContent('soGocBH', activePane);
 
+        // 2. QUAN TRỌNG: Gọi lại hàm lọc để giữ nguyên trạng thái Nhân viên, Ngày tháng và Từ khóa đang nhập
+        setTimeout(() => {
+          if (typeof filterSoGocCards === 'function') {
+            filterSoGocCards(soGocFilterKeyword);
+          }
+        }, 50);
+      }
+      
       if (typeof triggerHaptic === 'function') triggerHaptic(20);
+
     } catch (e) {
       alert("Lỗi tải lại dữ liệu: " + e.message);
     }
@@ -3813,7 +3743,7 @@ window.loadMoreSoGoc = async function() {
     }
 
     try {
-        let q = query(collection(db, "orders"), orderBy("ngayCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
+        let q = query(collection(db, "orders"), orderBy("soCtu", "desc"), startAfter(lastVisibleOrderDoc), limit(30));
         const snap = await getDocs(q);
         
         if (snap.empty) {
@@ -5736,7 +5666,7 @@ window.filterUsersList = function(val) {
   };
 
 function attachListeners() {
-    getDocs(query(collection(db, "orders"), orderBy("ngayCtu", "desc"), limit(300))).then(snap => {
+    getDocs(query(collection(db, "orders"), orderBy("soCtu", "desc"), limit(300))).then(snap => {
       orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!snap.empty) {
         lastVisibleOrderDoc = snap.docs[snap.docs.length - 1];
@@ -6476,8 +6406,8 @@ const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '
         </div>
       `;
       setTimeout(() => {
-          if (typeof filterSoGocCards === 'function') {
-              filterSoGocCards(soGocFilterKeyword);
+          if (typeof setSoGocQuickDateFilter === 'function') {
+              setSoGocQuickDateFilter(soGocQuickDate);
           }
       }, 50);
     } 
