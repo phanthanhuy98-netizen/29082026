@@ -15550,8 +15550,12 @@ window.buildUnvisitedStoresKpiHtml = function() {
       <div id="acc_unvisited_monthly" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); background:var(--card-bg); display:flex; flex-direction:column; gap:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span style="font-size:12px; color:var(--text-muted); font-weight:700;">Bấm vào từng Tuyến để xem danh sách tiệm chưa ai ghé trong tháng:</span>
-          <button class="btn btn-amber btn-sm" onclick="loadMonthlyVisitLogs(true).then(() => renderKpiAnalyticsBody())" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-rotate"></i> Cập nhật</button>
-        </div>
+         <div style="display:flex; gap:6px; align-items:center;">
+            ${currentUser && currentUser.role === 'admin' ? `
+              <button class="btn btn-red btn-sm" onclick="openCleanupVisitLogsModal()" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-trash"></i> Xóa tháng cũ</button>
+            ` : ''}
+            <button class="btn btn-amber btn-sm" onclick="loadMonthlyVisitLogs(true).then(() => renderKpiAnalyticsBody())" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-rotate"></i> Cập nhật</button>
+          </div>
         ${routesWithUnvisited.map((rt, idx) => {
           const rAccId = `acc_unvis_rt_${idx}`;
           const unvCount = rt.unvisitedList.length;
@@ -15583,6 +15587,59 @@ window.buildUnvisitedStoresKpiHtml = function() {
       </div>
     </div>
   `;
+};
+  window.openCleanupVisitLogsModal = async function() {
+  if (!currentUser || currentUser.role !== 'admin') {
+    return alert("Chỉ tài khoản Admin mới có quyền dọn dẹp nhật ký ghé tiệm!");
+  }
+
+  const { monthStr: currentMonth } = window.getVnTodayAndMonth();
+  const inputMonth = prompt(
+    `DỌN DẸP NHẬT KÝ GHÉ TIỆM (visitLogs) THEO THÁNG\n\nNhập tháng cũ cần xóa (định dạng YYYY-MM, ví dụ: 2026-10).\nKhông được xóa tháng hiện tại (${currentMonth}).`,
+    ""
+  );
+  if (!inputMonth) return;
+
+  const targetMonth = inputMonth.trim();
+  if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+    return alert("Định dạng tháng không hợp lệ! Vui lòng nhập theo dạng YYYY-MM (ví dụ: 2026-10).");
+  }
+  if (targetMonth >= currentMonth) {
+    return alert(`Chỉ được phép xóa các tháng cũ trước tháng hiện tại (${currentMonth})!`);
+  }
+
+  try {
+    const q = query(collection(db, "visitLogs"), where("month", "==", targetMonth));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      return alert(`Không tìm thấy bản ghi visitLogs nào của tháng ${targetMonth}.`);
+    }
+
+    const ok = await window.showCustomConfirm(
+      "Xác Nhận Xóa Nhật Ký Tháng Cũ",
+      `Bạn sắp xóa vĩnh viễn ${snap.size} dòng nhật ký ghé tiệm/gọi/Zalo của tháng ${targetMonth}.\nHành động này không thể hoàn tác!`,
+      "fa-trash",
+      "Xóa ngay",
+      "Hủy"
+    );
+    if (!ok) return;
+
+    const docs = snap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = writeBatch(db);
+      docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    localStorage.removeItem(`dms_visit_logs_${targetMonth}`);
+    localStorage.removeItem(`dms_visit_logs_sync_${targetMonth}`);
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    alert(`Đã xóa thành công ${docs.length} bản ghi visitLogs của tháng ${targetMonth}!`);
+  } catch (err) {
+    alert("Lỗi khi xóa visitLogs tháng cũ: " + err.message);
+  }
 };
 </script>
 </body>
