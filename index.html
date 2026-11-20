@@ -15606,6 +15606,89 @@ window.buildUnvisitedStoresKpiHtml = function() {
     alert("Lỗi khi xóa visitLogs tháng cũ: " + err.message);
   }
 };
+  window.reloadCompanyDataManually = async function() {
+  const btn = document.querySelector('button[onclick="reloadCompanyDataManually()"]');
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+
+  try {
+    const cSnap = await getDocs(collection(db, "companies"));
+    const freshComps = cSnap.docs.map(d => d.data()).filter(c => !c.isDeleted);
+
+    companyList = freshComps;
+    window.allCompanies = companyList;
+
+    if (typeof saveCompaniesToLocalCache === 'function') {
+      await saveCompaniesToLocalCache(companyList);
+    }
+
+    const metaSnap = await getDoc(doc(db, "systemMeta", "version"));
+    if (metaSnap.exists() && metaSnap.data().companiesVersion) {
+      localStorage.setItem("companiesVersion", Number(metaSnap.data().companiesVersion));
+    }
+    localStorage.setItem("dms_last_sync_comps", new Date().toISOString());
+
+    const activePane = document.getElementById('tabPane_company');
+    if (activePane) renderTabContent('company', activePane);
+
+    if (typeof triggerHaptic === 'function') triggerHaptic(20);
+    alert(`✅ Đã làm mới thành công ${companyList.length} công ty!`);
+  } catch (err) {
+    alert("⛔ Lỗi làm mới danh sách công ty: " + err.message);
+  } finally {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới';
+  }
+};
+
+window.addNewCompany = async function() {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+    return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền thêm công ty!");
+  }
+
+  const maCtuRaw = prompt("Nhập Mã Công Ty (2 ký tự, VD: 01, 10, 65...):");
+  if (!maCtuRaw || !maCtuRaw.trim()) return;
+  const maCtu = maCtuRaw.trim().toUpperCase();
+
+  const existed = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === maCtu);
+  if (existed) {
+    return alert(`⛔ Mã công ty "${maCtu}" đã tồn tại (${existed.tenCtu || 'Chưa có tên'})!`);
+  }
+
+  const tenCtuRaw = prompt(`Nhập Tên Công Ty cho mã [${maCtu}]:`);
+  if (tenCtuRaw === null) return;
+  const tenCtu = tenCtuRaw.trim();
+
+  const newCompObj = {
+    maCtu,
+    tenCtu,
+    status: 'Mở',
+    dvtDetails: [],
+    isDeleted: false,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await setDoc(doc(db, "companies", maCtu), newCompObj, { merge: true });
+
+    companyList.push(newCompObj);
+    window.allCompanies = companyList;
+
+    if (typeof saveCompaniesToLocalCache === 'function') {
+      await saveCompaniesToLocalCache(companyList);
+    }
+
+    const newVersion = Date.now();
+    localStorage.setItem("companiesVersion", newVersion);
+    await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+
+    const activePane = document.getElementById('tabPane_company');
+    if (activePane) renderTabContent('company', activePane);
+
+    if (typeof playSystemSound === 'function') playSystemSound('success');
+    alert(`✅ Đã thêm công ty [${maCtu}] ${tenCtu} thành công!`);
+  } catch (err) {
+    alert("⛔ Lỗi khi thêm công ty: " + err.message);
+  }
+};
 </script>
 </body>
 </html>
