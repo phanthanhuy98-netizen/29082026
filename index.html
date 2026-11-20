@@ -2755,11 +2755,14 @@ window.selectStoreDirectly = async function(storeId, event) {
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
           ${(() => {
   const st = window.getStoreMonthlyStats(s);
-  const badge = st.visitCount === 0
-    ? `<span style="color:var(--rose); font-weight:800;">🔴 Chưa ghé tháng này</span>`
-    : `<span style="color:var(--emerald); font-weight:800;">🟢 Tháng này: ${st.visitCount} lần (${st.lastBy} - ${st.daysAgo === 0 ? 'Hôm nay' : st.daysAgo + ' ngày trước'})</span>`;
+  const badge = st.orderCount === 0
+    ? `<span style="color:var(--rose); font-weight:800;">🔴 Chưa có đơn tháng này</span>`
+    : `<span style="color:var(--emerald); font-weight:800;">🟢 Tháng này: ${st.orderCount} đơn (${st.lastBy} - ${st.daysAgo === 0 ? 'Hôm nay' : st.daysAgo + ' ngày trước'})</span>`;
+  const zeroOrderTxt = st.noOrderVisitCount > 0
+    ? ` • ⚪ Ghé 0 đơn: <b>${st.noOrderVisitCount}</b> (${st.lastNoOrderBy}${st.lastNoOrderNote ? ': ' + st.lastNoOrderNote : ''})`
+    : '';
   const callTxt = st.callCount > 0 ? ` • 📞 Gọi/Zalo: <b>${st.callCount}</b>` : '';
-  return `<div style="font-size:var(--font-size-sub-meta); background:rgba(0,0,0,0.03); padding:5px 8px; border-radius:6px;">${badge}${callTxt}</div>`;
+  return `<div style="font-size:var(--font-size-sub-meta); background:rgba(0,0,0,0.03); padding:5px 8px; border-radius:6px; line-height:1.45;">${badge}${zeroOrderTxt}${callTxt}</div>`;
 })()}
 <div style="display:flex; gap:6px; margin-top:2px;">
   <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="flex:1; justify-content:center; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
@@ -15382,52 +15385,64 @@ window.getStoreMonthlyStats = function(store) {
   const sId = String(store.id || '');
   const sCode = String(store.code || '').trim().toUpperCase();
 
-  let visitCount = 0;
+  let orderCount = 0;
+  let noOrderVisitCount = 0;
   let callCount = 0;
-  let lastDate = '';
-  let lastBy = '';
-  let lastNote = '';
+  let lastOrderDate = '';
+  let lastOrderBy = '';
+  let lastNoOrderDate = '';
+  let lastNoOrderBy = '';
+  let lastNoOrderNote = '';
 
-  const updateLatest = (dateStr, byStr, noteStr = '') => {
-    if (dateStr && (!lastDate || dateStr >= lastDate)) {
-      lastDate = dateStr;
-      lastBy = byStr || '';
-      if (noteStr) lastNote = noteStr;
-    }
-  };
-
-  // 1. Tính từ Đơn hàng trong tháng (không bị hủy)
   (orders || []).forEach(o => {
     if (!o || o.status === 'Đã hủy' || !o.ngayCtu || !o.ngayCtu.startsWith(monthStr)) return;
     const oCode = String(o.maDTPNNo || (o.maKH && o.maKH.includes(' - ') ? o.maKH.split(' - ')[0] : '')).trim().toUpperCase();
     if (String(o.storeId || '') === sId || (sCode && oCode === sCode)) {
-      visitCount++;
-      updateLatest(o.ngayCtu, o.salesCode || o.salesName || '');
+      orderCount++;
+      if (!lastOrderDate || o.ngayCtu >= lastOrderDate) {
+        lastOrderDate = o.ngayCtu;
+        lastOrderBy = o.salesCode || o.salesName || '';
+      }
     }
   });
 
-  // 2. Tính từ Nhật ký ghé không đơn / Gọi / Zalo trong tháng
   (window.monthlyVisitLogs || []).forEach(log => {
     if (!log || log.month !== monthStr) return;
     const lCode = String(log.storeCode || '').trim().toUpperCase();
     if (String(log.storeId || '') === sId || (sCode && lCode === sCode)) {
       if (log.type === 'visit_no_order') {
-        visitCount++;
-        updateLatest(log.dateStr, log.salesCode || log.salesName || '', log.note || '');
+        noOrderVisitCount++;
+        if (!lastNoOrderDate || log.dateStr >= lastNoOrderDate) {
+          lastNoOrderDate = log.dateStr;
+          lastNoOrderBy = log.salesCode || log.salesName || '';
+          lastNoOrderNote = log.note || '';
+        }
       } else if (log.type === 'call' || log.type === 'zalo') {
         callCount++;
       }
     }
   });
 
-  let daysAgo = null;
-  if (lastDate) {
+  const calcDaysAgo = (dStr) => {
+    if (!dStr) return null;
     const d1 = new Date(todayStr + 'T00:00:00');
-    const d2 = new Date(lastDate + 'T00:00:00');
-    daysAgo = Math.max(0, Math.round((d1 - d2) / 86400000));
-  }
+    const d2 = new Date(dStr + 'T00:00:00');
+    return Math.max(0, Math.round((d1 - d2) / 86400000));
+  };
 
-  return { visitCount, callCount, lastDate, lastBy, lastNote, daysAgo };
+  return {
+    visitCount: orderCount,
+    orderCount,
+    noOrderVisitCount,
+    callCount,
+    lastDate: lastOrderDate,
+    lastBy: lastOrderBy,
+    daysAgo: calcDaysAgo(lastOrderDate),
+    lastNoOrderDate,
+    lastNoOrderBy,
+    lastNoOrderNote,
+    noOrderDaysAgo: calcDaysAgo(lastNoOrderDate)
+  };
 };
 
 window.logStoreInteraction = async function(storeId, type, event) {
