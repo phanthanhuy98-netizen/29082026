@@ -15689,6 +15689,111 @@ window.addNewCompany = async function() {
     alert("⛔ Lỗi khi thêm công ty: " + err.message);
   }
 };
+  window.importCompanyExcel = function(event) {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+    return alert("⛔ Chỉ tài khoản Admin hoặc Manager mới có quyền tải file công ty!");
+  }
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+
+      // CHỐT CHẶN BẢO MẬT ĐƠN VỊ (DonVi = BH_)
+      let headerRow = jsonRows[0] || [];
+      let donViColIndex = -1;
+      for (let j = 0; j < headerRow.length; j++) {
+        if (String(headerRow[j]).trim().toLowerCase() === 'donvi') {
+          donViColIndex = j;
+          break;
+        }
+      }
+
+      if (donViColIndex === -1) {
+        return alert("⛔ LỖI BẢO MẬT: File Excel không có cột 'DonVi'. Hệ thống từ chối tải file!");
+      }
+
+      for (let i = 1; i < jsonRows.length; i++) {
+        if (!jsonRows[i] || jsonRows[i].length === 0) continue;
+        let val = String(jsonRows[i][donViColIndex] || '').trim();
+        if (val !== 'BH_') {
+          return alert(`⛔ LỖI BẢO MẬT: Dòng số ${i + 1} có Đơn vị là "${val}" (Bắt buộc phải là "BH_"). Hệ thống từ chối tải file!`);
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const uniqueMap = new Map();
+
+      for (let i = 1; i < jsonRows.length; i++) {
+        const r = jsonRows[i];
+        if (!r || r.length === 0) continue;
+
+        const maCtu = r[0] !== undefined && r[0] !== null ? String(r[0]).trim().toUpperCase() : '';
+        const tenCtu = r[1] !== undefined && r[1] !== null ? String(r[1]).trim() : '';
+        const rawStatus = r[2] !== undefined && r[2] !== null ? String(r[2]).trim() : 'Mở';
+        const status = rawStatus === 'Đóng' ? 'Đóng' : 'Mở';
+
+        if (!maCtu || maCtu === 'MACTU' || maCtu.includes('MÃ CÔNG TY')) continue;
+
+        const existing = companyList.find(c => String(c.maCtu || '').trim().toUpperCase() === maCtu);
+        uniqueMap.set(maCtu, {
+          maCtu,
+          tenCtu,
+          status,
+          dvtDetails: existing && Array.isArray(existing.dvtDetails) ? existing.dvtDetails : [],
+          isDeleted: false,
+          updatedAt: nowIso
+        });
+      }
+
+      const newList = Array.from(uniqueMap.values());
+      if (newList.length === 0) return alert("Không tìm thấy dữ liệu công ty hợp lệ trong file!");
+
+      alert(`⏳ Đang đồng bộ ${newList.length} công ty lên Firebase...`);
+
+      const chunkSize = 400;
+      for (let i = 0; i < newList.length; i += chunkSize) {
+        const chunk = newList.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach(c => {
+          batch.set(doc(db, "companies", String(c.maCtu)), c, { merge: true });
+        });
+        await batch.commit();
+      }
+
+      const newVersion = Date.now();
+      localStorage.setItem("companiesVersion", newVersion);
+      localStorage.setItem("dms_last_sync_comps", nowIso);
+      await setDoc(doc(db, "systemMeta", "version"), { companiesVersion: newVersion }, { merge: true });
+
+      newList.forEach(newC => {
+        const idx = companyList.findIndex(c => String(c.maCtu || '').trim().toUpperCase() === newC.maCtu);
+        if (idx > -1) companyList[idx] = { ...companyList[idx], ...newC };
+        else companyList.push(newC);
+      });
+      window.allCompanies = companyList;
+
+      if (typeof saveCompaniesToLocalCache === 'function') {
+        await saveCompaniesToLocalCache(companyList);
+      }
+
+      const activePane = document.getElementById('tabPane_company');
+      if (activePane) renderTabContent('company', activePane);
+
+      if (typeof playSystemSound === 'function') playSystemSound('success');
+      alert(`✅ Đã tải lên thành công ${newList.length} công ty!`);
+    } catch (err) {
+      alert("⛔ Lỗi đọc file Excel: " + err.message);
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
 </script>
 </body>
 </html>
