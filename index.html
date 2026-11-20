@@ -5020,7 +5020,7 @@ window.importProductsExcel = function(event) {
         const batch = writeBatch(db);
         chunk.forEach(p => {
           const docRef = doc(db, "products", String(p.code));
-          batch.set(docRef, p);
+          batch.set(docRef, p, { merge: true });
         });
         await batch.commit();
         await new Promise(res => setTimeout(res, 50));
@@ -5028,14 +5028,27 @@ window.importProductsExcel = function(event) {
 
       const newProdVer = Date.now();
       localStorage.setItem("productsVersion", newProdVer);
+      localStorage.setItem("dms_last_sync_products", new Date().toISOString());
       await setDoc(doc(db, "systemMeta", "version"), { productsVersion: newProdVer }, { merge: true });
 
-      products = rawProducts;
+      // THUẬT TOÁN CỘNG DỒN & CẬP NHẬT (GIỐNG TAB KHÁCH HÀNG)
+      rawProducts.forEach(newProd => {
+        const idx = products.findIndex(p => String(p.code) === String(newProd.code) || String(p.id) === String(newProd.id));
+        if (idx > -1) {
+          products[idx] = { ...products[idx], ...newProd };
+        } else {
+          products.push(newProd);
+        }
+      });
+      window.allProducts = products;
+
       buildProductIndex();
       await saveProductsToLocalCache(products);
-      alert(`✅ Đã thêm mới/cập nhật thành công ${products.length} vật tư!`);
-      
-      if (typeof filterTabProducts === 'function') filterTabProducts('');
+
+      const activePane = document.getElementById('tabPane_productsAdmin');
+      if (activePane) renderTabContent('productsAdmin', activePane);
+
+      alert(`✅ Đã thêm/cập nhật thành công ${rawProducts.length} vật tư!\nTổng số lượng Vật tư hiện tại trên máy bạn là: ${products.length}`);
     } catch (err) { 
       alert("Lỗi đọc file: " + err.message); 
     }
