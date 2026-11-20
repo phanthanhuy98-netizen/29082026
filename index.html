@@ -1908,20 +1908,37 @@ try {
                 if (typeof renderUI === 'function' && currentTab === 'company') renderUI();
             }
 
-            // --- B. XỬ LÝ NHẢY SỐ KHÁCH HÀNG (REAL-TIME) ---
+        // --- B. XỬ LÝ NHẢY SỐ KHÁCH HÀNG (REAL-TIME) ---
             const serverStoresVersion = Number(data.storesVersion || 1);
             const localStoresVersion = Number(localStorage.getItem("storesVersion") || 0);
+            const serverFullReset = Number(data.fullResetVersion || 0);
+            const localFullReset = Number(localStorage.getItem("fullResetVersion") || 0);
 
-            // Nếu phát hiện Version Khách hàng trên server lớn hơn Version máy Sales
-            if (serverStoresVersion > localStoresVersion) {
-                // Gọi hàm đồng bộ ngầm siêu tốc
-                await syncStoresRealtime(); 
-                
-                // Cập nhật lại Version cho máy Sales
+            if (serverFullReset > localFullReset) {
+                // Admin vừa bấm "Xóa & Tải Mới KH" -> tải lại danh sách sạch để loại bỏ KH cũ trong cache
+                const sSnap = await getDocs(collection(db, "stores"));
+                stores = sSnap.docs.map(d => ({ ...d.data(), id: d.id })).filter(s => !s.isDeleted);
+                window.allStores = stores;
+                if (typeof saveStoresToLocalCache === 'function') await saveStoresToLocalCache(stores);
+                if (typeof buildStoreIndex === 'function') buildStoreIndex();
+
+                localStorage.setItem("dms_last_sync_stores", new Date().toISOString());
+                localStorage.setItem("fullResetVersion", serverFullReset);
                 localStorage.setItem("storesVersion", serverStoresVersion);
-                
-                // Rung điện thoại nhẹ để Sales biết có khách hàng mới vừa được Admin đẩy xuống
-                if (typeof triggerHaptic === 'function') triggerHaptic(15); 
+
+                if (currentTab === 'customers' && typeof filterTabCustomers === 'function') {
+                    const titleH2 = document.querySelector('#tabPane_customers h2');
+                    if (titleH2) titleH2.innerHTML = `<i class="fa-solid fa-address-book" style="color:var(--amber);"></i> Khách Hàng (${stores.length})`;
+                    filterTabCustomers();
+                } else if (currentTab === 'sales' && !activeVisitedStore && typeof filterSalesCustomers === 'function') {
+                    filterSalesCustomers();
+                }
+                if (typeof triggerHaptic === 'function') triggerHaptic(15);
+            } else if (serverStoresVersion > localStoresVersion) {
+                // Đổi SĐT, Ghim/Xóa GPS hoặc Tải Excel cập nhật -> đồng bộ gia tăng (chỉ tốn 1-2 lượt Read)
+                await syncStoresRealtime();
+                localStorage.setItem("storesVersion", serverStoresVersion);
+                if (typeof triggerHaptic === 'function') triggerHaptic(15);
             }
         }
     });
@@ -2135,8 +2152,10 @@ window.handleLogout = async function() {
         pinnedHistory: [...existingHistory, newHistoryItem]
       };
 
-      const storeRef = doc(db, "stores", String(store.id));
-      setDoc(storeRef, updatePayload, { merge: true }).catch(e => console.log("Lưu tạm GPS", e));
+    const storeRef = doc(db, "stores", String(store.id));
+      setDoc(storeRef, updatePayload, { merge: true })
+        .then(() => bumpStoresVersion(false))
+        .catch(e => console.log("Lưu tạm GPS", e));
       const storeIndex = stores.findIndex(s => String(s.id) === String(store.id) || String(s.code) === String(storeId));
       if (storeIndex > -1) {
         stores[storeIndex] = { ...stores[storeIndex], ...updatePayload };
@@ -2168,9 +2187,10 @@ window.handleLogout = async function() {
     if (!confirmReset) return;
 
     try {
-      const storeRef = doc(db, "stores", String(storeId));
+     const storeRef = doc(db, "stores", String(storeId));
       const resetPayload = { lat: 0, lng: 0, pinnedByCode: "", pinnedByName: "", pinnedAt: "", pinnedHistory: [], updatedAt: new Date().toISOString() };
       await updateDoc(storeRef, resetPayload);
+      bumpStoresVersion(false);
       const storeIndex = stores.findIndex(s => String(s.id) === String(storeId) || String(s.code) === String(storeId));
       if (storeIndex > -1) {
         stores[storeIndex] = { ...stores[storeIndex], ...resetPayload };
@@ -2324,16 +2344,20 @@ window.selectStoreDirectly = async function(storeId, event) {
           status: "Ghim GPS bắt buộc"
         };
 
+        const nowIso = new Date().toISOString();
         const updatePayload = {
           lat, lng,
           pinnedByCode: currentUser.code || 'NV',
           pinnedByName: currentUser.name || 'Nhân viên',
-          pinnedAt: new Date().toISOString(),
+          pinnedAt: nowIso,
+          updatedAt: nowIso,
           pinnedHistory: [...existingHistory, newHistoryItem]
         };
 
         const storeRef = doc(db, "stores", String(targetStore.id));
-        setDoc(storeRef, updatePayload, { merge: true }).catch(e => console.log("Lưu tạm GPS", e));
+        setDoc(storeRef, updatePayload, { merge: true })
+          .then(() => bumpStoresVersion(false))
+          .catch(e => console.log("Lưu tạm GPS", e));
         
         addDoc(collection(db, "checkins"), {
           ...checkinPayload,
@@ -2461,16 +2485,20 @@ window.selectStoreDirectly = async function(storeId, event) {
         status: "Check-in thành công"
       };
 
+      const nowIso = new Date().toISOString();
       const updatePayload = {
         lat, lng,
         pinnedByCode: currentUser.code || 'NV',
         pinnedByName: currentUser.name || 'Nhân viên',
-        pinnedAt: new Date().toISOString(),
+        pinnedAt: nowIso,
+        updatedAt: nowIso,
         pinnedHistory: [...existingHistory, newHistoryItem]
       };
 
-    const storeRef = doc(db, "stores", String(activeVisitedStore.id));
-      setDoc(storeRef, updatePayload, { merge: true }).catch(e => console.log("Lưu tạm GPS", e));
+      const storeRef = doc(db, "stores", String(activeVisitedStore.id));
+      setDoc(storeRef, updatePayload, { merge: true })
+        .then(() => bumpStoresVersion(false))
+        .catch(e => console.log("Lưu tạm GPS", e));
       
       addDoc(collection(db, "checkins"), {
         ...checkinPayload,
@@ -3671,6 +3699,24 @@ window.filterTabProducts = function(val) {
         const btn = document.getElementById('btnRefreshCustomers');
         if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Làm mới DS';
     }
+};
+  window.bumpStoresVersion = function(isFullReset = false) {
+  const newStoresVersion = Math.max(Date.now(), Number(localStorage.getItem("storesVersion") || 0) + 1);
+  localStorage.setItem("storesVersion", newStoresVersion);
+
+  if (isFullReset) {
+    // Chỉ Admin dùng khi "Xóa & Tải Mới KH" -> báo các máy khác tải lại danh sách sạch
+    localStorage.setItem("fullResetVersion", newStoresVersion);
+    setDoc(doc(db, "systemMeta", "version"), {
+      storesVersion: newStoresVersion,
+      fullResetVersion: newStoresVersion
+    }, { merge: true }).catch(e => console.warn("Không thể cập nhật fullResetVersion:", e));
+  } else {
+    // Sales & Admin dùng khi Ghim/Xóa GPS, Đổi SĐT -> chỉ chạm đúng trường storesVersion để không bị Rules chặn
+    updateDoc(doc(db, "systemMeta", "version"), {
+      storesVersion: newStoresVersion
+    }).catch(e => console.warn("Không thể cập nhật storesVersion:", e));
+  }
 };
 window.syncStoresRealtime = async function() {
     try {
@@ -9015,7 +9061,7 @@ window.deleteAllAndImportCustomersExcel = async function(e) {
             await uploadBatch.commit();
         }
         // --- KẾT THÚC ĐOẠN CODE SỬA LẠI ---
-
+        bumpStoresVersion(true);
         stores = newStoresList;
         await saveStoresToLocalCache(stores);
         buildStoreIndex();
@@ -14210,6 +14256,7 @@ window.resetFraudClusterGps = async function(encodedStoreIds, labelName) {
             });
             await batch.commit();
         }
+        bumpStoresVersion(false);
 
         const idSet = new Set(storeIds.map(String));
         stores.forEach((s, idx) => {
