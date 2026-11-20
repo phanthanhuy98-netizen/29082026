@@ -2015,6 +2015,7 @@ try {
         currentSalesGPS = DEFAULT_MAP_CENTER;
       }
       attachListeners();
+     loadMonthlyVisitLogs(false);
       if (typeof window.syncOfflineCheckins === 'function') window.syncOfflineCheckins();
 if (typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
     }, 50);
@@ -2697,8 +2698,12 @@ window.selectStoreDirectly = async function(storeId, event) {
       }
     }
 
-    matched.sort((a, b) => a.distance - b.distance);
-    const slicedMatched = matched.slice(0, 20);
+    window.updateSalesRouteVisitSummary(matched);
+ if (window._salesOnlyUnvisited) {
+   matched = matched.filter(item => window.getStoreMonthlyStats(item.store).visitCount === 0);
+ }
+ matched.sort((a, b) => a.distance - b.distance);
+ const slicedMatched = matched.slice(0, 20);
 
     container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(item => {
       const s = item.store;
@@ -2738,19 +2743,32 @@ window.selectStoreDirectly = async function(storeId, event) {
             </div>
             ${s.phone ? `
             <div style="display:flex; gap:6px;">
-              <a href="tel:${s.phone.replace(/[^0-9]/g, '')}" class="btn btn-sm btn-blue" style="padding:4px 10px; font-size:11px; text-decoration:none;" onclick="event.stopPropagation();">
+              <a href="tel:${s.phone.replace(/[^0-9]/g, '')}" class="btn btn-sm btn-blue" style="padding:4px 10px; font-size:11px; text-decoration:none;" onclick="logStoreInteraction('${s.id}', 'call', event);">
                 <i class="fa-solid fa-phone-volume"></i> Gọi
               </a>
-              <a href="https://zalo.me/${s.phone.replace(/[^0-9]/g, '')}" target="_blank" class="btn btn-sm" style="background:#0068FF; color:#fff; padding:4px 10px; font-size:11px; text-decoration:none;" onclick="event.stopPropagation();">
+              <a href="https://zalo.me/${s.phone.replace(/[^0-9]/g, '')}" target="_blank" class="btn btn-sm" style="background:#0068FF; color:#fff; padding:4px 10px; font-size:11px; text-decoration:none;" onclick="logStoreInteraction('${s.id}', 'zalo', event);">
                 Zalo
               </a>
             </div>
             ` : ''}
           </div>
           <div style="font-size:var(--font-size-sub-meta); color:var(--text-muted);">👤 NV ghim: <b style="color:#2563EB;">${pName}</b></div>
-          <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="width:100%; justify-content:center; margin-top:2px; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
-            <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN HÔM NAY - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
-          </button>
+          ${(() => {
+  const st = window.getStoreMonthlyStats(s);
+  const badge = st.visitCount === 0
+    ? `<span style="color:var(--rose); font-weight:800;">🔴 Chưa ghé tháng này</span>`
+    : `<span style="color:var(--emerald); font-weight:800;">🟢 Tháng này: ${st.visitCount} lần (${st.lastBy} - ${st.daysAgo === 0 ? 'Hôm nay' : st.daysAgo + ' ngày trước'})</span>`;
+  const callTxt = st.callCount > 0 ? ` • 📞 Gọi/Zalo: <b>${st.callCount}</b>` : '';
+  return `<div style="font-size:var(--font-size-sub-meta); background:rgba(0,0,0,0.03); padding:5px 8px; border-radius:6px;">${badge}${callTxt}</div>`;
+})()}
+<div style="display:flex; gap:6px; margin-top:2px;">
+  <button type="button" class="btn ${isSoldToday ? 'btn-green' : 'btn-amber'}" style="flex:1; justify-content:center; padding:10px; font-size:13px; font-weight:800;" onclick="selectStoreDirectly('${s.id}', event)">
+    <i class="fa-solid fa-check"></i> ${isSoldToday ? 'ĐÃ BÁN - BÁN TIẾP' : 'CHỌN TIỆM NÀY'}
+  </button>
+  <button type="button" class="btn btn-sm" style="background:#64748B; color:#fff; padding:10px 12px; font-size:12px; font-weight:800;" onclick="logStoreInteraction('${s.id}', 'visit_no_order', event)" title="Ghi nhận có ghé tiệm nhưng không lên đơn">
+    Ghé (0 đơn)
+  </button>
+</div>
         </div>
       `;
     }).join('') : `<div style="text-align:center; padding:16px; color:var(--text-muted); background:var(--card-bg); border-radius:10px;">Không tìm thấy khách hàng phù hợp.</div>`;
@@ -6049,7 +6067,7 @@ window.openCompanyGpsModal = function() {
             </div>
 
             <input type="text" id="customerSearchInput" maxlength="30" placeholder="🔍 Nhập mã khách hàng..." oninput="debounceFilterSalesCustomers(this.value)" value="${customerSearchKeyword}" autocomplete="off" autocapitalize="none" style="margin:0 0 8px 0; padding:13px 15px; font-size: var(--font-size-search-input);">
-
+           <div id="salesRouteVisitSummary"></div>
             <div id="salesCustomerResultContainer">
              <div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng để tìm kiếm nhanh...</div>
             </div>
@@ -7976,6 +7994,7 @@ else if (tab === 'kpi') {
             </div>
           </div>
           ` : ''}
+          ${typeof buildUnvisitedStoresKpiHtml === 'function' ? buildUnvisitedStoresKpiHtml() : ''}
 
           <!-- TOP 15 HÀNG BÁN CHẠY -->
           ${topGlobalSkus.length > 0 ? `
@@ -15317,6 +15336,253 @@ window.renderGpsAuditContent = function() {
             </div>
         </div>
     `;
+};
+  // =========================================================================
+// NHẬT KÝ GHÉ TIỆM, GỌI/ZALO & NHẮC NHỞ TIỆM CHƯA GHÉ TRONG THÁNG (DÙNG CHUNG 5 SALES)
+// =========================================================================
+window.monthlyVisitLogs = [];
+window._salesOnlyUnvisited = false;
+
+window.getVnTodayAndMonth = function() {
+  const vn = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  const y = vn.getFullYear();
+  const m = String(vn.getMonth() + 1).padStart(2, '0');
+  const d = String(vn.getDate()).padStart(2, '0');
+  return { todayStr: `${y}-${m}-${d}`, monthStr: `${y}-${m}` };
+};
+
+window.loadMonthlyVisitLogs = async function(forceRefresh = false) {
+  try {
+    const { monthStr } = window.getVnTodayAndMonth();
+    const cacheKey = `dms_visit_logs_${monthStr}`;
+    const lastSyncKey = `dms_visit_logs_sync_${monthStr}`;
+    const lastSync = Number(localStorage.getItem(lastSyncKey) || 0);
+
+    // Chỉ tải lại từ Firestore nếu ép làm mới hoặc đã quá 15 phút (tiết kiệm Read)
+    if (!forceRefresh && Date.now() - lastSync < 15 * 60 * 1000) {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        window.monthlyVisitLogs = JSON.parse(cached);
+        return;
+      }
+    }
+
+    const q = query(collection(db, "visitLogs"), where("month", "==", monthStr));
+    const snap = await getDocs(q);
+    window.monthlyVisitLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    localStorage.setItem(cacheKey, JSON.stringify(window.monthlyVisitLogs));
+    localStorage.setItem(lastSyncKey, String(Date.now()));
+  } catch (e) {
+    console.warn("Lỗi tải visitLogs:", e);
+  }
+};
+
+window.getStoreMonthlyStats = function(store) {
+  const { todayStr, monthStr } = window.getVnTodayAndMonth();
+  const sId = String(store.id || '');
+  const sCode = String(store.code || '').trim().toUpperCase();
+
+  let visitCount = 0;
+  let callCount = 0;
+  let lastDate = '';
+  let lastBy = '';
+  let lastNote = '';
+
+  const updateLatest = (dateStr, byStr, noteStr = '') => {
+    if (dateStr && (!lastDate || dateStr >= lastDate)) {
+      lastDate = dateStr;
+      lastBy = byStr || '';
+      if (noteStr) lastNote = noteStr;
+    }
+  };
+
+  // 1. Tính từ Đơn hàng trong tháng (không bị hủy)
+  (orders || []).forEach(o => {
+    if (!o || o.status === 'Đã hủy' || !o.ngayCtu || !o.ngayCtu.startsWith(monthStr)) return;
+    const oCode = String(o.maDTPNNo || (o.maKH && o.maKH.includes(' - ') ? o.maKH.split(' - ')[0] : '')).trim().toUpperCase();
+    if (String(o.storeId || '') === sId || (sCode && oCode === sCode)) {
+      visitCount++;
+      updateLatest(o.ngayCtu, o.salesCode || o.salesName || '');
+    }
+  });
+
+  // 2. Tính từ Nhật ký ghé không đơn / Gọi / Zalo trong tháng
+  (window.monthlyVisitLogs || []).forEach(log => {
+    if (!log || log.month !== monthStr) return;
+    const lCode = String(log.storeCode || '').trim().toUpperCase();
+    if (String(log.storeId || '') === sId || (sCode && lCode === sCode)) {
+      if (log.type === 'visit_no_order') {
+        visitCount++;
+        updateLatest(log.dateStr, log.salesCode || log.salesName || '', log.note || '');
+      } else if (log.type === 'call' || log.type === 'zalo') {
+        callCount++;
+      }
+    }
+  });
+
+  let daysAgo = null;
+  if (lastDate) {
+    const d1 = new Date(todayStr + 'T00:00:00');
+    const d2 = new Date(lastDate + 'T00:00:00');
+    daysAgo = Math.max(0, Math.round((d1 - d2) / 86400000));
+  }
+
+  return { visitCount, callCount, lastDate, lastBy, lastNote, daysAgo };
+};
+
+window.logStoreInteraction = async function(storeId, type, event) {
+  if (event) event.stopPropagation();
+  const s = stores.find(x => String(x.id) === String(storeId) || String(x.code) === String(storeId));
+  if (!s || !currentUser) return;
+
+  let note = '';
+  if (type === 'visit_no_order') {
+    const reason = prompt(`Ghi nhận GHÉ TIỆM (0 ĐƠN) cho [${s.code}] ${s.name}\nNhập lý do (VD: Đóng cửa, Còn hàng, Hẹn tuần sau):`, 'Còn hàng / Hẹn lại');
+    if (reason === null) return;
+    note = reason.trim() || 'Ghé không đơn';
+  }
+
+  const { todayStr, monthStr } = window.getVnTodayAndMonth();
+  const payload = {
+    storeId: String(s.id),
+    storeCode: s.code || '',
+    storeName: s.name || '',
+    salesUid: currentUser.uid,
+    salesCode: currentUser.code || '',
+    salesName: currentUser.name || '',
+    type,
+    note,
+    month: monthStr,
+    dateStr: todayStr,
+    lat: currentSalesGPS?.lat || 0,
+    lng: currentSalesGPS?.lng || 0,
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const docRef = await addDoc(collection(db, "visitLogs"), { ...payload, serverTime: serverTimestamp() });
+    window.monthlyVisitLogs.push({ id: docRef.id, ...payload });
+    localStorage.setItem(`dms_visit_logs_${monthStr}`, JSON.stringify(window.monthlyVisitLogs));
+
+    if (type === 'visit_no_order') {
+      if (typeof triggerHaptic === 'function') triggerHaptic(25);
+      alert(`✅ Đã ghi nhận ghé tiệm [${s.code}] ${s.name}!`);
+      if (currentTab === 'sales' && typeof filterSalesCustomers === 'function') filterSalesCustomers();
+    }
+  } catch (err) {
+    if (type === 'visit_no_order') alert("Lỗi lưu nhật ký ghé tiệm: " + err.message);
+  }
+};
+
+window.toggleOnlyUnvisitedFilter = function() {
+  window._salesOnlyUnvisited = !window._salesOnlyUnvisited;
+  if (typeof filterSalesCustomers === 'function') filterSalesCustomers();
+};
+
+window.updateSalesRouteVisitSummary = function(matchedAllStores) {
+  const box = document.getElementById('salesRouteVisitSummary');
+  if (!box) return;
+  if (!selectedRouteCode && customerSearchKeyword === '') {
+    box.innerHTML = '';
+    return;
+  }
+
+  let total = matchedAllStores.length;
+  let unvisited = 0;
+  matchedAllStores.forEach(item => {
+    const st = window.getStoreMonthlyStats(item.store);
+    if (st.visitCount === 0) unvisited++;
+  });
+  let visited = total - unvisited;
+
+  box.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.35); border-radius:10px; padding:8px 10px; margin-bottom:8px; font-size:12px;">
+      <div style="font-weight:800; color:var(--text-main);">
+        📊 Tháng này: <span style="color:var(--emerald);">Đã ghé ${visited}/${total}</span> • <span style="color:var(--rose);">Chưa ghé ${unvisited}</span>
+      </div>
+      <button type="button" class="btn btn-sm ${window._salesOnlyUnvisited ? 'btn-red' : 'btn-amber'}" style="padding:5px 10px; font-size:11.5px; font-weight:800;" onclick="toggleOnlyUnvisitedFilter()">
+        <i class="fa-solid fa-filter"></i> ${window._salesOnlyUnvisited ? 'Hiện tất cả tiệm' : `Chỉ hiện chưa ghé (${unvisited})`}
+      </button>
+    </div>
+  `;
+};
+
+window.buildUnvisitedStoresKpiHtml = function() {
+  const { monthStr } = window.getVnTodayAndMonth();
+  const routeMap = new Map();
+
+  (routeGroupsList || []).forEach(r => {
+    const code = String(r.nhomDoiTuong || '').trim().toUpperCase();
+    if (code) routeMap.set(code, { code, name: r.noiDung || `Tuyến ${code}`, total: 0, visited: 0, unvisitedList: [] });
+  });
+
+  let totalUnvisitedAll = 0;
+  (stores || []).forEach(s => {
+    const sCode = String(s.code || '').trim().toUpperCase();
+    let matchedRoute = null;
+    for (const [rCode, rObj] of routeMap.entries()) {
+      if (sCode.startsWith(rCode)) { matchedRoute = rObj; break; }
+    }
+    if (!matchedRoute) return;
+
+    matchedRoute.total++;
+    const st = window.getStoreMonthlyStats(s);
+    if (st.visitCount > 0) {
+      matchedRoute.visited++;
+    } else {
+      totalUnvisitedAll++;
+      matchedRoute.unvisitedList.push({ store: s, callCount: st.callCount });
+    }
+  });
+
+  const routesWithUnvisited = Array.from(routeMap.values())
+    .filter(r => r.total > 0)
+    .sort((a, b) => b.unvisitedList.length - a.unvisitedList.length);
+
+  return `
+    <div class="mobile-item-card" style="padding:0; overflow:hidden; border-left:5px solid #F59E0B; margin-bottom:20px;">
+      <div onclick="toggleOrderAccordion('acc_unvisited_monthly')" style="padding:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; background:var(--panel-bg);">
+        <div style="font-size:15.5px; font-weight:800; color:var(--text-main);">
+          <i class="fa-solid fa-bell" style="color:#F59E0B;"></i> TIỆM CHƯA GHÉ THÁNG ${monthStr.split('-')[1]} (${totalUnvisitedAll} tiệm bị sót)
+        </div>
+        <i id="icon_acc_unvisited_monthly" class="fa-solid fa-chevron-down" style="color:var(--text-muted); transition:0.3s;"></i>
+      </div>
+      <div id="acc_unvisited_monthly" class="hidden" style="padding:14px; border-top:1px solid var(--card-border); background:var(--card-bg); display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:12px; color:var(--text-muted); font-weight:700;">Bấm vào từng Tuyến để xem danh sách tiệm chưa ai ghé trong tháng:</span>
+          <button class="btn btn-amber btn-sm" onclick="loadMonthlyVisitLogs(true).then(() => renderKpiAnalyticsBody())" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-rotate"></i> Cập nhật</button>
+        </div>
+        ${routesWithUnvisited.map((rt, idx) => {
+          const rAccId = `acc_unvis_rt_${idx}`;
+          const unvCount = rt.unvisitedList.length;
+          return `
+            <div style="background:var(--panel-bg); border:1px solid var(--card-border); border-radius:10px; overflow:hidden;">
+              <div onclick="toggleOrderAccordion('${rAccId}')" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+                <div style="font-weight:800; font-size:13.5px; color:var(--text-main);">
+                  <span style="background:rgba(245,158,11,0.15); color:#D97706; padding:2px 6px; border-radius:4px; margin-right:6px;">Tuyến ${rt.code}</span>${rt.name}
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:800;">
+                  <span style="color:var(--emerald);">Đã ghé: ${rt.visited}/${rt.total}</span>
+                  <span style="color:${unvCount > 0 ? 'var(--rose)' : 'var(--emerald)'};">Sót: ${unvCount}</span>
+                  <i id="icon_${rAccId}" class="fa-solid fa-chevron-down" style="font-size:11px; color:var(--text-muted);"></i>
+                </div>
+              </div>
+              <div id="${rAccId}" class="hidden" style="padding:8px 12px; border-top:1px dashed var(--card-border); background:var(--card-bg); max-height:220px; overflow-y:auto;">
+                ${unvCount > 0 ? rt.unvisitedList.map(u => `
+                  <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(0,0,0,0.04); font-size:12.5px;">
+                    <span style="font-weight:700; color:var(--text-main);">[${u.store.code}] ${u.store.name}</span>
+                    <span style="font-size:11px; color:${u.callCount > 0 ? 'var(--primary)' : 'var(--rose)'}; font-weight:800; white-space:nowrap;">
+                      ${u.callCount > 0 ? `📞 Đã gọi/Zalo: ${u.callCount}` : 'Chưa liên hệ'}
+                    </span>
+                  </div>
+                `).join('') : '<div style="font-size:12px; color:var(--emerald); font-weight:800;">✅ Đã phủ 100% tiệm trong tuyến này!</div>'}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
 };
 </script>
 </body>
