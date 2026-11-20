@@ -15450,13 +15450,128 @@ window.logStoreInteraction = async function(storeId, type, event) {
   const s = stores.find(x => String(x.id) === String(storeId) || String(x.code) === String(storeId));
   if (!s || !currentUser) return;
 
-  let note = '';
   if (type === 'visit_no_order') {
-    const reason = prompt(`Ghi nhận 0 đơn cho [${s.code}] ${s.name}\nNhập lý do (VD: Đóng cửa, Còn hàng, Hẹn tuần sau):`, 'Còn hàng / Hẹn lại');
-    if (reason === null) return;
-    note = reason.trim() || 'Ghé không đơn';
+    const { todayStr, monthStr } = window.getVnTodayAndMonth();
+
+    // Kiểm tra xem hôm nay đã có log 0 đơn cho tiệm này chưa
+    const existedToday = (window.monthlyVisitLogs || []).find(log =>
+      log.type === 'visit_no_order' &&
+      log.dateStr === todayStr &&
+      (String(log.storeId || '') === String(s.id) ||
+        (s.code && String(log.storeCode || '').trim().toUpperCase() === String(s.code).trim().toUpperCase()))
+    );
+
+    if (existedToday) {
+      const okDup = await window.showCustomConfirm(
+        "Đã Ghi Nhận 0 Đơn Hôm Nay",
+        `Tiệm [${s.code}] ${s.name} đã được ghi nhận 0 đơn hôm nay (${existedToday.salesCode || existedToday.salesName || 'NV'} - ${existedToday.note || 'Không có ghi chú'}).\n\nBạn vẫn muốn ghi nhận thêm lần nữa?`,
+        "fa-circle-exclamation",
+        "Ghi nhận thêm",
+        "Hủy"
+      );
+      if (!okDup) return;
+    }
+
+    // Cảnh báo nhẹ nếu tiệm đã có GPS nhưng Sales đứng cách xa > 100m
+    let gpsWarningHtml = '';
+    if (s.lat && Number(s.lat) !== 0 && s.lng && Number(s.lng) !== 0 && currentSalesGPS?.lat && currentSalesGPS?.lng) {
+      const dist = Math.round(calculateDistanceMeters(currentSalesGPS.lat, currentSalesGPS.lng, Number(s.lat), Number(s.lng)));
+      if (dist > 100) {
+        gpsWarningHtml = `<div style="background:rgba(217,119,6,0.12); border:1px solid var(--amber); color:#B45309; padding:8px 10px; border-radius:8px; font-size:12px; font-weight:700; margin-bottom:10px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Bạn đang cách vị trí ghim của tiệm khoảng <b>${dist}m</b>. Hệ thống vẫn sẽ lưu kèm tọa độ thực tế.
+        </div>`;
+      }
+    }
+
+    const modalContainer = document.getElementById('dynamicModalContainer');
+    if (!modalContainer) return;
+
+    const reasons = [
+      "Còn đủ hàng / Chưa có nhu cầu",
+      "Đóng cửa / Vắng chủ tiệm",
+      "Chờ CTKM / Cân nhắc giá",
+      "Đang còn công nợ / Hẹn trả",
+      "Lý do khác"
+    ];
+
+    modalContainer.innerHTML = `
+      <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
+        <div class="modal-content" style="max-width:420px; padding:18px; border-radius:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
+            <h3 style="font-size:15px; font-weight:900; color:var(--text-main); margin:0;">
+              <i class="fa-solid fa-clipboard-check" style="color:var(--amber);"></i> Ghi Nhận Ghé 0 Đơn
+            </h3>
+            <button type="button" class="btn btn-red btn-sm" onclick="document.getElementById('dynamicModalContainer').innerHTML=''; document.getElementById('dynamicModalContainer').classList.add('hidden');">Đóng</button>
+          </div>
+
+          <div style="font-size:13px; font-weight:800; color:var(--primary); margin-bottom:10px;">
+            [${s.code || 'KH'}] ${s.name}
+          </div>
+
+          ${gpsWarningHtml}
+
+          <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:6px;">Chọn lý do chính:</label>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+            ${reasons.map((r, idx) => `
+              <label style="display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid var(--card-border); border-radius:10px; cursor:pointer; font-size:13px; font-weight:700; background:var(--card-bg);">
+                <input type="radio" name="zeroOrderReason" value="${r}" ${idx === 0 ? 'checked' : ''} style="width:auto; margin:0;">
+                <span>${r}</span>
+              </label>
+            `).join('')}
+          </div>
+
+          <label style="font-size:12px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">Ghi chú thêm (tùy chọn):</label>
+          <input type="text" id="zeroOrderExtraNote" maxlength="120" placeholder="VD: Hẹn thứ 5 giao, còn 4 thùng mì..." style="margin:0 0 14px 0; padding:10px 12px; font-size:13px;">
+
+          <button type="button" id="btnConfirmZeroOrder" class="btn btn-amber" style="width:100%; justify-content:center; padding:12px; font-size:14px; font-weight:900; border-radius:12px;">
+            <i class="fa-solid fa-check"></i> XÁC NHẬN LƯU 0 ĐƠN
+          </button>
+        </div>
+      </div>
+    `;
+    modalContainer.classList.remove('hidden');
+
+    document.getElementById('btnConfirmZeroOrder').onclick = async () => {
+      const checkedRadio = document.querySelector('input[name="zeroOrderReason"]:checked');
+      const reason = checkedRadio ? checkedRadio.value : 'Ghé không đơn';
+      const extra = (document.getElementById('zeroOrderExtraNote')?.value || '').trim();
+      const finalNote = extra ? `${reason} (${extra})` : reason;
+
+      const payload = {
+        storeId: String(s.id),
+        storeCode: s.code || '',
+        storeName: s.name || '',
+        salesUid: currentUser.uid,
+        salesCode: currentUser.code || '',
+        salesName: currentUser.name || '',
+        type: 'visit_no_order',
+        reason,
+        note: finalNote,
+        month: monthStr,
+        dateStr: todayStr,
+        lat: currentSalesGPS?.lat || 0,
+        lng: currentSalesGPS?.lng || 0,
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        const docRef = await addDoc(collection(db, "visitLogs"), { ...payload, serverTime: serverTimestamp() });
+        window.monthlyVisitLogs.push({ id: docRef.id, ...payload });
+        localStorage.setItem(`dms_visit_logs_${monthStr}`, JSON.stringify(window.monthlyVisitLogs));
+
+        modalContainer.innerHTML = '';
+        modalContainer.classList.add('hidden');
+
+        if (typeof triggerHaptic === 'function') triggerHaptic(25);
+        if (currentTab === 'sales' && typeof filterSalesCustomers === 'function') filterSalesCustomers();
+      } catch (err) {
+        alert("Lỗi lưu nhật ký ghé tiệm: " + err.message);
+      }
+    };
+    return;
   }
 
+  // Giữ nguyên luồng ghi nhận call / zalo
   const { todayStr, monthStr } = window.getVnTodayAndMonth();
   const payload = {
     storeId: String(s.id),
@@ -15466,7 +15581,7 @@ window.logStoreInteraction = async function(storeId, type, event) {
     salesCode: currentUser.code || '',
     salesName: currentUser.name || '',
     type,
-    note,
+    note: '',
     month: monthStr,
     dateStr: todayStr,
     lat: currentSalesGPS?.lat || 0,
@@ -15478,15 +15593,7 @@ window.logStoreInteraction = async function(storeId, type, event) {
     const docRef = await addDoc(collection(db, "visitLogs"), { ...payload, serverTime: serverTimestamp() });
     window.monthlyVisitLogs.push({ id: docRef.id, ...payload });
     localStorage.setItem(`dms_visit_logs_${monthStr}`, JSON.stringify(window.monthlyVisitLogs));
-
-    if (type === 'visit_no_order') {
-      if (typeof triggerHaptic === 'function') triggerHaptic(25);
-      alert(`✅ Đã ghi nhận ghé tiệm [${s.code}] ${s.name}!`);
-      if (currentTab === 'sales' && typeof filterSalesCustomers === 'function') filterSalesCustomers();
-    }
-  } catch (err) {
-    if (type === 'visit_no_order') alert("Lỗi lưu nhật ký ghé tiệm: " + err.message);
-  }
+  } catch (err) {}
 };
 
 window.toggleOnlyUnvisitedFilter = function() {
