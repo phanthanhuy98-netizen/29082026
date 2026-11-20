@@ -2779,6 +2779,11 @@ window.selectStoreDirectly = async function(storeId, event) {
     const hintEl = document.getElementById('customerSearchHint');
     if (hintEl) hintEl.innerText = slicedMatched.length > 0 ? `Hiển thị ${slicedMatched.length} khách hàng phù hợp.` : "Không tìm thấy khách hàng phù hợp.";
   };
+  ${(st.noOrderVisitCount > 0 || st.callCount > 0) ? `
+    <button type="button" class="btn btn-sm" style="background:#E2E8F0; color:#1E293B; padding:10px 10px; font-size:12px; font-weight:800;" onclick="event.stopPropagation(); openStoreInteractionLogsModal('${s.id}')" title="Xem danh sách các lần Ghi nhận 0 đơn / Gọi / Zalo">
+      <i class="fa-solid fa-clock-rotate-left"></i>
+    </button>
+  ` : ''}
 
   window.debounceFilterSalesProducts = function(val) {
     clearTimeout(productSearchDebounceTimer);
@@ -15569,6 +15574,9 @@ window.buildUnvisitedStoresKpiHtml = function() {
             ${currentUser && currentUser.role === 'admin' ? `
               <button class="btn btn-red btn-sm" onclick="openCleanupVisitLogsModal()" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-trash"></i> Xóa tháng cũ</button>
             ` : ''}
+            <button type="button" class="btn btn-blue btn-sm" onclick="openStoreInteractionLogsModal('')" style="font-size:11px; padding:4px 8px;">
+    <i class="fa-solid fa-list"></i> Chi tiết ghi nhận
+  </button>
             <button class="btn btn-amber btn-sm" onclick="loadMonthlyVisitLogs(true).then(() => renderKpiAnalyticsBody())" style="font-size:11px; padding:4px 8px;"><i class="fa-solid fa-rotate"></i> Cập nhật</button>
           </div>
         ${routesWithUnvisited.map((rt, idx) => {
@@ -15655,6 +15663,88 @@ window.buildUnvisitedStoresKpiHtml = function() {
   } catch (err) {
     alert("Lỗi khi xóa visitLogs tháng cũ: " + err.message);
   }
+};
+  window.openStoreInteractionLogsModal = function(storeId) {
+  const modalContainer = document.getElementById('dynamicModalContainer');
+  if (!modalContainer) return;
+
+  const { monthStr } = window.getVnTodayAndMonth();
+  let logs = (window.monthlyVisitLogs || []).filter(l => l && l.month === monthStr);
+  let titleText = `Nhật Ký Tương Tác Tháng ${monthStr}`;
+
+  if (storeId) {
+    const s = stores.find(x => String(x.id) === String(storeId) || String(x.code) === String(storeId));
+    logs = logs.filter(l => String(l.storeId) === String(storeId) || (s && s.code && String(l.storeCode || '').toUpperCase() === String(s.code).toUpperCase()));
+    titleText = s ? `[${s.code}] ${s.name}` : `Tiệm ${storeId}`;
+  }
+
+  logs = [...logs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  const typeLabel = (t) => {
+    if (t === 'visit_no_order') return `<span style="background:rgba(217,119,6,0.14); color:#D97706; padding:2px 8px; border-radius:6px; font-weight:800;">Ghi nhận 0 đơn</span>`;
+    if (t === 'call') return `<span style="background:rgba(37,99,235,0.12); color:#2563EB; padding:2px 8px; border-radius:6px; font-weight:800;">Gọi điện</span>`;
+    return `<span style="background:rgba(0,104,255,0.12); color:#0068FF; padding:2px 8px; border-radius:6px; font-weight:800;">Zalo</span>`;
+  };
+
+  const renderRows = (filterType) => {
+    const listEl = document.getElementById('interactionLogsListBody');
+    if (!listEl) return;
+    const filtered = filterType === 'ALL' ? logs : logs.filter(x => x.type === filterType);
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-weight:700;">Chưa có dữ liệu ghi nhận nào.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = filtered.map(item => {
+      const timeStr = item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : (item.dateStr || '');
+      const hasGps = item.lat && Number(item.lat) !== 0 && item.lng && Number(item.lng) !== 0;
+      return `
+        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:5px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              ${typeLabel(item.type)}
+              ${!storeId ? `<b style="font-size:12.5px; color:var(--text-main);">[${item.storeCode || ''}] ${item.storeName || ''}</b>` : ''}
+            </div>
+            <span style="font-size:11px; color:var(--text-muted); font-weight:700;">${timeStr}</span>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted);">
+            NV: <b style="color:var(--text-main);">[${item.salesCode || ''}] ${item.salesName || ''}</b>
+            ${item.note ? ` • Lý do: <b style="color:var(--amber);">${item.note}</b>` : ''}
+          </div>
+          ${hasGps ? `
+            <div style="text-align:right;">
+              <button type="button" class="btn btn-sm" style="padding:3px 8px; font-size:11px;" onclick="openNativeNavigator(${Number(item.lat)}, ${Number(item.lng)})">Xem GPS</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  };
+
+  window._filterInteractionLogs = renderRows;
+
+  modalContainer.innerHTML = `
+    <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) { this.innerHTML=''; this.classList.add('hidden'); }">
+      <div class="modal-content" style="max-width:520px; width:95%; max-height:85vh; display:flex; flex-direction:column; padding:16px; border-radius:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
+          <h3 style="font-size:15px; font-weight:800; color:var(--primary); margin:0;">${titleText} (${logs.length})</h3>
+          <button type="button" class="btn btn-red btn-sm" onclick="document.getElementById('dynamicModalContainer').innerHTML=''; document.getElementById('dynamicModalContainer').classList.add('hidden');">Đóng</button>
+        </div>
+
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+          <button type="button" class="btn btn-sm btn-amber" onclick="_filterInteractionLogs('ALL')">Tất cả (${logs.length})</button>
+          <button type="button" class="btn btn-sm" onclick="_filterInteractionLogs('visit_no_order')">0 đơn (${logs.filter(x=>x.type==='visit_no_order').length})</button>
+          <button type="button" class="btn btn-sm" onclick="_filterInteractionLogs('call')">Gọi (${logs.filter(x=>x.type==='call').length})</button>
+          <button type="button" class="btn btn-sm" onclick="_filterInteractionLogs('zalo')">Zalo (${logs.filter(x=>x.type==='zalo').length})</button>
+        </div>
+
+        <div id="interactionLogsListBody" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; padding-right:2px;"></div>
+      </div>
+    </div>
+  `;
+  modalContainer.classList.remove('hidden');
+  renderRows('ALL');
 };
 </script>
 </body>
