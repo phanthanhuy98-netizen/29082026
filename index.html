@@ -1028,7 +1028,7 @@ window.syncOfflineOrders = async function() {
                 // Nếu soCtu có chứa dấu '-' (Tức là tạo offline), ta có thể ép nó lấy số chuẩn ở đây nếu muốn,
                 // hoặc cứ giữ nguyên để kế toán biết đây là đơn tạo lúc rớt mạng.
                 const docRef = doc(db, "orders", order.id);
-                batch.set(docRef, { ...order, isSynced: true, syncedAt: serverTimestamp() }, { merge: true });
+                batch.set(docRef, { ...order, isSynced: true, syncedAt: serverTimestamp(), syncAt: new Date().toISOString() }, { merge: true });
                 syncedIds.push(order.id);
             });
 
@@ -5899,7 +5899,7 @@ function mergeOrdersIntoMemory(newOrders) {
   window._monthlyStatsIndex = null;
 }
 
-// Đồng bộ gia tăng: chỉ kéo đúng đơn mới tạo / vừa sửa / vừa hủy (tốn 0 -> vài Read)
+// Đồng bộ gia tăng: nới vùng an toàn 15 phút để chống lệch giờ giữa các máy
 window.syncOrdersIncremental = async function() {
   const { monthStr } = window.getVnTodayAndMonth();
   const syncKey = `dms_orders_last_sync_${monthStr}`;
@@ -5911,7 +5911,7 @@ window.syncOrdersIncremental = async function() {
 
   const lastMs = Date.parse(rawLastSync);
   const safeFromIso = (!isNaN(lastMs) && lastMs > 1000000000000)
-    ? new Date(lastMs - 2 * 60 * 1000).toISOString()
+    ? new Date(lastMs - 15 * 60 * 1000).toISOString()
     : rawLastSync;
 
   const q = query(collection(db, "orders"), where("syncAt", ">", safeFromIso));
@@ -5933,15 +5933,30 @@ window.syncOrdersIncremental = async function() {
   localStorage.setItem(syncKey, new Date().toISOString());
 };
 
-// Tải đơn theo khoảng ngày (ưu tiên IndexedDB -> chỉ kéo phần thiếu)
+// Tải đơn theo khoảng ngày: Ngày cũ lấy IndexedDB (0 Read), ngày Hôm Nay luôn khớp chuẩn 100% Server
 window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = false) {
-  const { monthStr } = window.getVnTodayAndMonth();
+  const { todayStr, monthStr } = window.getVnTodayAndMonth();
   const monthStart = `${monthStr}-01`;
   const monthEnd = `${monthStr}-31`;
   const startStr = fromDate || monthStart;
   const endStr = toDate || monthEnd;
 
-  // 1. Nằm gọn trong tháng hiện tại -> dùng IndexedDB + đồng bộ gia tăng syncAt
+  const fetchExactRangeFromServer = async (rStart, rEnd) => {
+    const q = query(collection(db, "orders"), where("ngayCtu", ">=", rStart), where("ngayCtu", "<=", rEnd));
+    const snap = await getDocs(q);
+    const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
+    orders = (orders || []).filter(o => !o || !o.ngayCtu || o.ngayCtu < rStart || o.ngayCtu > rEnd);
+    mergeOrdersIntoMemory(fetched);
+
+    const touchedMonths = new Set();
+    if (rStart.length >= 7) touchedMonths.add(rStart.slice(0, 7));
+    if (rEnd.length >= 7) touchedMonths.add(rEnd.slice(0, 7));
+    for (const m of touchedMonths) {
+      await window.saveCurrentMonthOrdersCache(m);
+    }
+  };
+
+  // 1. Nằm trong tháng hiện tại
   if (startStr >= monthStart && endStr <= monthEnd) {
     const inRam = window._loadedOrderRanges.some(r => r.start <= monthStart && r.end >= monthEnd);
     if (!inRam) {
@@ -5950,16 +5965,14 @@ window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = f
       if (cached !== null && hasSyncMark) {
         mergeOrdersIntoMemory(cached);
         window._loadedOrderRanges.push({ start: monthStart, end: monthEnd });
+        // Luôn kéo chuẩn toàn bộ đơn Hôm Nay từ server (không bỏ sót máy cũ/lệch giờ) + syncAt cho ngày cũ
+        await fetchExactRangeFromServer(todayStr, todayStr);
         await window.syncOrdersIncremental();
         hasMoreOrders = false;
         return;
       }
-      // Chưa có cache tháng này trên máy -> tải full 1 lần duy nhất
-      const q = query(collection(db, "orders"), where("ngayCtu", ">=", monthStart), where("ngayCtu", "<=", monthEnd));
-      const snap = await getDocs(q);
-      const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
-      mergeOrdersIntoMemory(fetched);
-      await window.saveCurrentMonthOrdersCache(monthStr);
+      // Chưa có cache tháng này trên máy -> tải full tháng 1 lần duy nhất
+      await fetchExactRangeFromServer(monthStart, monthEnd);
       localStorage.setItem(`dms_orders_last_sync_${monthStr}`, new Date().toISOString());
       window._loadedOrderRanges.push({ start: monthStart, end: monthEnd });
       hasMoreOrders = false;
@@ -5967,13 +5980,28 @@ window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = f
     }
 
     if (forceServer) {
-      await window.syncOrdersIncremental();
+      const d1 = new Date(startStr + 'T00:00:00');
+      const d2 = new Date(endStr + 'T00:00:00');
+      const spanDays = Math.round((d2 - d1) / 86400000);
+
+      if (spanDays <= 3) {
+        // Đang chọn Hôm Nay (hoặc tối đa 3 ngày) -> kéo thẳng khoảng đó từ Server
+        await fetchExactRangeFromServer(startStr, endStr);
+      } else {
+        // Đang chọn Tuần Này / Tháng Này -> kéo chuẩn 2 ngày gần nhất (Hôm qua + Hôm nay) + syncAt
+        const vnNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+        const yest = new Date(vnNow.getFullYear(), vnNow.getMonth(), vnNow.getDate() - 1);
+        const yestStr = formatLocalYMD(yest);
+        const recentStart = yestStr < monthStart ? monthStart : yestStr;
+        await fetchExactRangeFromServer(recentStart, todayStr);
+        await window.syncOrdersIncremental();
+      }
     }
     hasMoreOrders = false;
     return;
   }
 
-  // 2. Khoảng ngày thuộc tháng cũ -> kiểm tra RAM và IndexedDB trước khi gọi Firestore
+  // 2. Khoảng ngày thuộc tháng cũ -> ưu tiên RAM và IndexedDB
   const isCovered = window._loadedOrderRanges.some(r => r.start <= startStr && r.end >= endStr);
   if (!forceServer && isCovered) return;
 
@@ -5988,29 +6016,16 @@ window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = f
       hasMoreOrders = false;
       return;
     }
-    // Tải trọn tháng cũ đó 1 lần rồi lưu cứng IndexedDB để các lần sau tốn 0 Read
     const pStart = `${startMonth}-01`;
     const pEnd = `${startMonth}-31`;
-    const qPast = query(collection(db, "orders"), where("ngayCtu", ">=", pStart), where("ngayCtu", "<=", pEnd));
-    const snapPast = await getDocs(qPast);
-    const fetchedPast = snapPast.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
-    mergeOrdersIntoMemory(fetchedPast);
-    await window.saveCurrentMonthOrdersCache(startMonth);
+    await fetchExactRangeFromServer(pStart, pEnd);
     window._loadedOrderRanges.push({ start: pStart, end: pEnd });
     hasMoreOrders = false;
     return;
   }
 
   // 3. Khoảng ngày kéo dài nhiều tháng hoặc ép tải lại khoảng cũ
-  const q = query(collection(db, "orders"), where("ngayCtu", ">=", startStr), where("ngayCtu", "<=", endStr));
-  const snap = await getDocs(q);
-  const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
-
-  if (forceServer) {
-    orders = (orders || []).filter(o => !o.ngayCtu || o.ngayCtu < startStr || o.ngayCtu > endStr);
-  }
-
-  mergeOrdersIntoMemory(fetched);
+  await fetchExactRangeFromServer(startStr, endStr);
   if (!isCovered) {
     window._loadedOrderRanges.push({ start: startStr, end: endStr });
   }
@@ -7365,11 +7380,13 @@ else if (tab === 'kpi') {
       };
 
      window.forceRefreshKpiAnalytics = async function() {
-        window._kpiRangeCache = {};
-        await window.syncOrdersIncremental();
-        window.renderKpiAnalyticsBody();
-        if (typeof triggerHaptic === 'function') triggerHaptic(25);
-      };
+     window._kpiRangeCache = {};
+     const { todayStr } = window.getVnTodayAndMonth();
+     await window.fetchOrdersByDateRange(todayStr, todayStr, true);
+     await window.syncOrdersIncremental();
+     window.renderKpiAnalyticsBody();
+     if (typeof triggerHaptic === 'function') triggerHaptic(25);
+   };
 
       // Đồng bộ ngày hiển thị ban đầu
       if (window._kpiDateFilter !== 'custom') {
