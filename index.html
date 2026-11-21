@@ -2014,7 +2014,6 @@ try {
         currentSalesGPS = DEFAULT_MAP_CENTER;
       }
       attachListeners();
-     loadMonthlyVisitLogs(false);
       if (typeof window.syncOfflineCheckins === 'function') window.syncOfflineCheckins();
 if (typeof window.syncOfflineOrders === 'function') window.syncOfflineOrders();
     }, 50);
@@ -4091,14 +4090,20 @@ window.deleteSingleOrder = async function(orderId) {
 
     try {
       // DÙNG XÓA MỀM (SOFT DELETE) ĐỂ ĐẢM BẢO ĐỒNG BỘ OFFLINE CHUẨN 100%
+     const nowIso = new Date().toISOString();
       await updateDoc(doc(db, "orders", orderId), { 
           status: "Đã hủy", 
-          updatedAt: new Date().toISOString() 
+          updatedAt: nowIso,
+          syncAt: nowIso
       });
       
-      // Cập nhật lại mảng hiển thị trên màn hình hiện tại
       const idx = orders.findIndex(o => o.id === orderId);
-      if (idx > -1) orders[idx].status = 'Đã hủy';
+      if (idx > -1) {
+        orders[idx].status = 'Đã hủy';
+        orders[idx].syncAt = nowIso;
+      }
+      window._monthlyStatsIndex = null;
+      window.saveCurrentMonthOrdersCache((order.ngayCtu || '').slice(0, 7)).catch(() => {});
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -4197,9 +4202,11 @@ window.deleteSingleOrder = async function(orderId) {
 
       targetOrders.forEach(o => {
         // DÙNG XÓA MỀM BẰNG BATCH UPDATE
-        currentBatch.update(doc(db, "orders", o.id), { 
-            status: "Đã hủy", 
-            updatedAt: new Date().toISOString() 
+        const delIso = new Date().toISOString();
+        currentBatch.update(doc(db, "orders", o.id), {
+            status: "Đã hủy",
+            updatedAt: delIso,
+            syncAt: delIso
         });
         count++;
         if (count >= 400) {
@@ -4217,6 +4224,8 @@ window.deleteSingleOrder = async function(orderId) {
           const idx = orders.findIndex(o => o.id === to.id);
           if (idx > -1) orders[idx].status = 'Đã hủy';
       });
+      window._monthlyStatsIndex = null;
+      window.saveCurrentMonthOrdersCache().catch(() => {});
       
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) {
@@ -4778,7 +4787,8 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
         soCtu: assignedSoCtu,
         id: orderUuid,
         createdAt: existingOrd ? existingOrd.createdAt : serverTimestamp(),
-        updatedAt: editingOrderId ? serverTimestamp() : null
+        updatedAt: editingOrderId ? serverTimestamp() : null,
+        syncAt: new Date().toISOString()
       };
 
       const savedStoreId = activeVisitedStore.id;
@@ -4799,6 +4809,8 @@ window.getNextSoCtuWithRetry = async function(retries = 3, delay = 100) {
       } else {
         orders.unshift(localRenderOrder);
       }
+    window._monthlyStatsIndex = null;
+    window.saveCurrentMonthOrdersCache(orderData.ngayCtu.slice(0, 7)).catch(() => {});
       clearCartDraftAsync(savedStoreId).catch(e => console.log("Xóa giỏ hàng offline", e));    
       currentCart = {}; 
       activeVisitedStore = null; 
@@ -5815,16 +5827,68 @@ function formatLocalYMD(dateObj) {
   return `${y}-${m}-${d}`;
 }
 
-// Gộp danh sách đơn mới vào mảng orders toàn cục và khử trùng theo ID
+function normalizeOrderForCache(o) {
+  if (!o) return o;
+  const copy = { ...o };
+  if (copy.createdAt && typeof copy.createdAt.toDate === 'function') {
+    copy.createdAt = copy.createdAt.toDate().toISOString();
+  } else if (copy.createdAt instanceof Date) {
+    copy.createdAt = copy.createdAt.toISOString();
+  } else if (copy.createdAt && typeof copy.createdAt.seconds === 'number') {
+    copy.createdAt = new Date(copy.createdAt.seconds * 1000).toISOString();
+  }
+  if (copy.updatedAt && typeof copy.updatedAt.toDate === 'function') {
+    copy.updatedAt = copy.updatedAt.toDate().toISOString();
+  } else if (copy.updatedAt instanceof Date) {
+    copy.updatedAt = copy.updatedAt.toISOString();
+  } else if (copy.updatedAt && typeof copy.updatedAt.seconds === 'number') {
+    copy.updatedAt = new Date(copy.updatedAt.seconds * 1000).toISOString();
+  }
+  return copy;
+}
+
+async function saveOrdersMonthCache(monthStr, list) {
+  if (!monthStr) return;
+  if (!idbDb) await initIndexedDB();
+  const cleanList = (list || []).map(normalizeOrderForCache);
+  return new Promise((resolve) => {
+    try {
+      const tx = idbDb.transaction(["metaInfo"], "readwrite");
+      tx.objectStore("metaInfo").put({ key: 'orders_month_' + monthStr, value: cleanList });
+      tx.oncomplete = resolve;
+      tx.onerror = () => resolve();
+    } catch (e) { resolve(); }
+  });
+}
+
+async function loadOrdersMonthCache(monthStr) {
+  if (!monthStr) return null;
+  if (!idbDb) await initIndexedDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = idbDb.transaction(["metaInfo"], "readonly");
+      const req = tx.objectStore("metaInfo").get('orders_month_' + monthStr);
+      req.onsuccess = () => resolve(req.result ? req.result.value : null);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+
+window.saveCurrentMonthOrdersCache = async function(targetMonthStr) {
+  const mStr = targetMonthStr || window.getVnTodayAndMonth().monthStr;
+  const monthList = (orders || []).filter(o => o && o.ngayCtu && String(o.ngayCtu).startsWith(mStr));
+  await saveOrdersMonthCache(mStr, monthList);
+};
+
 window._loadedOrderRanges = [];
 
 function mergeOrdersIntoMemory(newOrders) {
   const map = new Map();
   (orders || []).forEach(o => {
-    if (o && o.id) map.set(String(o.id), o);
+    if (o && o.id) map.set(String(o.id), normalizeOrderForCache(o));
   });
   (newOrders || []).forEach(o => {
-    if (o && o.id) map.set(String(o.id), o);
+    if (o && o.id) map.set(String(o.id), normalizeOrderForCache(o));
   });
   orders = Array.from(map.values()).sort((a, b) => {
     const dComp = String(b.ngayCtu || '').localeCompare(String(a.ngayCtu || ''));
@@ -5835,24 +5899,112 @@ function mergeOrdersIntoMemory(newOrders) {
   window._monthlyStatsIndex = null;
 }
 
+// Đồng bộ gia tăng: chỉ kéo đúng đơn mới tạo / vừa sửa / vừa hủy (tốn 0 -> vài Read)
+window.syncOrdersIncremental = async function() {
+  const { monthStr } = window.getVnTodayAndMonth();
+  const syncKey = `dms_orders_last_sync_${monthStr}`;
+  const rawLastSync = localStorage.getItem(syncKey);
+
+  if (!rawLastSync) {
+    return window.fetchOrdersByDateRange(`${monthStr}-01`, `${monthStr}-31`, false);
+  }
+
+  const lastMs = Date.parse(rawLastSync);
+  const safeFromIso = (!isNaN(lastMs) && lastMs > 1000000000000)
+    ? new Date(lastMs - 2 * 60 * 1000).toISOString()
+    : rawLastSync;
+
+  const q = query(collection(db, "orders"), where("syncAt", ">", safeFromIso));
+  const snap = await getDocs(q);
+
+  if (!snap.empty) {
+    const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
+    mergeOrdersIntoMemory(fetched);
+
+    const touchedMonths = new Set([monthStr]);
+    fetched.forEach(o => {
+      if (o.ngayCtu && o.ngayCtu.length >= 7) touchedMonths.add(o.ngayCtu.slice(0, 7));
+    });
+    for (const m of touchedMonths) {
+      await window.saveCurrentMonthOrdersCache(m);
+    }
+  }
+
+  localStorage.setItem(syncKey, new Date().toISOString());
+};
+
+// Tải đơn theo khoảng ngày (ưu tiên IndexedDB -> chỉ kéo phần thiếu)
 window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = false) {
   const { monthStr } = window.getVnTodayAndMonth();
-  const startStr = fromDate || `${monthStr}-01`;
-  const endStr = toDate || `${monthStr}-31`;
+  const monthStart = `${monthStr}-01`;
+  const monthEnd = `${monthStr}-31`;
+  const startStr = fromDate || monthStart;
+  const endStr = toDate || monthEnd;
 
-  // Nếu khoảng ngày yêu cầu đã nằm gọn trong khoảng đã tải trước đó -> 0 Read, chạy tức thì
-  const isCovered = window._loadedOrderRanges.some(r => r.start <= startStr && r.end >= endStr);
-  if (!forceServer && isCovered) {
+  // 1. Nằm gọn trong tháng hiện tại -> dùng IndexedDB + đồng bộ gia tăng syncAt
+  if (startStr >= monthStart && endStr <= monthEnd) {
+    const inRam = window._loadedOrderRanges.some(r => r.start <= monthStart && r.end >= monthEnd);
+    if (!inRam) {
+      const cached = await loadOrdersMonthCache(monthStr);
+      const hasSyncMark = Boolean(localStorage.getItem(`dms_orders_last_sync_${monthStr}`));
+      if (cached !== null && hasSyncMark) {
+        mergeOrdersIntoMemory(cached);
+        window._loadedOrderRanges.push({ start: monthStart, end: monthEnd });
+        await window.syncOrdersIncremental();
+        hasMoreOrders = false;
+        return;
+      }
+      // Chưa có cache tháng này trên máy -> tải full 1 lần duy nhất
+      const q = query(collection(db, "orders"), where("ngayCtu", ">=", monthStart), where("ngayCtu", "<=", monthEnd));
+      const snap = await getDocs(q);
+      const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
+      mergeOrdersIntoMemory(fetched);
+      await window.saveCurrentMonthOrdersCache(monthStr);
+      localStorage.setItem(`dms_orders_last_sync_${monthStr}`, new Date().toISOString());
+      window._loadedOrderRanges.push({ start: monthStart, end: monthEnd });
+      hasMoreOrders = false;
+      return;
+    }
+
+    if (forceServer) {
+      await window.syncOrdersIncremental();
+    }
+    hasMoreOrders = false;
     return;
   }
 
-  const q = query(
-    collection(db, "orders"),
-    where("ngayCtu", ">=", startStr),
-    where("ngayCtu", "<=", endStr)
-  );
+  // 2. Khoảng ngày thuộc tháng cũ -> kiểm tra RAM và IndexedDB trước khi gọi Firestore
+  const isCovered = window._loadedOrderRanges.some(r => r.start <= startStr && r.end >= endStr);
+  if (!forceServer && isCovered) return;
+
+  const startMonth = startStr.slice(0, 7);
+  const endMonth = endStr.slice(0, 7);
+
+  if (!forceServer && startMonth === endMonth && startMonth < monthStr) {
+    const cachedPast = await loadOrdersMonthCache(startMonth);
+    if (cachedPast !== null) {
+      mergeOrdersIntoMemory(cachedPast);
+      window._loadedOrderRanges.push({ start: `${startMonth}-01`, end: `${startMonth}-31` });
+      hasMoreOrders = false;
+      return;
+    }
+    // Tải trọn tháng cũ đó 1 lần rồi lưu cứng IndexedDB để các lần sau tốn 0 Read
+    const pStart = `${startMonth}-01`;
+    const pEnd = `${startMonth}-31`;
+    const qPast = query(collection(db, "orders"), where("ngayCtu", ">=", pStart), where("ngayCtu", "<=", pEnd));
+    const snapPast = await getDocs(qPast);
+    const fetchedPast = snapPast.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
+    mergeOrdersIntoMemory(fetchedPast);
+    await window.saveCurrentMonthOrdersCache(startMonth);
+    window._loadedOrderRanges.push({ start: pStart, end: pEnd });
+    hasMoreOrders = false;
+    return;
+  }
+
+  // 3. Khoảng ngày kéo dài nhiều tháng hoặc ép tải lại khoảng cũ
+  const q = query(collection(db, "orders"), where("ngayCtu", ">=", startStr), where("ngayCtu", "<=", endStr));
   const snap = await getDocs(q);
-  const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const fetched = snap.docs.map(d => normalizeOrderForCache({ id: d.id, ...d.data() }));
 
   if (forceServer) {
     orders = (orders || []).filter(o => !o.ngayCtu || o.ngayCtu < startStr || o.ngayCtu > endStr);
@@ -5867,10 +6019,7 @@ window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = f
 
 function attachListeners() {
   const { monthStr } = window.getVnTodayAndMonth();
-  const monthStart = `${monthStr}-01`;
-  const monthEnd = `${monthStr}-31`;
-
-  window.fetchOrdersByDateRange(monthStart, monthEnd, false).then(() => {
+  window.fetchOrdersByDateRange(`${monthStr}-01`, `${monthStr}-31`, false).then(() => {
     if (currentTab === 'soGocBH') {
       const activePane = document.getElementById('tabPane_soGocBH');
       if (activePane) renderTabContent('soGocBH', activePane);
@@ -7215,8 +7364,9 @@ else if (tab === 'kpi') {
         window.renderKpiAnalyticsBody();
       };
 
-      window.forceRefreshKpiAnalytics = function() {
+     window.forceRefreshKpiAnalytics = async function() {
         window._kpiRangeCache = {};
+        await window.syncOrdersIncremental();
         window.renderKpiAnalyticsBody();
         if (typeof triggerHaptic === 'function') triggerHaptic(25);
       };
@@ -7302,17 +7452,8 @@ else if (tab === 'kpi') {
           </div>`;
 
         const fetchOrdersByRange = async (startStr, endStr) => {
-          const key = `${startStr}_${endStr}`;
-          if (window._kpiRangeCache[key]) return window._kpiRangeCache[key];
-          const q = query(
-            collection(db, "orders"),
-            where("ngayCtu", ">=", startStr),
-            where("ngayCtu", "<=", endStr)
-          );
-          const snap = await getDocs(q);
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          window._kpiRangeCache[key] = list;
-          return list;
+          await window.fetchOrdersByDateRange(startStr, endStr, false);
+          return (orders || []).filter(o => o && o.ngayCtu && o.ngayCtu >= startStr && o.ngayCtu <= endStr);
         };
 
         let analyticsOrders = [];
@@ -8239,13 +8380,22 @@ window._historyModalTab = 'top';
 window._historyDateFrom = '';
 window._historyDateTo = '';
 
-window.setHistoryDateFrom = function(val) {
+window.setHistoryDateFrom = async function(val) {
   window._historyDateFrom = val;
+  if (window._historyDateFrom) {
+    const endRange = window._historyDateTo || formatLocalYMD(new Date());
+    if (window._historyDateFrom <= endRange) {
+      await window.fetchOrdersByDateRange(window._historyDateFrom, endRange, false);
+    }
+  }
   window._renderHistoryResultsOnly(); 
 };
 
-window.setHistoryDateTo = function(val) {
+window.setHistoryDateTo = async function(val) {
   window._historyDateTo = val;
+  if (window._historyDateFrom && window._historyDateTo && window._historyDateFrom <= window._historyDateTo) {
+    await window.fetchOrdersByDateRange(window._historyDateFrom, window._historyDateTo, false);
+  }
   window._renderHistoryResultsOnly(); 
 };
 
@@ -8258,57 +8408,13 @@ window.clearHistoryFilter = function() {
   if (dTo) dTo.value = '';
   window._renderHistoryResultsOnly();
 };
-  window.syncActiveCustomerHistory = async function() {
+
+window.syncActiveCustomerHistory = async function() {
   if (!activeVisitedStore) return alert("Vui lòng chọn khách hàng trước!");
-  
-  const btn = document.getElementById('btnSyncCustHistory');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
-  }
-
-  try {
-    const storeIdStr = String(activeVisitedStore.id);
-    const storeCodeStr = String(activeVisitedStore.code || '').trim();
-
-    // Lọc theo ID của khách hàng trên máy chủ
-    const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
-    const snap1 = await getDocs(q1);
-
-    // Lọc dự phòng theo mã Cửa hàng (maDTPNNo) cho các đơn cũ
-    const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
-    const snap2 = await getDocs(q2);
-
-    let newCount = 0;
-    
-    // Gộp dữ liệu tải về vào biến `orders` cục bộ của máy
-    const mergeData = (docSnap) => {
-      const data = { id: docSnap.id, ...docSnap.data() };
-      if (!orders.find(o => o.id === data.id)) {
-        orders.push(data);
-        newCount++;
-      }
-    };
-
-    snap1.forEach(mergeData);
-    snap2.forEach(mergeData);
-
-    if (typeof triggerHaptic === 'function') triggerHaptic(30);
-    
-    if (newCount > 0) {
-        alert(`✅ Đã tải thêm thành công ${newCount} đơn hàng cũ của khách hàng này từ máy chủ đám mây!\n\nBây giờ AI Gợi ý và Lịch sử đã có đầy đủ dữ liệu để phân tích.`);
-    } else {
-        alert("Khách hàng này chưa có thêm đơn hàng cũ nào khác trên hệ thống.");
-    }
-
-  } catch (e) {
-    alert("Lỗi khi tải lịch sử: " + e.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Tải Lịch Sử Cũ';
-    }
-  }
+  const { monthStr } = window.getVnTodayAndMonth();
+  await window.fetchOrdersByDateRange(`${monthStr}-01`, `${monthStr}-31`, true);
+  if (typeof triggerHaptic === 'function') triggerHaptic(30);
+  alert("✅ Đã cập nhật đơn hàng mới nhất!");
 };
 
 window.openStoreHistoryModal = async function() {
@@ -8324,64 +8430,15 @@ window.openStoreHistoryModal = async function() {
   const modalContainer = document.getElementById('dynamicModalContainer');
   if (!modalContainer) return;
 
-  // 1. HIỂN THỊ GIAO DIỆN CHỜ
-  modalContainer.innerHTML = `<div class="modal" style="display:flex; z-index:999999;"><div style="color:#fff; font-size:18px; font-weight:bold;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu lịch sử...</div></div>`;
-  modalContainer.classList.remove('hidden');
-
   try {
       const storeIdStr = String(activeVisitedStore.id);
       const storeCodeStr = String(activeVisitedStore.code || '').trim();
+      const { monthStr: currentMonthPrefix } = window.getVnTodayAndMonth();
 
-      // 2. KIỂM TRA ADN AN TOÀN (Bypass nếu bạn copy thiếu hàm lưu ADN)
-      let hasLocalData = false;
-      if (typeof loadCustomerHistoryFromLocal === 'function') {
-          try {
-              let localHistory = await loadCustomerHistoryFromLocal(storeIdStr);
-              if (localHistory && Array.isArray(localHistory) && localHistory.length > 0) {
-                  hasLocalData = true;
-                  localHistory.forEach(localOrder => {
-                      if (!orders.find(o => o.id === localOrder.id)) {
-                          orders.push(localOrder);
-                      }
-                  });
-              }
-          } catch(e) { console.warn("Lỗi đọc ADN:", e); }
-      }
-
-      // 3. TẢI TỪ FIREBASE NẾU ADN CHƯA CÓ GÌ
-      if (!hasLocalData) {
-          const q1 = query(collection(db, "orders"), where("storeId", "==", storeIdStr));
-          const snap1 = await getDocs(q1);
-
-          const q2 = query(collection(db, "orders"), where("maDTPNNo", "==", storeCodeStr));
-          const snap2 = await getDocs(q2);
-
-          let customerFreshOrders = [];
-
-          const mergeData = (docSnap) => {
-            const data = { id: docSnap.id, ...docSnap.data() };
-            customerFreshOrders.push(data); 
-            
-            const idx = orders.findIndex(o => o.id === data.id);
-            if (idx > -1) {
-                orders[idx] = data; 
-            } else {
-                orders.push(data); 
-            }
-          };
-
-          snap1.forEach(mergeData);
-          snap2.forEach(mergeData);
-
-          if (customerFreshOrders.length > 0 && typeof saveCustomerHistoryToLocal === 'function') {
-              await saveCustomerHistoryToLocal(storeIdStr, customerFreshOrders);
-          }
-      }
+      // Đảm bảo tháng hiện tại đã có trong RAM/IndexedDB (0 Read nếu đã mở app)
+      await window.fetchOrdersByDateRange(`${currentMonthPrefix}-01`, `${currentMonthPrefix}-31`, false);
 
       const isTopTab = window._historyModalTab === 'top';
-      const currentMonthPrefix = new Date().toISOString().slice(0, 7); 
-
-      // 4. LỌC: MẶC ĐỊNH CHỈ LẤY TRONG THÁNG HIỆN TẠI
       let customerOrders = orders.filter(o => {
         const matchId = String(o.storeId || '') === storeIdStr;
         let inferredCode = o.maDTPNNo || '';
@@ -8389,14 +8446,11 @@ window.openStoreHistoryModal = async function() {
           inferredCode = o.maKH.split(' - ')[0].trim();
         }
         const matchCode = storeCodeStr !== '' && inferredCode === storeCodeStr;
-        
-        let matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
-        
+        const matchMonth = o.ngayCtu && o.ngayCtu.startsWith(currentMonthPrefix);
         return (matchId || matchCode) && matchMonth && o.status !== 'Đã hủy';
       });
       customerOrders.sort((a, b) => Number(b.soCtu || 0) - Number(a.soCtu || 0));
 
-      // 5. VẼ KHUNG GIAO DIỆN LỊCH SỬ
       modalContainer.innerHTML = `
         <div class="modal" style="display:flex; z-index:999999;" onclick="if(event.target === this) closeStoreHistoryModal()">
           <div class="modal-content fullscreen-modal" style="display:flex; flex-direction:column; max-width:600px;">
@@ -8437,16 +8491,12 @@ window.openStoreHistoryModal = async function() {
           </div>
         </div>
       `;
+      modalContainer.classList.remove('hidden');
 
-      // 6. GỌI HÀM VẼ CHI TIẾT
       if (typeof window.switchHistoryTab === 'function') {
           window.switchHistoryTab('top'); 
-      } else {
-          throw new Error("Không tìm thấy hàm switchHistoryTab (Có thể bạn đã xóa nhầm ở các bước trước).");
       }
-
   } catch (error) {
-      // NẾU CÓ BẤT KỲ LỖI GÌ XẢY RA, LẬP TỨC TẮT BẢNG LOADING VÀ BÁO LỖI
       console.error(error);
       modalContainer.innerHTML = '';
       modalContainer.classList.add('hidden');
