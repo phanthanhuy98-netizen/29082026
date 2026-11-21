@@ -2654,6 +2654,20 @@ window.selectStoreDirectly = async function(storeId, event) {
     const container = document.getElementById('salesCustomerResultContainer');
     if (!container) return;
 
+    const isSales = currentUser && currentUser.role === 'sales';
+    const assignedRouteSet = isSales
+      ? new Set((currentUser.assignedRoutes || []).map(r => String(r).trim().toUpperCase()).filter(Boolean))
+      : null;
+
+    if (isSales && (!assignedRouteSet || assignedRouteSet.size === 0)) {
+      const sumBox = document.getElementById('salesRouteVisitSummary');
+      if (sumBox) sumBox.innerHTML = '';
+      container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--rose); font-weight:800; background:var(--card-bg); border-radius:10px;">⛔ Bạn chưa được phân tuyến nào. Vui lòng liên hệ Quản lý!</div>`;
+      const hintEl = document.getElementById('customerSearchHint');
+      if (hintEl) hintEl.innerText = "Chưa có tuyến được phân công.";
+      return;
+    }
+
     const now = new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -2665,15 +2679,25 @@ window.selectStoreDirectly = async function(storeId, event) {
             .map(o => String(o.storeId))
     );
 
+    const isInAssignedRoutes = (codeUpper) => {
+      if (!isSales) return true;
+      for (const rCode of assignedRouteSet) {
+        if (codeUpper.startsWith(rCode)) return true;
+      }
+      return false;
+    };
+
     let matched = [];
     for (const [id, entry] of storeIndexMap.entries()) {
       const s = entry.store;
       const sCode = (s.code || '').trim();
-      
+      const sCodeUpper = sCode.toUpperCase();
+
+      if (!isInAssignedRoutes(sCodeUpper)) continue;
+
       let matchRoute = true;
       if (selectedRouteCode) {
-        const sCodeUpper = sCode.toUpperCase();
-        const routeCodeUpper = selectedRouteCode.toUpperCase();
+        const routeCodeUpper = selectedRouteCode.trim().toUpperCase();
         matchRoute = sCodeUpper.startsWith(routeCodeUpper);
       }
 
@@ -2692,11 +2716,21 @@ window.selectStoreDirectly = async function(storeId, event) {
     }
 
     window.updateSalesRouteVisitSummary(matched);
- if (window._salesOnlyUnvisited) {
-   matched = matched.filter(item => window.getStoreMonthlyStats(item.store).visitCount === 0);
- }
- matched.sort((a, b) => a.distance - b.distance);
- const slicedMatched = matched.slice(0, 20);
+
+    if (customerSearchKeyword === "" && !selectedRouteCode && !window._salesOnlyUnvisited) {
+      container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-weight:700;">Nhập mã khách hàng hoặc bấm "Chỉ hiện chưa ghé" để lọc nhanh...</div>`;
+      const hintEl = document.getElementById('customerSearchHint');
+      if (hintEl) hintEl.innerText = isSales
+        ? "Đang tính trên các tuyến được phân công của bạn."
+        : "Đang tính trên toàn bộ cửa hàng.";
+      return;
+    }
+
+    if (window._salesOnlyUnvisited) {
+      matched = matched.filter(item => window.getStoreMonthlyStats(item.store).visitCount === 0);
+    }
+    matched.sort((a, b) => a.distance - b.distance);
+    const slicedMatched = matched.slice(0, 20);
 
     container.innerHTML = slicedMatched.length > 0 ? slicedMatched.map(item => {
       const s = item.store;
