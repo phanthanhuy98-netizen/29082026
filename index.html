@@ -2080,6 +2080,8 @@ window.handleLogout = async function() {
       editingOrderId = null;
       existingOrderSoCtu = null;
       orders = [];
+      window._loadedOrderRanges = [];
+      window._monthlyStatsIndex = null;
       stores = [];
       currentUser = null; // Xóa biến user
 
@@ -3563,59 +3565,97 @@ window.filterTabProducts = function(val) {
 
   if (hintEl) hintEl.innerText = matched.length > 0 ? `Hiển thị tối đa ${matched.length} kết quả phù hợp nhất.` : "Không tìm thấy vật tư phù hợp.";
 };
- window.filterSoGocCards = function(val) {
-    if (val !== undefined) soGocFilterKeyword = val.toLowerCase();
-    const queryKey = removeAccents(soGocFilterKeyword.trim());
-    const cards = document.querySelectorAll('.so-goc-card-item');
-    let cleanSoCtuKey = queryKey.replace('#', '').trim();
+ window.renderSoGocCardsList = function() {
+  const container = document.getElementById('soGocCardsContainer');
+  if (!container) return;
 
-    // SỬA LỖI 1: Tự động vô hiệu hóa bộ lọc Nhân Viên nếu tài khoản đang đăng nhập là Sales
-    const isSales = currentUser && currentUser.role === 'sales';
-    const selectedSales = isSales ? "" : (soGocSalesFilter || '').trim().toLowerCase();
+  const list = window._soGocFilteredOrders || [];
+  const queryKey = removeAccents((soGocFilterKeyword || '').trim().replace('#', ''));
 
-    // SỬA LỖI 2: Ép định dạng ngày tháng chuẩn về YYYY-MM-DD trước khi so sánh
-    const normalizeDate = (dStr) => {
-        if (!dStr) return '';
-        if (dStr.includes('/')) {
-            const p = dStr.split('/');
-            if (p[0].length === 4) return dStr; // Nếu đã là YYYY thì giữ nguyên
-            return `${p[2]}-${p[1]}-${p[0]}`; // Đảo DD/MM/YYYY thành YYYY-MM-DD
-        }
-        return dStr;
-    };
-    
-    const fFrom = normalizeDate(soGocFilterDateFrom);
-    const fTo = normalizeDate(soGocFilterDateTo);
+  const matched = queryKey
+    ? list.filter(o => o.searchText.includes(queryKey))
+    : list;
 
-    cards.forEach(card => {
-      const soCtu = card.getAttribute('data-so-ctu') || '';
-      const maDtpn = card.getAttribute('data-ma-dtpn') || '';
-      const maNv = (card.getAttribute('data-ma-nv') || '').trim().toLowerCase();
-      const tenNv = card.getAttribute('data-ten-nv') || '';
-      const ngayCtu = card.getAttribute('data-ngay-ctu') || '';
+  window._soGocMatchedSoCtuSet = new Set(matched.map(o => String(o.soCtu)));
 
-      const matchSoCtu = cleanSoCtuKey === "" || soCtu.includes(cleanSoCtuKey);
-      const matchOther = queryKey === "" || 
-        matchSoCtu ||
-        maDtpn.includes(queryKey) || 
-        maNv.includes(queryKey) || 
-        tenNv.includes(queryKey);
+  if (matched.length === 0) {
+    container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Không có đơn hàng nào phù hợp.</div>`;
+    return;
+  }
 
-      let matchDate = true;
-      if (fFrom && fTo) {
-        matchDate = ngayCtu >= fFrom && ngayCtu <= fTo;
-      } else if (fFrom) {
-        matchDate = ngayCtu >= fFrom;
-      } else if (fTo) {
-        matchDate = ngayCtu <= fTo;
-      }
+  const limitCount = window._soGocDisplayLimit || 50;
+  const visibleSlice = matched.slice(0, limitCount);
+  const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
 
-      const matchSales = selectedSales === "" || maNv === selectedSales;
+  let html = visibleSlice.map(o => {
+    const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
+    const canModify = isOwner || currentUser.role === 'admin';
+    const isViewed = Boolean(viewedData[o.orderId]);
 
-      const isVisible = matchOther && matchDate && matchSales;
-      card.style.display = isVisible ? '' : 'none';
-    });
-  };
+    let distHtml = '';
+    if (o.distMeters !== null && o.distMeters !== undefined) {
+      const distStr = o.distMeters > 1000 ? (o.distMeters / 1000).toFixed(1) + ' km' : o.distMeters + ' m';
+      distHtml = `<span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${o.distMeters <= 50 ? 'var(--emerald)' : 'var(--amber)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>`;
+    }
+
+    return `
+      <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+          <div style="display:inline-flex; align-items:center; gap:8px;">
+            <span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>
+            ${isViewed ? `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap;">✅ Đã xem</span>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${distHtml}
+            <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${o.ngayCtuFormatted} ${formatOrderTime(o.createdAt)}</span>
+          </div>
+        </div>
+        <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;">
+          ${o.maKH || o.maDTPNNo}
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
+          <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
+          <div style="display:flex; gap: 8px;">
+            <span>📦 SL: <b style="color:var(--emerald);">${o.totalQty}</b></span>
+            <span>💰 <b style="color:var(--rose);">${(o.totalRev / 1000).toLocaleString('en-US')}K</b></span>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
+          <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
+          ${canModify ? `
+            <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
+            <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (matched.length > visibleSlice.length) {
+    html += `
+      <div style="text-align:center; margin-top:10px; margin-bottom:20px;">
+        <button class="btn btn-amber" style="padding:10px 20px; font-weight:800;" onclick="window._soGocDisplayLimit += 50; renderSoGocCardsList();">
+          Xem Thêm (${matched.length - visibleSlice.length} đơn khác)
+        </button>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+};
+
+window.filterSoGocCards = function(val) {
+  if (val !== undefined) soGocFilterKeyword = val;
+  window._soGocDisplayLimit = 50;
+  renderSoGocCardsList();
+};
+
+window.setSoGocSalesFilter = function(val) {
+  soGocSalesFilter = val;
+  localStorage.setItem('dms_sogoc_sales_filter', val);
+  const activePane = document.getElementById('tabPane_soGocBH');
+  if (activePane) renderTabContent('soGocBH', activePane);
+};
 
 window.setSoGocDateFrom = async function(val) {
   soGocFilterDateFrom = val;
@@ -4792,17 +4832,10 @@ window.exportSoGocExcel = function() {
     return alert("Không có dữ liệu sổ gốc để xuất!");
   }
 
-  const visibleCards = document.querySelectorAll('.so-goc-card-item');
-  const visibleSoCtuSet = new Set();
-  
-  visibleCards.forEach(card => {
-    if (card.style.display !== 'none') {
-      const soCtu = card.getAttribute('data-so-ctu');
-      if (soCtu) visibleSoCtuSet.add(String(soCtu));
-    }
-  });
-
-  const filteredData = window._flatExcelRows.filter(r => visibleSoCtuSet.has(String(r.soCtu)));
+  const matchedSet = window._soGocMatchedSoCtuSet;
+  const filteredData = matchedSet
+    ? window._flatExcelRows.filter(r => matchedSet.has(String(r.soCtu)))
+    : window._flatExcelRows;
 
   if (filteredData.length === 0) {
     return alert("Không có dữ liệu đơn hàng nào thỏa mãn điều kiện lọc để xuất Excel!");
@@ -4827,34 +4860,16 @@ window.exportSoGocExcel = function() {
   }));
 
   const ws = XLSX.utils.json_to_sheet(exportData);
-
-  // Thêm cấu hình độ rộng cho cột MaNB (cột thứ 15, index 14)
   ws['!cols'] = [
-    { wch: 10 },    // 0: So CTu
-    { wch: 12 },    // 1: Ngay CTu__
-    { wch: 15 },    // 2: Ma DTPNNo
-    { wch: 15 },    // 3: SoHoaDon
-    { wch: 15 },    // 4: Ma DTPNCo
-    { hidden: true }, // 5: Ten DTPNCo
-    { wch: 15 },    // 6: Ma VTHHCo
-    { hidden: true }, // 7: Ten Hang Hoa
-    { hidden: true }, // 8: Don Vi Tinh
-    { wch: 10 },    // 9: So Luong
-    { wch: 15 },    // 10: Don Gia
-    { hidden: true }, // 11: VND Thanh Tien
-    { wch: 20 },    // 12: Ghi Chu
-    { wch: 15 },    // 13: GPS Lech
-    { wch: 10 }     // 14: MaNB
+    { wch: 10 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+    { hidden: true }, { wch: 15 }, { hidden: true }, { hidden: true },
+    { wch: 10 }, { wch: 15 }, { hidden: true }, { wch: 20 }, { wch: 15 }, { wch: 10 }
   ];
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "SoGoc");
-
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const fromStr = soGocFilterDateFrom || 'tat_ca';
-  const toStr = soGocFilterDateTo || dateStr;
-  
-  XLSX.writeFile(wb, `SoGocBanHang_${fromStr}_den_${toStr}.xlsx`);
+  const dateStr = formatLocalYMD(new Date());
+  XLSX.writeFile(wb, `SoGocBanHang_${soGocFilterDateFrom || 'tat_ca'}_den_${soGocFilterDateTo || dateStr}.xlsx`);
 };
 
   window.exportCustomersExcel = function() {
@@ -5801,7 +5816,7 @@ function formatLocalYMD(dateObj) {
 }
 
 // Gộp danh sách đơn mới vào mảng orders toàn cục và khử trùng theo ID
-window._loadedOrderRanges = new Set();
+window._loadedOrderRanges = [];
 
 function mergeOrdersIntoMemory(newOrders) {
   const map = new Map();
@@ -5817,16 +5832,17 @@ function mergeOrdersIntoMemory(newOrders) {
     const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, ''), 10) || 0;
     return getNum(b.soCtu) - getNum(a.soCtu);
   });
+  window._monthlyStatsIndex = null;
 }
 
-// Tải đầy đủ 100% đơn hàng theo khoảng ngày (không giới hạn 300 đơn)
 window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = false) {
   const { monthStr } = window.getVnTodayAndMonth();
   const startStr = fromDate || `${monthStr}-01`;
   const endStr = toDate || `${monthStr}-31`;
-  const rangeKey = `${startStr}_${endStr}`;
 
-  if (!forceServer && window._loadedOrderRanges.has(rangeKey)) {
+  // Nếu khoảng ngày yêu cầu đã nằm gọn trong khoảng đã tải trước đó -> 0 Read, chạy tức thì
+  const isCovered = window._loadedOrderRanges.some(r => r.start <= startStr && r.end >= endStr);
+  if (!forceServer && isCovered) {
     return;
   }
 
@@ -5838,13 +5854,14 @@ window.fetchOrdersByDateRange = async function(fromDate, toDate, forceServer = f
   const snap = await getDocs(q);
   const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // Nếu làm mới từ server: xóa bản cũ trong đúng khoảng ngày này trước khi gộp để cập nhật cả đơn đã xóa
   if (forceServer) {
     orders = (orders || []).filter(o => !o.ngayCtu || o.ngayCtu < startStr || o.ngayCtu > endStr);
   }
 
   mergeOrdersIntoMemory(fetched);
-  window._loadedOrderRanges.add(rangeKey);
+  if (!isCovered) {
+    window._loadedOrderRanges.push({ start: startStr, end: endStr });
+  }
   hasMoreOrders = false;
 };
 
@@ -6239,7 +6256,7 @@ ${activeVisitedStore ? `
         ` : ''}
       `;
       if (selectedRouteCode || customerSearchKeyword) {
-        setTimeout(() => filterSalesCustomers(''), 50);
+        setTimeout(() => filterSalesCustomers(), 50);
       }
       setTimeout(() => filterSalesProducts(''), 50);
     }
@@ -6298,300 +6315,195 @@ ${activeVisitedStore ? `
     }
 
    else if (tab === 'soGocBH') {
-      // Tự động làm mới mốc "Hôm nay" nếu qua ngày mới (Chống lỗi ngậm ứng dụng qua đêm trên điện thoại)
-      const currentNow = new Date();
-      const currentTodayStr = `${currentNow.getFullYear()}-${String(currentNow.getMonth() + 1).padStart(2, '0')}-${String(currentNow.getDate()).padStart(2, '0')}`;
+      const currentNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+      const currentTodayStr = formatLocalYMD(currentNow);
       if (soGocQuickDate === 'today' && soGocFilterDateFrom !== currentTodayStr) {
-          soGocFilterDateFrom = currentTodayStr;
-          soGocFilterDateTo = currentTodayStr;
+        soGocFilterDateFrom = currentTodayStr;
+        soGocFilterDateTo = currentTodayStr;
       }
 
-      let groupedOrdersMap = new Map();
-      let flatExcelRows = [];
+      const isSales = currentUser && currentUser.role === 'sales';
+      const isViewer = currentUser && currentUser.role === 'viewer';
+      const selectedSales = isSales ? "" : (soGocSalesFilter || '').trim().toLowerCase();
 
-    const isSales = currentUser && currentUser.role === 'sales';
-const isManagerOrAdmin = currentUser && (currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.role === 'accountant');
+      const normalizeDate = (dStr) => {
+        if (!dStr) return '';
+        if (dStr.includes('/')) {
+          const p = dStr.split('/');
+          if (p[0].length === 4) return dStr;
+          return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+        }
+        return dStr;
+      };
+      const fFrom = normalizeDate(soGocFilterDateFrom);
+      const fTo = normalizeDate(soGocFilterDateTo);
+
+      const storeLookup = new Map();
+      (stores || []).forEach(s => {
+        if (s.id) storeLookup.set(String(s.id), s);
+        if (s.code) storeLookup.set(String(s.code).trim().toUpperCase(), s);
+      });
+      const productLookup = new Map();
+      (products || []).forEach(p => {
+        if (p.id) productLookup.set(String(p.id), p);
+        if (p.code) productLookup.set(String(p.code).trim().toUpperCase(), p);
+      });
+
+      const groupedList = [];
+      const flatExcelRows = [];
+
       const sortedOrders = [...orders].sort((a, b) => {
-    const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, '')) || 0;
-    return getNum(b.soCtu) - getNum(a.soCtu);
-});
+        const dComp = String(b.ngayCtu || '').localeCompare(String(a.ngayCtu || ''));
+        if (dComp !== 0) return dComp;
+        const getNum = (val) => parseInt(String(val || '0').split('-')[0].replace(/[^0-9]/g, ''), 10) || 0;
+        return getNum(b.soCtu) - getNum(a.soCtu);
+      });
 
       sortedOrders.forEach(o => {
-        if (o.status !== 'Đã hủy' && o.items && o.items.length > 0) {
-          if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) {
-            return;
+        if (!o || o.status === 'Đã hủy' || !o.items || o.items.length === 0) return;
+        if (isSales && o.salesCode !== currentUser.code && o.salesUid !== currentUser.uid) return;
+
+        const normNgay = normalizeDate(o.ngayCtu || '');
+        if (fFrom && normNgay < fFrom) return;
+        if (fTo && normNgay > fTo) return;
+        if (selectedSales && String(o.salesCode || '').trim().toLowerCase() !== selectedSales) return;
+
+        let inferredMaDTPN = o.maDTPNNo || '';
+        if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
+          inferredMaDTPN = o.maKH.split(' - ')[0].trim();
+        }
+        const cleanCode = inferredMaDTPN.trim().toUpperCase();
+
+        const matchedStore = storeLookup.get(String(o.storeId || '')) || storeLookup.get(cleanCode);
+        let distMeters = null;
+        let gpsLechVal = "";
+        if (matchedStore && Number(matchedStore.lat) && Number(matchedStore.lng) && Number(o.lat) && Number(o.lng)) {
+          distMeters = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
+          gpsLechVal = distMeters;
+        }
+
+        let maTuyenVal = '';
+        const matchRouteObj = Array.isArray(routeGroupsList)
+          ? routeGroupsList.find(r => cleanCode.startsWith(String(r.nhomDoiTuong || '').trim().toUpperCase()))
+          : null;
+        maTuyenVal = matchRouteObj
+          ? `${matchRouteObj.nhomDoiTuong || ''} ${matchRouteObj.noiDung || ''}`.trim()
+          : inferredMaDTPN.slice(0, 2);
+
+        const ngayFmt = formatDateDDMMYYYY(normNgay || '2026-09-01');
+        let orderTotalQty = 0;
+        let orderTotalRev = 0;
+
+        o.items.forEach(item => {
+          const itemQty = Number(item.qty || 0);
+          if (itemQty <= 0) return;
+          orderTotalQty += itemQty;
+
+          let finalMaVTHHCo = item.code || '';
+          let finalTenHangHoa = item.name || '';
+          if (finalMaVTHHCo.includes('-')) {
+            const pSplit = finalMaVTHHCo.split('-');
+            finalMaVTHHCo = pSplit[0].trim();
+            if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
           }
 
-          let inferredMaDTPN = o.maDTPNNo || '';
-          if (!inferredMaDTPN && o.maKH && o.maKH.includes(' - ')) {
-            inferredMaDTPN = o.maKH.split(' - ')[0].trim();
-          }
+          const pKey1 = String(item.id || item.code || '');
+          const pKey2 = String(item.code || item.id || '').trim().toUpperCase();
+          const productObj = productLookup.get(pKey1) || productLookup.get(pKey2);
+          const unitPrice = Number(item.price || productObj?.price || 0);
+          const thanhTienNum = itemQty * unitPrice;
+          orderTotalRev += thanhTienNum;
 
-          let maTuyenVal = '';
-          let cleanCode = inferredMaDTPN.trim().toUpperCase();
-          
-          let matchRouteObj = Array.isArray(routeGroupsList) ? routeGroupsList.find(r => cleanCode.startsWith(String(r.nhomDoiTuong || '').trim().toUpperCase())) : null;
-          if (matchRouteObj) {
-            maTuyenVal = `${matchRouteObj.nhomDoiTuong || ''} ${matchRouteObj.noiDung || ''}`.trim();
-          } else {
-            maTuyenVal = inferredMaDTPN.slice(0, 2);
-          }
-
-          let orderTotalQty = 0;
-          let orderTotalRev = 0;
-          o.items.forEach(item => {
-            const itemQty = Number(item.qty || 0);
-            if (itemQty > 0) { 
-              orderTotalQty += itemQty;
-
-              let itemCode = item.code || '';
-              let itemName = item.name || '';
-              let finalMaVTHHCo = itemCode;
-              let finalTenHangHoa = itemName;
-
-              if (finalMaVTHHCo.includes('-')) {
-                let pSplit = finalMaVTHHCo.split('-');
-                finalMaVTHHCo = pSplit[0].trim();
-                if (!finalTenHangHoa) finalTenHangHoa = pSplit.slice(1).join('-').trim();
-              }
-
-      // TÍNH KHOẢNG CÁCH LỆCH GIỮA VỊ TRÍ CHỐT ĐƠN CỦA NHÂN VIÊN VÀ GPS GHIM CỦA KHÁCH HÀNG
-              let gpsLechVal = ""; // Đổi mặc định thành chuỗi rỗng
-              
-              // 1. Tìm thông tin khách hàng trong cơ sở dữ liệu gốc
-              const matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(inferredMaDTPN));
-              
-              // 2. Tính khoảng cách lệch (đơn vị: Mét)
-              if (matchedStore && matchedStore.lat && matchedStore.lng && o.lat && o.lng) {
-                gpsLechVal = Math.round(calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng)));
-              } else if (matchedStore && (!matchedStore.lat || matchedStore.lat == 0)) {
-                gpsLechVal = ""; // Để trống nếu chưa ghim
-              } else if (!o.lat || o.lat == 0) {
-                gpsLechVal = ""; // Để trống nếu đơn hàng lúc đặt bị mất GPS
-              }
-
-              // Tra cứu giá từ danh mục sản phẩm nếu item chưa có sẵn giá
-              let productObj = products.find(p => p.id === (item.id || item.code) || p.code === (item.code || item.id));
-              let unitPrice = Number(item.price || productObj?.price || 0);
-              let thanhTienNum = itemQty * unitPrice;
-              orderTotalRev += thanhTienNum;
-
-              flatExcelRows.push({
-                soCtu: o.soCtu || 1,
-                ngayCtu: o.ngayCtu || '2026-09-01',
-                ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
-                maDTPNNo: inferredMaDTPN,
-                maTuyen: maTuyenVal,
-                maNhanVien: o.salesCode || '',
-                tenNhanVien: o.salesName || '',
-                maVTHHCo: finalMaVTHHCo,
-                tenHangHoa: finalTenHangHoa,
-                donViTinh: item.dvt || 'hộp',
-                soLuong: itemQty,
-                donGia: unitPrice,            
-                thanhTien: thanhTienNum,      
-                ghiChu: item.note || '',
-                gpsLech: gpsLechVal // Đã đồng bộ tên biến chuẩn xác tại đây
-              });
-            }
+          flatExcelRows.push({
+            soCtu: o.soCtu || 1,
+            ngayCtu: normNgay,
+            ngayCtuFormatted: ngayFmt,
+            maDTPNNo: inferredMaDTPN,
+            maTuyen: maTuyenVal,
+            maNhanVien: o.salesCode || '',
+            tenNhanVien: o.salesName || '',
+            maVTHHCo: finalMaVTHHCo,
+            tenHangHoa: finalTenHangHoa,
+            donViTinh: item.dvt || 'hộp',
+            soLuong: itemQty,
+            donGia: unitPrice,
+            thanhTien: thanhTienNum,
+            ghiChu: item.note || '',
+            gpsLech: gpsLechVal
           });
+        });
 
-          if (orderTotalQty > 0) {
-            groupedOrdersMap.set(o.id, {
-              orderId: o.id,
-              soCtu: o.soCtu || 1,
-              ngayCtu: o.ngayCtu || '2026-09-01',
-              ngayCtuFormatted: formatDateDDMMYYYY(o.ngayCtu || '2026-09-01'),
-              createdAt: o.createdAt,
-              maDTPNNo: inferredMaDTPN,
-              maKH: o.maKH || '',
-              maNhanVien: o.salesCode || '',
-              tenNhanVien: o.salesName || '',
-              salesCode: o.salesCode || '',
+        if (orderTotalQty > 0) {
+          groupedList.push({
+            orderId: o.id,
+            soCtu: o.soCtu || 1,
+            ngayCtu: normNgay,
+            ngayCtuFormatted: ngayFmt,
+            createdAt: o.createdAt,
+            maDTPNNo: inferredMaDTPN,
+            maKH: o.maKH || '',
+            maNhanVien: o.salesCode || '',
+            tenNhanVien: o.salesName || '',
+            salesCode: o.salesCode || '',
             salesUid: o.salesUid || '',
-              totalQty: orderTotalQty,
-              totalRev: orderTotalRev,
-              lat: o.lat || 0,
-              lng: o.lng || 0,
-              storeId: o.storeId || ''
-            });
-          }
+            totalQty: orderTotalQty,
+            totalRev: orderTotalRev,
+            distMeters,
+            searchText: removeAccents(`${o.soCtu || ''} ${inferredMaDTPN} ${o.maKH || ''} ${o.salesCode || ''} ${o.salesName || ''}`)
+          });
         }
       });
-      window._flatExcelRows = flatExcelRows; // Lưu ra biến toàn cục để xuất Excel chuẩn
-      const allGroupedList = Array.from(groupedOrdersMap.values());
-      const uniqueSalesList = Array.from(new Set(allGroupedList.map(o => o.maNhanVien))).filter(Boolean);
-      
-      const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
-      const isViewer = currentUser.role === 'viewer';
 
-      // SẮP XẾP EXCEL: Đơn gần công ty nhất nằm trên, xa hơn nằm dưới
-      flatExcelRows.sort((a, b) => {
-        const distA = a.khoangCachKm === Infinity ? 999999 : a.khoangCachKm;
-        const distB = b.khoangCachKm === Infinity ? 999999 : b.khoangCachKm;
-        return distA - distB;
-      });
+      window._flatExcelRows = flatExcelRows;
+      window._soGocFilteredOrders = groupedList;
+      window._soGocDisplayLimit = 50;
+
       container.innerHTML = `
-       <div class="tab-header-actions">
-          <h2 style="font-size: 20px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng</h2>
+        <div class="tab-header-actions">
+          <h2 style="font-size: 20px; font-weight:800;"><i class="fa-solid fa-book-open" style="color:var(--amber);"></i> Sổ Gốc Bán Hàng (${groupedList.length})</h2>
           <div class="excel-group-btns">
-         <button class="btn btn-amber" style="padding: 8px 16px; font-size: 17px;" onclick="reloadSoGocDataManually()" title="Làm mới danh sách đơn hàng"><i class="fa-solid fa-rotate"></i> Làm mới</button>
-        
-        <!-- SỬA DÒNG NÀY: Chỉ Admin mới thấy nút Xóa đơn -->
-        ${currentUser.role === 'admin' ? `<button class="btn btn-red btn-sm" onclick="openDeleteOrdersRangeModal()"><i class="fa-solid fa-calendar-minus"></i> Xóa đơn (Từ ngày - Đến ngày)</button>` : ''}
-        
-        ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
+            <button class="btn btn-amber" style="padding: 8px 16px; font-size: 17px;" onclick="reloadSoGocDataManually()" title="Làm mới danh sách đơn hàng"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+            ${currentUser.role === 'admin' ? `<button class="btn btn-red btn-sm" onclick="openDeleteOrdersRangeModal()"><i class="fa-solid fa-calendar-minus"></i> Xóa đơn (Từ ngày - Đến ngày)</button>` : ''}
+            ${!isSales && !isViewer ? `<button class="btn btn-green btn-sm" onclick="exportSoGocExcel()"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>` : ''}
           </div>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px; background:var(--card-bg); padding:10px; border-radius:12px; border:1px solid var(--card-border);">
-        <div style="display:flex; gap:6px; margin-bottom: 15px; flex-wrap:nowrap; overflow-x:auto;">
-  <button id="quickDateBtn_today" class="btn ${soGocQuickDate==='today'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('today')">Hôm Nay</button>
-  <button id="quickDateBtn_week" class="btn ${soGocQuickDate==='week'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('week')">Tuần Này</button>
-  <button id="quickDateBtn_month" class="btn ${soGocQuickDate==='month'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('month')">Tháng Này</button>
- <!-- CHỈ ADMIN GỐC MỚI THẤY NÚT "TẤT CẢ" -->
-          ${currentUser && currentUser.role === 'admin' ? `
-  <button id="quickDateBtn_all" class="btn ${soGocQuickDate==='all'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('all')">Tất Cả</button>
-  ` : ''}
-</div>
-<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-  <!-- Ô TỪ NGÀY -->
-  <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
-    <span style="font-size:22px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ:</span>
-    <input type="date" id="soGocDateFrom" 
-           value="${soGocFilterDateFrom}" 
-           onchange="setSoGocDateFrom(this.value);" 
-           style="margin:0; padding:8px 4px; font-size:17px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; box-sizing:border-box;">
-  </div>
-  
-  <!-- Ô ĐẾN NGÀY -->
-  <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
-    <span style="font-size:22px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến:</span>
-    <input type="date" id="soGocDateTo" 
-           value="${soGocFilterDateTo}" 
-           onchange="setSoGocDateTo(this.value);" 
-           style="margin:0; padding:8px 4px; font-size:17px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; box-sizing:border-box;">
-  </div>
-</div>
-     ${!isSales ? `
-<select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="...">
-  <option value="">-- Tất cả NV --</option>
-${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role || String(u.role).toLowerCase() === 'sales') : users).map(u => `<option value="${u.code}" ${soGocSalesFilter === u.code ? 'selected' : ''}>[${u.code || 'NV'}] ${u.name}</option>`).join('')}</select>
-` : ''}
+          <div style="display:flex; gap:6px; margin-bottom: 10px; flex-wrap:nowrap; overflow-x:auto;">
+            <button id="quickDateBtn_today" class="btn ${soGocQuickDate==='today'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('today')">Hôm Nay</button>
+            <button id="quickDateBtn_week" class="btn ${soGocQuickDate==='week'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('week')">Tuần Này</button>
+            <button id="quickDateBtn_month" class="btn ${soGocQuickDate==='month'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('month')">Tháng Này</button>
+            ${currentUser && currentUser.role === 'admin' ? `
+              <button id="quickDateBtn_all" class="btn ${soGocQuickDate==='all'?'btn-amber':''}" style="padding: 5px 10px; font-size: 13px; white-space: nowrap;" onclick="setSoGocQuickDateFilter('all')">Tất Cả</button>
+            ` : ''}
           </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+              <span style="font-size:20px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Từ:</span>
+              <input type="date" id="soGocDateFrom" value="${soGocFilterDateFrom}" onchange="setSoGocDateFrom(this.value);" style="margin:0; padding:8px 4px; font-size:16px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; box-sizing:border-box;">
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:140px;">
+              <span style="font-size:20px; font-weight:800; color:var(--text-muted); white-space:nowrap;">Đến:</span>
+              <input type="date" id="soGocDateTo" value="${soGocFilterDateTo}" onchange="setSoGocDateTo(this.value);" style="margin:0; padding:8px 4px; font-size:16px; font-weight:800; color:var(--primary); text-align:center; width:100%; border-radius:8px; box-sizing:border-box;">
+            </div>
+          </div>
+          ${!isSales ? `
+            <select id="soGocSalesSelect" onchange="setSoGocSalesFilter(this.value)" style="margin:0; padding:10px; font-size:14px; font-weight:700;">
+              <option value="">-- Tất cả NV --</option>
+              ${(currentUser && currentUser.role === 'accountant' ? users.filter(u => !u.role || String(u.role).toLowerCase() === 'sales') : users).map(u => `<option value="${u.code}" ${soGocSalesFilter === u.code ? 'selected' : ''}>[${u.code || 'NV'}] ${u.name}</option>`).join('')}
+            </select>
+          ` : ''}
         </div>
 
         <div style="margin-bottom: 10px;">
-          <input type="text" placeholder="🔍 Tìm theo số CTu, mã KH, tên KH hoặc mã NV..." oninput="filterSoGocCards(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
+          <input type="text" placeholder="🔍 Tìm theo số CTu, mã KH, tên KH hoặc mã NV..." value="${(soGocFilterKeyword || '').replace(/"/g, '&quot;')}" oninput="filterSoGocCards(this.value)" style="margin:0; padding:12px 14px; font-size: var(--font-size-search-input);">
         </div>
 
-        <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;">
-          ${allGroupedList.length > 0 ? allGroupedList.map(o => {
-            const isOwner = o.salesCode === currentUser.code || o.salesUid === currentUser.uid;
-            const canModify = isOwner || currentUser.role === 'admin';
-const viewedData = JSON.parse(localStorage.getItem('dms_accountant_viewed') || '{}');
-  const isViewed = viewedData[o.id || o.orderId] ? true : false;
-           return `
-              <div class="mobile-item-card so-goc-card-item" data-so-ctu="${o.soCtu}" data-ma-dtpn="${removeAccents(o.maDTPNNo)}" data-ma-nv="${removeAccents(o.maNhanVien)}" data-ten-nv="${removeAccents(o.tenNhanVien)}" data-ngay-ctu="${o.ngayCtu}" style="display:flex; flex-direction:column; gap:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
-<div style="display:inline-flex; align-items:center; gap:8px;"><span style="background:var(--prod-code-bg); color:var(--prod-code-color); padding:3px 10px; border-radius:6px; font-size:var(--font-size-sub-meta); font-weight:800;">CTu #${o.soCtu}</span>${isViewed ? `<span style="background:#10B981; color:#fff; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; white-space:nowrap;">✅ Đã xem</span>` : ''}</div>                  <div style="display:flex; align-items:center; gap:8px;">
-                    ${(() => {
-                     let matchedStore = stores.find(s => String(s.id) === String(o.storeId) || String(s.code) === String(o.maDTPNNo));
-                      if (matchedStore && matchedStore.lat && Number(matchedStore.lat) !== 0 && o.lat && Number(o.lat) !== 0) {
-                        let distance = calculateDistanceMeters(Number(o.lat), Number(o.lng), Number(matchedStore.lat), Number(matchedStore.lng));
-                        let distStr = distance > 1000 ? (distance / 1000).toFixed(1) + ' km' : Math.round(distance) + ' m';
-                        let isClose = distance <= 50;
-                        return `<span style="font-size:var(--font-size-sub-meta); font-weight:700; color:${isClose ? 'var(--emerald)' : 'var(--amber)'};"><i class="fa-solid fa-location-arrow"></i> ${distStr}</span>`;
-                      }
-                      return '';
-                    })()}
-                    <span style="font-size:var(--font-size-sub-meta); color:var(--text-muted);"><i class="fa-regular fa-clock"></i> ${o.ngayCtuFormatted} ${formatOrderTime(o.createdAt)}</span>
-                  </div>
-                </div>
-
-                <div style="font-size:var(--font-size-customer-name); font-weight:800; color:var(--text-main); word-break:break-word;">
-                  ${o.maKH || o.maDTPNNo}
-                </div>
-
-                <div style="display:flex; justify-content:space-between; align-items:center; font-size:var(--font-size-sub-meta); color:var(--text-muted);">
-                  <span>👤 NV: <b style="color:#2563EB;">[${o.maNhanVien}] ${o.tenNhanVien}</b></span>
-                  <div style="display:flex; gap: 8px;">
-                      <span>📦 SL: <b style="color:var(--emerald);">${o.totalQty}</b></span>
-                      <span>💰 <b style="color:var(--rose);">${(o.totalRev / 1000).toLocaleString('en-US')}K</b></span>
-                  </div>
-                </div>
-
-                <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;">
-                  <button class="btn btn-blue btn-sm" style="flex:1; padding:8px;" onclick="openOrderDetailsModal('${o.orderId}')"><i class="fa-solid fa-eye"></i> Xem Chi Tiết</button>
-                  ${canModify ? `
-                    <button class="btn btn-amber btn-sm" style="padding:8px;" onclick="editOrder('${o.orderId}')"><i class="fa-solid fa-pen-to-square"></i> Sửa</button>
-                    <button class="btn btn-red btn-sm" style="padding:8px;" onclick="deleteSingleOrder('${o.orderId}')"><i class="fa-solid fa-trash"></i> Xóa</button>
-                  ` : ''}
-                </div>
-              </div>
-            `;
-          }).join('') : `<div style="text-align:center; padding:24px; color:var(--text-muted); background:var(--card-bg); border-radius:12px;">Chưa có đơn hàng nào được lập.</div>`}
-        </div>
-
-        ${hasMoreOrders ? `
-          <div style="text-align:center; margin-top:12px;">
-            <button id="loadMoreSoGocBtn" class="btn btn-amber" style="padding:10px 20px; font-weight:800;" onclick="loadMoreSoGoc()">Tải Thêm Đơn Hàng Cũ Hơn</button>
-          </div>
-        ` : ''}
-
-   <div style="display:none;">
-          <table id="soGocExportTable">
-            <thead>
-              <tr>
-                <th>So CTu</th>
-                <th>Ngay CTu__</th>
-                <th>Ma DTPNNo</th>
-                <th>SoHoaDon</th>
-                <th>Ma DTPNCo</th>
-                <th>Ten DTPNCo</th>
-                <th>Ma VTHHCo</th>
-                <th>Ten Hang Hoa</th>
-                <th>Don Vi Tinh</th>
-                <th>So Luong</th>
-                <th>Don Gia</th>
-                <th>VND Thanh Tien</th>
-                <th>Ghi Chu</th>
-                <th>GPS Lech</th>
-                <th>DonVi</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${flatExcelRows.map(r => `
-                <tr>
-                  <td>${r.soCtu}</td>
-                  <td>${r.ngayCtuFormatted}</td>
-                  <td>${r.maDTPNNo}</td>
-                  <td>${r.maTuyen}</td>
-                  <td>${r.maNhanVien}</td>
-                  <td>${r.tenNhanVien}</td>
-                  <td>${r.maVTHHCo}</td>
-                  <td>${r.tenHangHoa}</td>
-                  <td>${r.donViTinh}</td>
-                  <td>${r.soLuong}</td>
-                  <td>${r.donGia}</td>
-                  <td>${r.thanhTien}</td>
-                  <td>${r.ghiChu}</td>
-                  <td>${r.gpsLech}</td>
-                  <td>BH_</td>
-                </tr>
-              `).join('')}
-        </tbody>
-          </table>
-        </div>
+        <div id="soGocCardsContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
       `;
-      setTimeout(() => {
-    if (typeof filterSoGocCards === 'function') {
-        filterSoGocCards(soGocFilterKeyword);
+
+      renderSoGocCardsList();
     }
-}, 30);
-    } 
     else if (tab === 'productsAdmin') {
       const isSales = currentUser.role === 'sales';
       const isViewer = currentUser.role === 'viewer';
@@ -15439,72 +15351,107 @@ window.loadMonthlyVisitLogs = async function(forceRefresh = false) {
   }
 };
 
+window._monthlyStatsIndex = null;
+window._monthlyStatsBuiltAt = 0;
+
 window.getStoreMonthlyStats = function(store) {
   const { todayStr, monthStr } = window.getVnTodayAndMonth();
+  const nowMs = Date.now();
+
+  // Tự gom chỉ mục 1 lần cho toàn bộ orders trong tháng (cache 1.5 giây để không lặp lại cho từng tiệm)
+  if (
+    !window._monthlyStatsIndex ||
+    window._monthlyStatsIndex.monthStr !== monthStr ||
+    window._monthlyStatsIndex.ordersLen !== (orders || []).length ||
+    (nowMs - window._monthlyStatsBuiltAt) > 1500
+  ) {
+    const byId = new Map();
+    const byCode = new Map();
+    const seenOrderIds = new Set();
+
+    const getOrCreate = (map, key) => {
+      let obj = map.get(key);
+      if (!obj) {
+        obj = { orderCount: 0, lastOrderDate: '', lastOrderBy: '', callCount: 0 };
+        map.set(key, obj);
+      }
+      return obj;
+    };
+
+    (orders || []).forEach(o => {
+      if (!o || o.status === 'Đã hủy' || !o.ngayCtu) return;
+
+      let normDate = String(o.ngayCtu).trim();
+      if (normDate.includes('/')) {
+        const p = normDate.split('/');
+        if (p.length === 3 && p[2].length === 4) {
+          normDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+        }
+      }
+      if (!normDate.startsWith(monthStr)) return;
+
+      const oid = String(o.id || o.orderUuid || `${o.soCtu}_${normDate}`);
+      if (seenOrderIds.has(oid)) return;
+      seenOrderIds.add(oid);
+
+      const oStoreId = String(o.storeId || '').trim().toUpperCase();
+      const oCode = String(
+        o.maDTPNNo || (o.maKH && o.maKH.includes(' - ') ? o.maKH.split(' - ')[0] : '')
+      ).trim().toUpperCase();
+      const rep = o.salesCode || o.salesName || '';
+
+      if (oStoreId) {
+        const st = getOrCreate(byId, oStoreId);
+        st.orderCount++;
+        if (!st.lastOrderDate || normDate >= st.lastOrderDate) {
+          st.lastOrderDate = normDate;
+          st.lastOrderBy = rep;
+        }
+      }
+      if (oCode) {
+        const st = getOrCreate(byCode, oCode);
+        st.orderCount++;
+        if (!st.lastOrderDate || normDate >= st.lastOrderDate) {
+          st.lastOrderDate = normDate;
+          st.lastOrderBy = rep;
+        }
+      }
+    });
+
+    (window.monthlyVisitLogs || []).forEach(log => {
+      if (!log || log.month !== monthStr) return;
+      const lId = String(log.storeId || '').trim().toUpperCase();
+      const lCode = String(log.storeCode || '').trim().toUpperCase();
+      if (lId) getOrCreate(byId, lId).callCount++;
+      if (lCode && lCode !== lId) getOrCreate(byCode, lCode).callCount++;
+    });
+
+    window._monthlyStatsIndex = { monthStr, ordersLen: (orders || []).length, byId, byCode };
+    window._monthlyStatsBuiltAt = nowMs;
+  }
+
   const sId = String(store.id || '').trim().toUpperCase();
   const sCode = String(store.code || '').trim().toUpperCase();
+  const stat =
+  (sCode && window._monthlyStatsIndex.byCode.get(sCode)) ||
+  (sId && window._monthlyStatsIndex.byId.get(sId)) ||
+  (sCode && window._monthlyStatsIndex.byId.get(sCode)) ||
+  { orderCount: 0, lastOrderDate: '', lastOrderBy: '', callCount: 0 };
 
-  let orderCount = 0;
-  let lastOrderDate = '';
-  let lastOrderBy = '';
-  const seenOrderIds = new Set();
-
-  (orders || []).forEach(o => {
-    if (!o || o.status === 'Đã hủy' || !o.ngayCtu) return;
-
-    // Chuẩn hóa ngày về YYYY-MM-DD phòng trường hợp dữ liệu cũ lưu DD/MM/YYYY
-    let normDate = String(o.ngayCtu).trim();
-    if (normDate.includes('/')) {
-      const p = normDate.split('/');
-      if (p.length === 3 && p[2].length === 4) {
-        normDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-      }
-    }
-    if (!normDate.startsWith(monthStr)) return;
-
-    const oid = String(o.id || o.orderUuid || `${o.soCtu}_${normDate}`);
-    if (seenOrderIds.has(oid)) return;
-
-    const oStoreId = String(o.storeId || '').trim().toUpperCase();
-    const oCode = String(
-      o.maDTPNNo || (o.maKH && o.maKH.includes(' - ') ? o.maKH.split(' - ')[0] : '')
-    ).trim().toUpperCase();
-
-    if ((sId && oStoreId === sId) || (sCode && oCode === sCode)) {
-      seenOrderIds.add(oid);
-      orderCount++;
-      if (!lastOrderDate || normDate >= lastOrderDate) {
-        lastOrderDate = normDate;
-        lastOrderBy = o.salesCode || o.salesName || '';
-      }
-    }
-  });
-
-  // Đếm thêm số lượt Gọi/Zalo trong tháng từ monthlyVisitLogs (dùng cho báo cáo tiệm bị sót)
-  let callCount = 0;
-  (window.monthlyVisitLogs || []).forEach(log => {
-    if (!log || log.month !== monthStr) return;
-    const lId = String(log.storeId || '').trim().toUpperCase();
-    const lCode = String(log.storeCode || '').trim().toUpperCase();
-    if ((sId && lId === sId) || (sCode && lCode === sCode)) {
-      callCount++;
-    }
-  });
-
-  const calcDaysAgo = (dStr) => {
-    if (!dStr) return null;
+  let daysAgo = null;
+  if (stat.lastOrderDate) {
     const d1 = new Date(todayStr + 'T00:00:00');
-    const d2 = new Date(dStr + 'T00:00:00');
-    return Math.max(0, Math.round((d1 - d2) / 86400000));
-  };
+    const d2 = new Date(stat.lastOrderDate + 'T00:00:00');
+    daysAgo = Math.max(0, Math.round((d1 - d2) / 86400000));
+  }
 
   return {
-    visitCount: orderCount,
-    orderCount,
-    callCount,
-    lastDate: lastOrderDate,
-    lastBy: lastOrderBy,
-    daysAgo: calcDaysAgo(lastOrderDate)
+    visitCount: stat.orderCount,
+    orderCount: stat.orderCount,
+    callCount: stat.callCount,
+    lastDate: stat.lastOrderDate,
+    lastBy: stat.lastOrderBy,
+    daysAgo
   };
 };
 
